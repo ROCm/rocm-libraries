@@ -155,13 +155,20 @@ different resource-gate verdict, after other compiles.
 Python process that compiles nothing else
 (`rocke.runtime._comgr_fresh_process`): the comgr library this process resolved
 (passed as `ROCKE_COMGR_LIB`), this rocke package first on `PYTHONPATH`, and
-comgr's own on-disk cache off. A compile error raises `ComgrError` with the
-child's message; a child that dies raises `ComgrProcessDied` (a `ComgrError`).
+comgr's own on-disk cache off. On POSIX the child caps its own address space
+(`RLIMIT_AS`) at `FRESH_PROCESS_MEMORY_CAP_BYTES` (4 GiB), or at a lower limit it
+inherited; Windows has no such limit, and there the child runs uncapped. A
+compile error raises `ComgrError` with the child's message; a child that runs out
+of memory raises `ComgrOutOfMemory`, whose message names the cap, what LLVM
+reported and the known cause (the `iglp_opt(1)` compiler bug, known issue 8 in
+[gfx_support_audit.md](../architecture/gfx_support_audit.md)); a child that dies
+otherwise raises `ComgrProcessDied`. Both are `ComgrError`s, and
+`ComgrOutOfMemory` is a `ComgrProcessDied`.
 `compile_kernel` does this for a kernel whose builder set the kernel attribute
 `COMGR_FRESH_PROCESS_ATTR` (`"comgr_fresh_process"`, compile policy only: no
 lowerer reads it, so the LLVM IR is unchanged). The attention backward main
-kernel sets it whenever it emits `iglp_opt(1)`; other families compile in-process
-as before. The cost is one short process start per such kernel. `compile_module`
+kernel and the fp8 fused-MoE kernel set it whenever they emit `iglp_opt(1)`;
+other families compile in-process as before. The cost is one short process start per such kernel. `compile_module`
 links its modules in-process, so it refuses a kernel carrying the attribute
 (`ValueError`); compile such a kernel with `compile_kernel`.
 

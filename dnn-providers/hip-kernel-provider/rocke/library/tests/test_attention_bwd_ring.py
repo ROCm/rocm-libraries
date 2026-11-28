@@ -300,6 +300,8 @@ _SIM = [
 @pytest.mark.parametrize("atomics", (True, False))
 @pytest.mark.parametrize("depth,trips,waves,rows,cols", _SIM)
 def test_wait_model_has_no_race(depth, trips, waves, rows, cols, atomics):
+    """``simulate`` raises ``_Race`` on any race, so returning is the check;
+    test_wait_immediates_are_maximal shows it raises for a wait one too loose."""
     # without atomics: the immediates must not rely on the previous step's
     n_a = rows * cols // (waves * 64) if atomics else 0
     simulate(depth, trips, waves, rows, cols, n_a)

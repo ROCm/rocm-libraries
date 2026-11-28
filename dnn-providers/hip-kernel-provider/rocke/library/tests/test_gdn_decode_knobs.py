@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import dataclasses as dc
 import itertools
+import re
 
 import pytest
+from rocke.tests.bool_flags import bool_flag_reason
 
 from kernels.gfx950.gdn_decode import (
     ROW_LOADS,
@@ -92,7 +94,7 @@ def test_non_bool_flag_is_rejected(field, value):
     spec = _spec(**_FUSED, fuse_conv=True, fuse_out_norm=True, **knobs)
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert not ok
-    assert f"{field} must be a bool" in why
+    assert why == bool_flag_reason(field, value)
 
 
 @pytest.mark.parametrize("field", BOOL_KNOBS)
@@ -102,7 +104,6 @@ def test_launcher_cache_hit_does_not_bypass_flag_validation(field, value, monkey
     # ("false" and 1 with the knob on, 0 and None with it off). Warm the cache
     # under both names: ``launcher_for`` must still raise, never hand back the
     # cached launcher.
-    pytest.importorskip("torch", reason="the builder module imports torch")
     from builders.gfx950.gdn import gdn_decode as builder
 
     def spec_for(flag):
@@ -117,7 +118,7 @@ def test_launcher_cache_hit_does_not_bypass_flag_validation(field, value, monkey
     assert len(cache) == 2  # the knob changes the name, so both keys are distinct
     monkeypatch.setattr(builder, "_LAUNCHER_CACHE", cache)
 
-    with pytest.raises(ValueError, match=f"{field} must be a bool"):
+    with pytest.raises(ValueError, match=re.escape(bool_flag_reason(field, value))):
         builder.launcher_for(spec_for(value), arch=ARCH)
     # the valid specs keep hitting the cache
     assert builder.launcher_for(spec_for(True), arch=ARCH) is cached

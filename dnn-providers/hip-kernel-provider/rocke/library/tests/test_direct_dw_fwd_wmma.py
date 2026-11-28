@@ -6,27 +6,21 @@ CPU: the spec validator, the AOT grid, the cache's problem gate and the
 cross-engine agreement of the validator, kernel name, grid and LDS size. GPU
 (gfx1250): 3x3 / 5x5 / 7x7 "same" and 7x7 "valid" layers with image edges on
 every side, 1 to 4 folded images, 2 to 16 waves, one-row to whole-map tiles
-and a partial channel block -- checked numerically against torch's forward
-convolution.
+and a partial channel block -- checked numerically against a float64 numpy
+reference of the stored operands.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_direct_dw_fwd_wmma.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    import torch
-
-    torch.cuda.is_available()
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_dw_fwd_wmma import (
     DwFwdWmmaSpec,
@@ -35,6 +29,8 @@ from kernels.common.conv_direct_dw_fwd_wmma import (
     is_valid_dw_fwd_wmma_spec,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
+
+from ._direct_conv_numeric import direct_fwd_peak_error
 
 GPU_ARCH = get_device_arch(0)
 
@@ -101,9 +97,7 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
         tensor-size rules (0 bytes) and gave a zero grid Y."""
         import dataclasses
 
-        import pytest
-
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.common.conv_direct_grouped import PROBLEM_DIMS
         from kernels.conv.engine_bridge import conv_direct_dw_fwd_wmma_spec_to_dict
 
@@ -161,9 +155,7 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs."""
-        import pytest
-
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
@@ -225,9 +217,7 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 
@@ -248,54 +238,18 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestDwFwdWmmaGpu(unittest.TestCase):
     def _check(self, pkw, knobs):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
         from rocke import compile_kernel
-        from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         p = _problem(**pkw)
         spec = DwFwdWmmaSpec(problem=p, **knobs)
         self.assertIsNone(_reason(spec, GPU_ARCH))
         art = compile_kernel(build_dw_fwd_wmma(spec, GPU_ARCH), arch=GPU_ARCH)
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        x = torch.empty(p.N, p.H, p.W, p.groups).uniform_(-1, 1).to(td)
-        w = torch.empty(p.groups, p.KH, p.KW, 1).uniform_(-1, 1).to(td)
-        y = torch.zeros(p.N, p.Ho, p.Wo, p.groups, dtype=td)
-        rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        bufs = [rt.alloc(t.nbytes) for t in (x, w, y)]
-        try:
-            rt.memcpy_h2d(bufs[0], u8(x), x.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, y.nbytes)  # poison: every element is written
-            vals = ConvArgs.from_problem(p, direction="fwd").to_launch_values(
-                *(int(v) for v in bufs), x.nbytes, w.nbytes, y.nbytes
-            )
-            grid, block = spec.launch_geometry()
-            KernelLauncher(
-                hsaco=art.hsaco,
-                kernel_name=art.kernel_name,
-                signature=conv_direct_args_signature(p.dtype, direction="fwd"),
-            )(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
-            rt.memcpy_d2h(u8(y), bufs[2], y.nbytes)
-        finally:
-            for v in bufs:
-                rt.free(v)
-        ref = torch.nn.functional.conv2d(
-            x.float().permute(0, 3, 1, 2),
-            w.float().permute(0, 3, 1, 2),
-            padding=p.PAD,
-            groups=p.groups,
-        ).permute(0, 2, 3, 1)
-        err = float((y.float() - ref).abs().max() / ref.abs().max())
+        grid, block = spec.launch_geometry()
+        err = direct_fwd_peak_error(art, p, grid=grid, block=block)
         self.assertLess(err, 1e-2, f"{pkw} {knobs}: rel err {err:.3g}")
 
     def test_cases(self):

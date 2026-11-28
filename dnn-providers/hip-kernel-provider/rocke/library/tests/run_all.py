@@ -38,7 +38,7 @@ if __package__:
         preflight_is_disabled as _preflight_is_disabled,
     )
     from ._explicit_gate_policy import selection_is_partial as _selection_is_partial
-    from ._worker_process import available_cpus, run_bounded_to_stream, stop_all
+    from ._worker_process import run_bounded_to_stream, stop_all
 else:
     # Script execution puts this directory on sys.path automatically, but tools
     # that load the runner with importlib do not. Bootstrap its private support
@@ -48,7 +48,7 @@ else:
         sys.path.insert(0, str(_RUNNER_DIR))
     from _explicit_gate_policy import preflight_is_disabled as _preflight_is_disabled
     from _explicit_gate_policy import selection_is_partial as _selection_is_partial
-    from _worker_process import available_cpus, run_bounded_to_stream, stop_all
+    from _worker_process import run_bounded_to_stream, stop_all
 
 TESTS = Path(__file__).resolve().parent
 _LIBRARY_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +59,7 @@ _SOURCE_PLATFORM_PYTHON = _ROCKE_ROOT / "platform" / "python"
 if _SOURCE_PLATFORM_PYTHON.is_dir() and str(_SOURCE_PLATFORM_PYTHON) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PLATFORM_PYTHON))
 
+from rocke.tests.host_cpus import available_cpus
 from rocke.tests.subprocess_launcher import (  # noqa: E402 - source bootstrap above
     rocke_python_command,
     rocke_subprocess_env,
@@ -148,9 +149,11 @@ def _gate_environment(
         if not partial:
             environment.pop("ROCKE_TEST_SHARD", None)
     if name == "counted-compiler":
-        # Preserve the resource gate's reference-toolchain contract. The
-        # library conftest pins that compiler when it is available; preflight
-        # reports one gate-level outcome when it is not.
+        # The gate's compiles share one comgr cache directory of this process
+        # tree, so an inherited opt-out of it is dropped. On a compiler other
+        # than the gate's reference toolchain its preflight skips every case
+        # until AICK-3320 and ends the session with 77 (an INCOMPLETE run, never
+        # a plain GREEN; a failure when the gate is required).
         environment.pop("ROCKE_BWD_NO_COMGR_PIN", None)
         environment.pop("ROCKE_BWD_ISA_ARCH", None)
         if gate_arch is not None:
@@ -499,8 +502,9 @@ def main() -> int:
     parser.add_argument(
         "--require-compiler-gate",
         action="store_true",
-        help="fail when the counted ISA gate's qualified toolchain is unavailable; "
-        "the default local run reports that gate as skipped",
+        help="fail when the counted ISA gate cannot run (no llvm-objdump, a comgr "
+        "without a target, or, until AICK-3320, a compiler other than its "
+        "reference toolchain); the default local run reports that gate as skipped",
     )
     parser.add_argument(
         "--allow-partial-gate",
@@ -714,17 +718,25 @@ def main() -> int:
                     name == "counted-compiler" and not args.require_compiler_gate
                 ),
             )
-            if gate_result.code == 0 and not gate_result.skipped:
-                try:
-                    attestation = json.loads(sentinel.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    attestation = {}
-                if attestation.get("collected", 0) <= 0:
-                    print(
-                        f"rocke library gate: {name}: FAIL(no executed pytest session)",
-                        flush=True,
-                    )
-                    gate_result = _StageResult(1)
+            try:
+                attestation = json.loads(sentinel.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                attestation = {}
+            if skipped_for := attestation.get("skipped_for"):
+                print(
+                    f"rocke library gate: {name}: skipped for: {skipped_for}",
+                    flush=True,
+                )
+            if (
+                gate_result.code == 0
+                and not gate_result.skipped
+                and attestation.get("collected", 0) <= 0
+            ):
+                print(
+                    f"rocke library gate: {name}: FAIL(no executed pytest session)",
+                    flush=True,
+                )
+                gate_result = _StageResult(1)
         status = status or gate_result.code
         skipped |= gate_result.skipped
         if status and not args.keep_going:

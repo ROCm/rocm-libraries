@@ -32,8 +32,8 @@ LDS column at adjacent rows. With a row-major LDS the addresses are
 ``(row + i) * stride_r + col`` for ``i in 0..vec-1``, so they cannot
 collapse to a single ``ds_read_b{N*16}`` op -- the only way to fuse
 them is an "in-LDS transpose" instruction (``ds_read_b{64,96,128}_tr_b16``
-on gfx950, see the CDNA4 chapter of the LDS optimisation skill in
-``FlyDSL/.claude/skills/lds-optimization/SKILL.md``). The DSL's IR
+on gfx950, see the CDNA4 chapter of the LDS optimisation skill in the
+FlyDSL repository, ``.claude/skills/lds-optimization/SKILL.md``). The DSL's IR
 builder does not yet expose those primitives -- the proposal to add
 them lives at the bottom of this docstring.
 
@@ -153,7 +153,7 @@ the workload sizes we benchmark today:
   bound -- the ~256 CTAs amortise poorly against ~3-5us launch cost.
   Morton can't help; cache reuse isn't the bottleneck.
 * At large sizes (4096x4096+) the kernel saturates HBM at
-  ~5700 GB/s on MI355X (close to peak). There's no spare bandwidth
+  ~5700 GB/s on gfx950 (close to peak). There's no spare bandwidth
   for cache tricks to claw back.
 
 In the middle band (2048x2048) row-major beats Morton by ~25%

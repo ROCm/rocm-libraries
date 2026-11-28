@@ -197,6 +197,10 @@ def is_valid_spec(spec: Pooling2DSpec, arch: str = "gfx950") -> Tuple[bool, str]
     )
     if not ok:
         return ok, why
+    if spec.dtype == "bf16":
+        # The output store goes through store_tile, which has a buffer store
+        # for f16 only; refuse here instead of failing in the builder.
+        return False, "bf16 output is not supported (the store is f16 only); use f16"
     if spec.op not in ("max", "avg", "sum"):
         return False, f"unsupported pool op {spec.op!r}"
     p = spec.problem

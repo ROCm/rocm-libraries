@@ -954,7 +954,7 @@ def list_configs(args, shapes: list) -> int:
 
 # ---------------------------------------------------------------- GPU
 def _driver():
-    """The builder's host driver (imports torch): GPU paths only."""
+    """The builder's host driver: GPU paths only (its HIP-graph timing needs torch)."""
     from builders.gfx950.gdn import gdn_decode
 
     return gdn_decode
@@ -1681,9 +1681,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     if args.list_only:
         return list_configs(args, shapes)
 
-    try:
-        import torch  # noqa: F401  (the driver needs it; fail early and clearly)
-    except ImportError:
+    if not _driver().import_graph_torch():  # before the first HIP call
         print("torch is required to time configurations", file=sys.stderr)
         return 2
     from rocke.runtime.hip_module import get_device_arch

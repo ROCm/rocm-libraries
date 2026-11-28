@@ -45,101 +45,6 @@
 #define ROCKE_SQ_NAME_CAP 256
 #define ROCKE_SQ_MAX_VEC 8
 
-/* QUANT_MAX_ABS table (helpers/quant.py). i8=127, fp8e4m3=448, bf8e5m2=57344. */
-static double rocke_sq_quant_max_abs(const char* out_dtype)
-{
-    if(out_dtype == NULL)
-    {
-        return 0.0;
-    }
-    if(strcmp(out_dtype, "i8") == 0 || strcmp(out_dtype, "int8") == 0)
-    {
-        return 127.0;
-    }
-    if(strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "fp8") == 0
-       || strcmp(out_dtype, "fp8_e4m3") == 0)
-    {
-        return 448.0;
-    }
-    if(strcmp(out_dtype, "bf8e5m2") == 0 || strcmp(out_dtype, "bf8") == 0
-       || strcmp(out_dtype, "fp8_e5m2") == 0)
-    {
-        return 57344.0;
-    }
-    return 0.0;
-}
-
-/* Canonicalised out-dtype tag for quantize dispatch ("i8"/"fp8e4m3"/"bf8e5m2"). */
-static const char* rocke_sq_canon_out(const char* out_dtype)
-{
-    if(out_dtype == NULL)
-    {
-        return NULL;
-    }
-    if(strcmp(out_dtype, "i8") == 0 || strcmp(out_dtype, "int8") == 0)
-    {
-        return "i8";
-    }
-    if(strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "fp8") == 0
-       || strcmp(out_dtype, "fp8_e4m3") == 0)
-    {
-        return "fp8e4m3";
-    }
-    if(strcmp(out_dtype, "bf8e5m2") == 0 || strcmp(out_dtype, "bf8") == 0
-       || strcmp(out_dtype, "fp8_e5m2") == 0)
-    {
-        return "bf8e5m2";
-    }
-    return NULL;
-}
-
-/* quantize_scalar_f32(b, x_f32, inv_scale, qdtype) -- helpers/quant.py.
- *
- *   scaled  = b.fmul(x_f32, inv_scale)
- *   clamped = b.clamp_f32(scaled, -qmax, +qmax)
- *   result  = cvt_f32_to_<qdtype>(clamped)
- *
- * The default skip_clamp_on_pack=False path is used by smoothquant's VEC==2
- * scalar fallback, so the explicit clamp is always emitted. */
-static rocke_value_t* rocke_sq_quantize_scalar_f32(rocke_ir_builder_t* b,
-                                                   rocke_value_t* x_f32,
-                                                   rocke_value_t* inv_scale,
-                                                   const char* qdtype)
-{
-    const char* canon;
-    double qmax;
-    rocke_value_t* c_pos;
-    rocke_value_t* c_neg;
-    rocke_value_t* scaled;
-    rocke_value_t* clamped;
-
-    if(b != NULL && b->status != ROCKE_OK)
-    {
-        return NULL;
-    }
-    canon = rocke_sq_canon_out(qdtype);
-    if(canon == NULL)
-    {
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "quantize_scalar_f32: unsupported qdtype");
-    }
-    qmax = rocke_sq_quant_max_abs(canon);
-    c_pos = rocke_b_const_f32(b, qmax);
-    c_neg = rocke_b_const_f32(b, -qmax);
-    scaled = rocke_b_fmul(b, x_f32, inv_scale);
-    clamped = rocke_b_clamp_f32(b, scaled, c_neg, c_pos);
-    if(strcmp(canon, "i8") == 0)
-    {
-        return rocke_b_cvt_f32_to_i8_sat(b, clamped);
-    }
-    if(strcmp(canon, "fp8e4m3") == 0)
-    {
-        return rocke_b_cvt_f32_to_fp8(b, clamped);
-    }
-    /* bf8e5m2 */
-    return rocke_b_cvt_f32_to_bf8(b, clamped);
-}
-
 /* _tree_fmax(b, values) -- balanced pairwise fmax tree (smoothquant.py). The
  * critical path is ceil(log2(n)) fmax ops; total op count matches a left-fold.
  * Mirrors the Python loop exactly (pair cur[i]/cur[i+1] left-to-right, carry the
@@ -384,8 +289,8 @@ static rocke_value_t* rocke_sq_pack_quant_local(rocke_ir_builder_t* b,
         {
             if(strcmp(qname, "i8") == 0)
             {
-                rocke_value_t* c_neg = rocke_b_const_f32(b, -127.0);
-                rocke_value_t* c_pos = rocke_b_const_f32(b, 127.0);
+                rocke_value_t* c_neg = rocke_b_const_f32(b, -ROCKE_QUANT_I8_MAX_ABS);
+                rocke_value_t* c_pos = rocke_b_const_f32(b, ROCKE_QUANT_I8_MAX_ABS);
                 rocke_value_t* cl = rocke_b_clamp_f32(b, scaled[i], c_neg, c_pos);
                 qs[i] = rocke_b_cvt_f32_to_i8_sat(b, cl);
             }
@@ -494,7 +399,6 @@ bool rocke_smoothquant_is_valid_spec(const rocke_smoothquant_spec_t* spec,
                                      size_t reason_cap)
 {
     const rocke_arch_target_t* target;
-    const char* canon;
     long bytes_lds;
 
     if(reason != NULL && reason_cap > 0)
@@ -521,37 +425,9 @@ bool rocke_smoothquant_is_valid_spec(const rocke_smoothquant_spec_t* spec,
         return false;
     }
 
-    /* out_dtype not in ("i8","fp8e4m3","bf8e5m2"). */
-    canon = rocke_sq_canon_out(spec->out_dtype);
-    if(canon == NULL
-       || (strcmp(canon, "i8") != 0 && strcmp(canon, "fp8e4m3") != 0
-           && strcmp(canon, "bf8e5m2") != 0))
+    /* ok, why = validate_quant_out_dtype(spec.out_dtype, arch) */
+    if(!rocke_validate_quant_out_dtype(spec->out_dtype, arch, reason, reason_cap))
     {
-        if(reason != NULL && reason_cap > 0)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "unsupported out_dtype %s",
-                     spec->out_dtype ? spec->out_dtype : "(null)");
-        }
-        return false;
-    }
-
-    /* fp8/bf8 need the CDNA-only v_cvt_pk_{fp8,bf8}_f32 op. */
-    if((strcmp(canon, "fp8e4m3") == 0 || strcmp(canon, "bf8e5m2") == 0)
-       && (target->family == NULL || strcmp(target->family, "cdna") != 0))
-    {
-        if(reason != NULL && reason_cap > 0)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "out_dtype %s needs the CDNA-only v_cvt_pk_{fp8,bf8}_f32 "
-                     "conversion; %s (family %s) has no fp8/bf8 pack op -- use "
-                     "out_dtype='i8'",
-                     spec->out_dtype,
-                     arch,
-                     target->family ? target->family : "(null)");
-        }
         return false;
     }
 
@@ -702,8 +578,12 @@ rocke_kernel_def_t* rocke_build_smoothquant(rocke_ir_builder_t* b,
         {
             return NULL;
         }
-        out_canon = rocke_sq_canon_out(spec->out_dtype);
-        qmax = rocke_sq_quant_max_abs(out_canon);
+        out_canon = spec->out_dtype; /* canonical: is_valid_spec checked it */
+        /* qmax = quant_max_abs(spec.out_dtype, arch=arch) */
+        if(rocke_quant_max_abs(spec->out_dtype, arch, &qmax, reason, sizeof(reason)) != ROCKE_OK)
+        {
+            return (rocke_kernel_def_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+        }
 
         BS = spec->block_size;
         VEC = spec->vec;
@@ -950,7 +830,7 @@ rocke_kernel_def_t* rocke_build_smoothquant(rocke_ir_builder_t* b,
              * StaticDistributedTensor of dtype q_ty with the already-scaled f32
              * chunk values (the SmScale reload uses the same n_off addressing as
              * pass 1, NOT the distribution), then store_tile applies the
-             * saturating cvt + vec_pack + one coalesced global_store_vN per
+             * cvt + vec_pack + one coalesced global_store_vN per
              * access. Faithful inline port of distribution.py store_tile. */
             rocke_tile_distribution_t* qy_dist = rocke_sq_make_row_x_distribution(b, BS, VEC, EPT);
             rocke_static_distributed_tensor_t* qy_dt;
@@ -1051,7 +931,7 @@ rocke_kernel_def_t* rocke_build_smoothquant(rocke_ir_builder_t* b,
                     rocke_value_t* x_f32 = cached[k * VEC + i];
                     rocke_value_t* y_f32 = rocke_b_fmul(b, x_f32, sm_scalars[i]);
                     rocke_value_t* q
-                        = rocke_sq_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype);
+                        = rocke_b_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype, arch);
                     rocke_value_t* col = rocke_b_add(b, n_off, rocke_b_const_i32(b, i));
                     rocke_value_t* local_idx[2];
                     local_idx[0] = rocke_b_const_i32(b, 0);

@@ -409,7 +409,7 @@ kernel for an A/B comparison; the AOT grid does not sweep it.
 |------|---------|
 | `conv_implicit_gemm_dgrad.py` | Python builder (this instance) |
 | `../../benchmarks/common/benchmark_implicit_gemm_conv.py` | `--direction dgrad` sweep |
-| `../../builders/common/conv_reference.py` | `dgrad_reference()` via `torch.nn.grad.conv2d_input` |
+| `../../builders/common/conv_reference.py` | `conv_dgrad_reference()`: the float64 dX the sweep verifies against (`rocke.numeric.conv`) |
 | `../../cpp/instances/common/conv_implicit_gemm_dgrad.cpp` | C++ port (byte-identical) |
 | `../../cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
 | `../../tests/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |

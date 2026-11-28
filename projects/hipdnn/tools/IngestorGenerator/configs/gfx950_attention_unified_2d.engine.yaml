@@ -380,6 +380,6 @@ launch_surface:
     kmd_fields: [dtype]
     guard: >
       unified2DKernelSignature() is the 18-argument form (10 pointers, 6 f32/i32 scalars,
-      block_table_stride, qq_bias_stride_0). Validated at prepare() time by
+      block_table_stride, qq_bias_stride0). Validated at prepare() time by
       buildIngestorKernelCode(..., expectedSignature); names are load-bearing.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DSignature.cpp

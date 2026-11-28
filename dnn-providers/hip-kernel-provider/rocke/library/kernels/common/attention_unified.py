@@ -10,11 +10,17 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
+import sys
 from collections import OrderedDict
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, replace
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
+# numpy is imported only by the launch functions that need it, together with the
+# numpy-backed array runtime (rocke.numeric.storage, rocke.runtime.device_array):
+# dispatch and the provider build's table generators import this module with a
+# Python that has no numpy.
 from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
@@ -42,6 +48,7 @@ from rocke.runtime.launcher import (
     retain_for_stream,
     wait_stream_and_release,
 )
+from rocke.runtime.torch_interop import is_torch_tensor
 
 from rocke.helpers.attention import (
     BINARY_SEARCH_FALLBACK_ITERS,
@@ -56,13 +63,46 @@ from rocke.helpers.attention import (
 )
 
 from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     TensorDescriptor,
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
 from ._lse_store import validate_unified_lse
-from ._spec_checks import require_bool
+
+__all__ = [
+    "UNIFIED_BLOCK_SIZES",
+    "UNIFIED_DTYPES",
+    "UNIFIED_HEAD_SIZES",
+    "Attention3DExecution",
+    "UnifiedAttention2DSpec",
+    "UnifiedAttention3DSpec",
+    "UnifiedAttentionProblem",
+    "UnifiedAttentionReduceSpec",
+    "attention_3d_workspace_nbytes",
+    "build_unified_attention_2d",
+    "build_unified_attention_3d",
+    "build_unified_attention_reduce",
+    "builder_supports_i64_kv_addr",
+    "clear_attention_3d_graph_cache",
+    "gfx942_3d_kv_needs_i64_addr",
+    "gfx942_4warp_launch_grid",
+    "gfx942_gqa_fold_eligible",
+    "kv_addr_width_for_builder",
+    "kv_cache_needs_i64_addr",
+    "prepare_unified_attention_torch",
+    "run_unified_attention_torch",
+    "runtime_kernarg_values",
+    "select_auto_path",
+    "supports_native_unified_attention",
+    "supports_native_unified_attention_3d_tiled",
+    "supports_native_unified_attention_coverage",
+    "supports_native_unified_attention_tiled",
+    "tiled_2d_signature",
+    "tiled_3d_signatures",
+    "unified_lse_path_gate",
+]
 
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
@@ -155,18 +195,14 @@ class UnifiedAttentionProblem:
     emit_lse: bool = False
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
             )
         # Changes the kernel ABI (4 appended params), so a truthy non-bool such as
         # "false" must not silently enable it.
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool_fields(self, "use_additive_bias")
 
     @property
     def causal(self) -> bool:
@@ -865,7 +901,7 @@ def _enable_d128_small_tile(problem: UnifiedAttentionProblem, arch: str) -> bool
     """d128 occupancy lever: select T = block_size (small tile) + nw=2 for
     the single-batch d128 combo so the kernel drops from 1 -> 2 WG/CU.
 
-    Diagnosis (gfx950 MI355X, llvm22+comgr7.2, measured same-session; re-verified
+    Diagnosis (gfx950, llvm22+comgr7.2, measured same-session; re-verified
     on the merged tree): the d128 combo at num_warps=2 is purely LDS-bound --
     K_lds[2,T,HD] + V_lds[1,T,HD] = 48 KB at T=2*block_size -> only 1 workgroup
     fits the 64 KB/CU budget; the register file already admits 2 waves/SIMD
@@ -925,7 +961,7 @@ def _enable_k_single_buffer(
     halve K_lds via K single-buffer so LDS stays at 32 KB -> 2 WG/CU. The
     next-K prefetch is re-issued after the PV-wait barrier (no WAR race). This
     crosses flash at the S4096 holdout (0.976x -> 1.020x bf16+fp16) and beats
-    the small-tile T=32 pick at every measured shape (gfx950 MI355X, same-session
+    the small-tile T=32 pick at every measured shape (gfx950, same-session
     vs torch SDPA FLASH, GPU-idle; see the long-context analysis). Occupancy proof
     (llvm-readelf):
     T=64 + K-single -> VGPR=215 AGPR=0 LDS=32 KB -> 2 WG/CU.
@@ -995,7 +1031,7 @@ def _d256_gfx950_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
     applied by the spec override in ``_tiled_spec_from_problem``. Narrow +
     arch/feature-guarded: every other shape is byte-identical.
 
-    Perf (MI355X, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
+    Perf (gfx950, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
     mode2 g4 gives +9.1% @ Sq4096 and +10.1% @ Sq8192 over the 32x32 base.
     """
     return arch == "gfx950" and _d256_gfx950_cohort(problem)
@@ -1051,7 +1087,7 @@ def _enable_softmax_mfma_interleave(
     lets the backend spread the causal-mask + softmax VALU across the MFMA gap)
     combined with num_warps=4 lifts MFMA-busy to ~18% and occupancy to ~24%.
 
-    Measured (gfx950 MI355X, comgr llvm22, same-session vs the shipped auto path;
+    Measured (gfx950, comgr llvm22, same-session vs the shipped auto path;
     ``sweep_shapes_gfx950.py`` across the gap-doc cohort, correctness max_abs=0.0
     vs the shipped kernel on every shape):
       * D128 S8192: 122 -> 443 TF (3.6x); S4096 118 -> 412 (3.5x);
@@ -1072,7 +1108,7 @@ def _enable_softmax_mfma_interleave(
     **Why this cohort only (measured, not assumed).** The interleave lever pays
     off wherever the loop is schedule-bound with a softmax-VALU/MFMA-idle window
     to fill -- i.e. a 32x32-transposed (combo) geometry at nw>=2. The full
-    eligible space was swept (MI355X); adding ONLY the hint to each cohort's
+    eligible space was swept (gfx950); adding ONLY the hint to each cohort's
     SHIPPED spec:
 
         cohort (shipped geometry)        S1024  S2048  S4096
@@ -1178,7 +1214,7 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool:
 
     Perf (gfx942, same-run vs AITER ``unified_attention``, D256 bf16 causal
     prefill GQA 16/2 bs=16): OURS/AITER ~= 0.98x @ Sq4096 (parity), ~= 0.94x @
-    Sq8192 (OURS ~6% faster). Measured on MI300A 2026-07-11 (MI300X prototype
+    Sq8192 (OURS ~6% faster). Measured on a 228-CU gfx942 2026-07-11 (304-CU gfx942 prototype
     run: 0.97x / 0.94x); OURS matches the fp32 reference + AITER within bf16 tol.
 
     D192 bf16 causal prefill rides the same lean body: the 2-wave wide-flash
@@ -1207,7 +1243,7 @@ def _d128_gfx942_swa_fast(problem: "UnifiedAttentionProblem", arch: str) -> bool
     4-warp kernel applies the windowed mask + windowed KV-skip in-kernel.
 
     Perf (4-warp vs the non-ring wide flash it replaces; both routes, same
-    inputs/node/HIP-event timer; MI300X gfx942, GQA 32/8, window 4096; every
+    inputs/node/HIP-event timer; gfx942, GQA 32/8, window 4096; every
     cohort bit-identical vs an fp32 windowed reference): ~4x at ``block_size``
     16 (fp16 4.2x / bf16 4.0x), ~3.1x / 1.4x at 32 (fp16 / bf16), ~1.2-1.3x at
     64 (64-key tiles drop the double-buffer pipeline). The bs16 uplift rises
@@ -1284,7 +1320,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
 
     **Universal ``T = 2 * BS``** post the Q-in-registers + single-buffer-V
     refactor: the LDS savings (8 KiB Q + 8 KiB V) make the multi-block
-    path fit comfortably for every workload class on MI355X. For decode,
+    path fit comfortably for every workload class on gfx950. For decode,
     the higher per-iter amortization beats the smaller-tile choice by
     ~24% (measured by an out-of-tree ``probe_prefill_sweep.py``: decode_b1
     drops 34 µs → 26 µs).
@@ -1328,7 +1364,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # and the spec validator would reject the build (reachable via the public
     # backend="auto" dispatcher for a head_size=64 fp16 long-prefill problem with
     # a 16/32-token paged KV cache). The narrow path keeps the single-KV-block
-    # oracle (the generic ``2*block_size`` over-allocates LDS on MI300X with mw=32).
+    # oracle (the generic ``2*block_size`` over-allocates LDS on gfx942 with mw=32).
     if arch == "gfx942" and problem.head_size == 64:
         if _enable_gfx942_fp16_flash(problem, arch):
             return 64
@@ -1375,7 +1411,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
         if problem.head_size == 64:
             # fast_paged_kv_desc (needs T=64) is a ~1.3-1.4x win for the bf16
             # h64kv8 no-SW family -> beats the T=128 early-V path (measured on
-            # MI355X). Force T=64 there so the combo's fast_paged enablement is
+            # gfx950). Force T=64 there so the combo's fast_paged enablement is
             # valid; other d64 single-batch shapes keep the wider T=128 tile.
             if (
                 problem.dtype == "bf16"
@@ -1412,7 +1448,7 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv=8). At BS=16 the default ``T=2*BS=32`` gives the
     # async DMA loader only 32*64 = 2048 bytes per iter, which under-feeds
-    # the long-prefill kv loop. Measured on MI355X with the bench at
+    # the long-prefill kv loop. Measured on gfx950 with the bench at
     # ``/tmp/bench_prefill_sweep2.py``:
     #   - q=128:   T=64 best (29µs vs 37µs)
     #   - q=256:   T=64 best
@@ -1452,13 +1488,13 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
     per-tile KV slab, otherwise the async DMA underfills.
 
     Tuning thresholds (calibrated against the trace shapes documented in
-    an out-of-tree ``trace_bench_report.md`` on MI355X / gfx950; the
+    an out-of-tree ``trace_bench_report.md`` on gfx950; the
     ``warps``-sweep harness is an out-of-tree ``probe_prefill_sweep.py``
     and the prefill-time harness is an out-of-tree
     ``probe_prefill_time.py``):
 
     **Post Q-in-registers + single-buffer-V refactor** (measured with
-    ``probe_prefill_sweep.py`` on MI355X):
+    ``probe_prefill_sweep.py`` on gfx950):
 
       ``q <= 64``    (decode + tiny prefill) -> 1   (small grid; tiny
                                                      per-CTA work)
@@ -1478,7 +1514,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
       - the architectural ceiling above (``T * HD >= num_warps * 512``);
       - the per-wave-tokens constraint (``WAVE*8/HD <= BS``);
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
-        MI355X comfortably).
+        gfx950 comfortably).
     """
     if _d256_gfx950_fast(problem, arch):
         return 2
@@ -1518,7 +1554,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
     if _enable_gfx942_sink_prefill_tuned(problem, arch):
         return 2
     # gfx942 D64 oracle.
-    #   * prefill: num_warps=4 (BLOCK_M=128) + mw=32, four waves fit the MI300X
+    #   * prefill: num_warps=4 (BLOCK_M=128) + mw=32, four waves fit the gfx942
     #     64 KB LDS budget and match the direct gfx942 harness.
     #   * decode (max_seqlen_q == 1, bf16): num_warps=1. Decode is memory-bound;
     #     nw=1 (BLOCK_M=32, T=2*block_size) measured markedly faster than nw=4
@@ -1599,7 +1635,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem, arch: str) -> int:
     # is much higher than necessary because (a) q<=128 had NW=2 which
     # over-allocated LDS/VGPR for a tiny grid, and (b) q>256 num_seqs<=1
     # kept NW=2 which left perf on the table on long single-seq prefill.
-    # Measured (``/tmp/bench_prefill_sweep2.py``, MI355X bf16 hd64):
+    # Measured (``/tmp/bench_prefill_sweep2.py``, gfx950 bf16 hd64):
     #   q=128:   NW=1 best  (28.7µs vs 37µs default)
     #   q=256:   NW=2 best  (32µs vs 43µs default)
     #   q>=512:  NW=2 (mw=16) or NW=4 (mw=32) best
@@ -1935,7 +1971,7 @@ def _select_2d_waves_per_eu(
     We match that: it gives the LLVM backend more VGPR headroom per wave
     (less risk of spill to scratch / LDS) while still meeting the
     occupancy targets (the double-buffered K/V kernel runs at 2-3 WGs/CU
-    on MI355X depending on shape; pushing for wpe=3 was a marginal
+    on gfx950 depending on shape; pushing for wpe=3 was a marginal
     +5% on isolated workloads but no consistent gain over the full
     workload spectrum once we A/B'd it against Triton's choice).
 
@@ -2170,7 +2206,7 @@ def _enable_sched_barrier(problem: UnifiedAttentionProblem, arch: str) -> bool:
     QK MFMAs packed instead of interleaving the next-tile ``buffer_load_lds``
     into the MFMA window. Bit-identical numerics (pure scheduler hint).
 
-    Same-session A/B on MI355X (gfx950, LLVM backend):
+    Same-session A/B on gfx950 (LLVM backend):
       * SINGLE-BATCH d128 S<=1024 (num_warps==1 + V-double-buffer): +35.6-36.0%
         on bf16 AND fp16 (0.152 -> 0.112 ms) -> DSL/flash ~0.67x -> ~0.92x. The
         lone resident wave cannot hide the prefetch-in-MFMA-window cost, so
@@ -2197,7 +2233,7 @@ def _enable_early_v_schedule(problem: UnifiedAttentionProblem, arch: str) -> boo
     issues the V load earlier in the iteration so the long KV loop overlaps the
     V DMA with the QK MFMA + softmax window. Bit-identical to the no-flag path.
 
-    Scoped to d64-LONG by same-session ablation (MI355X gfx950 LLVM):
+    Scoped to d64-LONG by same-session ablation (gfx950 LLVM):
       * d64 GQA-8 S2048: T128 + early-V 104.3us is the best (vs T128 none
         108.1, T64 none 112.2) -> ON for d64 long.
       * d128 S2048/S4096: early-V REGRESSES (e.g. fp16 S2048 187us vs none
@@ -2218,7 +2254,7 @@ def _enable_mfma_32x32(problem: UnifiedAttentionProblem, arch: str) -> bool:
     ``use_transposed_qk_32x32=True``) has been parity-validated against the
     default 16x16x32 path across 17 representative shapes (bf16 long /
     short prefill, multi-batch, sliding-window, GQA, hd64/128/256,
-    decode). Measured speedup vs default (MI355X, bf16):
+    decode). Measured speedup vs default (gfx950, bf16):
 
       * multi-batch prefill (num_seqs >= 2, max_seqlen_q >= 256):
         1.21-1.48x on hd64, 1.28-1.39x on hd128
@@ -2403,7 +2439,7 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem, arch: str) -> bo
 
     The baseline L4 geometry is transposed-x8 + K single-buffer (WG=64). The
     production provider defaults D128 to wide4 (WG=256). D64 uses the same
-    gfx942-legal 32x32x8 atom plus cfvst stack; measured on MI300X it improves
+    gfx942-legal 32x32x8 atom plus cfvst stack; measured on gfx942 it improves
     S2048 D64 from ~142 TFLOPS to ~199 TFLOPS with identical correctness.
     """
     return (
@@ -2489,7 +2525,7 @@ def _gfx942_bf16_wide_use_cfvst(problem: UnifiedAttentionProblem) -> bool:
     transpose works on raw i32 words, and the K=8 32x32x8 atom is gfx942-legal
     for bf16), so it ports unchanged to bf16.
 
-    MEASURED (MI300X, graph, same-session steady-state, 3% median over 6 runs):
+    MEASURED (gfx942, graph, same-session steady-state, 3% median over 6 runs):
     cfvst is a small consistent WIN on D64 (S1024 ~0.106->0.104ms, S2048
     ~0.309->0.301ms, S4096 ~1.027->0.997ms = ~3% each). On D128 cfvst-only
     cannot fit the nw=4/BLOCK_M=128 geometry within the 64 KB LDS cap (it needs
@@ -2530,7 +2566,7 @@ def _gfx942_bf16_wide_geometry(
         # prefill campaign; ex-T2). At T=32 (BLOCK_M = nw*32 = 64) the K_lds
         # DOUBLE buffer is 2*32*128*2 = 16 KB + V 8 KB = 24 KB -> still 2 WG/CU,
         # so restore the K double-buffer (single_k=False) instead of the T=64
-        # K-single-buffer. Same-session MEASURED on MI300X (gfx942): xflash vs
+        # K-single-buffer. Same-session MEASURED on gfx942: xflash vs
         # torch FLASH 0.24->0.57-0.65 (~2.3-2.4x the shipped T=64 single-K
         # baseline) on bf16 D128 S1024/S2048/S4096, occupancy unchanged at
         # 2 WG/CU (the win is K-double-buffer prefetch overlap, not occupancy --
@@ -3151,7 +3187,6 @@ _I32_KV_FLAT_BYTES = 0x8000_0000
 _I32_ONLY_KV_LOADERS = {
     "use_conflict_free_v": _I32_KV_FLAT_BYTES,  # gfx942 _issue_v_transposed
     "use_v_hbm_direct": _I32_KV_FLAT_BYTES,  # gfx942 _v_hbm_elem
-    "use_k_hbm_direct": _I32_KV_BUFFER_BYTES,  # gfx942 _read_k8_mfma_operand
     # _issue_v_fp8_mfma_async is a buffer load, _issue_v_fp8_mfma_stripe a flat
     # one (gfx942 and gfx950); the tighter limit covers both.
     "use_fp8_mfma_pv": _I32_KV_BUFFER_BYTES,
@@ -3524,7 +3559,7 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem, arch: str) -> 
     # latent trap: it doubled BLOCK_M without the atom benefit and ran
     # ~1.4x slower than mw=16 on the sinks trace family. ``select_path``
     # has already routed decode-class shapes to 3D before we get here.
-    # gfx942 (CDNA3 / MI300X) head_size=64: the oracle is always mw=32 with a
+    # gfx942 (CDNA3) head_size=64: the oracle is always mw=32 with a
     # 1x tile (tile_size == block_size) on the plain 16x16 atom path. gfx942 is
     # LDS-bound at one CTA/CU on the 64 KB part, so the mw=32 + 2x-tile combo is
     # rejected while the 1x-tile mw=32 combo fits, yielding 1.7-2.0x over mw=16.
@@ -4362,7 +4397,7 @@ def _window_key(problem: UnifiedAttentionProblem, arch: str, path: str):
     return problem.sliding_window
 
 
-def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:
+def runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict[str, int]:
     """Every runtime shape kernarg a tiled body can declare. The launcher packs
     only the ones its signature names."""
     return {
@@ -4372,14 +4407,14 @@ def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:
     }
 
 
-def _tiled_2d_signature(
+def tiled_2d_signature(
     arch: str,
     dtype: str,
     *,
-    kv_dtype: Optional[str] = None,
+    kv_dtype: str | None = None,
     include_additive_bias: bool = False,
     emit_lse: bool = False,
-):
+) -> list[dict]:
     """Launch signature of the tiled 2D kernels built for ``arch``."""
     spec_cls, _, _ = _tiled_2d_impl(arch)
     return _attn_signature(
@@ -4393,15 +4428,15 @@ def _tiled_2d_signature(
     )
 
 
-def _tiled_3d_signatures(
+def tiled_3d_signatures(
     arch: str,
     dtype: str,
     *,
-    kv_dtype: Optional[str] = None,
+    kv_dtype: str | None = None,
     strided_kv: bool = False,
     include_additive_bias: bool = False,
     emit_lse: bool = False,
-):
+) -> tuple[list[dict], list[dict]]:
     """Launch signatures of the tiled 3D segment and reduce kernels for ``arch``."""
     segment_cls, reduce_cls, _, _, _ = _tiled_3d_impl(arch)
     segment = _3d_signature(
@@ -4449,7 +4484,7 @@ def _3d_signature(
         .scalar("softcap", "f32")
         .scalar("num_seqs", "i32")
         .scalar("block_table_stride", "i32")
-        .scalar("qq_bias_stride_0", "i32")
+        .scalar("qq_bias_stride0", "i32")
     )
     for name in runtime_fields:
         sb.scalar(name, "i32")
@@ -4525,7 +4560,7 @@ def _attn_signature(
     if include_bt_stride:
         sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
-        sb.scalar("qq_bias_stride_0", "i32")
+        sb.scalar("qq_bias_stride0", "i32")
     for name in runtime_fields:
         sb.scalar(name, "i32")
     # Appended last, matching the kernel's conditional param declarations:
@@ -4593,12 +4628,12 @@ def _attn_values(
         "out_scale": float(out_scale),
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
-        **_runtime_kernarg_values(problem),
+        **runtime_kernarg_values(problem),
     }
     if include_bt_stride:
         vals["block_table_stride"] = int(bt_stride)
     if include_qq_bias_stride:
-        vals["qq_bias_stride_0"] = int(qq_bias_stride_0)
+        vals["qq_bias_stride0"] = int(qq_bias_stride_0)
     if include_additive_bias_strides:
         vals["additive_bias_batch_stride"] = int(additive_bias_batch_stride)
         vals["additive_bias_head_stride"] = int(additive_bias_head_stride)
@@ -4647,15 +4682,13 @@ class Attention3DExecution:
         Caller-owned outer graphs and their capture streams require caller cleanup.
         Do not close concurrently with an outer capture using these bindings.
         """
-        import torch
-
         if not self._lock.acquire(blocking=False):
             raise RuntimeError("execution is already submitting work")
         try:
             if self._closed:
                 return
             if self._stream is not None:
-                with torch.cuda.device(self._device):
+                with _device_scope(self._device):
                     if _torch_stream_capturing():
                         raise RuntimeError("cannot close execution during capture")
                     wait_stream_and_release(self._stream)
@@ -4687,9 +4720,7 @@ def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
         run_unified_attention_torch(**arguments, execution=execution)
         if execution._identity is None:
             raise ValueError("prepared execution requires a supported 3D path")
-        import torch
-
-        with torch.cuda.device(execution._device):
+        with _device_scope(execution._device):
             wait_stream_and_release(execution._stream)
         execution._arguments = dict(arguments)
         return execution
@@ -4700,13 +4731,11 @@ def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
 
 def clear_attention_3d_graph_cache() -> None:
     """Drain internal graph streams before releasing their captured resources."""
-    import torch
-
     with _3D_GRAPH_LOCK:
         if _torch_stream_capturing():
             raise RuntimeError("cannot clear the graph cache during capture")
         for entry in _3D_GRAPHS.values():
-            with torch.cuda.device(entry.device):
+            with _device_scope(entry.device):
                 wait_stream_and_release(entry.stream)
         _3D_GRAPHS.clear()
 
@@ -4720,31 +4749,65 @@ class _Attention3DGraph:
 
 
 def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
-    """Keep allocation and complete pair submission on the owner's stream."""
-    import torch
-    from rocke.runtime.torch_interop import resolve_stream
+    """Keep allocation and complete pair submission on the owner's stream.
 
-    # An outer capture owns its active stream. The prepared eager stream is
-    # retained only as geometry identity; captures never use its workspace.
-    if execution is not None and _torch_stream_capturing():
-        stream = int(torch.cuda.current_stream(q.device).cuda_stream)
+    For torch tensors that is a torch stream on Q's device (``stream=0`` picks
+    torch's current one), so torch's allocator sees the scratch's stream. Other
+    arrays launch on the HIP stream ``stream`` as given."""
+    if is_torch_tensor(q):
+        stream = _torch_owner_stream(q, stream, prepared=execution is not None)
     else:
-        stream = resolve_stream(stream, device=q.device)
+        stream = int(stream)
     if execution is not None and not execution._lock.acquire(blocking=False):
         # Reject reentrant/concurrent submission instead of interleaving pairs.
         raise RuntimeError("execution is already submitting work")
     try:
         if execution is not None and execution._closed:
             raise RuntimeError("execution is closed")
-        with torch.cuda.device(q.device), torch.cuda.stream(
-            torch.cuda.ExternalStream(stream, device=q.device)
-        ):
+        with _stream_scope(q, stream):
             return _run_3d_tiled_on_stream(
                 q=q, stream=stream, execution=execution, **kwargs
             )
     finally:
         if execution is not None:
             execution._lock.release()
+
+
+def _torch_owner_stream(q, stream: int, *, prepared: bool) -> int:
+    """The torch stream a launch on torch tensors uses."""
+    import torch
+    from rocke.runtime.torch_interop import resolve_stream
+
+    # An outer capture owns its active stream. The prepared eager stream is
+    # retained only as geometry identity; captures never use its workspace.
+    if prepared and _torch_stream_capturing():
+        return int(torch.cuda.current_stream(q.device).cuda_stream)
+    return resolve_stream(stream, device=q.device)
+
+
+def _stream_scope(q, stream: int):
+    """Make ``stream`` on Q's device torch's current stream for torch tensors, so
+    workspaces torch allocates are ordered on it; nothing for other arrays."""
+    if not is_torch_tensor(q):
+        return nullcontext()
+    import torch
+
+    scope = ExitStack()
+    scope.enter_context(torch.cuda.device(q.device))
+    scope.enter_context(
+        torch.cuda.stream(torch.cuda.ExternalStream(stream, device=q.device))
+    )
+    return scope
+
+
+def _device_scope(device):
+    """Torch's device context for a torch device; nothing for a HIP ordinal (the
+    device of a non-torch array)."""
+    if not is_torch_tensor(device):
+        return nullcontext()
+    import torch
+
+    return torch.cuda.device(device)
 
 
 def _run_3d_tiled_on_stream(
@@ -4854,7 +4917,13 @@ def _run_3d_tiled_on_stream(
             raise ValueError(
                 "execution geometry, layout, device or stream changed; prepare again"
             )
-    if use_graph and _enable_3d_graph_replay(problem, _launch_arch) and not capturing:
+    # Graph replay captures through torch, so it serves torch tensors only.
+    if (
+        use_graph
+        and is_torch_tensor(q)
+        and _enable_3d_graph_replay(problem, _launch_arch)
+        and not capturing
+    ):
         with _3D_GRAPH_LOCK:
             return _run_3d_graph(
                 problem=problem,
@@ -4896,13 +4965,14 @@ def _run_3d_tiled_on_stream(
         tuning_spec=tuning_spec,
         strided_kv=kv_cache_layout is not None,
     )
-    import torch
-
     # External and internal captures own separate graph-private allocation.
     # Eager reuse is safe only under the owner's whole-pair submission lock.
     if execution is None or capturing or execution._workspace is None:
+        from rocke.numeric.storage import element_type_of
+        from rocke.runtime.device_array import device_workspace
+
         workspace = tuple(
-            torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
+            device_workspace(spec.shape, element_type_of(spec.dtype), like=q)
             for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
         )
         if execution is not None and not capturing:
@@ -4913,9 +4983,9 @@ def _run_3d_tiled_on_stream(
         capture_refs.extend(workspace)
     segm_output, segm_max, segm_expsum = workspace
     if _launch_arch == "gfx1250":
-        segm_max.fill_(-1e30)
-        segm_expsum.zero_()
-        segm_output.zero_()
+        _fill_workspace(segm_max, -1e30)
+        _fill_workspace(segm_expsum, 0.0)
+        _fill_workspace(segm_output, 0.0)
 
     _require_additive_bias(problem, additive_bias)
     seg_vals = {
@@ -4938,11 +5008,11 @@ def _run_3d_tiled_on_stream(
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
         "block_table_stride": int(bt_stride),
-        "qq_bias_stride_0": int(qq_bias_stride_0),
+        "qq_bias_stride0": int(qq_bias_stride_0),
         "additive_bias_batch_stride": int(additive_bias_batch_stride),
         "additive_bias_head_stride": int(additive_bias_head_stride),
         "additive_bias_sq_stride": int(additive_bias_sq_stride),
-        **_runtime_kernarg_values(problem),
+        **runtime_kernarg_values(problem),
     }
     if kv_cache_layout is not None:
         seg_vals.update(kv_cache_layout.arguments())
@@ -4952,7 +5022,7 @@ def _run_3d_tiled_on_stream(
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
-        **_runtime_kernarg_values(problem),
+        **runtime_kernarg_values(problem),
     }
     if problem.emit_lse:
         red_vals["lse_ptr"] = lse
@@ -5493,8 +5563,6 @@ def _run_2d_graphed(
     ok_t, _reason = supports_native_unified_attention_tiled(problem, _launch_arch_2dg)
     if not ok_t:
         return _GRAPH_FALLBACK
-    import torch
-
     key = _tiled_cache_key(problem, _launch_arch_2dg)
     launcher = _get_2d_launcher(problem, key, arch=_launch_arch_2dg)
     meta = _get_2d_launch_meta(problem, key, arch=_launch_arch_2dg)
@@ -5535,6 +5603,10 @@ def _run_2d_graphed(
     # primes the module + produces the correct `out`).
     with no_fence():
         _do()
+    # Only the graph capture below needs torch; the launch and kernel-argument
+    # checks above run without it.
+    import torch
+
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         with no_fence():
@@ -5559,12 +5631,25 @@ def _run_2d_graphed(
 
 
 def _torch_stream_capturing() -> bool:
+    """Whether torch is capturing a graph on its current stream. Never imports
+    torch: a process that has not imported it has no torch capture to be in."""
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return False
     try:
-        import torch
-
         return bool(torch.cuda.is_current_stream_capturing())
     except Exception:
         return False
+
+
+def _fill_workspace(workspace, value: float) -> None:
+    """Set every element of a 3D workspace array (see ``device_workspace``)."""
+    if is_torch_tensor(workspace):
+        workspace.fill_(value)
+    else:
+        import numpy as np
+
+        workspace.write(np.full(workspace.shape, value, np.float32))
 
 
 def _attention_3d_workspace_specs(
@@ -5578,18 +5663,14 @@ def _attention_3d_workspace_specs(
     `lse_acc_ptr` + `o_acc_ptr` sizing in
     `example/ck_tile/01_fmha/fmha_fwd_runner.hpp`: all scratch shapes
     are derived from the problem up front and passed to the segment and reduce
-    kernels by pointer. The launcher allocates them per invocation; captured
-    allocations use Torch's graph-private pool.
+    kernels by pointer. The launcher allocates them per invocation, of the
+    caller's array kind (``device_workspace``); captured torch allocations use
+    torch's graph-private pool. The dtype is numpy's, so byte accounting needs
+    no torch.
     """
-    try:
-        import torch
+    import numpy as np
 
-        f32 = torch.float32
-    except Exception:
-        # CPU-only/static tests can still ask for byte accounting without
-        # importing torch. WorkspacePool.required_nbytes understands this
-        # string fallback via `_dtype_element_size`.
-        f32 = "float32"
+    f32 = np.dtype(np.float32)
 
     return (
         WorkspaceSpec(
@@ -5728,7 +5809,7 @@ def _get_3d_pipeline(
     # problem.emit_lse matches the built reduce: an explicit tuning spec must
     # agree with it (paged: run_unified_attention_torch; strided:
     # _validate_strided_3d_spec refuses an LSE reduce).
-    seg_signature, red_signature = _tiled_3d_signatures(
+    seg_signature, red_signature = tiled_3d_signatures(
         arch,
         problem.dtype,
         strided_kv=strided_kv,
@@ -5821,7 +5902,7 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
         return "llvm"
     # gfx942 kernels are validated through LLVM-direct. The HIP debug backend has
     # emitted code objects that hipModuleLoadData rejects for both cfvst D128 and
-    # narrow D64 MI300X kernels, so keep gfx942 on the proven direct path unless
+    # narrow D64 gfx942 kernels, so keep gfx942 on the proven direct path unless
     # the caller explicitly overrides ``compile_backend``.
     if arch == "gfx942":
         return "llvm"
@@ -5924,7 +6005,7 @@ def _get_2d_launcher(
     launcher = KernelLauncher(
         hsaco=hsaco,
         kernel_name=kname,
-        signature=_tiled_2d_signature(
+        signature=tiled_2d_signature(
             arch,
             problem.dtype,
             include_additive_bias=problem.use_additive_bias,
@@ -6152,10 +6233,11 @@ def _validate_additive_bias(
     That index must also fall inside the tensor's storage, which catches
     strides that do not match the tensor passed.
 
-    ``q_device`` is the launch's Q device; a mismatch would pack a pointer
-    from the wrong device and fault at launch rather than at this check.
-    Pass ``None`` to skip the device check (used by host-only validation
-    tests that have no Q tensor).
+    ``q_device`` is the launch's Q device (an ``ArrayInfo.device``); a mismatch
+    would pack a pointer from the wrong device and fault at launch rather than
+    at this check. Pass ``None`` to skip the device check (used by host-only
+    validation tests that have no Q array). ``additive_bias`` is anything
+    :func:`rocke.runtime.device_array.array_info` describes.
     """
     if not problem.use_additive_bias:
         if additive_bias is not None:
@@ -6164,17 +6246,20 @@ def _validate_additive_bias(
             )
         return 0
     _require_additive_bias(problem, additive_bias)
-    if str(additive_bias.dtype) != "torch.float32":
-        raise ValueError(f"additive_bias must be float32, got {additive_bias.dtype}")
-    if q_device is not None and additive_bias.device != q_device:
+    from rocke.runtime.device_array import array_info
+
+    bias = array_info(additive_bias)
+    if bias.dtype != "fp32":
+        raise ValueError(f"additive_bias must be float32, got {bias.dtype}")
+    if q_device is not None and bias.device != q_device:
         raise ValueError(
             f"additive_bias must be on the same device as q, got "
-            f"{additive_bias.device} vs {q_device}"
+            f"{bias.device} vs {q_device}"
         )
-    if additive_bias.stride(-1) != 1:
+    if bias.strides[-1] != 1:
         raise ValueError(
             "additive_bias must be contiguous along Sk (stride(-1) == 1), "
-            f"got strides {tuple(additive_bias.stride())}"
+            f"got strides {bias.strides}"
         )
     if sq_stride is None:
         raise ValueError(
@@ -6207,16 +6292,12 @@ def _validate_additive_bias(
             "i32 bias addressing (< 2**31, i.e. 8 GiB of f32); broadcast a "
             "dimension (stride 0) or split the launch"
         )
-    # Strides are passed separately from the tensor, so a mismatch would read
-    # past its storage; check the reach against the elements actually backed.
-    avail = (
-        additive_bias.untyped_storage().nbytes() // additive_bias.element_size()
-        - additive_bias.storage_offset()
-    )
-    if max_idx >= avail:
+    # Strides are passed separately from the array, so a mismatch would read
+    # past its allocation; check the reach against the elements actually backed.
+    if max_idx >= bias.backed_elements:
         raise ValueError(
-            f"additive_bias strides reach element {max_idx} but the tensor "
-            f"only backs {avail} elements from its storage offset"
+            f"additive_bias strides reach element {max_idx} but the array "
+            f"only backs {bias.backed_elements} elements from its start"
         )
     return sq_stride
 
@@ -6254,7 +6335,14 @@ def run_unified_attention_torch(
     use_graph: bool = True,
     lse=None,
 ):
-    """Launch a CK DSL attention kernel on torch tensors.
+    """Launch a CK DSL attention kernel on caller-owned device arrays.
+
+    Every array argument is anything
+    :func:`rocke.runtime.device_array.array_info` describes: a torch tensor or a
+    :class:`rocke.runtime.device_array.DeviceArray`. Scratch is allocated of
+    the same kind as ``q``. Graph replay (the gfx942 2D and the opt-in 3D
+    replay) captures through torch, so it serves torch tensors only; other
+    arrays launch eagerly.
 
     ``kv_layout="strided"`` adapts non-paged K/V tensors with logical shape
     [B,Hkv,capacity,D] to the existing split-KV pipeline on gfx942/gfx950.
@@ -6271,9 +6359,10 @@ def run_unified_attention_torch(
     ``alibi_slopes`` is an optional `[num_query_heads]` f32 tensor; when
     supplied, the kernel applies the ALiBi linear bias on each row.
     ``qq_bias`` is an optional 2D f32 query-to-query bias; ``qq_bias_stride_0``
-    is its first-axis stride (in elements). Both follow AITER's Triton
-    semantics exactly and require the corresponding ``problem.use_alibi`` /
-    ``problem.use_qq_bias`` flags to be set.
+    is its first-axis stride (in elements), which the kernels take as their
+    ``qq_bias_stride0`` argument (the name packed kernel descriptors record).
+    Both follow AITER's Triton semantics exactly and require the corresponding
+    ``problem.use_alibi`` / ``problem.use_qq_bias`` flags to be set.
 
     ``additive_bias`` is an f32 tensor read as
     ``bias[seq*batch_stride + q_head*head_stride + q_row*sq_stride + k]``
@@ -6285,20 +6374,22 @@ def run_unified_attention_torch(
     Strided-KV decode (``kv_layout="strided"``) does not support it.
 
     ``stream`` is the HIP stream handle (an `int`) to launch on. In the 3D
-    path, zero selects Torch's current stream on Q's device. Scratch allocation,
-    initialization and both launches use that stream. Eager calls own separate
+    path with torch tensors, zero selects Torch's current stream on Q's device.
+    Scratch allocation, initialization and both launches use that stream. Eager calls own separate
     scratch unless an execution owner is supplied. Captures use graph-private
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
 
     ``lse`` is the optional caller-owned natural-log softmax normalizer, a
-    contiguous FP32 ``[total_q, num_query_heads, 1]`` tensor, written only when
+    contiguous FP32 ``[total_q, num_query_heads, 1]`` array, written only when
     ``problem.emit_lse`` is set. The gfx942/gfx950 split-KV (3D) and tiled 2D
     paths write it (an LSE request skips the gfx942 2D graph replay and the
     4-warp GQA builder); the scalar path, sinks and other arches raise
     ``NotImplementedError`` rather than returning without it. Rows with no
     visible key get ``-inf`` (and O = 0).
     """
+    from rocke.runtime.device_array import array_info
+
     if kv_layout == "strided" and problem.emit_lse:
         raise NotImplementedError("LSE output is not implemented for strided-KV decode")
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
@@ -6358,7 +6449,9 @@ def run_unified_attention_torch(
     # as such rather than as a bias-argument error. Bias-free paths do not need
     # tensor metadata here; when bias is enabled, keep strict device access so a
     # malformed non-None Q cannot bypass the same-device launch check.
-    q_device = q.device if problem.use_additive_bias and q is not None else None
+    q_device = (
+        array_info(q).device if problem.use_additive_bias and q is not None else None
+    )
     additive_bias_sq_stride = _validate_additive_bias(
         problem,
         additive_bias,
@@ -6416,33 +6509,38 @@ def run_unified_attention_torch(
         if problem.max_seqlen_k > capacity:
             raise ValueError("maximum valid KV length exceeds allocation capacity")
         expected_q = (batch, problem.num_query_heads, dim)
-        expected_dtype = (
-            "torch.float16" if problem.dtype == "fp16" else "torch.bfloat16"
-        )
-        if tuple(q.shape) != expected_q or tuple(out.shape) != expected_q:
+        q_info, out_info = array_info(q), array_info(out)
+        lengths, offsets = array_info(seqused_k), array_info(cu_seqlens_q)
+        if q_info.shape != expected_q or out_info.shape != expected_q:
             raise ValueError("strided decode Q/O must have shape [B,Hq,D]")
-        if not q.is_contiguous() or not out.is_contiguous():
+        if not q_info.is_contiguous() or not out_info.is_contiguous():
             raise ValueError("strided decode Q/O must be contiguous")
-        if not q.is_cuda:
-            raise ValueError("strided decode requires device tensors")
-        if any(int(t.data_ptr()) % 16 for t in (q, out)):
+        if q_info.device is None:
+            raise ValueError("strided decode requires device arrays")
+        if any(info.data_ptr % 16 for info in (q_info, out_info)):
             raise ValueError("strided decode Q/O must be 16-byte aligned")
-        if any(str(t.dtype) != expected_dtype for t in (q, k, v, out)):
+        if any(
+            info.dtype != problem.dtype
+            for info in (q_info, array_info(k), array_info(v), out_info)
+        ):
             raise ValueError("strided decode Q/K/V/O dtype must match the problem")
-        if any(t.device != q.device for t in (k, v, out, seqused_k, cu_seqlens_q)):
+        if any(
+            info.device != q_info.device
+            for info in (array_info(k), array_info(v), out_info, lengths, offsets)
+        ):
             raise ValueError("strided decode inputs must be on the same device")
         if (
-            str(seqused_k.dtype) != "torch.int32"
-            or tuple(seqused_k.shape) != (batch,)
-            or not seqused_k.is_contiguous()
+            lengths.dtype != "i32"
+            or lengths.shape != (batch,)
+            or not lengths.is_contiguous()
         ):
-            raise ValueError("KV lengths must be a contiguous int32 [B] tensor")
+            raise ValueError("KV lengths must be a contiguous int32 [B] array")
         if (
-            str(cu_seqlens_q.dtype) != "torch.int32"
-            or tuple(cu_seqlens_q.shape) != (batch + 1,)
-            or not cu_seqlens_q.is_contiguous()
+            offsets.dtype != "i32"
+            or offsets.shape != (batch + 1,)
+            or not offsets.is_contiguous()
         ):
-            raise ValueError("query offsets must be a contiguous int32 [B+1] tensor")
+            raise ValueError("query offsets must be a contiguous int32 [B+1] array")
         # Caller-owned device metadata: lengths are in [0, max_seqlen_k], and
         # query offsets are [0, 1, ..., B]. No host read/synchronization here.
         ok, why = _explicit_path_supported(problem, tuning_spec, "3d", _launch_arch)
@@ -6618,6 +6716,7 @@ def run_unified_attention_torch(
         if (
             tuning_spec is None
             and not problem.emit_lse
+            and is_torch_tensor(q)
             and _enable_2d_graph_replay(problem, _launch_arch)
             and not _torch_stream_capturing()
         ):

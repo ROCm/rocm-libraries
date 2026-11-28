@@ -33,6 +33,7 @@ import struct
 from dataclasses import dataclass
 
 from ...helpers import compile_kernel
+from ...helpers.quant import quant_max_abs
 from ...instances.common.fused_moe import (
     FusedMoeSpec,
     build_moe_gather,
@@ -286,7 +287,7 @@ class Gfx1250Fp8Moe:
         fp8 = (
             ml_dtypes.float8_e4m3fn if s.lowbit == "fp8e4m3" else ml_dtypes.float8_e5m2
         )
-        qmax = 448.0 if s.lowbit == "fp8e4m3" else 57344.0
+        qmax = quant_max_abs(s.lowbit, arch=self.arch)
 
         def u8(a):
             a = np.ascontiguousarray(a)

@@ -2,12 +2,8 @@
 // SPDX-License-Identifier: MIT
 /*
  * library/cpp/bindings/rocke_library_engine_img2col.cpp -- img2col family
- * bindings for the rocke_library_engine module. Kept in its own translation
- * unit because the img2col helper header
- * defines its own struct rocke_conv_problem (a peer copy of the conv
- * implicit-GEMM problem with the same tag); compiling it alongside
- * instance_conv_implicit_gemm.h in the same TU is a C++ redefinition. Here the
- * only conv header included is instance_img2col.h, so the tag is unique.
+ * bindings for the rocke_library_engine module. The spec's nested ConvProblem
+ * is read with the conv bindings' fill_conv_problem (conv_glue.hpp).
  *
  * register_img2col(m) is called from rocke_library_engine.cpp, adding:
  *   img2col_lower_llvm(spec, arch) / img2col_serialize_ir(spec, arch)
@@ -23,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "conv_glue.hpp"
 #include "family_glue.hpp"
 
 extern "C" {
@@ -38,35 +35,11 @@ namespace py = pybind11;
 namespace
 {
 
+using rocke_bind::dict_int;
 using rocke_bind::dict_str;
 using rocke_bind::serialize_kernel;
 using rocke_bind::verify_kernel;
-
-/* Unlike rocke_bind::dict_int, a key set to None reads as the default. */
-int i2c_dict_int(const py::dict& d, const char* key, int dflt)
-{
-    if(d.contains(key) && !d[key].is_none())
-        return d[key].cast<int>();
-    return dflt;
-}
-
-/* Fill the img2col conv problem from a "problem" sub-dict. */
-void fill_problem(rocke_conv_problem_t* p, const py::dict& d)
-{
-    p->N = i2c_dict_int(d, "N", p->N);
-    p->Hi = i2c_dict_int(d, "Hi", p->Hi);
-    p->Wi = i2c_dict_int(d, "Wi", p->Wi);
-    p->C = i2c_dict_int(d, "C", p->C);
-    p->K = i2c_dict_int(d, "K", p->K);
-    p->Y = i2c_dict_int(d, "Y", p->Y);
-    p->X = i2c_dict_int(d, "X", p->X);
-    p->sH = i2c_dict_int(d, "sH", p->sH);
-    p->sW = i2c_dict_int(d, "sW", p->sW);
-    p->pH = i2c_dict_int(d, "pH", p->pH);
-    p->pW = i2c_dict_int(d, "pW", p->pW);
-    p->dH = i2c_dict_int(d, "dH", p->dH);
-    p->dW = i2c_dict_int(d, "dW", p->dW);
-}
+using rocke_conv_bind::fill_conv_problem;
 
 rocke_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& store)
 {
@@ -76,7 +49,7 @@ rocke_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& stor
     };
     rocke_img2col_spec_t s = rocke_img2col_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
-        fill_problem(&s.problem, d["problem"].cast<py::dict>());
+        fill_conv_problem(&s.problem, d["problem"].cast<py::dict>());
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -84,9 +57,9 @@ rocke_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& stor
         if(dict_str(d, "name", v))
             s.name = keep(v);
     }
-    s.block_tile_m = i2c_dict_int(d, "block_tile_m", s.block_tile_m);
-    s.block_tile_k = i2c_dict_int(d, "block_tile_k", s.block_tile_k);
-    s.vec_k = i2c_dict_int(d, "vec_k", s.vec_k);
+    s.block_tile_m = dict_int(d, "block_tile_m", s.block_tile_m);
+    s.block_tile_k = dict_int(d, "block_tile_k", s.block_tile_k);
+    s.vec_k = dict_int(d, "vec_k", s.vec_k);
     return s;
 }
 

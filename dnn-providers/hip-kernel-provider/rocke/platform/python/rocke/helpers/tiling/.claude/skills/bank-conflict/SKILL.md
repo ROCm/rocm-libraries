@@ -268,7 +268,7 @@ verified on; older/newer may work but has not been checked).
 Container images and their internal paths CHANGE, so treat the shape below as the contract and VERIFY
 before use (`docker images | grep -i rocm`), confirming the container's GPU arch matches the analysis
 target. A **known-good** configuration, verified working on this host: image `fmha-build-a:rocm714`
-(ROCm 7.14), python `/opt/venv/bin/python3`, rocprofv3 1.3.2, host GPU gfx90a (MI210); a long-lived
+(ROCm 7.14), python `/opt/venv/bin/python3`, rocprofv3 1.3.2, host GPU gfx90a; a long-lived
 container named `lds_prof` may already exist — reuse it rather than spawning another.
 
 ```bash

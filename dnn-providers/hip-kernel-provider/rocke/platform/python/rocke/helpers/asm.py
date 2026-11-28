@@ -57,7 +57,7 @@ def _as_src_v8i32(b: IRBuilder, v: Value) -> Value:
 # wrong (the accumulator is consumed / the source AGPRs are clobbered before the
 # MFMA retires).
 #
-# Empirically on MI355X (asm_mfma_parity.py): a bare asm MFMA returns the
+# Empirically on gfx950 (asm_mfma_parity.py): a bare asm MFMA returns the
 # unmodified accumulator (A·B contributes 0); a single trailing ``s_nop 3``
 # fixes the isolated case, and a 4-deep accumulation chain (the real K-loop
 # shape, where the next K-step's load reuses the same source AGPRs) becomes

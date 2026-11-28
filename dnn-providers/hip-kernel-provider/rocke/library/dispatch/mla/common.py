@@ -35,6 +35,7 @@ from typing import Any, List
 
 from rocke.dispatch.core import OperatorRequest, selector_matches
 from rocke.dispatch.tuning.identity import normalize_knobs
+from rocke.helpers.spec import bool_flag_reason
 
 FAMILY = "mla"
 MLA_ABI_VERSION = "hipkg-mla/v1"
@@ -206,11 +207,8 @@ def _request_errors(req: OperatorRequest) -> List[str]:
     # Exact types, never coerced: "false" is truthy, True == 1 and 1.5 would
     # truncate, so a loose value would silently select a different kernel.
     for name in _BOOL_FIELDS:
-        value = getattr(req, name)
-        if type(value) is not bool:
-            errors.append(
-                f"{name} must be a bool, got {type(value).__name__} {value!r}"
-            )
+        if (reason := bool_flag_reason(name, getattr(req, name))) is not None:
+            errors.append(reason)
     for name in _POSITIVE_INT_FIELDS + _NONNEGATIVE_INT_FIELDS + _ANY_INT_FIELDS:
         value = getattr(req, name)
         if type(value) is not int:

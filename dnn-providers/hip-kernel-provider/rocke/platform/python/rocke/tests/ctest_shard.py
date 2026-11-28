@@ -18,10 +18,31 @@ usage error (exit 4) before collection. A gtest pair with only one variable
 set is also a usage error, when it is that source.
 
 The plugin hashes a shard key per test and keeps the tests whose hash falls in
-this shard. The key is the module path plus the parameter id, so all tests of
-one parameter set run in the same shard. The plugin filters after ``-k``,
-``-m``, ``--deselect`` and the conftest filters. Thus every shard divides the
-same set of tests, and each test runs in exactly one shard.
+this shard. The shard sources and this rule live in ``rocke.tests.ci_shard``,
+which runners that are not pytest share. The key is the module path plus the
+parameter id, so all tests of one parameter set run in the same shard.
+
+A heavy test declares its cost with ``@pytest.mark.rocke_shard_cost(seconds)``
+(on a function, a class, a module's ``pytestmark`` or one ``pytest.param``; the
+closest mark wins). A shard key's cost is the sum over its tests, and the keys
+with a cost are spread over the shards by ``ci_shard.place_keys`` instead of by
+their hash, heaviest first, so an entry's few heavy groups do not pile onto one
+shard by chance. The seconds are a rough single-core measurement; only their
+relative size matters. Tests without the mark keep the hash rule. The
+plugin filters after ``-k``, ``-m``, ``--deselect`` and the conftest filters.
+Thus every shard divides the same set of tests, and each test runs in exactly
+one shard.
+
+The marks are placement hints, not the projection of shard time (that is the
+per-entry times file). So that a mark does not drift silently from what its
+tests cost, the plugin times the marked tests of every run. A shard key counts
+when every marked test of it passed; its ratio is measured seconds over
+declared cost, and the run's scale is the median ratio of the keys that count,
+so the check needs no reference machine. A key whose ratio is more than
+``COST_MARK_TOLERANCE`` times the scale, or less than its inverse, gets a
+``rocke-ctest-shard: cost mark ...`` line in the terminal summary. The line
+warns and never changes the exit status. Under pytest-xdist the tests run in
+the workers, which print no summary, so there is no check.
 
 A header line names the shard and its source, for example
 ``rocke-ctest-shard: 1/4 (GTEST_SHARD_INDEX=1, GTEST_TOTAL_SHARDS=4)``, or
@@ -40,42 +61,54 @@ when it is true, the plugin does the selection.
 
 from __future__ import annotations
 
+import collections
 import dataclasses
-import hashlib
 import os
+import statistics
 from collections.abc import Mapping
 
 import pytest
 
-PLUGIN_NAME = "rocke.tests.ctest_shard"
-SHARD_ENV = "ROCKE_TEST_SHARD"
-GTEST_INDEX_ENV = "GTEST_SHARD_INDEX"
-GTEST_TOTAL_ENV = "GTEST_TOTAL_SHARDS"
-ACTIVATION_FLAG = "--rocke-shard-from-gtest-env"
-# A child pytest that must run unsharded, with only the plugins that it names,
-# must not inherit these variables. SHARD_INDEX and TOTAL_SHARDS are
-# TheRock's 1-based pair.
-CHILD_ENV_EXCLUDED = (
-    SHARD_ENV,
+from .ci_shard import (
+    ACTIVATION_FLAG,
+    CHILD_ENV_EXCLUDED,
     GTEST_INDEX_ENV,
     GTEST_TOTAL_ENV,
-    "SHARD_INDEX",
-    "TOTAL_SHARDS",
-    "PYTEST_ADDOPTS",
-    "PYTEST_PLUGINS",
+    SHARD_ENV,
+    Shard,
+    check_cost,
+    header_line,
+    parse_shard,
+    resolve_shard,
+    shard_of,
+    unsharded_environment,
 )
+from .run_records import OTHER_SHARD, note_deselection
 
+__all__ = [
+    "ACTIVATION_FLAG",
+    "CHILD_ENV_EXCLUDED",
+    "COST_MARK_TOLERANCE",
+    "GTEST_INDEX_ENV",
+    "GTEST_TOTAL_ENV",
+    "PLUGIN_NAME",
+    "SHARD_COST_MARKER",
+    "SHARD_ENV",
+    "drifted_cost_marks",
+    "owns_selection",
+    "parse_shard",
+    "register_shard_cost_marker",
+    "resolve_shard",
+    "select_items",
+    "shard_costs",
+    "shard_key",
+    "shard_of",
+    "unsharded_environment",
+]
 
-def parse_shard(text: str) -> tuple[frozenset[int], int]:
-    """``"i/n"`` or ``"i,j,.../n"`` -> ``({i, j, ...}, n)``."""
-    picks, sep, total = text.strip().partition("/")
-    if not sep:
-        raise ValueError(f"shard {text!r} is not i/n")
-    n = int(total)
-    idx = frozenset(int(p) for p in picks.split(",") if p.strip())
-    if n < 1 or not idx or any(not 0 <= i < n for i in idx):
-        raise ValueError(f"shard {text!r} out of range")
-    return idx, n
+PLUGIN_NAME = "rocke.tests.ctest_shard"
+SHARD_COST_MARKER = "rocke_shard_cost"
+COST_MARK_TOLERANCE = 2.0
 
 
 def shard_key(item) -> str:
@@ -88,103 +121,112 @@ def shard_key(item) -> str:
     return f"{item.nodeid.split('::', 1)[0]}[{callspec.id}]"
 
 
-def shard_of(key: str, n: int) -> int:
-    return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % n
+def register_shard_cost_marker(config) -> None:
+    """Declare the ``rocke_shard_cost`` mark, so a run that marks tests
+    without loading this plugin does not warn about an unknown mark."""
+    config.addinivalue_line(
+        "markers",
+        f"{SHARD_COST_MARKER}(seconds): the rough cost of a heavy test, which "
+        "places its shard key by cost instead of by hash (rocke.tests.ctest_shard)",
+    )
 
 
-def select_items(config, items: list, spec: str | None = None) -> None:
+def _declared_cost(item) -> float | None:
+    marker = item.get_closest_marker(SHARD_COST_MARKER)
+    if marker is None:
+        return None
+    if marker.kwargs or len(marker.args) != 1:
+        raise pytest.UsageError(
+            f"{item.nodeid}: {SHARD_COST_MARKER} takes one positional cost in "
+            f"seconds, got args={marker.args!r} kwargs={marker.kwargs!r}"
+        )
+    return marker.args[0]
+
+
+def shard_costs(items) -> dict[str, float]:
+    """The declared cost of each shard key of ``items`` that has one: the sum
+    of its tests' ``rocke_shard_cost`` marks. Raises ``pytest.UsageError``
+    for a malformed mark or a cost that is not a positive finite number."""
+    costs: dict[str, float] = {}
+    for item in items:
+        cost = _declared_cost(item)
+        if cost is None:
+            continue
+        key = shard_key(item)
+        try:
+            check_cost(key, cost)
+        except ValueError as error:
+            raise pytest.UsageError(f"{item.nodeid}: {error}") from error
+        costs[key] = costs.get(key, 0) + cost
+    return costs
+
+
+def drifted_cost_marks(
+    declared: Mapping[str, float],
+    measured: Mapping[str, float],
+    tolerance: float = COST_MARK_TOLERANCE,
+) -> dict[str, float]:
+    """The shard keys whose cost mark is off, each with its ratio to the run's
+    scale. A key's ratio is ``measured[key] / declared[key]``; the scale is the
+    median ratio over the keys in both mappings; a key is off when its ratio is
+    more than ``tolerance`` times the scale or less than the scale divided by
+    ``tolerance``. Raises ``ValueError`` unless ``tolerance`` is at least 1."""
+    if not (tolerance >= 1):  # also refuses NaN
+        raise ValueError(f"cost mark tolerance {tolerance!r} is not at least 1")
+    ratios = {key: measured[key] / declared[key] for key in declared if key in measured}
+    if not ratios:
+        return {}
+    scale = statistics.median(ratios.values())
+    if scale <= 0:
+        return {}
+    relative = {key: ratio / scale for key, ratio in ratios.items()}
+    return {
+        key: value
+        for key, value in sorted(relative.items())
+        if not 1 / tolerance <= value <= tolerance
+    }
+
+
+def select_items(
+    config,
+    items: list,
+    spec: str | None = None,
+    *,
+    costs: Mapping[str, float] | None = None,
+) -> None:
     """``pytest_collection_modifyitems`` body: keep the items of shard
-    ``spec`` (default: ``ROCKE_TEST_SHARD``; blank keeps every item)."""
+    ``spec`` (default: ``ROCKE_TEST_SHARD``; blank keeps every item).
+    ``costs`` are the shard costs of ``items`` when the caller already has
+    them (default: computed here with ``shard_costs``)."""
     text = (os.environ.get(SHARD_ENV, "") if spec is None else spec).strip()
     if not text:
         return
-    picks, n = parse_shard(text)
+    shard = Shard(text)
+    keys = [shard_key(item) for item in items]
+    kept = shard.keeps(keys, shard_costs(items) if costs is None else costs)
     keep, drop = [], []
-    for it in items:
-        (keep if shard_of(shard_key(it), n) in picks else drop).append(it)
+    for item, key in zip(items, keys):
+        (keep if key in kept else drop).append(item)
     if drop:
+        for item in drop:
+            note_deselection(item, OTHER_SHARD)
         config.hook.pytest_deselected(items=drop)
         items[:] = keep
 
 
-def _count(name: str, raw: str) -> int:
-    if not (raw.isascii() and raw.isdigit()):
-        raise ValueError(f"{name}={raw!r} is not a non-negative integer")
-    return int(raw)
-
-
-def _gtest_shard(env: Mapping[str, str]) -> str | None:
-    """``"<index>/<total>"`` from the gtest pair; ``None`` when both are
-    blank."""
-    index_text = env.get(GTEST_INDEX_ENV, "").strip()
-    total_text = env.get(GTEST_TOTAL_ENV, "").strip()
-    if not index_text and not total_text:
-        return None
-    if not index_text:
-        raise ValueError(f"{GTEST_TOTAL_ENV}={total_text} needs {GTEST_INDEX_ENV}")
-    if not total_text:
-        raise ValueError(f"{GTEST_INDEX_ENV}={index_text} needs {GTEST_TOTAL_ENV}")
-    total = _count(GTEST_TOTAL_ENV, total_text)
-    if total < 1:
-        raise ValueError(f"{GTEST_TOTAL_ENV}={total_text!r} is not at least 1")
-    index = _count(GTEST_INDEX_ENV, index_text)
-    if index >= total:
-        raise ValueError(
-            f"{GTEST_INDEX_ENV}={index_text!r} is not in 0..{total - 1} "
-            f"({GTEST_TOTAL_ENV}={total_text})"
-        )
-    return f"{index}/{total}"
-
-
-def _gtest_source(env: Mapping[str, str]) -> str:
-    index = env.get(GTEST_INDEX_ENV, "").strip()
-    total = env.get(GTEST_TOTAL_ENV, "").strip()
-    return f"{GTEST_INDEX_ENV}={index}, {GTEST_TOTAL_ENV}={total}"
-
-
-def unsharded_environment(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """A copy of ``env`` (default ``os.environ``) without the variables in
-    ``CHILD_ENV_EXCLUDED``, for a child pytest that runs every test."""
-    env = os.environ if env is None else env
-    return {k: v for k, v in env.items() if k not in CHILD_ENV_EXCLUDED}
-
-
-def resolve_shard(
-    env: Mapping[str, str] | None = None, from_gtest: bool = False
-) -> tuple[str, str] | None:
-    """``(spec, source)`` of this run, or ``None`` when there is no shard.
-
-    ``spec`` is ``i/n`` or ``i,j,.../n``. ``source`` names the variables
-    that give the shard. A non-blank ``ROCKE_TEST_SHARD`` gives the shard,
-    and then the gtest pair is not read. When ``from_gtest`` is true, the
-    gtest pair gives the shard if ``ROCKE_TEST_SHARD`` is blank. The 1-based
-    ``SHARD_INDEX`` and ``TOTAL_SHARDS`` are not read. Raises ``ValueError``
-    for a malformed or out-of-range value of the source that gives the
-    shard, and for a half-set gtest pair when that pair is the source."""
-    env = os.environ if env is None else env
-    text = env.get(SHARD_ENV, "").strip()
-    if text:
-        parse_shard(text)
-        return text, f"{SHARD_ENV}={text}"
-    if not from_gtest:
-        return None
-    spec = _gtest_shard(env)
-    return None if spec is None else (spec, _gtest_source(env))
-
-
 @dataclasses.dataclass
 class _ShardState:
-    spec: str | None
-    source: str = ""
+    shard: Shard | None
     before: int | None = None
-    split: list[int] | None = None
+    split_line: str | None = None
     kept: int | None = None
+    costs: dict[str, float] | None = None
 
     def empty_share(self, exitstatus) -> bool:
         """True when the selection had tests, none fell in this shard, and
         pytest found no other problem."""
         return (
-            self.spec is not None
+            self.shard is not None
             and exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
             and bool(self.before)
             and self.kept == 0
@@ -192,6 +234,66 @@ class _ShardState:
 
 
 _STATE = pytest.StashKey[_ShardState]()
+
+
+# eq=False keeps the instance hashable: it is registered as a plugin.
+@dataclasses.dataclass(eq=False)
+class _CostMarkTiming:
+    """The measured time of the run's marked tests, per shard key."""
+
+    key_of_test: dict[str, str] = dataclasses.field(default_factory=dict)
+    declared: dict[str, float] = dataclasses.field(default_factory=dict)
+    measured: collections.Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
+    passed: collections.Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
+    spoiled: set[str] = dataclasses.field(default_factory=set)
+
+    def pytest_collection_finish(self, session) -> None:
+        """Time the marked tests of the run's final selection, reusing the
+        shard costs the selection computed when there was a shard."""
+        state = session.config.stash.get(_STATE, None)
+        costs = None if state is None else state.costs
+        self.declared = shard_costs(session.items) if costs is None else costs
+        self.key_of_test = {
+            item.nodeid: shard_key(item)
+            for item in session.items
+            if _declared_cost(item) is not None
+        }
+
+    def pytest_runtest_logreport(self, report) -> None:
+        key = self.key_of_test.get(report.nodeid)
+        if key is None:
+            return
+        self.measured[key] += report.duration
+        if report.outcome != "passed":
+            self.spoiled.add(key)
+        elif report.when == "call":
+            self.passed[key] += 1
+
+    def complete(self) -> dict[str, float]:
+        """Measured seconds of each key whose marked tests all passed."""
+        tests_per_key = collections.Counter(self.key_of_test.values())
+        return {
+            key: self.measured[key]
+            for key, count in tests_per_key.items()
+            if key not in self.spoiled and self.passed[key] == count
+        }
+
+    def warning_lines(self) -> list[str]:
+        drifted = drifted_cost_marks(self.declared, self.complete())
+        return [
+            f"rocke-ctest-shard: cost mark of {key} is off: declared "
+            f"{self.declared[key]:g} s, measured {self.measured[key]:.3g} s, "
+            f"{relative:.2g}x the run's median ratio; update its "
+            f"{SHARD_COST_MARKER} mark"
+            for key, relative in drifted.items()
+        ]
+
+
+_TIMING = pytest.StashKey[_CostMarkTiming]()
 
 
 def owns_selection(config) -> bool:
@@ -213,55 +315,55 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
+    register_shard_cost_marker(config)
     try:
         resolved = resolve_shard(from_gtest=config.getoption(ACTIVATION_FLAG))
     except ValueError as error:
         raise pytest.UsageError(f"rocke-ctest-shard: {error}") from error
-    if resolved is None:
-        config.stash[_STATE] = _ShardState(spec=None)
-    else:
-        config.stash[_STATE] = _ShardState(spec=resolved[0], source=resolved[1])
+    shard = None if resolved is None else Shard(*resolved)
+    config.stash[_STATE] = _ShardState(shard=shard)
+    timing = _CostMarkTiming()
+    config.stash[_TIMING] = timing
+    config.pluginmanager.register(timing, f"{PLUGIN_NAME}.cost_mark_timing")
 
 
-def _header_line(state: _ShardState | None) -> str:
-    if state is None or state.spec is None:
-        return "rocke-ctest-shard: off"
-    return f"rocke-ctest-shard: {state.spec} ({state.source})"
+def _shard_of_run(config) -> Shard | None:
+    state = config.stash.get(_STATE, None)
+    return None if state is None else state.shard
 
 
 def pytest_report_header(config):
-    return _header_line(config.stash.get(_STATE, None))
+    return header_line(_shard_of_run(config))
 
 
 # trylast: the split must see the final selection of every other hook.
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     state = config.stash.get(_STATE, None)
-    if state is None or state.spec is None:
+    if state is None or state.shard is None:
         return
-    _picks, n = parse_shard(state.spec)
-    split = [0] * n
-    for item in items:
-        split[shard_of(shard_key(item), n)] += 1
     state.before = len(items)
-    state.split = split
-    select_items(config, items, state.spec)
+    state.costs = shard_costs(items)
+    state.split_line = state.shard.split_line(
+        [shard_key(item) for item in items], state.costs
+    )
+    select_items(config, items, state.shard.spec, costs=state.costs)
     state.kept = len(items)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     state = config.stash.get(_STATE, None)
-    terminalreporter.write_line(_header_line(state))
-    if state is None or state.split is None:
+    terminalreporter.write_line(header_line(_shard_of_run(config)))
+    timing = config.stash.get(_TIMING, None)
+    if timing is not None:
+        for line in timing.warning_lines():
+            terminalreporter.write_line(line)
+    if state is None or state.split_line is None:
         return
-    counts = "/".join(str(c) for c in state.split)
-    terminalreporter.write_line(
-        f"rocke-ctest-shard {state.spec}: split {counts} of {state.before}; "
-        f"kept {state.kept}"
-    )
+    terminalreporter.write_line(state.split_line)
     if state.empty_share(exitstatus):
         terminalreporter.write_line(
-            f"rocke-ctest-shard {state.spec}: no test of this entry falls in "
+            f"rocke-ctest-shard {state.shard.spec}: no test of this entry falls in "
             "this shard; the entry passes"
         )
 

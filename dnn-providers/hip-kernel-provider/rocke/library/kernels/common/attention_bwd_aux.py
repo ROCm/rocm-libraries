@@ -63,6 +63,7 @@ from dataclasses import dataclass, replace
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import BF16, F16, F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
 from rocke.helpers.attention_fwd_ext import LOG2E
+from rocke.helpers.spec import require_bool_fields
 
 from ._attention_bwd_addr import (
     PagedCacheAddr,
@@ -153,8 +154,7 @@ class AttnBwdAuxSpec:
             raise ValueError("rows_per_cta must be positive")
         if self.convert_vec not in CONVERT_VECS:
             raise ValueError(f"convert_vec must be one of {CONVERT_VECS}")
-        if not isinstance(self.worklist, bool):
-            raise ValueError(f"worklist must be a bool, got {self.worklist!r}")
+        require_bool_fields(self, "worklist")
         if self.worklist and (self.seq_mode != "thd" or self.kv_target != "contiguous"):
             raise ValueError(
                 "worklist=True needs seq_mode='thd' and kv_target='contiguous'"

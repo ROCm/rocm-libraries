@@ -5,34 +5,27 @@
 Runs K1 (filter transform) -> K2 (input transform) -> K3 (grouped 1x1
 implicit-GEMM conv, built on a non-pointwise probe and launched on the real
 grouped 1x1 problem) -> K4 (output transform) on small shapes and compares y
-with a float32 direct-conv reference, using the conv benchmarks' metric
-max|out - ref| / max(max|ref|, 1) < 5e-2.
+with a float64 numpy reference of the stored operands (rounded to the io
+dtype), using the conv benchmarks' metric max|out - ref| / max(max|ref|, 1)
+< 5e-2.
 
 Every workspace and y are poisoned (bytes 0x7F) before the run, so an element
 a kernel fails to write shows up as NaN / a huge value.
 
-Requires a gfx1250 GPU and torch.
+Requires a gfx1250 GPU.
 """
 
 from __future__ import annotations
 
-import importlib.util
-
 import pytest
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    import torch
-
-    torch.cuda.is_available()  # let torch claim the HIP context first
-
-from rocke.runtime.hip_module import get_device_arch  # noqa: E402
+from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import TICKET, arch_skip_reason, skip_until
 
 GPU_ARCH = get_device_arch(0)
 
 pytestmark = pytest.mark.skipif(
-    not _HAS_TORCH or GPU_ARCH != "gfx1250",
-    reason="needs torch and a gfx1250 GPU",
+    GPU_ARCH != "gfx1250",
+    reason=arch_skip_reason(("gfx1250",), "needs a gfx1250 GPU"),
 )
 
 _K3_CFG = (32, 32, 32, 1, 1, 16, "mem", "cshuffle")
@@ -314,15 +307,22 @@ def _run(pk, m, io, op, ps, vec, scale, *, chunks=1, merge=(), mode="serial", **
     """
     import dataclasses
 
+    from rocke.numeric import storage
+
     from benchmarks.common.benchmark_winograd_conv import (
         WinogradPipeline,
         build_k3_candidates,
         make_inputs,
+        reference,
         verify_error,
     )
-    from builders.common.conv_reference import conv_reference_gfx1250
     from kernels.common._conv_implicit_gemm_common import ConvProblem
     from kernels.common.conv_winograd_fwd import WinogradFwdSpec
+
+    if mode == "graph":
+        # rocKE has no HIP-graph capture of its own; the torch CUDA-graph
+        # capture this mode used cannot run in a torch-free process.
+        skip_until(TICKET, reason="HIP graph capture needs a rocKE graph primitive")
 
     mh, mw = m if isinstance(m, tuple) else (m, 0)
     p = ConvProblem(Y=3, X=3, **pk)
@@ -341,11 +341,10 @@ def _run(pk, m, io, op, ps, vec, scale, *, chunks=1, merge=(), mode="serial", **
     transforms = pipe.compile_transforms()
     cands = build_k3_candidates((_K3_CFG,), pipe.gemm_problem, op, GPU_ARCH, jobs=1)
     assert cands, "K3 config did not build"
-    x, w, y = make_inputs(p, io, seed=7)
+    x, w = make_inputs(p, io, seed=7)
     if scale != 1.0:
-        x = (x.float() * scale).to(x.dtype)
-    tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[io]
-    ref = conv_reference_gfx1250(x, w, p, out_dtype=tdt)
+        x = storage.encode(storage.decode(x, io) * scale, io)
+    ref = reference(x, w, p, io)
     pipe.alloc()
     try:
         pipe.upload(x, w)
@@ -354,24 +353,11 @@ def _run(pk, m, io, op, ps, vec, scale, *, chunks=1, merge=(), mode="serial", **
         pipe.poison(0x7F)
         if mode == "serial":
             pipe.run_once()
-        elif mode == "two_streams":
-            pipe.bound_two_streams()()
-            torch.cuda.synchronize()
         else:
-            s = torch.cuda.Stream()
-            run = pipe.bound_total(stream=s.cuda_stream)
-            torch.cuda.synchronize()
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g, stream=s):
-                run()
-            torch.cuda.synchronize()
-            pipe.poison(0x7F)  # the capture did not run the kernels
+            assert mode == "two_streams", mode
+            pipe.bound_two_streams()()
             pipe.rt.sync()
-            with torch.cuda.stream(s):
-                g.replay()
-            torch.cuda.synchronize()
-            del g
-        out = pipe.read_y(y)
+        out = pipe.read_y()
     finally:
         pipe.free()
     return verify_error(out, ref)

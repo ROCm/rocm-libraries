@@ -4,8 +4,8 @@
 """C++/Python byte-identity gate for the library attention kernels.
 
 The IR-sha256 golden for these kernels lives in the platform parity harness
-(``platform/tests/instances/rocke_ir_parity_harness.py``, families
-``attention_dense`` / ``attention_d256``) and is gated in CI by the
+(``platform/tests/instances/rocke_ir_parity_harness.py``, the families in
+``_FAMILIES`` below) and is gated in CI by the
 ``rocke_golden_static`` CTest entry. That golden pins the *Python* lowering only.
 This file adds the other half for the same case set: the C++ engine
 (``rocke_engine``) must lower each of those kernels to byte-identical IR.
@@ -29,20 +29,26 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 
-_HARNESS_DIR = Path(__file__).resolve().parents[2] / "platform" / "tests" / "instances"
+from rocke.assets import platform_instances_dir
+from rocke.tests.engines import skip_without_cpp_engine
 
 # Families whose cases this gate covers (the ones built from library kernels).
 # lightning_indexer is a Python-authored, generically-lowered family (no
 # hand-written C++ emitter), so this gate is what actually proves its Python and
 # C++ lowerings agree -- the representative golden only pins the Python side.
-_FAMILIES = ("attention_dense", "attention_d256", "lightning_indexer")
+_FAMILIES = (
+    "attention_dense",
+    "attention_d256",
+    "attention_d128_swa",
+    "lightning_indexer",
+)
 
 
 def _harness():
-    if str(_HARNESS_DIR) not in sys.path:
-        sys.path.insert(0, str(_HARNESS_DIR))
+    harness_dir = str(platform_instances_dir())
+    if harness_dir not in sys.path:
+        sys.path.insert(0, harness_dir)
     import rocke_ir_parity_harness
 
     return rocke_ir_parity_harness
@@ -70,8 +76,6 @@ def test_attention_ir_cpp_python_byte_identity():
     """
     import pytest
 
-    if not _HARNESS_DIR.is_dir():
-        pytest.skip(f"platform parity harness not found at {_HARNESS_DIR}")
     try:
         from rocke.core.backend import BackendCoverageGap, BackendError
         from rocke.helpers.compile import _lower_llvm_via_backend
@@ -236,7 +240,7 @@ def test_attention_ir_cpp_python_byte_identity():
                 gaps.append(f"{case['case_id']} ({arch})")
                 continue
             except BackendError as e:  # engine absent -- same for every case
-                pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+                skip_without_cpp_engine(e, f"C++ engine not importable: {str(e)[:200]}")
             if py != cpp:
                 mism.append(case["case_id"])
     finally:
@@ -290,7 +294,9 @@ def test_mla_prefill_ir_cpp_python_byte_identity():
                         gaps.append(f"{flavor}/{cid}")
                         continue
                     except BackendError as e:
-                        pytest.skip(f"C++ engine not importable: {str(e)[:200]}")
+                        skip_without_cpp_engine(
+                            e, f"C++ engine not importable: {str(e)[:200]}"
+                        )
                     compared += 1
                     if py != cpp:
                         mism.append(f"{flavor}/{cid}")

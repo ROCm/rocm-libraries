@@ -41,6 +41,36 @@ static void check_isa_backend(const char* gfx, const char* generic)
     CHECK(own.valid && err == NULL, "rocke_backend_for resolves", gfx);
     CHECK(own.gfx != NULL && strcmp(own.gfx, gfx) == 0, "the ISA backend keeps the name", gfx);
     CHECK(rocke_backend_is_known(gfx), "rocke_backend_is_known", gfx);
+
+    // The MMA catalog gate admits exactly the target's catalog rows, and a
+    // builder-only K=128 op_id where the target lists the row of the same
+    // instruction; it refuses any other op_id with Python's text (here the bf16
+    // 4x4x4 atom, which gfx908 and every RDNA target lack).
+    char refusal[ROCKE_ERR_MSG_CAP];
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(gfx);
+    for(int i = 0; target != NULL && i < target->mma.num_ops; ++i)
+        CHECK(
+            !rocke_isa_mma_catalog_refusal(gfx, target->mma.ops[i].op_id, refusal, sizeof(refusal)),
+            "the MMA catalog gate admits a listed atom",
+            gfx);
+    const bool has_k128
+        = target != NULL
+          && rocke_mma_catalog_by_op_id(&target->mma, "mfma_f32_16x16x128_fp8") != NULL;
+    for(const char* builder_only :
+        {"mfma_scale_f32_16x16x128_f8f6f4", "mfma_f32_16x16x128_fp4fp6fp8"})
+        CHECK(rocke_isa_mma_catalog_refusal(gfx, builder_only, refusal, sizeof(refusal))
+                  == !has_k128,
+              "the MMA catalog gate admits a builder-only op_id where its instruction is",
+              gfx);
+    const char* batched_bf16 = "mfma_f32_4x4x4_bf16";
+    const bool listed
+        = target != NULL && rocke_mma_catalog_by_op_id(&target->mma, batched_bf16) != NULL;
+    const std::string expected = std::string("tile.") + batched_bf16 + " is not available on " + gfx
+                                 + ": its MMA catalog does not list it";
+    CHECK(rocke_isa_mma_catalog_refusal(gfx, batched_bf16, refusal, sizeof(refusal)) == !listed
+              && (listed || expected == refusal),
+          "the MMA catalog gate refuses an unlisted atom with Python's text",
+          gfx);
     if(generic == NULL)
         return;
     const rocke_isa_backend_t shared = rocke_backend_for(generic, NULL);
@@ -55,7 +85,7 @@ static void check_isa_backend(const char* gfx, const char* generic)
 static void check_lowering_backend(const char* gfx, const char* generic)
 {
     rocke_status_t status = ROCKE_ERR_VALUE;
-    const ckc::rocke_isa_backend_t* own = ckc::rocke_ll_backend_for(gfx, &status);
+    const ckc::rocke_ll_isa_backend_t* own = ckc::rocke_ll_backend_for(gfx, &status);
     CHECK(own != NULL && status == ROCKE_OK, "rocke_ll_backend_for resolves", gfx);
     if(own == NULL)
         return;
@@ -63,7 +93,7 @@ static void check_lowering_backend(const char* gfx, const char* generic)
     CHECK(ckc::rocke_ll_backend_for(gfx, NULL) == own, "the lowering backend is one row", gfx);
     if(generic == NULL)
         return;
-    const ckc::rocke_isa_backend_t* shared = ckc::rocke_ll_backend_for(generic, NULL);
+    const ckc::rocke_ll_isa_backend_t* shared = ckc::rocke_ll_backend_for(generic, NULL);
     CHECK(shared != NULL && shared != own, "the generic has a row of its own", gfx);
     if(shared == NULL)
         return;
@@ -93,6 +123,10 @@ static void check_unknown_target(const char* gfx)
     const char* err = NULL;
     const rocke_isa_backend_t be = rocke_backend_for(gfx, &err);
     CHECK(!be.valid && !rocke_backend_is_known(gfx), "rocke_backend_for refuses", gfx);
+    char refusal[ROCKE_ERR_MSG_CAP];
+    CHECK(rocke_isa_mma_catalog_refusal(gfx, "mfma_f32_4x4x4_f16", refusal, sizeof(refusal)),
+          "an unknown target's MMA catalog lists nothing",
+          gfx);
     CHECK(err != NULL && expected == err, "the refusal is Python's message", gfx);
     if(err != NULL && expected != err)
         fprintf(stderr, "  expected: %s\n  got:      %s\n", expected.c_str(), err);

@@ -364,7 +364,7 @@ static int test_hip_constraint_rejection()
         for(int i = 0; i < inputs; ++i)
         {
             char name[32];
-            snprintf(name, sizeof name, "value_%d", i);
+            snprintf(name, sizeof name, "value%d", i);
             operands[i] = rocke_b_param(&b, name, rocke_f32(), nullptr);
         }
         const rocke_type_t* types[] = {rocke_f32()};

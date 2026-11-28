@@ -8,30 +8,24 @@ gfx1250 cache of placeholder binaries (capability match, re-validation, launch
 grid, block and kernargs). GPU (gfx1250): every spec branch -- edges and
 ragged tiles, groups, PAD 0 / 5x5, several images per block, a 3-deep ring,
 two WMMA k-steps per chunk, fragment prefetch, the upper VGPR banks -- checked
-numerically against torch's dgrad.
+numerically against a float64 numpy reference of the stored operands.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_direct_dgrad_wmma.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
 import json
-import importlib.util
 import unittest
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it (see
-    # test_direct_conv_correctness.py).
-    import torch
-
-    torch.cuda.is_available()
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_dgrad_wmma import (
     DirectDgradWmmaSpec,
@@ -39,6 +33,8 @@ from kernels.common.conv_direct_dgrad_wmma import (
     dgrad_wmma_reason,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
+
+from ._direct_conv_numeric import direct_dgrad_reference, launch_direct_conv, poisoned
 
 GPU_ARCH = get_device_arch(0)
 
@@ -165,7 +161,7 @@ class TestDgradWmmaSpec(unittest.TestCase):
         groups, the split barrier and the per-wave epilogue included) and a
         set of rejected specs (the byte-identity gate only covers the IR of
         specs both engines build)."""
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import DIRECT_CAPABILITIES, _knob_grid
         from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
@@ -260,7 +256,7 @@ class TestDgradWmmaSpec(unittest.TestCase):
         """The C++ refusal of an unknown scheduler quotes the name as Python's
         ``{value!r}`` does: the quote character, the escapes, a printable
         non-ASCII name (the subset rocke_py_str_repr documents)."""
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for name in ("bogus", "it's", "a\\b", "x'\"y", "tab\there", "caf\u00e9"):
@@ -279,7 +275,7 @@ class TestDgradWmmaSpec(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for knobs in (dict(waves_c=0), dict(tiles_c=0), dict(waves_p=0)):
@@ -309,7 +305,7 @@ class TestDgradWmmaSpec(unittest.TestCase):
     def test_binding_rejects_nonpositive_filter(self):
         """The C++ engine refuses a zero or negative filter extent with
         Python's reason, before planning its (empty) taps."""
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for KH, KW in ((0, 3), (3, 0), (-1, 3), (3, -2)):
@@ -562,9 +558,7 @@ def test_aot_cache_offers_nothing_for_uncached_geometry(wmma_cache, pkw):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 
@@ -727,61 +721,33 @@ class TestDgradWmmaPack8Strided(unittest.TestCase):
                 build_direct_dgrad_wmma(spec, "gfx1250")
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestDgradWmmaGpu(unittest.TestCase):
     def _check(self, pkw, knobs):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
         from rocke import compile_kernel
-        from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         p = _problem(**pkw)
         spec = DirectDgradWmmaSpec(problem=p, **knobs)
         self.assertIsNone(dgrad_wmma_reason(spec, GPU_ARCH))
         art = compile_kernel(build_direct_dgrad_wmma(spec, GPU_ARCH), arch=GPU_ARCH)
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        dY = torch.empty(p.N, p.Ho, p.Wo, p.total_k).uniform_(-1, 1).to(td)
-        w = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1, 1).to(td)
-        dX = torch.zeros(p.N, p.H, p.W, p.total_c, dtype=td)
-        rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        bufs = [rt.alloc(t.nbytes) for t in (dY, w, dX)]
-        try:
-            rt.memcpy_h2d(bufs[0], u8(dY), dY.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, dX.nbytes)  # poison: every element is written
-            vals = ConvArgs.from_problem(p, direction="dgrad").to_launch_values(
-                *(int(x) for x in bufs), dY.nbytes, w.nbytes, dX.nbytes
-            )
-            KernelLauncher(
-                hsaco=art.hsaco,
-                kernel_name=art.kernel_name,
-                signature=conv_direct_args_signature(p.dtype, direction="dgrad"),
-            )(
-                vals,
-                config=LaunchConfig(
-                    grid=spec.grid(), block=(spec.threads_per_block, 1, 1), fence=True
-                ),
-            )
-            rt.memcpy_d2h(u8(dX), bufs[2], dX.nbytes)
-        finally:
-            for x in bufs:
-                rt.free(x)
-        ref = torch.nn.grad.conv2d_input(
-            (p.N, p.total_c, p.H, p.W),
-            w.float().permute(0, 3, 1, 2),
-            dY.float().permute(0, 3, 1, 2),
-            stride=p.stride,
-            padding=p.PAD,
-            dilation=(p.dil_h, p.dil_w),
-            groups=p.groups,
-        ).permute(0, 2, 3, 1)
-        err = float((dX.float() - ref).abs().max() / ref.abs().max())
+        rng = np.random.default_rng(0)
+        dy = storage.encode(rng.uniform(-1, 1, (p.N, p.Ho, p.Wo, p.total_k)), p.dtype)
+        w = storage.encode(rng.uniform(-1, 1, (p.total_k, p.KH, p.KW, p.cpg)), p.dtype)
+        dx = launch_direct_conv(
+            art,
+            p,
+            (dy, w),
+            # Poisoned: an element the kernel does not write fails.
+            poisoned((p.N, p.H, p.W, p.total_c), p.dtype),
+            grid=spec.grid(),
+            block=(spec.threads_per_block, 1, 1),
+            direction="dgrad",
+        )
+        ref = direct_dgrad_reference(
+            p, storage.decode(dy, p.dtype), storage.decode(w, p.dtype)
+        )
+        err = peak_relative_error(storage.decode(dx, p.dtype), ref)
         self.assertLess(err, 1e-2, f"{pkw} {knobs}: rel err {err:.3g}")
 
     def test_cases(self):

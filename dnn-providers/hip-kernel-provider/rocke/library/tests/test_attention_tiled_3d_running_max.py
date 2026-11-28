@@ -47,6 +47,7 @@ from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.hip_module import Runtime, get_device_arch, get_device_num_cus
 from rocke.runtime.host_buffers import as_u8_buffer
 from rocke.runtime.launcher import DeviceMem
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
@@ -205,8 +206,8 @@ def _attention(problem, arch, q, k, v, *, tuning_spec=None, sinks=None):
         "softcap": 0.0,
         "num_seqs": 1,
         "block_table_stride": blocks,
-        "qq_bias_stride_0": 0,
-        **au._runtime_kernarg_values(problem),
+        "qq_bias_stride0": 0,
+        **au.runtime_kernarg_values(problem),
     }
     reduce_values = {
         "output_ptr": out,
@@ -214,7 +215,7 @@ def _attention(problem, arch, q, k, v, *, tuning_spec=None, sinks=None):
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seq_lens,
-        **au._runtime_kernarg_values(problem),
+        **au.runtime_kernarg_values(problem),
     }
     # The launch fences the stream, so ``out`` is complete when it returns.
     au._launch_3d_pipeline(
@@ -344,7 +345,7 @@ def test_decode_sink(gpu):
 def test_native_builder_matches_python(arch, q_len, kv_len, num_segments, use_sinks):
     # The GPU tests run the Python builders; the C++ builders, which serve
     # kernels without Python, must emit the same IR for their specs.
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     # The explicit specs do not depend on the CU count.
     problem = _problem(1, q_len=q_len, kv_len=kv_len, use_sinks=use_sinks)
     spec = _explicit_spec(problem, arch, num_segments)

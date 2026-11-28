@@ -1,0 +1,23 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""The test session's garbage collector setting (``rocke.tests.session_gc``)."""
+
+from __future__ import annotations
+
+import gc
+
+from rocke.tests.session_gc import TEST_SESSION_YOUNG_GC_THRESHOLD, use_test_session_gc
+
+
+def test_the_setting_keeps_the_older_generations_thresholds():
+    session = gc.get_threshold()
+    try:
+        gc.set_threshold(700, 11, 12)
+        # Compare with what the interpreter kept: early CPython 3.14 releases
+        # drop the third threshold and read it back as 0.
+        older = gc.get_threshold()[1:]
+        use_test_session_gc()
+        assert gc.get_threshold() == (TEST_SESSION_YOUNG_GC_THRESHOLD, *older)
+    finally:
+        gc.set_threshold(*session)

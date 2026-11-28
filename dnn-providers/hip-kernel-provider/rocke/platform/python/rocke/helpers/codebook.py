@@ -15,6 +15,11 @@ re-materialises the fp8 mantissa via a codebook lookup:
 The codebook tables are 256-entry (i8) or 16-entry (i4) f32 arrays
 that the host prebuilds once and the kernel reads via a single global
 load + ``cvt_f32_to_fp8`` / ``cvt_f32_to_bf8`` per element.
+
+The ``_to_fp8`` / ``_to_bf8`` lookups apply no clamp: the caller owns the
+bound. Each table entry, times ``per_tensor_scale`` when one is given, must
+stay within ``quant_max_abs(dtype, arch=...)``, as the conversions do not
+saturate (:mod:`rocke.helpers.fp8_encoding`).
 """
 
 from __future__ import annotations

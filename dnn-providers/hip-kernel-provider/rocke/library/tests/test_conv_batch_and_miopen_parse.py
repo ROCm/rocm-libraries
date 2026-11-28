@@ -8,14 +8,19 @@
   dropped, and the problem silently replaced by defaults.
 * ``_batch_chunks`` -- the batch slices one AOT launch each covers, so no
   operand exceeds the kernels' i32 byte addressing.
-* ``_batch_slices`` -- the batch slices the torch reference runs, so no fp32
-  operand crosses torch's 2^32-byte break point.
-  ``conv_reference`` refuses an image that alone crosses the cap.
+* ``_batch_slices`` -- the batch slices the float64 references run, so no
+  slice's activation exceeds a byte cap (checked here with fp32 elements and
+  a 2^31-byte cap).
+* ``_pool_size`` -- how many compile workers a sweep starts: an explicit
+  ``--jobs`` as given; ``--jobs 0`` one per CPU, but never so many that a
+  worker's start-up outweighs its share of the kernels.
 
 CPU only; no kernel is built or launched.
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
@@ -227,15 +232,14 @@ def test_batch_chunks_rejects_oversized_weights():
 
 
 # ---------------------------------------------------------------------------
-# _batch_slices (torch reference)
+# _batch_slices
 # ---------------------------------------------------------------------------
 
 
 def _slices(p, n):
-    pytest.importorskip("torch")
     from builders.common.conv_reference import _batch_slices
 
-    return _batch_slices(p, n)
+    return _batch_slices(p, n, element_bytes=4, max_bytes=2**31 - 1)
 
 
 def test_batch_slices_small_batch_is_one_slice():
@@ -250,6 +254,17 @@ def test_batch_slices_fp32_cap():
     slices = _slices(p, 16)
     assert slices == [(0, 7), (7, 7), (14, 2)]
     _assert_partition(slices, 16, 7)
+
+
+def test_batch_slices_float64_reference_cap():
+    # The float64 references slice at REFERENCE_SLICE_BYTES (2^28): a 1024x1024
+    # image with C=K=8 is 2^23 elements, 2^26 float64 bytes, so 4 per slice.
+    from builders.common.conv_reference import REFERENCE_SLICE_BYTES, _batch_slices
+
+    p = _image(9, C=8, K=8)
+    slices = _batch_slices(p, 9, element_bytes=8, max_bytes=REFERENCE_SLICE_BYTES)
+    assert slices == [(0, 4), (4, 4), (8, 1)]
+    _assert_partition(slices, 9, 4)
 
 
 def test_batch_slices_sized_by_the_larger_activation():
@@ -284,24 +299,28 @@ def test_batch_slices_strided_stem_is_sized_by_its_output():
     assert _slices(p, 200) == [(0, step), (step, 200 - step)]
 
 
-def _meta_conv_reference(p):
-    torch = pytest.importorskip("torch")
-    from builders.common.conv_reference import conv_reference
-
-    # Meta tensors: the refusal must come before any data is touched.
-    A = torch.empty((p.N, p.Hi, p.Wi, p.C), device="meta")
-    B = torch.empty((p.K, p.Y, p.X, p.C), device="meta")
-    return conv_reference(A, B, p)
+# ---------------------------------------------------------------------------
+# _pool_size (the sweep's compile pool)
+# ---------------------------------------------------------------------------
 
 
-def test_conv_reference_refuses_an_image_past_the_limit():
-    p = ConvProblem(N=1, Hi=8192, Wi=8192, C=32, K=32, Y=1, X=1)
-    with pytest.raises(ValueError, match="2\\*\\*31 limit"):
-        _meta_conv_reference(p)
+def test_pool_size_keeps_an_explicit_job_count():
+    from benchmarks.common.benchmark_implicit_gemm_conv import _pool_size
+
+    assert _pool_size(3, 1000) == 3
+    assert _pool_size(500, 10) == 500
 
 
-def test_conv_reference_refuses_an_output_past_the_limit():
-    # The input fits (2^30 fp32 bytes); padding grows the output past 2^31.
-    p = ConvProblem(N=1, Hi=8190, Wi=8190, C=4, K=8, Y=1, X=1, pH=1, pW=1)
-    with pytest.raises(ValueError, match="2\\*\\*31 limit"):
-        _meta_conv_reference(p)
+def test_pool_size_auto_gives_each_worker_its_share_of_the_work():
+    from benchmarks.common.benchmark_implicit_gemm_conv import (
+        _ITEMS_PER_AUTO_WORKER,
+        _pool_size,
+    )
+
+    cpus = os.cpu_count() or 1
+    # A 444-combo dgrad test sweep: one worker per 16 combos, rounded up.
+    assert _pool_size(0, 444) == min(cpus, -(-444 // _ITEMS_PER_AUTO_WORKER))
+    assert _pool_size(0, 1) == 1
+    assert _pool_size(0, 0) == 1
+    # A full tuning grid: one worker per CPU.
+    assert _pool_size(0, cpus * _ITEMS_PER_AUTO_WORKER * 2) == cpus

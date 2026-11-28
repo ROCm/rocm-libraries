@@ -20,6 +20,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.bool_flags import bool_flag_refusal
+from rocke.tests.comgr import compile_kernel_or_skip, loaded_compiler_build
+from rocke.tests.compiler_tools import require_tools_or_skip
+from rocke.tests.pending_lanes import (
+    measured_budget_kernels,
+    measured_scratch_allowance,
+)
+
 from kernels.mla.mla_prefill_gfx942 import (
     MlaPrefillSpec,
     _fwd_lds_bytes,
@@ -32,16 +41,33 @@ from kernels.mla.mla_prefill_gfx942 import (
     mla_prefill_score_probe_signature,
     supports_mla_prefill,
 )
-from rocke.core.lower_llvm import lower_kernel_to_llvm
 
-from ._compiler_test_utils import (
-    require_tools_or_skip,
-    skip_where_compiler_refuses_option,
-)
+from ._compiler_test_utils import skip_where_compiler_refuses_option
+
+# This file's path in rocke.tests.pending_lanes.MEASURED_BUDGETS.
+_MEASURED_BUDGETS_PATH = "library/tests/test_mla_prefill_gfx942.py"
 
 
 def _spec(**kw) -> MlaPrefillSpec:
     return MlaPrefillSpec(num_heads=kw.pop("num_heads", 16), **kw)
+
+
+def _shipped_spec(num_cus: int = 0) -> MlaPrefillSpec:
+    """The spec dispatch ships for a DeepSeek-V3-shaped request; ``num_cus``
+    0 takes the live device's CU count when it is a gfx942."""
+    from dispatch.mla import MLARequest, dispatch_mla
+
+    return dispatch_mla(
+        MLARequest(
+            num_heads=128,
+            total_q=64,
+            num_seqs=2,
+            max_seqlen_k=96,
+            arch="gfx942",
+            num_kv_blocks=12,
+            num_cus=num_cus,
+        )
+    ).spec
 
 
 def _assert_no_private_memory(case: unittest.TestCase, ir: str) -> None:
@@ -84,9 +110,13 @@ class TestMlaPrefillSpec(unittest.TestCase):
             for value in ("false", 0, 1, None):
                 with (
                     self.subTest(name=name, value=value),
-                    self.assertRaisesRegex(TypeError, f"{name} must be a bool"),
+                    self.assertRaises(ValueError) as refusal,
                 ):
                     _spec(**{name: value})
+                self.assertEqual(
+                    str(refusal.exception),
+                    bool_flag_refusal(name, value, what="MlaPrefillSpec"),
+                )
 
     def test_int_fields_reject_bool_float_and_str(self):
         # True == 1 and 1.0 == 1 would otherwise pass every range check.
@@ -109,9 +139,13 @@ class TestMlaPrefillSpec(unittest.TestCase):
             for value in (True, 1.0, "1"):
                 with (
                     self.subTest(name=name, value=value),
-                    self.assertRaisesRegex(TypeError, f"{name} must be an int"),
+                    self.assertRaises(ValueError) as refusal,
                 ):
                     _spec(**{name: value})
+                self.assertEqual(
+                    str(refusal.exception),
+                    f"MlaPrefillSpec failed - {name}={value!r}, expected an int",
+                )
 
 
 class TestMlaPrefillGate(unittest.TestCase):
@@ -335,6 +369,14 @@ class TestMlaPrefillHeadsPerWg(unittest.TestCase):
         self.assertIn("num_xcds", reason)
         self.assertIn("_x6", _hpw_spec(num_xcds=6).fwd_kernel_name())
 
+    def test_kernel_identity_drops_only_the_xcd_count(self):
+        self.assertEqual(
+            _hpw_spec(num_xcds=6).fwd_kernel_identity(), _hpw_spec().fwd_kernel_name()
+        )
+        self.assertEqual(
+            _hpw_spec().fwd_kernel_identity(), _hpw_spec().fwd_kernel_name()
+        )
+
     def test_eight_heads_admitted(self):
         # k_rope is a quarter of the c_kv tile, so at 512 threads its staging
         # narrows to 2-wide chunks rather than being refused.
@@ -424,15 +466,6 @@ class _OccupancyGuard:
 
     @classmethod
     def setUpClass(cls):
-        # Import torch first when it is installed: it binds the torch-bundled
-        # comgr, the one the benchmark and dispatch path compile with. The
-        # system comgr is a different LLVM vintage and allocates a few more
-        # VGPRs, so without this the guard would check a code object the
-        # runtime never runs.
-        try:
-            import torch  # noqa: F401
-        except ImportError:
-            pass
         try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.helpers.compile import compile_kernel
@@ -457,6 +490,9 @@ class _OccupancyGuard:
                 )
         except ImportError as exc:  # pragma: no cover - environment-dependent
             require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+        cls.kernel_name = art.kernel_name
+        # Measured budgets key on the layout, not the device's XCD count.
+        cls.kernel_identity = cls.spec.fwd_kernel_identity()
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd.hsaco"
             path.write_bytes(bytes(art.hsaco))
@@ -473,8 +509,13 @@ class _OccupancyGuard:
         self.assertIsNotNone(self.res.vgpr_count)
         self.assertLessEqual(self.res.vgpr_count, self.VGPRS_PER_SIMD // 2)
 
-    def test_no_scratch(self):
-        self.assertEqual(self.res.scratch_bytes, 0)
+    def test_scratch_within_budget(self):
+        """No scratch, unless the loaded compiler is one this kernel has a
+        measured budget for (``rocke.tests.pending_lanes.MEASURED_BUDGETS``)."""
+        allowance = measured_scratch_allowance(
+            _MEASURED_BUDGETS_PATH, self.kernel_identity, loaded_compiler_build()
+        )
+        self.assertLessEqual(self.res.scratch_bytes, allowance)
 
     def test_two_workgroups_per_cu(self):
         vgpr = -(-self.res.vgpr_count // 8) * 8
@@ -487,27 +528,31 @@ class _OccupancyGuard:
 class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
     """The layout dispatch ships for a DeepSeek-V3-shaped request."""
 
+    def test_every_measured_budget_names_this_kernel(self):
+        """A budget whose kernel identity no longer matches the shipped
+        layout's (a re-tuned dispatch) would silently stop applying."""
+        self.assertLessEqual(
+            measured_budget_kernels(_MEASURED_BUDGETS_PATH), {self.kernel_identity}
+        )
+
     @staticmethod
     def make_spec():
-        from dispatch.mla import MLARequest, dispatch_mla
+        return _shipped_spec()
 
-        return dispatch_mla(
-            MLARequest(
-                num_heads=128,
-                total_q=64,
-                num_seqs=2,
-                max_seqlen_k=96,
-                arch="gfx942",
-                num_kv_blocks=12,
-            )
-        ).spec
 
-    @unittest.skip(
-        "the amd-llvm in the current TheRock pin spills 12 bytes on this "
-        "layout; re-enable once the kernel compiles without scratch again"
-    )
-    def test_no_scratch(self):
-        super().test_no_scratch()
+class TestShippedLayoutBudgetKey(unittest.TestCase):
+    """The shipped layout's measured budget applies on every device class."""
+
+    def test_every_xcd_count_dispatch_picks_shares_the_budgeted_identity(self):
+        # 80 CUs is no whole number of 38-CU XCDs (launch order), 228 and 304
+        # are 6 and 8 XCDs: every XCD count dispatch derives for gfx942.
+        specs = [_shipped_spec(num_cus=num_cus) for num_cus in (80, 228, 304)]
+        self.assertEqual({spec.num_xcds for spec in specs}, {0, 6, 8})
+        self.assertEqual(len({spec.fwd_kernel_name() for spec in specs}), 3)
+        budgeted = measured_budget_kernels(_MEASURED_BUDGETS_PATH)
+        for spec in specs:
+            with self.subTest(num_xcds=spec.num_xcds):
+                self.assertEqual(budgeted, {spec.fwd_kernel_identity()})
 
 
 class TestDefaultLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
@@ -594,25 +639,15 @@ class TestAgprAccResources(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         try:
-            import torch  # noqa: F401
-        except ImportError:
-            pass
-        try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
-            from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
             require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
         if not _is_modern_flavor(_resolve_llvm_flavor()):
             raise unittest.SkipTest("agpr_acc needs an llvm22 / llvm23 comgr")
-        try:
-            art = compile_kernel(
-                build_mla_prefill_fwd(_aa_spec(), arch="gfx942"),
-                arch="gfx942",
-                capture_ir_text=False,
-            )
-        except (ImportError, RuntimeError) as exc:  # pragma: no cover
-            require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+        art = compile_kernel_or_skip(
+            build_mla_prefill_fwd(_aa_spec(), arch="gfx942"), arch="gfx942"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd_aa.hsaco"
             path.write_bytes(bytes(art.hsaco))

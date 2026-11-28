@@ -4,8 +4,8 @@
 
 Unlike ``test_rocke.py`` (build/IR/structure smoke tests) and
 ``test_rocke_multiarch.py`` (pure-Python arch metadata), this module actually
-*launches* kernels on the GPU and compares results against numpy/torch
-references — so it certifies numeric correctness on the gfx target it runs on.
+*launches* kernels on the GPU and compares results against numpy references —
+so it certifies numeric correctness on the gfx target it runs on.
 Run it on a gfx942 node and on a gfx950 node to cover both architectures.
 
 It drives the arch-aware parity harnesses (which exit non-zero on any tolerance
@@ -14,16 +14,17 @@ breach):
                                              layernorm, rmsnorm, transpose2d,
                                              batched + grouped GEMM  (BOTH arches)
   - rocke.examples.common.universal_gemm_verify : Universal GEMM vs A@B.T (BOTH)
-  - rocke.examples.common.parity_extended_kernels: fmha/attention/sage/sparse/streamk/
-                                             mfma/block_scale/mx  (gfx950 today;
-                                             see test_extended_parity for the
-                                             gfx942 status)
+  - rocke.examples.common.parity_extended_kernels: MoE/streamk/mfma/block_scale/mx
+                                             (BOTH; see test_extended_parity
+                                             for the gfx942 status), and the
+                                             fused-MoE forward on its own
+                                             (test_moe_e2e_forward, needs torch)
 
 The conv numeric gate (bake_off_implicit_gemm + run_manifest --verify) is in
 library/tests/test_conv_implicit_gemm_numeric.py.
 
-Requires a ROCm GPU and torch (e.g. a dedicated ~/.venv); skipped otherwise.
-Run:  PYTHONPATH=python <torch-python> tests/instances/test_rocke_numeric.py
+Requires a ROCm GPU; skipped otherwise.
+Run:  PYTHONPATH=python python tests/instances/test_rocke_numeric.py
 """
 
 from __future__ import annotations
@@ -33,11 +34,15 @@ import pathlib
 import subprocess
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import TICKET, skip_needing_arch, skip_until_reason
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+pytestmark = pytest.mark.gpu
 
 _HERE = pathlib.Path(__file__).resolve()
 _LIBRARY_ROOTS = (
@@ -46,20 +51,19 @@ _LIBRARY_ROOTS = (
 )
 
 
-# Detect arch via the rocke HIP runtime (no torch). The parity harnesses run in
-# subprocesses (see _run) and import torch there for their numeric reference, so also
-# gate on torch being importable (a dependency check, not a device probe) — a torch-free
-# env then skips cleanly. This replaces the old "import torch first so rocke binds torch's
-# HIP" ordering hack: the HIP query binds no device context, and the subprocess bodies
-# init torch fresh in their own process.
+# Detect arch via the rocke HIP runtime. The parity harnesses run in subprocesses
+# (see _run) with numpy references.
 ARCH = get_device_arch(0)
 _CDNA = ARCH in ("gfx942", "gfx950")  # MFMA targets; gfx1151 is RDNA/WMMA
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
+
+# The extended-parity case that drives FusedMoeForward, which still takes torch
+# tensors: it runs in its own test, so the other cases never wait for torch.
+_MOE_E2E_CASE = "moe_e2e_forward"
+# Checked, not imported: the harness subprocess imports torch itself.
+_HAVE_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(
-    ARCH and _HAS_TORCH, "needs a ROCm GPU + torch (run under a torch venv)"
-)
+@unittest.skipUnless(ARCH, "needs a ROCm GPU")
 class TestNumericVerification(unittest.TestCase):
     """Launch + numeric-compare on whatever gfx device this runs on."""
 
@@ -77,7 +81,7 @@ class TestNumericVerification(unittest.TestCase):
         return r.returncode, (r.stdout + r.stderr)
 
     def test_core_parity(self):
-        """Elementwise/reduce/norm/transpose/batched+grouped GEMM vs torch+numpy."""
+        """Elementwise/reduce/norm/transpose/batched+grouped GEMM vs numpy."""
         if not _CDNA:
             self.skipTest(f"CDNA/MFMA parity harness; running on {ARCH} (RDNA)")
         rc, out = self._run(
@@ -109,33 +113,56 @@ class TestNumericVerification(unittest.TestCase):
         self.assertEqual(rc, 0, f"gemm verify failed on {ARCH}:\n{out[-2500:]}")
         self.assertIn("bad=0", out)
 
-    def test_extended_parity(self):
-        """fmha/attention/sage/sparse/streamk/mfma/block_scale/mx vs torch.
-
-        Runs on BOTH arches now that the extended ``build_*`` entrypoints
-        thread ``arch`` into their MFMA-atom selection. On gfx950 every case
-        runs and verifies numerically (24/24 PASS, 0 SKIP). On gfx942 the
-        builders raise a clean ValueError/NotImplementedError for any kernel
-        that genuinely needs a gfx950-only atom; the harness reports those as
-        SKIP (not FAIL) and keeps running. Either way the gate is: rc == 0 and
-        no ``FAIL`` line in the output (skips are allowed on gfx942).
-        """
-        if not _CDNA:
-            self.skipTest(f"CDNA MFMA extended kernels; running on {ARCH} (RDNA)")
-        rc, out = self._run(
+    def _run_extended(self, *cases):
+        return self._run(
             "-m",
             "rocke.examples.common.parity_extended_kernels",
             "--arch",
             ARCH,
+            "--op",
+            ",".join(cases),
             timeout=420,
         )
+
+    def test_extended_parity(self):
+        """MoE streaming/streamk/mfma/block_scale/mx vs numpy: every case but
+        the fused-MoE forward (``test_moe_e2e_forward``).
+
+        On gfx950 every case runs and passes, so a SKIP line fails the test.
+        On gfx942 the builders refuse the kernels that need a gfx950-only atom
+        or fp8 format, and the harness reports those as SKIP. On both
+        the gate is rc == 0 and no ``FAIL`` line.
+        """
+        if not _CDNA:
+            self.skipTest(f"CDNA MFMA extended kernels; running on {ARCH} (RDNA)")
+        from rocke.examples.common.parity_extended_kernels import ALL_CASES
+
+        rc, out = self._run_extended(*(n for n in ALL_CASES if n != _MOE_E2E_CASE))
         self.assertEqual(rc, 0, f"extended parity failure on {ARCH}:\n{out[-3000:]}")
-        # No FAIL line anywhere: every case either PASSed or legitimately
-        # SKIPped (gfx950-only on gfx942). A FAIL means a numeric breach.
         self.assertNotIn(
             "FAIL", out, f"extended parity has FAIL on {ARCH}:\n{out[-3000:]}"
         )
+        if ARCH == "gfx950":
+            self.assertNotIn(
+                "SKIP", out, f"extended parity skipped a case on gfx950:\n{out[-3000:]}"
+            )
         self.assertIn("pass", out)
+
+    @unittest.skipUnless(
+        _HAVE_TORCH,
+        skip_until_reason(TICKET, reason="FusedMoeForward takes torch tensors"),
+    )
+    def test_moe_e2e_forward(self):
+        """The fused-MoE forward (router, sort, gather, grouped GEMMs, SwiGLU,
+        weighted reduce) vs a torch eager reference, in the harness
+        subprocess."""
+        if not _CDNA:
+            self.skipTest(f"CDNA MFMA extended kernels; running on {ARCH} (RDNA)")
+        rc, out = self._run_extended(_MOE_E2E_CASE)
+        self.assertEqual(rc, 0, f"fused-MoE forward failure on {ARCH}:\n{out[-3000:]}")
+        self.assertNotIn("FAIL", out, out[-3000:])
+        self.assertNotIn("SKIP", out, out[-3000:])
+        self.assertIn("1/1 pass", out)
 
     def test_wmma_gemm(self):
         """gfx1151 (RDNA3.5) WMMA GEMM vs numpy A@B.T, within fp tolerance.
@@ -144,7 +171,9 @@ class TestNumericVerification(unittest.TestCase):
         the gate is max_abs_diff within tolerance (1e-2), not exact parity.
         """
         if ARCH != "gfx1151":
-            self.skipTest(f"gfx1151/WMMA GEMM; running on {ARCH}")
+            skip_needing_arch(
+                ("gfx1151",), reason=f"gfx1151/WMMA GEMM; running on {ARCH}"
+            )
         rc, out = self._run(
             "-m",
             "rocke.examples.gfx1151.wmma_gemm_verify",
@@ -159,7 +188,7 @@ class TestNumericVerification(unittest.TestCase):
         self.assertIn("PASS", out)
 
     def test_rdna_core_parity(self):
-        """gfx1151 (RDNA3.5) non-MFMA parity vs torch+numpy.
+        """gfx1151 (RDNA3.5) non-MFMA parity vs numpy.
 
         The ``ck_tile_parity`` harness runs the wave32-aware kernels and
         verifies them numerically: elementwise(×12), reduce(×3), layernorm2d,
@@ -171,7 +200,9 @@ class TestNumericVerification(unittest.TestCase):
         line in the output. ``SKIP`` is allowed (the MFMA-only cases).
         """
         if ARCH != "gfx1151":
-            self.skipTest(f"gfx1151/RDNA non-MFMA parity; running on {ARCH}")
+            skip_needing_arch(
+                ("gfx1151",), reason=f"gfx1151/RDNA non-MFMA parity; running on {ARCH}"
+            )
         rc, out = self._run(
             "-m", "rocke.examples.common.ck_tile_parity", "--arch", "gfx1151"
         )

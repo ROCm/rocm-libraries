@@ -7,10 +7,10 @@ Every row is one strided decode case (K and V layouts, batch, Hq, Hkv, scale) an
 the segment kernel's full ordered argument list rocKE would pass for it:
 
 * names and types, in order: ``kernels.common.attention_unified
-  ._tiled_3d_signatures("gfx942", dtype, strided_kv=True)`` (the segment half, with
+  .tiled_3d_signatures("gfx942", dtype, strided_kv=True)`` (the segment half, with
   the spec class's runtime fields num_query_heads, num_kv_heads, sliding_window);
 * the runtime head counts and sliding_window (0):
-  ``_runtime_kernarg_values(problem)``;
+  ``runtime_kernarg_values(problem)``;
 * the 8 strided K/V values: ``kernels.common.attention_kv_cache
   .StridedKvCacheLayout(KvTensorLayout(...), KvTensorLayout(...)).arguments()``
   (constructing the layouts also runs rocKE's admission checks);
@@ -22,11 +22,11 @@ the segment kernel's full ordered argument list rocKE would pass for it:
 
 TestGfx942AttentionUnified3dArguments.cpp asserts gfx942StridedKvArguments() and
 gfx942Unified3dSegmentArguments() reproduce every row value-by-value, in order.
-Before printing, the script also asserts rocKE's reduce signature is the 6
-arguments the engine's reduceSignature() lists (no LSE, num_query_heads i32).
+The reduce launch's argument list is checked by
+TestGfx942AttentionUnified3dSignature.cpp against RockeKernelSignaturesTable.inc.
 
 The build generates the table into the build tree through
-gen_gfx942_attention_unified_3d_table.py (kernel_ingestor_engine/CMakeLists.txt);
+gen_rocke_table.py (kernel_ingestor_engine/CMakeLists.txt);
 it is never committed. To print it by hand, from the provider root:
 
     cd rocke/library && PYTHONPATH=.:../platform/python python3 \
@@ -38,8 +38,8 @@ from types import SimpleNamespace
 
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
 from kernels.common.attention_unified import (
-    _runtime_kernarg_values,
-    _tiled_3d_signatures,
+    runtime_kernarg_values,
+    tiled_3d_signatures,
 )
 
 # The buffer each pointer argument takes in _run_3d_tiled_on_stream's seg_vals
@@ -190,28 +190,7 @@ def c_array(values):
 
 def _signatures():
     """rocKE's gfx942 strided segment and reduce signatures (runtime fields included)."""
-    return _tiled_3d_signatures("gfx942", "fp16", strided_kv=True)
-
-
-# hipDNN's reduce launch: no LSE, num_query_heads read at runtime.
-REDUCE_ARGUMENTS = (
-    ("output_ptr", "ptr"),
-    ("segm_output_ptr", "ptr"),
-    ("segm_max_ptr", "ptr"),
-    ("segm_expsum_ptr", "ptr"),
-    ("seq_lens_ptr", "ptr"),
-    ("num_query_heads", "i32"),
-)
-
-
-def check_reduce():
-    """The reduce launch Gfx942AttentionUnified3dNative.cpp passes is rocKE's."""
-    _, reduce = _signatures()
-    got = tuple(
-        (p["name"], "ptr" if p["type"].startswith("ptr<") else p["type"])
-        for p in reduce
-    )
-    assert got == REDUCE_ARGUMENTS, f"rocKE reduce signature changed: {got}"
+    return tiled_3d_signatures("gfx942", "fp16", strided_kv=True)
 
 
 def arguments(batch, hq, hkv, scale, k_layout, v_layout):
@@ -227,8 +206,8 @@ def arguments(batch, hq, hkv, scale, k_layout, v_layout):
         "softcap": 0.0,
         "num_seqs": batch,
         "block_table_stride": 0,
-        "qq_bias_stride_0": 0,
-        **_runtime_kernarg_values(problem),
+        "qq_bias_stride0": 0,
+        **runtime_kernarg_values(problem),
         **kv,
     }
     segment, _ = _signatures()
@@ -246,7 +225,6 @@ def arguments(batch, hq, hkv, scale, k_layout, v_layout):
 
 
 def main():
-    check_reduce()
     for label, batch, hq, hkv, scale, k_layout, v_layout in CASES:
         args = ",\n  ".join(arguments(batch, hq, hkv, scale, k_layout, v_layout))
         print(

@@ -2,12 +2,6 @@
 // SPDX-License-Identifier: MIT
 /*
  * bindings/rocke_engine_moe_gemm_fused.cpp -- moe_gemm_fused family bindings.
- * Kept in its own translation unit because instance_moe_gemm_fused.h pulls in
- * helper_rocke.helpers.tensor_view.h, whose struct rocke_tensor_descriptor has
- * the same tag as (but a different definition from) the copy in
- * helper_rocke.helpers.transforms.h that the fmha/WMMA-FMHA attention headers
- * pull in. Compiling both in one translation unit is a C++ redefinition; here
- * only the moe_gemm_fused header chain is present, so the tag is unique.
  *
  * register_moe_gemm_fused(m) is called from the main module file. The family has
  * three sub-kernels (gate_up_silu / interleaved / down_reduce) selected by the

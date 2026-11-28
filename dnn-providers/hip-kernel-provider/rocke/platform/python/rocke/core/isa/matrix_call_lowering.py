@@ -12,8 +12,25 @@ and the result goes through its form. The backends call
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 from ..ir import Op
+from ..llvm_profile import LlvmProfileRefusal
 from .matrix_calls import Imm, MatrixCall, Signedness
+
+
+def llvm23_matrix_op_refusal(op_id: str, flavor: str) -> str:
+    """The refusal of the MMA op ``tile.<op_id>`` at ``flavor``, which lacks the
+    LLVM 23 target-op profile its intrinsic needs."""
+    return f"tile.{op_id} requires llvm23 (ROCm 7.13+), got {flavor}"
+
+
+def refuse_llvm23_matrix_op(op_id: str, flavor: str) -> NoReturn:
+    """Refuse the MMA op ``tile.<op_id>`` at ``flavor``, which lacks the LLVM 23
+    target-op profile its intrinsic needs (:class:`LlvmProfileRefusal`,
+    :func:`llvm23_matrix_op_refusal`). The C++ engine's twin is
+    ``rocke_ll_refuse_llvm23_matrix_op``."""
+    raise LlvmProfileRefusal(llvm23_matrix_op_refusal(op_id, flavor))
 
 
 def emit_matrix_call(lowerer, op: Op, call: MatrixCall) -> None:
@@ -24,11 +41,15 @@ def emit_matrix_call(lowerer, op: Op, call: MatrixCall) -> None:
     in the table and registers its derived declaration the way the other
     dynamically declared intrinsics do; a table entry whose text differs from
     the derived one is refused, so the call and its ``declare`` line cannot
-    disagree.
+    disagree. A call that does not lower at the lowerer's flavor
+    (:meth:`MatrixCall.lowers_at`) is refused before anything else
+    (:func:`refuse_llvm23_matrix_op`).
     """
     from ..lower_llvm import _llvm_type, _mma_op_id
 
     op_id = _mma_op_id(op)
+    if not call.lowers_at(lowerer._flavor):
+        refuse_llvm23_matrix_op(op_id, lowerer._flavor)
     if len(op.operands) != 3:
         raise ValueError(f"{op.name} expects 3 operands, got {len(op.operands)}")
     if len(op.results) != 1:
@@ -77,5 +98,5 @@ def _catalog_op(lowerer, op_id: str):
     signedness flags follow; refused, as by the backend, where the catalog does
     not list it."""
     backend = lowerer._backend
-    backend._require_catalog_lists(op_id)
+    backend.require_catalog_lists(op_id)
     return backend.arch.mma.by_op_id(op_id)

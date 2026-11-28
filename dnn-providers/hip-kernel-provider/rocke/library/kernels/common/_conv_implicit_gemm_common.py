@@ -45,7 +45,7 @@ from rocke.core.ir import (
 )
 from rocke.helpers.io import smem_load_fragment
 from rocke.helpers.magic_division import do_magic_division_dynamic
-from rocke.helpers.spec import choose_load_vec
+from rocke.helpers.spec import choose_load_vec, require_bool_fields
 from rocke.helpers.transforms import (
     TensorDescriptor,
     DynamicTensorDescriptor,
@@ -317,20 +317,15 @@ class ConvAccumulatorEpilogue:
         # Reject malformed fields here rather than coerce them downstream: a
         # truthy non-bool ``relu`` (``1``, ``"no"``) or a non-numeric bound
         # would otherwise be read differently by the two engines' bridges.
-        if not isinstance(self.relu, bool):
-            raise TypeError(
-                f"ConvAccumulatorEpilogue.relu must be a bool, got "
-                f"{type(self.relu).__name__} {self.relu!r}"
-            )
+        require_bool_fields(self, "relu")
         for name in ("bias", "scale", "clamp_min", "clamp_max"):
             v = getattr(self, name)
             if v is None and name in ("clamp_min", "clamp_max"):
                 continue
             if isinstance(v, bool) or not isinstance(v, numbers.Real):
-                raise TypeError(
-                    f"ConvAccumulatorEpilogue.{name} must be a real number"
-                    f"{' or None' if name.startswith('clamp') else ''}, got "
-                    f"{type(v).__name__} {v!r}"
+                raise ValueError(
+                    f"{type(self).__name__} failed - {name}={v!r}, expected a real "
+                    f"number{' or None' if name.startswith('clamp') else ''}"
                 )
 
     def is_identity(self) -> bool:

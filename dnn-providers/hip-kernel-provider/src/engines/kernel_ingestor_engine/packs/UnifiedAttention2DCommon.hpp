@@ -363,7 +363,9 @@ bool kernelMatches(const MatchContext& context,
 /// the recorded names out of the rocKE builder's own parameter list, so keep these spellings
 /// identical to the Python (kernels/<arch>/attention_tiled_2d.py,
 /// build_unified_attention_2d_tiled's `b.param` calls); a divergence here fails every
-/// dispatch rather than silently weakening the check.
+/// dispatch rather than silently weakening the check. The Unified2D signature tests check
+/// this list against the one rocKE declares, generated from rocKE at build time with the
+/// rocKE engine on or off (tests/.../packs/RockeKernelSignatures.hpp).
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared; they exist so the
 /// mismatch diagnostic prints the real layout beside the recorded one. An LSE-on kernel
@@ -392,7 +394,7 @@ inline std::vector<KernelArgument> unified2DKernelSignature(bool emitLse = false
         KernelArgument{"by_value", F32, 96, "softcap"},
         KernelArgument{"by_value", I32, 100, "num_seqs"},
         KernelArgument{"by_value", I32, 104, "block_table_stride"},
-        KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"},
+        KernelArgument{"by_value", I32, 108, "qq_bias_stride0"},
         KernelArgument{"by_value", I32, 112, "num_query_heads"},
         KernelArgument{"by_value", I32, 116, "num_kv_heads"},
         KernelArgument{"by_value", I32, 120, "sliding_window"}};

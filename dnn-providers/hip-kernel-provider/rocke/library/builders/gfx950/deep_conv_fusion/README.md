@@ -23,7 +23,7 @@ int8/int4 packed paths, true virtual concat, or production autotuning.
 
 ## Prerequisites
 
-- An AMD **gfx950** GPU (MI350-class). The kernel is gfx950-gated; the harnesses
+- An AMD **gfx950** GPU. The kernel is gfx950-gated; the harnesses
   refuse any other arch (a sibling WMMA example targets gfx1201 separately).
 - A working `rocke` toolchain (comgr / HIP runtime) and `numpy`. The `--verify`
   and `--bench` paths launch on the GPU; building the HSACO alone does not.

@@ -115,7 +115,7 @@ from rocke.core.ir import (
     TemporalHint,
     Value,
 )
-from rocke.helpers.grid import NUM_XCDS_MI350X, xcd_remap
+from rocke.helpers.grid import NUM_XCDS_GFX950, xcd_remap
 from rocke.helpers.io import (
     io_ir_type,
     load_scalar_as_f32,
@@ -125,7 +125,12 @@ from rocke.helpers.io import (
     store_vec,
 )
 from rocke.helpers.reduction import block_lds_reduce_with_wave_prologue, tree_reduce
-from rocke.helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+from rocke.helpers.spec import (
+    SignatureBuilder,
+    bool_flag_reason,
+    ceil_div_grid,
+    kernel_name_join,
+)
 
 __all__ = [
     "GdnDecodeSpec",
@@ -883,9 +888,8 @@ def _field_type_error(spec: GdnDecodeSpec) -> Optional[str]:
         "norm_gate_once",
         "out_lds",
     ):
-        _value = getattr(spec, _field)
-        if type(_value) is not bool:
-            return f"{_field} must be a bool, got {_value!r}"
+        if (_reason := bool_flag_reason(_field, getattr(spec, _field))) is not None:
+            return _reason
     for _field in (
         "num_k_heads",
         "num_v_heads",
@@ -1353,11 +1357,9 @@ class _Lane:
         #
         # The sibling reductions route masks 1 and 2 through
         # warp_shuffle_xor_dpp and take the same mask 7 / 15 pairing for xor 4
-        # / 8 unconditionally (no knob): helpers/reduction.py
-        # `_warp_xor_reduce` and helpers/attention.py `warp_xor_reduce_sum`
-        # (with their C++ twins), and kernels/gfx950/kda_chunkwise.py
-        # `_reduce16_fadd`. The attention_tiled_2d.py register transpose (and
-        # its gfx950 twin) uses masks 1 and 2 only.
+        # / 8 unconditionally (no knob), through helpers/reduction.py
+        # `butterfly_allreduce`. The attention_tiled_2d.py register
+        # transpose (and its gfx950 twin) uses masks 1 and 2 only.
         b, dpp = self.b, self.spec.dpp_reduce_on
         shfl = [1 << i for i in range(self.t.WTK.bit_length() - 1)]  # [1,2,4]: WTK=8
         for off in shfl:
@@ -1477,7 +1479,7 @@ def _active_lane(
             b,
             bidx,
             num_wgs=b.mul(a.batch_size, b.const_i32(t.HV * t.BPV)),
-            num_xcds=NUM_XCDS_MI350X,
+            num_xcds=NUM_XCDS_GFX950,
             mode="contiguous",
         )
     b_hv_i = b.div(bidx, b.const_i32(t.BPV))

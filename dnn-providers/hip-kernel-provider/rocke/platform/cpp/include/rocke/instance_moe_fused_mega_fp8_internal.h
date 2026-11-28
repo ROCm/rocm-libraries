@@ -141,7 +141,7 @@ typedef struct rocke_moe_fp8_build_ctx
      * env default). Mirrors the Python local `cadence = spec.sched_cadence`. */
     const char* cadence;
 
-    /* ---- kernel param Values (BUILD_SPEC_FP8 Section 2.7) ---------------- *
+    /* ---- kernel param Values ------------------------------------------------- *
      * Immutable kernel params (b.param order). The per-expert REBASED weight /
      * scale pointers are the *0 immutable bases below; the rebased Values live in
      * the per-work-item selected-state block. */
@@ -205,7 +205,7 @@ typedef struct rocke_moe_fp8_build_ctx
     rocke_value_t* c0; /* const_i32(0)                              */
     rocke_value_t* c_neg_log2e; /* const_f32(-1.4426950408889634)            */
     rocke_value_t* one_f32; /* const_f32(1.0)                            */
-    rocke_value_t* c_fp8_max; /* const_f32(FP8_MAX)                        */
+    rocke_value_t* c_fp8_max; /* const_f32(the target's fp8e4m3 max)     */
     rocke_value_t* c_floor; /* const_f32(AMAX_FLOOR)                     */
     rocke_value_t* c_group_k; /* const_i32(GROUP_K)                        */
     rocke_value_t* c_threads; /* const_i32(block_size)                     */
@@ -272,9 +272,10 @@ typedef struct rocke_moe_fp8_build_ctx
  * return them (or write into caller arrays) as noted.
  * ===================================================================== */
 
-/* ---- scheduling-cadence + MFMA dispatch (Python lines 203-282) -------- */
+/* ---- scheduling-cadence + MFMA dispatch -------- */
 
-/* _emit_loop_cadence_hint: emit b.iglp_opt(1) iff effective cadence == "iglp1".
+/* _emit_loop_cadence_hint: emit b.iglp_opt(1) iff effective cadence == "iglp1",
+ * and then mark the kernel to compile in a fresh, memory-capped process.
  * `cadence` NULL => ctx->cadence (which itself NULL => levers env default). */
 void rocke_moe_fp8_emit_loop_cadence_hint(rocke_moe_fp8_build_ctx_t* ctx, const char* cadence);
 
@@ -304,7 +305,7 @@ rocke_value_t* rocke_moe_fp8_emit_mfma_down(rocke_moe_fp8_build_ctx_t* ctx,
                                             rocke_value_t* bb,
                                             rocke_value_t* acc);
 
-/* ---- per-expert pointer rebasing closures (Python lines 1710-1772) ---- */
+/* ---- per-expert pointer rebasing closures ---- */
 
 /* _elem_bytes_b: lazy const_i64(1); materializes ctx->elem_bytes_b on first call
  * and returns it. */
@@ -332,7 +333,7 @@ void rocke_moe_fp8_select_item(rocke_moe_fp8_build_ctx_t* ctx,
                                rocke_value_t* m_block_idx,
                                rocke_value_t* bx_block);
 
-/* ---- fp8 operand loads (Python lines 983-1039, 1224-1255) ------------- */
+/* ---- fp8 operand loads ------------- */
 
 /* _global_load_fp8_vec(ptr, addr, n): coalesced fp8 vector load of n contiguous
  * bytes (splits into 16-wide chunks + vec_concat when n>16). */
@@ -361,7 +362,7 @@ rocke_value_t* rocke_moe_fp8_load_a_fp8_lds(rocke_moe_fp8_build_ctx_t* ctx,
                                             rocke_value_t* m_tile_base,
                                             rocke_value_t* k_tile_base);
 
-/* ---- DTLA B-operand staging (Python lines 1072-1145) ----------------- */
+/* ---- DTLA B-operand staging ----------------- */
 
 /* _dtla_stage_b_fp8: issue the direct-to-LDS DMA of one lane's b_per_lane fp8
  * weight bytes into `slot`. */
@@ -384,7 +385,7 @@ rocke_value_t* rocke_moe_fp8_dtla_read_b_fp8(rocke_moe_fp8_build_ctx_t* ctx,
                                              rocke_value_t* warp_row_base,
                                              int wave_size);
 
-/* ---- X (A) DTLA staging (Python lines 1159-1216; _USE_X_DTLA path) ---- */
+/* ---- X (A) DTLA staging (_USE_X_DTLA path) ---- */
 
 /* _xdtla_stage_a_fp8 / _xdtla_read_a_fp8: A-operand mirror of the B DTLA pair. */
 void rocke_moe_fp8_xdtla_stage_a_fp8(rocke_moe_fp8_build_ctx_t* ctx,
@@ -404,27 +405,7 @@ rocke_value_t* rocke_moe_fp8_xdtla_read_a_fp8(rocke_moe_fp8_build_ctx_t* ctx,
                                               rocke_value_t* warp_row_base,
                                               int wave_size);
 
-/* ---- STAGE 1a: gate+up fused K-loop (Python lines 504-980) ----------- */
-
-/* _emit_fp8_gateup_group_gemm: LEGACY per-(mi,ni) independent K-loop (the pre-
- * combination-lever path). Returns (gate_dq, up_dq) via out_gate / out_up.
- * (Kept for fidelity; the active path is the fused emitter below.) */
-void rocke_moe_fp8_emit_fp8_gateup_group_gemm(rocke_moe_fp8_build_ctx_t* ctx,
-                                              rocke_value_t* A,
-                                              rocke_value_t* WGate,
-                                              rocke_value_t* WUp,
-                                              rocke_value_t* AScale,
-                                              rocke_value_t* WGateScale,
-                                              rocke_value_t* WUpScale,
-                                              rocke_value_t* m_tile_base,
-                                              rocke_value_t* n_tile_base,
-                                              rocke_value_t* K,
-                                              rocke_value_t* stride_a_scale,
-                                              rocke_value_t* stride_gate_scale,
-                                              rocke_value_t* stride_up_scale,
-                                              const char* tag,
-                                              rocke_value_t** out_gate,
-                                              rocke_value_t** out_up);
+/* ---- STAGE 1a: gate+up fused K-loop ----------- */
 
 /* _emit_fp8_gateup_fused_kloop: gate+up fp8 GEMM fused across ALL ni cells of one
  * mi row (the COMBINATION lever: shared A load, register-double-buffered B,
@@ -452,7 +433,7 @@ void rocke_moe_fp8_emit_fp8_gateup_fused_kloop(rocke_moe_fp8_build_ctx_t* ctx,
                                                rocke_value_t** out_gate,
                                                rocke_value_t** out_up);
 
-/* ---- STAGE 1b: SiLU*up + dyn-quant (Python lines 1481-1546) ---------- */
+/* ---- STAGE 1b: SiLU*up + dyn-quant ---------- */
 
 /* _silu_mul_f32: f32 SwiGLU chain silu(g)*u (sigmoid via exp2 + rcp_fast). */
 rocke_value_t* rocke_moe_fp8_silu_mul_f32(rocke_moe_fp8_build_ctx_t* ctx,
@@ -488,7 +469,7 @@ rocke_value_t* rocke_moe_fp8_store_hidden_f32_pass(rocke_moe_fp8_build_ctx_t* ct
                                                    rocke_value_t* c_neg_log2e,
                                                    rocke_value_t* c_floor);
 
-/* ---- STAGE 2: down GEMM + atomic reduce (Python lines 1258-1473) ----- */
+/* ---- STAGE 2: down GEMM + atomic reduce ----- */
 
 /* _emit_fp8_down_group_gemm: down fp8 GEMM for one warp-atom output cell -> the
  * per-lane f32 accumulator (returned). */
@@ -523,7 +504,7 @@ void rocke_moe_fp8_emit_down_atomic_reduce(rocke_moe_fp8_build_ctx_t* ctx,
                                            rocke_value_t* Y,
                                            rocke_value_t* tokens);
 
-/* ---- whole-body driver (Python _emit_body, lines 1850-2093) ---------- */
+/* ---- whole-body driver (Python _emit_body) ---------- */
 
 /* _emit_body: run STAGE 1a (per-mi fused gate/up K-loop) -> Pass A + amax
  * butterfly -> per-block scale broadcast -> Pass C packed quantize -> STAGE 2

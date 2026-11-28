@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""gfx942 (CDNA3 / MI300) example showcases (hybrid layout).
+"""gfx942 (CDNA3) example showcases (hybrid layout).
 
 These pin ``arch="gfx942"`` and reuse the arch-neutral harnesses in
 ``examples/common/`` so they add only gfx942-specific specs/configs without

@@ -9,8 +9,7 @@ and one short timing repeat."""
 from __future__ import annotations
 
 import pytest
-
-torch = pytest.importorskip("torch")
+from rocke.tests.lanes import arch_skip_reason
 
 
 def _gfx1250():
@@ -22,7 +21,10 @@ def _gfx1250():
         return False
 
 
-pytestmark = pytest.mark.skipif(not _gfx1250(), reason="needs a gfx1250 GPU")
+pytestmark = pytest.mark.skipif(
+    not _gfx1250(),
+    reason=arch_skip_reason(("gfx1250",), "needs a gfx1250 GPU"),
+)
 
 _T = "-F 1 -u 1 -v 1 -l 1 -g 1 -m conv -I NHWC -O NHWC -f NHWC"
 _COMMON = [

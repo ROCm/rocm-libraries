@@ -39,6 +39,8 @@ from reference_common.numeric import (
     encode,
     max_abs_upper,
 )
+from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.run_records import fixture_session_environment
 
 from ._child_pytest import pin_child_rootdir
 
@@ -960,7 +962,8 @@ def test_reference_pytest_selects_variants_by_id(
     (tmp_path / "fictional_reference/worker.py").write_text(
         f"from {operation}_reference.worker import run\n"
     )
-    env = dict(os.environ, AMDGPU_TARGETS=architecture)
+    env = fixture_session_environment()
+    env["AMDGPU_TARGETS"] = architecture
     env["PYTHONPATH"] = os.pathsep.join(
         [
             str(Path(rocke.__file__).resolve().parent.parent),
@@ -1873,7 +1876,9 @@ def test_reference_fixture_keeps_one_slot_open_at_a_time(
         return {"variant": variant}
 
     @contextmanager
-    def reuse_workers(module):
+    def reuse_workers(module, *, timeout):
+        # A pinned test's requests stop below the GPU entries' per-test limit.
+        assert timeout == pinned_tests.PINNED_REQUEST_TIMEOUT_SECONDS
         workers.append("open")
         try:
             yield
@@ -1901,6 +1906,62 @@ def test_reference_fixture_keeps_one_slot_open_at_a_time(
         assert open_slot(architecture, "wide")[0] is wide
         assert (loads, workers) == (["narrow", "wide"], ["closed", "open"])
     assert workers == ["closed", "closed"]
+
+
+@pytest.mark.parametrize("operation", OPERATIONS[:1])
+def test_a_pinned_reference_slot_stops_a_stalled_request_at_its_timeout(
+    second_variant, tmp_path, monkeypatch
+):
+    """A request made while a pinned slot is open runs in that slot's workers,
+    which stop it at ``PINNED_REQUEST_TIMEOUT_SECONDS`` with the worker's own
+    error, below the GPU entries' per-test limit.
+
+    The real worker session runs a worker that never finishes; the limit is
+    shortened so the stop takes half a second rather than the real one.
+    """
+    from contextlib import closing
+    from types import SimpleNamespace
+
+    from reference_common import pinned_tests
+    from reference_common.runner import run_worker
+    from rocke.runtime import hip_module
+
+    registry = second_variant.architectures
+    architecture = registry.ARCHITECTURES[0]
+    for variant in registry.variants(architecture):
+        registry.baseline_lock(architecture, variant).write_text("{}")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+    monkeypatch.setattr(pinned_tests, "PINNED_REQUEST_TIMEOUT_SECONDS", 0.5)
+    stalled = tmp_path / "stalled_worker"
+    (stalled / "stalled_reference").mkdir(parents=True)
+    (stalled / "stalled_reference" / "__init__.py").touch()
+    (stalled / "stalled_reference" / "worker.py").write_text(
+        "import time\ndef run(request, work):\n    time.sleep(30)\n"
+    )
+    fixture = pinned_tests.select_bundle(
+        SimpleNamespace(getoption=lambda option: None),
+        second_variant,
+        lambda *args, **kwargs: tmp_path,
+        lambda bundle, lock, *, architecture, variant: {},
+    )
+    with closing(fixture):
+        open_slot = next(fixture)
+        open_slot(architecture, "narrow")
+        started = time.monotonic()
+        with pytest.raises(
+            TimeoutError, match="replay worker exceeded its 0.5 s request timeout"
+        ):
+            run_worker(
+                {"mode": "replay", "repetitions": 1},
+                runner=stalled,
+                platform=stalled,
+                library=None,
+                work=tmp_path / "request",
+                module="stalled_reference.worker",
+            )
+        assert time.monotonic() - started < 10
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -2833,7 +2894,7 @@ def test_reference_tools_name_the_variant_they_use():
 
     ``get_adapter``, ``baseline_lock``, and ``resolve_variant`` fall back to the
     only variant, so a tool that omits it fails once a second variant is
-    enrolled. The Torch audits run outside CI, so nothing else would notice.
+    enrolled.
     Host tests are exempt so that the registry's own tests can exercise the
     default; the variant authoring notes require every other host test to
     name its variant or run for every variant.
@@ -2855,41 +2916,6 @@ def test_reference_tools_name_the_variant_they_use():
                 ):
                     defaulted.append(f"{path.relative_to(tests)}:{node.lineno} {name}")
     assert not defaulted, "pass the selected variant:\n" + "\n".join(defaulted)
-
-
-@pytest.mark.parametrize("operation", ["sdpa"])
-def test_torch_audit_checks_one_selected_variant(
-    second_variant, tmp_path, monkeypatch, capsys
-):
-    """The SDPA Torch audit needs ``--variant`` before it probes the device."""
-    from sdpa_reference import architectures, torch_reference
-
-    registry = second_variant.architectures
-    first = registry.ARCHITECTURES[0]
-    for name in ("resolve_variant", "get_adapter"):
-        monkeypatch.setattr(architectures, name, getattr(registry, name))
-    probed = []
-    monkeypatch.setattr(torch_reference, "validate_device", lambda *a: probed.append(a))
-    monkeypatch.setattr(torch_reference, "make_inputs", lambda case: {})
-    monkeypatch.setattr(torch_reference, "independent_reference", lambda *a: None)
-    monkeypatch.setattr(torch_reference, "cross_check", lambda case, *a, **k: case.id)
-    output = tmp_path / "audit.json"
-    command = ["--arch", first, "--output", str(output)]
-    with pytest.raises(SystemExit) as exit:
-        torch_reference.main(command)
-    assert exit.value.code == 2
-    assert capsys.readouterr().err.endswith(
-        f"error: argument --variant: SDPA {first} needs a selected reference "
-        "variant; enrolled: narrow, wide\n"
-    )
-    assert not probed and not output.exists()
-    torch_reference.main([*command, "--variant", "narrow"])
-    report = json.loads(output.read_text())
-    assert (report["architecture"], report["variant"]) == (first, "narrow")
-    cases = registry.get_adapter(first, "narrow").CASES
-    assert {
-        key: entry["torch_reference"] for key, entry in report["cases"].items()
-    } == {case.id: case.id for case in cases}
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
@@ -3864,10 +3890,11 @@ def _published_bundle_data(spec, architecture, variant):
                 f"bundle is extracted at {bundle}; fetch the archive with: "
                 + display_command(["dvc", "pull", str(pointer)])
             )
-        pytest.skip(
-            f"no {name} bundle is installed at {bundle}; installed trees have it "
-            "only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
-            "assembled with its architecture's test artifact"
+        skip_until(
+            SOURCE_TREE,
+            reason=f"no {name} bundle is installed at {bundle}; installed trees have "
+            "it only when built with ROCKE_INSTALL_TEST_GPU_REFERENCES=ON and "
+            "assembled with its architecture's test artifact",
         )
     return bundle
 
@@ -4422,9 +4449,10 @@ def _baseline_repository(tests, revision):
     from reference_common.paths import installed_test_root
 
     if installed_test_root(tests) is not None:
-        pytest.skip(
-            "installed test trees have no git history to export locked baselines "
-            "from; run this check from a rocKE source checkout"
+        skip_until(
+            SOURCE_TREE,
+            reason="installed test trees have no git history to export locked "
+            "baselines from; run this check from a rocKE source checkout",
         )
     if shutil.which("git") is None:
         pytest.skip("git is not installed; exporting a locked baseline needs it")
@@ -4834,30 +4862,6 @@ def test_every_reference_command_and_option_has_help(operation):
         assert "status 1" in description and " 2 when the lock or bundle" in description
     assert "PYTHONPATH=platform/python" in commands.choices["diff"].description
     assert "--case" in commands.choices["verify"].description
-
-
-@pytest.mark.parametrize("operation", OPERATIONS)
-def test_operation_without_torch_offers_no_torch_cross_check(tmp_path, operation):
-    """A new operation need not declare a placeholder Torch reference."""
-    from dataclasses import replace
-    from importlib import import_module
-
-    spec = replace(import_module(f"{operation}_reference.cli").OPERATION, torch=None)
-    parser = spec._parser()
-    qualify = ["qualify", "--baseline", "baseline", "--output", "bundle"]
-    assert parser.parse_args(qualify).torch_reference is None
-    with pytest.raises(SystemExit):
-        parser.parse_args([*qualify, "--torch-reference"])
-    with pytest.raises(ValueError, match="qualification has no Torch reference"):
-        spec.qualify(
-            tmp_path / "baseline",
-            tmp_path / "bundle",
-            2,
-            spec.architectures.ARCHITECTURES[0],
-            variant=_variant(spec.architectures, spec.architectures.ARCHITECTURES[0]),
-            torch_reference="cpu",
-        )
-    assert not (tmp_path / "bundle").exists()
 
 
 def _verifiable_case(monkeypatch, operation, index=0):

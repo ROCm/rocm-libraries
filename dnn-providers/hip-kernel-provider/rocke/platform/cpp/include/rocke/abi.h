@@ -17,8 +17,9 @@
  *
  *   ROCKE_ABI_VERSION   BINARY. Does this header match this .so? Governs struct
  *                       layouts, enum values and function signatures -- the
- *                       things a C++ caller and the ctypes bindings in
- *                       src/online.py hard-code at their own build time. A
+ *                       things a C++ caller and the ctypes bindings
+ *                       (rocke.core.native_engine, portable_ir/src/online.py)
+ *                       hard-code at their own build time. A
  *                       mismatch here is memory-unsafe, not merely wrong, so
  *                       callers should check it once at load and refuse.
  *
@@ -136,8 +137,35 @@ extern "C" {
  * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
  *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
  *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
- *     returns long long (it returned int), which changes its signature. */
-#define ROCKE_ABI_VERSION 20
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_attention_tiled_2d_spec_t gained use_v_hbm_direct and
+ *     use_k_hbm_direct after use_q_direct_global, which moves every later
+ *     field.
+ * 22: rocke_hip_arch_t lost has_wmma and family, which changes its size (it is
+ *     returned by value from rocke_hip_arch_from_gfx); rocke_hip_waitcnt_family_t
+ *     gained ROCKE_HIP_WAITCNT_NONE at its end.
+ * 23: rocke_img2col_spec_t holds the conv family's rocke_conv_problem_t, whose
+ *     groups field sits in the spec's old padding after problem: size and
+ *     offsets unchanged, but an old caller leaves groups unset. The
+ *     rocke_img2col_conv_problem_* functions are removed (the conv
+ *     rocke_conv_problem_* ones replace them), and the tensor_view descriptor
+ *     type and its functions are renamed rocke_tv_tensor_descriptor*. The
+ *     standalone fused-MoE orchestrator header is removed, and with it
+ *     rocke_fused_moe_forward_t and rocke_fused_moe_forward_init, _forward,
+ *     _static, _dynamic and _workspace_specs; rocke_fused_moe_host_preshuffle_b
+ *     and rocke_fused_moe_build_per_expert_problems; rocke_fmoe_dtype_t and
+ *     rocke_fmoe_dtype_elem_bytes and _to_universal; and rocke_ws_dtype_t and
+ *     rocke_ws_spec_t. It redefined rocke_fmoe_forward_spec_t and
+ *     rocke_grouped_gemm_problem_t with other layouts; the fused-MoE instance's
+ *     own entries in rocke/instance_fused_moe_e2e.h
+ *     (rocke_build_fused_moe_forward, rocke_fused_moe_forward_free and
+ *     rocke_fused_moe_forward_lower_to_llvm) stay. rocke_topk_softmax_spec_t lost
+ *     cross_wave_argmax, which no lowering read, so its size changes.
+ *     rocke_build_f64_mma_probe takes the target as a fourth argument
+ *     (const char* arch, required), which changes its signature. The per-part
+ *     XCD-count macros of rocke/helper_rocke.helpers.grid.h are replaced by
+ *     ROCKE_NUM_XCDS_GFX942 and ROCKE_NUM_XCDS_GFX950. */
+#define ROCKE_ABI_VERSION 23
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

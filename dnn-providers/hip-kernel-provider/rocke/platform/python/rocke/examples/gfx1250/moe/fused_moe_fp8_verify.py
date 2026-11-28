@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 
+from rocke.helpers.quant import quant_max_abs
 from rocke.instances.gfx1250.fused_moe_fp8 import Gfx1250Fp8Moe, Gfx1250Fp8MoeSpec
 from rocke.runtime.hip_module import Runtime
 
@@ -45,7 +46,7 @@ def main() -> int:
         args.intermediate,
     )  # noqa: E741
     fp8 = ml_dtypes.float8_e4m3fn if args.lowbit == "fp8e4m3" else ml_dtypes.float8_e5m2
-    qmax = 448.0 if args.lowbit == "fp8e4m3" else 57344.0
+    qmax = quant_max_abs(args.lowbit, arch="gfx1250")
     rng = np.random.default_rng(0xF00D)
 
     X = (rng.standard_normal((T, H)) * 0.3).astype(np.float32)

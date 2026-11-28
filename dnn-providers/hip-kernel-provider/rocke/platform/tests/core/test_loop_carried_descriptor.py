@@ -20,7 +20,6 @@ serialized IR, which does not pass the builder.
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 
@@ -30,6 +29,7 @@ from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 from rocke.core.verify import verify
+from rocke.tests.engines import native_engine_or_skip
 from rocke.tests.ir_validity import assert_target_accepts
 
 _ARCH = "gfx90a"
@@ -44,14 +44,9 @@ def _message(index: int) -> str:
 
 
 def _engine():
-    """The C++ engine binding; a strict both-engine run fails without it."""
-    try:
-        import rocke_engine
-    except ImportError as exc:
-        if os.environ.get("ROCKE_CPP_STRICT") == "1":
-            raise
-        pytest.skip(f"rocke_engine extension not built: {exc}")
-    return rocke_engine
+    """The C++ engine's serialized-IR lowering; a strict run fails without it
+    (``native_engine_or_skip``)."""
+    return native_engine_or_skip()
 
 
 def _bounds(b: IRBuilder):
@@ -153,7 +148,7 @@ def test_cpp_hip_lowering_refuses_a_carried_descriptor(where):
     engine = _engine()
     text = serialize(_carrying_kernel(where))
     with pytest.raises(RuntimeError, match=re.escape(_message(0))):
-        engine.lower_serialized_ir_hip(text, arch=_ARCH)
+        engine.lower_serialized_ir_to_hip(text, arch=_ARCH)
 
 
 # ------------------------------------------------- the forms that do work
@@ -222,7 +217,7 @@ def test_supported_forms_lower_identically_and_compile(form, unroll):
 def test_supported_forms_lower_identically_to_hip_and_compile(form):
     kernel = _SUPPORTED[form](unroll=False)
     hip = lower_kernel_to_hip(kernel, arch=_ARCH)
-    assert _engine().lower_serialized_ir_hip(serialize(kernel), arch=_ARCH) == hip
+    assert _engine().lower_serialized_ir_to_hip(serialize(kernel), arch=_ARCH) == hip
     if shutil.which("hipcc") is None:
         pytest.skip("hipcc not found on PATH")
     from rocke.helpers.compile import compile_kernel_via_hipcc

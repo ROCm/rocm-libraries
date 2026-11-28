@@ -53,7 +53,15 @@ _LIB_ROOT = str(_TESTS.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
+from rocke.core.golden_file import (
+    FINGERPRINT_KEY,
+    rerecord_hint,
+    stamp_fingerprint,
+)
+
 GOLDEN = _TESTS / "golden" / "attention_bwd_ir_sha256.json"
+# This golden's name in the golden index, printed in its re-record command.
+GOLDEN_NAME = "attention_bwd"
 SCHEMA = "attention_bwd.ir_golden_sha256/v1"
 FLAVORS = ("llvm20", "llvm22", "llvm23")
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
@@ -527,7 +535,12 @@ def test_ir_matches_golden(kind, arch, flavor):
         got = _sha(_kernel(key), arch, flavor)
         if got != want:
             drift.append(f"{key}: {want[:16]} -> {got[:16]}")
-    assert not drift, f"backward IR drift ({flavor}):\n  " + "\n  ".join(drift)
+    assert not drift, (
+        f"backward IR drift ({flavor}):\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(GOLDEN_NAME)
+    )
 
 
 @pytest.mark.parametrize("kind,arch", KIND_ARCH)
@@ -557,8 +570,13 @@ def test_uncovered_values_are_exactly_the_recorded_ones(kind, arch):
 
 
 def _write() -> None:
-    doc = _build_doc()
-    lines = ["{", f' "schema": {json.dumps(SCHEMA)},', ' "uncovered": {']
+    doc = stamp_fingerprint(_build_doc())
+    lines = [
+        "{",
+        f' "schema": {json.dumps(SCHEMA)},',
+        f' "{FINGERPRINT_KEY}": {json.dumps(doc[FINGERPRINT_KEY])},',
+        ' "uncovered": {',
+    ]
     unc = sorted(doc["uncovered"].items())
     for i, (k, v) in enumerate(unc):
         comma = "," if i + 1 < len(unc) else ""

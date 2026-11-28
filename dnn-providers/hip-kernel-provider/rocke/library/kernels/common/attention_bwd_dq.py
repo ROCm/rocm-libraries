@@ -71,7 +71,11 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.helpers.attention_band import AttnRuntimeBounds
 from rocke.helpers.grid import xcd_remap_plane
-from rocke.helpers.spec import non_default_fields, salted_kernel_name
+from rocke.helpers.spec import (
+    non_default_fields,
+    require_bool_fields,
+    salted_kernel_name,
+)
 
 from kernels.common._attention_bwd_addr import (
     PackedRows,
@@ -447,11 +451,9 @@ class AttnBwdDqSpec:
             v = getattr(self, fname)
             if v is not None:
                 _check_in(fname, v, allowed)
-        for fname in ("stats_prescale", "edge_tiles", "kv_prefetch", "xcd_remap"):
-            if not isinstance(getattr(self, fname), bool):
-                raise ValueError(
-                    f"{fname} must be a bool, got {getattr(self, fname)!r}"
-                )
+        require_bool_fields(
+            self, "stats_prescale", "edge_tiles", "kv_prefetch", "xcd_remap"
+        )
         if self.agpr_alloc is not None:
             a = self.agpr_alloc
             a = a if isinstance(a, str) else tuple(a)
@@ -978,7 +980,7 @@ def _emit_dq(spec: AttnBwdDqSpec, arch: str, *, sentinel: bool = True):
         )
     dq = step.zero_dq(b)  # after the range: the accumulators start here
     fm, fn = geom.g4t.frags_m, geom.g4t.frags_n
-    for (s0, _e, edge), trip, name in zip(ranges, trips, ("k", "ki_", "ke_")):
+    for (s0, _e, edge), trip, name in zip(ranges, trips, ("k", "ki", "ke")):
         flat = [v for row in dq for v in row]
         loop = b.scf_for_iter(
             zero, trip, one,

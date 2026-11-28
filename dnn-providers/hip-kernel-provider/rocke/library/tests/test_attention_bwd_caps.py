@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 from rocke.core.ir import F16, F32, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
+from rocke.tests.comgr import require_comgr_target
 
 from kernels.common import _attention_bwd_caps as C
 
@@ -223,17 +224,15 @@ def test_atomic_is_native_in_the_isa(arch):
     objdump = _objdump()
     if objdump is None:
         pytest.skip("llvm-objdump not found (set LLVM_OBJDUMP)")
-    try:
-        from rocke.helpers.compile import compile_kernel
+    require_comgr_target(arch)
+    from rocke.helpers.compile import compile_kernel
 
-        art = compile_kernel(
-            _atomic_kernel(f"bwd_caps_atomic_isa_{arch}"),
-            arch=arch,
-            capture_ir_text=False,
-            backend="python",
-        )
-    except Exception as exc:  # noqa: BLE001 - no comgr on this host
-        pytest.skip(f"comgr unavailable: {exc}")
+    art = compile_kernel(
+        _atomic_kernel(f"bwd_caps_atomic_isa_{arch}"),
+        arch=arch,
+        capture_ir_text=False,
+        backend="python",
+    )
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "k.hsaco"
         path.write_bytes(art.hsaco)

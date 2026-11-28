@@ -5,7 +5,8 @@ per (batch, head) walks that head's chunks in order, so the six per-chunk tiles
 are produced and consumed in LDS and the only HBM traffic is q/k/g/beta in and
 o (plus the final state) out.
 
-Correctness is checked against a token-serial float64 oracle, which shares no
+Correctness is checked against a token-serial float64 oracle
+(:func:`rocke.numeric.gated_delta.gated_delta_recurrence`), which shares no
 algebra with the kernel: the kernel evaluates the chunkwise factorization,
 while the oracle just walks the gated delta rule one token at a time. Agreement
 therefore tests the factorization itself, not only its implementation.
@@ -30,8 +31,14 @@ except ImportError:  # running as a bare script outside the editable install
     _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
     sys.path[:0] = [_RK + "/library", _RK + "/platform/python"]
 
-import torch  # noqa: E402
+import numpy as np  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
+from rocke.numeric import storage  # noqa: E402
+from rocke.numeric.gated_delta import gated_delta_recurrence  # noqa: E402
+from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
+from rocke.runtime.device_array import DeviceArray  # noqa: E402
 
+from builders.common.kda_host import dense_inputs, initial_state, score  # noqa: E402
 from kernels.gfx950.kda_chunkwise import (  # noqa: E402
     KdaChunkFusedSpec,
     KdaTileSpec,
@@ -40,8 +47,6 @@ from kernels.gfx950.kda_chunkwise import (  # noqa: E402
     kda_chunk_fused_grid,
     kda_chunk_fused_signature,
 )
-from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
 
 _LAUNCHER_CACHE: dict = {}
 TOL = 3e-2
@@ -67,8 +72,9 @@ def make_launcher(spec: KdaChunkFusedSpec) -> KernelLauncher:
     return _LAUNCHER_CACHE[key]
 
 
-def run_fused(spec, q, k, g, beta, v, o, ht, scale, bh, nc, h0=None, stream=None):
-    """Launch the fused kernel over inputs already packed by chunk.
+def run_fused(spec, q, k, g, beta, v, o, ht, scale, bh, nc, h0=None, stream=0):
+    """Launch the fused kernel over device inputs already packed by chunk, on
+    ``stream`` (0: the default stream).
 
     ``q/k/g`` are ``[BH*NC, C*DK]``, ``beta`` is ``[BH*NC, C]``, ``v``/``o`` are
     ``[BH*NC, C*DV]``, and ``h0``/``ht`` are ``[BH, DV, DK]`` fp32 (the state
@@ -77,8 +83,6 @@ def run_fused(spec, q, k, g, beta, v, o, ht, scale, bh, nc, h0=None, stream=None
     if h0 is None:
         assert not spec.has_initial_state, "h0=None but the kernel reads h0_ptr"
     launcher = make_launcher(spec)
-    if stream is None:
-        stream = torch.cuda.current_stream().cuda_stream
     cfg = LaunchConfig(
         grid=kda_chunk_fused_grid(spec, bh),
         block=(spec.tile.block_size, 1, 1),
@@ -103,139 +107,89 @@ def run_fused(spec, q, k, g, beta, v, o, ht, scale, bh, nc, h0=None, stream=None
 
 
 # ---------------------------------------------------------------------
-# reference + parity
+# parity
 # ---------------------------------------------------------------------
 
 
-def ref_token_serial(q, k, v, g, beta, scale, h0=None):
-    """Token-serial float64 oracle for the gated delta rule.
+def upload_chunked(spec, q, k, v, g, beta):
+    """Dense host ``[B,H,T,*]`` inputs as the kernels' chunk-major device
+    arrays ``(q, k, g, beta, v)``: ``[BH*NC, C*D]`` (``beta``: ``[BH*NC, C]``)."""
+    batch, heads, tokens, _ = q.shape
+    num_tiles = batch * heads * tokens // spec.tile.chunk
 
-    Per token, with ``S`` the ``DK x DV`` state:
+    def chunked(x, dtype):
+        return DeviceArray(x.reshape(num_tiles, -1), dtype)
 
-    .. code-block:: text
-
-        S <- Diag(exp(g_t)) S
-        u <- beta_t (v_t - k_t^T S)
-        S <- S + k_t u^T
-        o_t = scale * q_t^T S
-
-    Deliberately not chunked: this is the recurrence the chunkwise
-    factorization claims to compute, so it is an independent check of that
-    claim rather than a re-derivation of it.
-    """
-    B, H, T, DK = q.shape
-    DV = v.shape[-1]
-    qd, kd, vd = (x.double() for x in (q, k, v))
-    gd, bd = g.double(), beta.double()
-    o = torch.zeros(B, H, T, DV, dtype=torch.float64, device=q.device)
-    S = (
-        torch.zeros(B, H, DK, DV, dtype=torch.float64, device=q.device)
-        if h0 is None
-        else h0.double().clone()
+    return (
+        chunked(q, "bf16"),
+        chunked(k, "bf16"),
+        chunked(g, "fp32"),
+        chunked(beta, "fp32"),
+        chunked(v, "bf16"),
     )
-    for t in range(T):
-        S = S * gd[:, :, t, :].exp().unsqueeze(-1)
-        kt = kd[:, :, t, :]
-        kv = torch.einsum("bhd,bhde->bhe", kt, S)
-        u = bd[:, :, t].unsqueeze(-1) * (vd[:, :, t, :] - kv)
-        S = S + kt.unsqueeze(-1) * u.unsqueeze(-2)
-        o[:, :, t, :] = scale * torch.einsum("bhd,bhde->bhe", qd[:, :, t, :], S)
-    return o, S
 
 
-def make_inputs(B, H, T, DK, DV, gate_low=-0.5, seed=0, device="cuda"):
-    gen = torch.Generator(device=device).manual_seed(seed)
-    kw = dict(device=device, generator=gen)
-    q = torch.nn.functional.normalize(
-        torch.randn(B, H, T, DK, dtype=torch.float32, **kw), dim=-1
-    ).bfloat16()
-    k = torch.nn.functional.normalize(
-        torch.randn(B, H, T, DK, dtype=torch.float32, **kw), dim=-1
-    ).bfloat16()
-    v = (torch.randn(B, H, T, DV, dtype=torch.float32, **kw) * 0.2).bfloat16()
-    g = gate_low * torch.rand(B, H, T, DK, dtype=torch.float32, **kw)
-    beta = torch.rand(B, H, T, dtype=torch.float32, **kw)
-    return [x.contiguous() for x in (q, k, v, g, beta)]
+def device_state(spec, batch, heads, h0=None):
+    """The kernels' fp32 state buffer ``[BH, DV, DK]``: zero, or ``h0``
+    ``[B,H,DK,DV]`` transposed into it."""
+    shape = (batch * heads, spec.head_v, spec.head_k)
+    if h0 is None:
+        return DeviceArray.zeros(shape, "fp32")
+    return DeviceArray(np.ascontiguousarray(np.swapaxes(h0, -1, -2)).reshape(shape))
+
+
+def read_state(state, batch, heads):
+    """A device ``[BH, DV, DK]`` state back as host ``[B, H, DK, DV]`` fp32."""
+    host = state.values()
+    return np.swapaxes(host.reshape(batch, heads, *host.shape[1:]), -1, -2)
+
+
+def reference(q, k, v, g, beta, scale, h0=None):
+    """The token-serial float64 oracle on the stored host inputs:
+    ``(o [B,H,T,DV], final state [B,H,DK,DV])``. Deliberately not chunked, so
+    agreement tests the chunkwise factorization itself."""
+    q, k, v = (storage.decode(x, "bf16") for x in (q, k, v))
+    return gated_delta_recurrence(q, k, v, g, beta, scale=scale, initial_state=h0)
 
 
 def launch_packed(spec, q, k, v, g, beta, h0=None):
-    """Reshape dense [B,H,T,D] inputs into the kernel's chunk-major views."""
+    """Run dense host ``[B,H,T,D]`` inputs through the fused kernel; returns
+    host ``(o [B,H,T,DV] bf16 bits, final state [B,H,DK,DV] fp32)``."""
     B, H, T, DK = q.shape
     DV = v.shape[-1]
     C = spec.tile.chunk
     BH, NC = B * H, T // C
-    nt = BH * NC
-    o = torch.empty(nt, C * DV, dtype=torch.bfloat16, device=q.device)
-    ht = torch.zeros(BH, DV, DK, dtype=torch.float32, device=q.device)
-    h0t = None if h0 is None else h0.transpose(-1, -2).contiguous().view(BH, DV, DK)
-    run_fused(
-        spec,
-        q.view(nt, C * DK),
-        k.view(nt, C * DK),
-        g.view(nt, C * DK),
-        beta.view(nt, C),
-        v.view(nt, C * DV),
-        o,
-        ht,
-        DK**-0.5,
-        BH,
-        NC,
-        h0=h0t,
-    )
-    return o.view(B, H, T, DV), ht.view(B, H, DV, DK).transpose(-1, -2)
+    q_d, k_d, g_d, beta_d, v_d = upload_chunked(spec, q, k, v, g, beta)
+    o = DeviceArray.zeros((BH * NC, C * DV), "bf16")
+    ht = device_state(spec, B, H)
+    h0t = None if h0 is None else device_state(spec, B, H, h0)
+    run_fused(spec, q_d, k_d, g_d, beta_d, v_d, o, ht, DK**-0.5, BH, NC, h0=h0t)
+    return o.values().reshape(B, H, T, DV), read_state(ht, B, H)
 
 
 def check(spec, B, H, T, gate_low=-0.5, tol=TOL, with_h0=False, verbose=True):
     DK, DV = spec.head_k, spec.head_v
-    q, k, v, g, beta = make_inputs(B, H, T, DK, DV, gate_low)
-    h0 = None
-    if with_h0:
-        gen = torch.Generator(device="cuda").manual_seed(7)
-        h0 = 0.1 * torch.randn(
-            B, H, DK, DV, dtype=torch.float32, device="cuda", generator=gen
-        )
+    q, k, v, g, beta = dense_inputs(B, H, T, DK, DV, gate_low=gate_low)
+    h0 = initial_state(B, H, DK, DV) if with_h0 else None
     o_got, ht_got = launch_packed(spec, q, k, v, g, beta, h0=h0)
-    torch.cuda.synchronize()
-    o_ref, s_ref = ref_token_serial(q, k, v, g, beta, DK**-0.5, h0=h0)
-
-    worst = 0.0
-    for name, got, ref in (("out", o_got, o_ref), ("final_state", ht_got, s_ref)):
-        d = (got.double() - ref).abs().max().item()
-        den = max(ref.abs().max().item(), 1e-30)
-        rel = d / den
-        worst = max(worst, rel)
-        if verbose:
-            print(
-                f"  {name:12s} max_abs={d:.3e} rel={rel:.3e} "
-                f"ref_absmax={den:.3e} finite={bool(torch.isfinite(got).all())}"
-            )
-    verdict = "PASS" if worst <= tol else "FAIL"
-    if verbose:
-        print(f"  -> worst rel {worst:.3e}  tol {tol:.1e}  {verdict}")
-    return worst
+    o_ref, s_ref = reference(q, k, v, g, beta, DK**-0.5, h0=h0)
+    pairs = (
+        ("out", storage.decode(o_got, "bf16"), o_ref),
+        ("final_state", ht_got, s_ref),
+    )
+    return score(pairs, tol, verbose=verbose)
 
 
 def bench(spec, B, H, T, warmup=10, iters=30):
     DK, DV = spec.head_k, spec.head_v
-    q, k, v, g, beta = make_inputs(B, H, T, DK, DV)
+    q, k, v, g, beta = dense_inputs(B, H, T, DK, DV)
     C = spec.tile.chunk
     BH, NC = B * H, T // C
     nt = BH * NC
-    o = torch.empty(nt, C * DV, dtype=torch.bfloat16, device="cuda")
-    ht = torch.zeros(BH, DV, DK, dtype=torch.float32, device="cuda")
-    args = (
-        spec,
-        q.view(nt, C * DK),
-        k.view(nt, C * DK),
-        g.view(nt, C * DK),
-        beta.view(nt, C),
-        v.view(nt, C * DV),
-        o,
-        ht,
-        DK**-0.5,
-        BH,
-        NC,
-    )
+    q_d, k_d, g_d, beta_d, v_d = upload_chunked(spec, q, k, v, g, beta)
+    o = DeviceArray.zeros((nt, C * DV), "bf16")
+    ht = device_state(spec, B, H)
+    args = (spec, q_d, k_d, g_d, beta_d, v_d, o, ht, DK**-0.5, BH, NC)
     ms = time_launches(lambda: run_fused(*args), warmup=warmup, iters=iters)
     # Essential traffic only: q/k/v in, g/beta in, o out. The fused kernel adds
     # nothing else, which is the whole point of the design.

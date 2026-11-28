@@ -7,7 +7,6 @@
 #
 # source tree: this dir -> rocke/platform/tests, so parent -> rocke/platform
 
-import os
 import sys
 import warnings
 from pathlib import Path
@@ -19,6 +18,62 @@ _ROCKE = _HERE.parent  # tests -> rocke/platform
 _PYROOT = _ROCKE / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
+
+from rocke.tests.ctest_listing import PROVIDER_CTEST_SUBDIR, configure_installed_ctest
+
+# A session started from a git hook inherits the hook's GIT_DIR and
+# GIT_INDEX_FILE, which would point every git command a test runs, even in a
+# scratch directory, at the repository being committed to.
+from rocke.tests.git_environment import drop_inherited_git_repository_variables
+from rocke.tests.platform_build import BUILD_PROGRAMS, missing_build_programs
+
+drop_inherited_git_repository_variables()
+
+
+def pytest_addoption(parser):
+    # tools/test_pending_lanes.py: a scheduled run fails on any expired entry;
+    # a pull-request run fails only on the ones its change touches.
+    parser.addoption(
+        "--strict-expiry",
+        action="store_true",
+        help="fail on every expired rocke.tests.pending_lanes entry",
+    )
+    # The rocKE pre-commit hooks pass it: a hook whose test skipped for a
+    # missing cmake would pass having checked nothing.
+    parser.addoption(
+        "--require-build-programs",
+        action="store_true",
+        help="fail, rather than skip, a test that needs cmake and ctest on PATH "
+        "when either is missing (the build_programs fixture)",
+    )
+
+
+@pytest.fixture(scope="session")
+def build_programs(request):
+    """Use in a test, or a fixture, that configures, builds or lists the
+    platform with CMake: skips it where cmake or ctest is not on PATH, or fails
+    it, naming the missing programs, under ``--require-build-programs``.
+    Session-scoped, so it runs before the module fixtures that configure."""
+    if missing := missing_build_programs():
+        if request.config.getoption("--require-build-programs"):
+            pytest.fail(
+                f"--require-build-programs: missing={missing!r}, expected "
+                f"{' and '.join(BUILD_PROGRAMS)} on PATH",
+                pytrace=False,
+            )
+        pytest.skip("CMake and CTest required")
+
+
+@pytest.fixture(scope="session")
+def provider_ctest_layout(build_programs, tmp_path_factory) -> tuple[Path, Path]:
+    """The platform configured once per session as the provider installs it
+    (nothing built): ``configure_installed_ctest``'s build directory and
+    installed-CTest directory. Every test of the session shares them, so read
+    them and write elsewhere (``tmp_path``)."""
+    return configure_installed_ctest(
+        tmp_path_factory.mktemp("provider-ctest"),
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}",
+    )
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -96,12 +151,20 @@ for _lib_root in (_HERE / "library", _HERE.parents[1] / "library"):
             sys.path.insert(0, str(_lib_root))
         break
 
-# rocke.tests.ir_validity compiles lowered IR with the platform's IR-validity
-# tool, found through rocke.assets.platform_tools_dir() (tools/ in a checkout).
-# An install has no tools/ tree: it stages a copy of the tool and the modules it
-# imports under tests/arch_domain, so point the locator there unless the caller
-# already chose a directory. The probe keys on the directory, so an install that
-# lost the tool fails rather than skips.
-_STAGED_TOOLS = _HERE / "arch_domain"
-if _STAGED_TOOLS.is_dir():
-    os.environ.setdefault("ROCKE_PLATFORM_TOOLS_DIR", str(_STAGED_TOOLS))
+# An install has no platform root: it stages the IR-validity tool (which
+# rocke.tests.ir_validity runs) under tests/arch_domain, the instance tests and
+# their IR parity harness under tests/instances, and the parity-emitter tree
+# under tests/instances/parity. Point the rocke.assets locators there. The
+# IR-validity probe keys on the directory, so an install that lost the tool
+# fails rather than skips.
+from rocke.tests.staged_payload import point_locators_at_staged_payload
+
+point_locators_at_staged_payload(_HERE)
+
+
+def pytest_configure(config):
+    """Install what every rocKE pytest root installs
+    (``rocke.tests.pytest_roots``)."""
+    from rocke.tests.pytest_roots import configure_pytest_root
+
+    configure_pytest_root(config, _HERE, "platform/tests")

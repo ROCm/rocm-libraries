@@ -22,8 +22,9 @@ applied) and a depth-2 pipeline (ring_depth=2, k%2 -> no reuse). Current routing
 
 Two layers:
   * Pure-Python spec assertions (always run): per-dtype D128 routing, D64 ring.
-  * On-GPU numeric guardrail (skipped without a gfx942 device + torch): launch
-    the production kernel at randn magnitude and assert max_abs vs the fp32 oracle
+  * On-GPU numeric guardrail (skipped without a gfx942 device): launch the
+    production kernel on ``rocke.runtime`` device arrays at randn magnitude and
+    assert max_abs vs the FP64 numpy oracle
     for BOTH dtypes -- so both the bf16 non-ring path and the fp16 depth-2 ring are
     gated on numerics. A spec-only test cannot catch a numerics regression in the
     emitted kernel -- that is exactly what let #9198 through.
@@ -31,13 +32,15 @@ Two layers:
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
+import numpy as np
 import pytest
+from rocke.tests.gpu import current_device_arch_in
 
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
+
+from ._attention_tiled_launch import launch_unified
+from ._attention_unified_support import chunked_paged_reference, random_half
 
 
 @pytest.fixture
@@ -149,140 +152,61 @@ def test_d64_ring_depth_unchanged(gfx942):
 # ---------------------------------------------------------------------------
 
 
-def _load_parity_harness():
-    import sys
-
-    here = Path(__file__).resolve()
-    # rocke/library/tests -> rocke/library/builders/gfx942/attention/prefill
-    harness = (
-        here.parents[1]
-        / "builders/gfx942/attention/prefill/parity_unified_attention.py"
-    )
-    if not harness.exists():
-        return None
-    spec = importlib.util.spec_from_file_location("parity_unified_attention", harness)
-    mod = importlib.util.module_from_spec(spec)
-    # Register before exec so dataclasses in the harness (e.g. Shape) can resolve
-    # cls.__module__ during field introspection.
-    sys.modules["parity_unified_attention"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+@pytest.fixture
+def gfx942_device():
+    current_device_arch_in(("gfx942",), "the gfx942 D128 numeric guardrail")
 
 
-def _gpu_ready():
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    if not torch.cuda.is_available():
-        return False
-    name = torch.cuda.get_device_name(0).lower()
-    return "mi300" in name or "gfx942" in name
-
-
-requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 (MI300X) GPU with ROCm torch"
-)
-
-
-@requires_gfx942_gpu
 @pytest.mark.parametrize("dtype,tol", [("bf16", 5e-2), ("fp16", 5e-2)])
 @pytest.mark.parametrize("hq,hk", [(32, 8), (16, 16)])
 @pytest.mark.parametrize("sq", [512, 1024, 4096])
-def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, hk, sq):
+def test_d128_numeric_vs_fp32_oracle_at_magnitude(
+    gfx942_device, gfx942, dtype, tol, hq, hk, sq
+):
     """Launch the production D128 kernel at realistic (unit-variance) magnitude
-    and assert max_abs vs the fp32 paged-attn oracle.
+    and assert max_abs vs the FP64 paged-attn oracle.
 
     This is the guardrail #9198 lacked: with the default uniform_(-0.1, 0.1)
     inputs the ring bug is invisible (softmax ~uniform); randn inputs expose it
     immediately. If a future change re-enables the broken D128 ring, this fails.
     """
-    import torch
+    p = _problem(dtype, sq=sq, hq=hq, hk=hk)
+    spec = au._tiled_spec_from_problem(p, "gfx942")
+    # Routing sanity: bf16 D128 is non-ring; fp16 D128 uses the depth-2 ring
+    # once past the small-q narrow path (q<=768 -> narrow, no ring). The
+    # numeric assert below gates every path on correctness regardless.
+    if dtype == "bf16":
+        assert not spec.use_k_sliced_ring, "bf16 D128 must be non-ring"
+    elif spec.use_k_sliced_ring:
+        assert spec.ring_depth == 2, "fp16 D128 ring must be depth-2"
 
-    H = _load_parity_harness()
-    if H is None:
-        pytest.skip("parity harness not present in this checkout")
-
-    # Force the arch resolver so the production selector picks the gfx942 path.
-    old_arch = au._RESOLVED_ATTENTION_ARCH
-    au._RESOLVED_ATTENTION_ARCH = "gfx942"
-    # monkeypatch.delenv, not os.environ.pop: a bare pop leaks the cleared
-    # override into every later gfx942 routing test in the same process. This
-    # test is GPU-gated, so the leak is invisible on a CPU host and only shows up
-    # in the ordering runs the regression guard is meant to cover.
-    for var in (
-        "HIPDNN_GFX942_K_SLICED_RING",
-        "HIPDNN_GFX942_FLASH_WIDE",
-        "HIPDNN_GFX942_FLASH_MLIM",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    try:
-        from builders.common.attention_spec_builder import _tiled_spec_from_problem
-
-        s = H.Shape(
-            f"d128_{hq}_{hk}_S{sq}", dtype, sq, sq, 128, hq, hk, 1, True, "perf"
-        )
-
-        # randn (unit-variance) inputs -- NOT the uniform_(-0.1,0.1) default that
-        # masked the ring bug.
-        torch.manual_seed(0)
-        td = torch.float16 if dtype == "fp16" else torch.bfloat16
-        BS = H.BLOCK_SIZE
-        max_blk = (sq + BS - 1) // BS
-        query = torch.randn(sq, hq, 128, device="cuda").to(td)
-        key_cache = torch.randn(max_blk, BS, hk, 128, device="cuda").to(td)
-        value_cache = torch.randn(max_blk, BS, hk, 128, device="cuda").to(td)
-        cu_q = torch.tensor([0, sq], dtype=torch.int32, device="cuda")
-        kv_lens = torch.tensor([sq], dtype=torch.int32, device="cuda")
-        block_tables = torch.arange(max_blk, dtype=torch.int32, device="cuda").view(
-            1, max_blk
-        )
-        scale = 128**-0.5
-        data = {
-            "query": query,
-            "key_cache": key_cache,
-            "value_cache": value_cache,
-            "cu_q": cu_q,
-            "kv_lens": kv_lens,
-            "query_lens": [sq],
-            "kv_lens_list": [sq],
-            "block_tables": block_tables,
-            "scale": scale,
-            "max_query_len": sq,
-            "max_kv_len": sq,
-        }
-        ref = H.ref_paged_attn(
-            query, key_cache, value_cache, [sq], [sq], block_tables, scale
-        )
-
-        p = _problem(dtype, sq=sq, hq=hq, hk=hk)
-        spec = _tiled_spec_from_problem(p, "gfx942")
-        # Routing sanity: bf16 D128 is non-ring; fp16 D128 uses the depth-2 ring
-        # once past the small-q narrow path (q<=768 -> narrow, no ring). The
-        # numeric assert below gates every path on correctness regardless.
-        if dtype == "bf16":
-            assert not spec.use_k_sliced_ring, "bf16 D128 must be non-ring"
-        elif spec.use_k_sliced_ring:
-            assert spec.ring_depth == 2, "fp16 D128 ring must be depth-2"
-
-        from rocke import compile_kernel
-        from kernels import build_unified_attention_2d_tiled
-        from kernels.common.attention_unified import _tiled_2d_signature
-        from rocke.runtime import KernelLauncher
-
-        kernel = build_unified_attention_2d_tiled(spec, arch="gfx942")
-        artifact = compile_kernel(kernel, arch="gfx942", capture_ir_text=False)
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            signature=_tiled_2d_signature("gfx942", dtype),
-            cache_key=("d128guard", spec.kernel_name(), dtype, sq, hq, hk),
-        )
-        out, _ = H._run_rocke(s, data, launcher, spec, warmup=3, attempts=3)
-        m = H.compare(ref, out)
-        assert m["max_abs"] <= tol, (
-            f"D128 {dtype} {hq}/{hk} S{sq}: max_abs {m['max_abs']:.4f} > {tol} "
-            f"(ring regression?)"
-        )
-    finally:
-        au._RESOLVED_ATTENTION_ARCH = old_arch
+    # randn (unit-variance) inputs -- NOT the uniform_(-0.1,0.1) default that
+    # masked the ring bug.
+    rng = np.random.default_rng(0)
+    block_size = p.block_size
+    max_blk = -(-sq // block_size)
+    query = random_half(rng, (sq, hq, 128), dtype)
+    key_cache = random_half(rng, (max_blk, block_size, hk, 128), dtype)
+    value_cache = random_half(rng, (max_blk, block_size, hk, 128), dtype)
+    block_table = np.arange(max_blk, dtype=np.int32).reshape(1, max_blk)
+    scale = 128**-0.5
+    # The production route on the tiled 2D path builds the spec above.
+    out = launch_unified(
+        p,
+        query,
+        key_cache,
+        value_cache,
+        block_table,
+        scale,
+        q_lens=[sq],
+        kv_lens=[sq],
+        backend="tiled",
+    )
+    ref = chunked_paged_reference(
+        query, key_cache, value_cache, sq, block_table[0], scale
+    )
+    max_abs = float(np.abs(ref - out).max())
+    assert max_abs <= tol, (
+        f"D128 {dtype} {hq}/{hk} S{sq}: max_abs {max_abs:.4f} > {tol} "
+        f"(ring regression?)"
+    )

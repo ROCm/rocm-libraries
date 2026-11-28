@@ -84,6 +84,12 @@ static rocke_attention_tiled_2d_spec_t spec_fastkv(int num_query_heads, int num_
     rocke_attention_tiled_2d_spec_t s = spec_2d(num_query_heads, num_kv_heads);
     s.head_size = 64;
     s.block_size = 32;
+    s.num_warps = 4;
+    s.has_waves_per_eu = true;
+    s.waves_per_eu = 2;
+    s.has_tile_size = true;
+    s.tile_size = 2 * s.block_size;
+    s.block_m_per_warp = 32;
     s.use_fast_paged_kv_desc = true;
     s.use_mfma_32x32 = true;
     s.use_transposed_qk_32x32 = true;

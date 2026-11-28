@@ -88,6 +88,13 @@ edge:
                           way hipDNN's benchmark times a call; for
                           numbers compared against hipDNN or MIOpen.
 
+  - ``device_array``: :class:`DeviceArray` (a typed device copy of a numpy
+                      array, passable wherever a launch helper takes a
+                      device tensor) and :func:`array_info`, the one
+                      description of a DeviceArray or torch tensor that
+                      host-side launch checks read. Import it directly;
+                      it is not re-exported here.
+
 The previous monolithic ``launch_torch_kernel`` is now a thin
 back-compat shim over :class:`KernelLauncher` + :func:`time_launches`;
 prefer the launcher primitives directly in new code.

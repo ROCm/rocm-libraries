@@ -9,30 +9,25 @@ run as packed ``<2 x f32>`` FMAs over channel pairs. ``cpl == 1`` is the
 unchanged kernel.
 
 CPU: validators, kernel names and the AOT grid entries. GPU (gfx1250):
-numerics against torch.
+numerics against a float64 numpy reference of the stored operands.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_direct_depthwise_fwd_cpl.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import json
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it.
-    import torch
-
-    torch.cuda.is_available()
+from rocke.tests.lanes import arch_skip_reason
 
 from kernels.common import conv_direct_grouped as dc
+
+from ._direct_conv_numeric import direct_fwd_peak_error
 
 GPU_ARCH = get_device_arch(0)
 
@@ -113,9 +108,7 @@ class TestDepthwiseFwdCplSpecs(unittest.TestCase):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 
@@ -158,14 +151,11 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestDepthwiseFwdCplGpu(unittest.TestCase):
     def _check(self, pkw, kind, knobs):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
         from rocke import compile_kernel
-        from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         p = _problem(**pkw)
         if kind == "stream":
@@ -180,41 +170,7 @@ class TestDepthwiseFwdCplGpu(unittest.TestCase):
             kernel = dc.build_direct_depthwise_tiled(spec, GPU_ARCH)
         art = compile_kernel(kernel, arch=GPU_ARCH)
         grid, block = dc.direct_launch_geometry(spec)
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        x = torch.empty(p.N, p.H, p.W, p.groups).uniform_(-1, 1).to(td)
-        w = torch.empty(p.groups, p.KH, p.KW, 1).uniform_(-1, 1).to(td)
-        y = torch.zeros(p.N, p.Ho, p.Wo, p.groups, dtype=td)
-        rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        bufs = [rt.alloc(t.nbytes) for t in (x, w, y)]
-        try:
-            rt.memcpy_h2d(bufs[0], u8(x), x.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, y.nbytes)  # poison: every element is written
-            vals = ConvArgs.from_problem(p).to_launch_values(
-                *(int(b) for b in bufs), x.nbytes, w.nbytes, y.nbytes
-            )
-            KernelLauncher(
-                hsaco=art.hsaco,
-                kernel_name=art.kernel_name,
-                signature=conv_direct_args_signature(p.dtype),
-            )(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
-            rt.memcpy_d2h(u8(y), bufs[2], y.nbytes)
-        finally:
-            for b in bufs:
-                rt.free(b)
-        ref = torch.nn.functional.conv2d(
-            x.float().permute(0, 3, 1, 2),
-            w.float().permute(0, 3, 1, 2),
-            stride=p.stride,
-            padding=p.PAD,
-            groups=p.groups,
-        ).permute(0, 2, 3, 1)
-        err = float((y.float() - ref).abs().max() / ref.abs().max())
+        err = direct_fwd_peak_error(art, p, grid=grid, block=block)
         self.assertLess(err, 1e-2, f"{pkw} {kind} {knobs}: rel err {err:.3g}")
 
     def test_cases(self):

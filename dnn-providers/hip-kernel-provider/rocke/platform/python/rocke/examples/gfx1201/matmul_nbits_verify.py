@@ -13,7 +13,7 @@ three families are buildable here, covering the full Qwen3.5-9B MatMulNBits set:
 
 The WMMA families share one source (``instances/common/_matmul_nbits_large_n.py``)
 and branch the fragment ABI per arch, so this only differs from the gfx1151
-driver in the manifest atom tag. Must run on a gfx1201 device (Navi 48) for the
+driver in the manifest atom tag. Must run on a gfx1201 device for the
 verify step; ``--no-verify`` only builds + writes.
 
 Real Qwen3.5-9B shapes (int4 / g32), pick via ``--family`` + ``--n/--k``:

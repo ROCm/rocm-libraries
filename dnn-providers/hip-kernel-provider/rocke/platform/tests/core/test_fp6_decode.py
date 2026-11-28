@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The fp6 and fp4 decode tables follow the OCP MX spec.
+"""The fp6 decode table follows the OCP MX spec.
 
 ``unpack_fp6_bytes_to_quad_f32`` decodes the OCP MX E3M2 format: bit 5 is the
 sign, bits 4..2 the exponent (bias 3), bits 1..0 the mantissa. Exponent field 0
@@ -12,11 +12,10 @@ The tests compare every code against a decoder written here from the bit
 fields with ``math.ldexp`` (independent of the helper's table), check the sign
 of both zeros with ``math.copysign``, and run all 64 codes through the emitted
 select chain on the GPU, comparing the f32 bits so that -0.0 is told apart from
-+0.0. The fp4 (E2M1) table is checked against its spec decoder the same way.
++0.0.
 """
 
 import ctypes
-import importlib.util
 import math
 import struct
 
@@ -27,10 +26,15 @@ from rocke.core.ir import F32, I8, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import optimize_kernel
 from rocke.helpers import compile_kernel
+from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.engines import all_engines_backend
 from rocke.helpers.i4_dequant import (
-    _FP4_CODEBOOK,
     _FP6_CODEBOOK,
     unpack_fp6_bytes_to_quad_f32,
+)
+
+pytestmark = pytest.mark.filterwarnings(
+    "error::rocke.core.lower_llvm.ArchDomainWarning"
 )
 
 _FP6_CODES = 64
@@ -45,18 +49,6 @@ def _spec_e3m2(code):
         magnitude = math.ldexp(mantissa, 1 - 3 - 2)
     else:
         magnitude = math.ldexp(4 + mantissa, exponent - 3 - 2)
-    return math.copysign(magnitude, sign)
-
-
-def _spec_e2m1(code):
-    """OCP MX E2M1 value of a 4-bit code, from its bit fields."""
-    sign = -1.0 if code & 0b1000 else 1.0
-    exponent = (code >> 1) & 0b11
-    mantissa = code & 0b1
-    if exponent == 0:
-        magnitude = math.ldexp(mantissa, 1 - 1 - 1)
-    else:
-        magnitude = math.ldexp(2 + mantissa, exponent - 1 - 1)
     return math.copysign(magnitude, sign)
 
 
@@ -82,15 +74,6 @@ def test_fp6_subnormals_are_not_flushed():
     # Exponent field 0 with mantissa m is m / 16.
     assert _FP6_CODEBOOK[1:4] == (0.0625, 0.125, 0.1875)
     assert _FP6_CODEBOOK[33:36] == (-0.0625, -0.125, -0.1875)
-
-
-def test_fp4_table_matches_the_spec_for_every_code():
-    assert len(_FP4_CODEBOOK) == 16
-    for code in range(16):
-        want = _spec_e2m1(code)
-        got = _FP4_CODEBOOK[code]
-        assert got == want, (code, got, want)
-        assert math.copysign(1.0, got) == math.copysign(1.0, want), code
 
 
 def _decode_kernel():
@@ -142,9 +125,11 @@ def _decode_on_gpu(arch, optimize_ir):
 
     # With the C++ engine present, backend="both" lowers through both engines
     # and requires identical LLVM IR.
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
     artifact = compile_kernel(
-        _decode_kernel(), arch=arch, backend=backend, optimize_ir=optimize_ir
+        _decode_kernel(),
+        arch=arch,
+        backend=all_engines_backend(),
+        optimize_ir=optimize_ir,
     )
     codes = _packed_codes()
     out_bytes = 2 * _FP6_CODES * 4
@@ -172,15 +157,17 @@ def _decode_on_gpu(arch, optimize_ir):
         module.unload()
 
 
-def test_optimized_decode_keeps_negative_zero():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_optimized_decode_keeps_negative_zero(arch):
     # Code 32 decodes to -0.0, a different constant from code 0's +0.0, so the
     # optimizer must not merge them (Python's 0.0 == -0.0).
     kernel = _decode_kernel()
     optimize_kernel(kernel)
-    assert "0x8000000000000000" in lower_kernel_to_llvm(kernel, arch="gfx942")
+    assert "0x8000000000000000" in lower_kernel_to_llvm(kernel, arch=arch)
 
 
 # The optimizer runs only when asked; run the codes through both paths.
+@pytest.mark.gpu
 @pytest.mark.parametrize("optimize_ir", [False, True], ids=["plain", "optimized"])
 def test_all_fp6_codes_decode_to_the_spec_value_on_gpu(gpu_arch, optimize_ir):
     got = _decode_on_gpu(gpu_arch, optimize_ir)

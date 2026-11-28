@@ -1536,6 +1536,16 @@ def wgrad_wmma_split_k_available(arch: str) -> bool:
     return ArchTarget.from_gfx(arch).memory.has_global_float_atomic_add
 
 
+def wgrad_lds_k_outer_available(arch: str) -> bool:
+    """Whether ``arch`` has the LDS transpose read a K-outer wgrad tile needs.
+
+    is_valid_wgrad_spec rejects every ``lds_k_outer`` spec (and so every
+    ``async_dma`` spec, which requires it) wherever this is False, so a caller
+    can ask before it builds instead of meeting a skip per config.
+    """
+    return arch in _LDS_K_OUTER_ARCH_WAVE
+
+
 def _kouter_pad(spec: "WgradConvSpec") -> int:
     """Row pad (elements) of the K-outer LDS tile.
 
@@ -4345,7 +4355,9 @@ def _emit_wgrad_direct_epilogue(
         _c_N = params["p_wg_N"]
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-            return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
+            # Pointwise dW is a flat [K, N] matrix: no validity predicate
+            # (None) beyond the store bounds.
+            return b_.add(b_.mul(m_val, _c_N), n_val), None
 
     elif group is not None and spec.group_merge > 1:
         # Group-merged: the tile covers Gm groups per side. Rebuild the true dW
@@ -4486,7 +4498,9 @@ def _emit_wgrad_cshuffle_epilogue(
         _c_N = params["p_wg_N"]
 
         def dw_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-            return b_.add(b_.mul(m_val, _c_N), n_val), b.const_i32(1)
+            # Pointwise dW is a flat [K, N] matrix: no validity predicate
+            # (None) beyond the store bounds.
+            return b_.add(b_.mul(m_val, _c_N), n_val), None
 
     elif group is not None and spec.group_merge > 1:
         # Group-merged: rebuild the true dW address from merged coords and mask

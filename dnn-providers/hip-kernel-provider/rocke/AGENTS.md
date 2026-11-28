@@ -8,6 +8,10 @@ This file is the **short canonical index**: the non-negotiables inlined, deeper
 material one hop away. When a rule here and a linked doc disagree, this file wins
 on hard invariants.
 
+> **Before you count on CI** for any part of a change, read
+> [What CI checks today](TESTING.md#what-ci-checks-today); the gates below are
+> yours to run.
+
 ## Compliance — non-negotiable
 
 `platform/AGENTS.md` §"Compliance" binds every agent and **overrides any other
@@ -56,7 +60,7 @@ builder in `library/kernels/` and its C++ mirror in `library/cpp/`, with parity
 emitters and their golden in `library/tests/parity/`. `platform/CMakeLists.txt`
 adds `library/cpp` when the sibling tree exists; its targets link `rocke_core`,
 never the reverse, and `tools/check_byte_identity.py` gates them with the
-engine's own families. Library tests enrol in CI through
+engine's own families. Library tests are assigned to CI entries in
 `library/tests/ctest_lists.cmake`.
 
 One-way dependency: **`library → platform` only**; platform never imports
@@ -102,13 +106,18 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **MMA operands** — only through the shared operand layer, never a cast in a
+  handler; a new atom is a catalog row. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#hard-rules).
 - **Helpers** — reuse them, write the missing ones, fix the broken ones, each
   with a test, in the kernel's PR. New families too; the C++ mirror is not a
   reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).
-- **Test placement** — place each new or moved test by
-  [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test),
-  at the tier and in the entry it gives: standard by default, quick only for
-  smoke.
+- **Tests** — PR test-evidence [rule](platform/AGENTS.md#pull-requests); placement:
+  [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
+- **Never add coverage to quick** — it holds unit tests and the most basic
+  enablement checks only, under a hard time cap; new tests go to standard; the
+  `rocke-pending-lanes` hook fails a quick entry over budget or on the GPU.
+  Rule: [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test).
+- **Develop breaks** — [rule](TESTING.md#53-after-merging-develop-breaks).
 - **Relative paths only** — no file under `platform/` may hardcode an absolute repo
   path or escape the tree; `tests/run_all.py` enforces this. Anchor on `__file__` /
   `CMAKE_CURRENT_SOURCE_DIR` / `rocke.assets`.
@@ -117,13 +126,15 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
   changes kernels. Lint with `ruff check` (no `--fix`).
 - **Cross-platform** — scripts under the rocke tree are Python, not `.sh`; use
   `tempfile`, `os.cpu_count()`, `pathlib`, `shutil.which` — no `/tmp`, `nproc`, `sudo`.
-- **torch is optional** — numpy is the only hard dep; gate torch behind `importorskip`
-  in tests and lazy/guarded imports in code.
+- **No torch** — existing uses are being removed, and their allowlist
+  (`platform/tests/tools/no_torch_allowlist.txt`) only shrinks. Until a test's
+  use is removed, it declares torch under a pending record that names the torch
+  follow-up ticket (AICK-3408).
+  Rule: [`TESTING.md` §6](TESTING.md#6-invariants--contracts).
 - **No build artifacts in git** — never commit `build*/`, `_deps/`, `*.a`/`*.o`/`*.so`,
   `*.egg-info/`, `__pycache__/`. Always build out-of-tree on a local filesystem.
 
-Full rationale + build/test/GPU setup + `helpers/` placement + env-flag table:
-[`platform/AGENTS.md`](platform/AGENTS.md).
+Full rationale: [`platform/AGENTS.md`](platform/AGENTS.md).
 
 ## Definition of Done
 
@@ -137,6 +148,13 @@ cases reach must keep those suites green, and new pinned coverage starts at the
 Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
 [`style/CPP_STYLE.md`](style/CPP_STYLE.md).
+
+## Numerics (NaN, infinity, saturation, encodings)
+
+Before writing or reviewing a conversion, quantizer, clamp, reduction or mask,
+look the dtype up in the dispatch table of
+[`platform/dsl_docs/numerics/README.md`](platform/dsl_docs/numerics/README.md)
+and follow that type's file.
 
 ## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
 

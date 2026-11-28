@@ -7,7 +7,7 @@ This is the gfx942 sibling of ``instances/gfx950/attention_tiled_3d.py``. The
 *structure* (split-KV segment kernel + online-softmax reduce) is identical to
 the gfx950 version; only the three gfx950-only ISA spots are swapped for the
 gfx942-legal forms that the 2D gfx942 kernel
-(``instances/gfx942_mi300/attention_tiled_2d.py``) already validates:
+(``kernels/gfx942/attention_tiled_2d.py``) already validates:
 
   * **QK MFMA**: gfx942 has no wide-K ``mfma_f32_16x16x32`` f16/bf16 atom, so
     the QK matmul uses the narrow ``16x16x16`` atom with a K-step of 16
@@ -41,7 +41,6 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
     tiled_reduce_unsupported_reason,
@@ -74,6 +73,7 @@ from rocke.helpers.attention import (
     wave64_reduce_sum as _wave64_reduce_sum,
 )
 from rocke.helpers.distribution import make_static_tile_distribution
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     embed,
@@ -488,7 +488,7 @@ def build_unified_attention_3d_tiled(
     softcap_p = b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
-    qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    qq_bias_stride0_p = b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
@@ -1347,7 +1347,7 @@ class UnifiedAttentionReduceTiledSpec:
     emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 

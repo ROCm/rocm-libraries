@@ -16,15 +16,17 @@ MoE per-expert path with fp8 e4m3 operands and per-128-block f32 scales:
       -> GEMM2 (down) -- fp8 Hidden . fp8 W_down -> f32 acc, dequant by
          (hidden_dyn_scale * down_scale) -> weighted atomic reduce into Y.
 
-See ``examples/gfx950/fused_mega_moe/docs/BUILD_SPEC_FP8.md`` for the authoritative
-build spec. The dequant ordering follows BUILD_SPEC_FP8 Section 1.2 (the
+The authoritative build spec is not in the tree;
+``examples/gfx950/fused_mega_moe/ALGORITHM.md`` is the in-tree specification, and
+the ``ALGORITHM.md §N`` citations below are its sections. The dequant ordering
+follows ALGORITHM.md §2 (the
 ``block_scale_gemm.py`` group-accumulator pattern): within a 128-wide
 contraction block the scales are constant, so
 ``sum_k (a.sa)(b.sb) = sa.sb . sum_k (a.b)`` -- the scale is applied per
 K-group, post-MFMA, NOT in-instruction (which would mean the E8M0 trap of
 ``cvt_scalef32_pk_f32_fp8x4``).
 
-STAGING STATUS (incremental implementation per BUILD_SPEC_FP8 Phase plan):
+STAGING STATUS (incremental implementation, in stages):
 
 * STAGE 1 (THIS FILE, current state):
     - ``FusedMegaKernelSpecFp8`` (fp8 spec / signature / grid).
@@ -38,7 +40,7 @@ STAGING STATUS (incremental implementation per BUILD_SPEC_FP8 Phase plan):
 * STAGE 2 (THIS FILE, current state): the fp8 down GEMM reading ``Hidden_smem``
   as the LDS-resident A operand (``make_transposed``-equivalent implicit reshape
   -- the dynamic-quant write addr == the down MFMA A-read addr, same logical
-  ``(m, inter)`` cell, BUILD_SPEC_FP8 Section 3.5), with the per-128-group
+  ``(m, inter)`` cell, ALGORITHM.md §5.5), with the per-128-group
   group-accumulator dequant by (``HiddenScale_smem[row, blk]`` * ``down_scale``),
   multiply by the sorted per-token weight, and atomic-add the f32 partial into Y
   (padded rows token id -1 / >= tokens are skipped). Tiled over the H_out output
@@ -87,8 +89,8 @@ __all__ = [
 
 # Group block along the contraction axis (= 4 fp8_16x16x32 atoms).
 GROUP_K = 128
-# fp8e4m3 saturating clamp magnitude.
-FP8_MAX = quant_max_abs("fp8e4m3")  # 448.0
+# The largest value of gfx950's OCP e4m3: the requantization bound.
+FP8_MAX = quant_max_abs("fp8e4m3", arch="gfx950")  # 448.0
 # hand-tuned asm dynamic-quant amax floor.
 AMAX_FLOOR = 1e-6
 
@@ -102,8 +104,8 @@ AMAX_FLOOR = 1e-6
 class FusedMegaKernelSpecFp8:
     """Single-launch fused-MoE mega-kernel spec (FP8 e4m3 block-scale).
 
-    Tile geometry is IDENTICAL to the f16 :class:`FusedMegaKernelSpec`
-    (BUILD_SPEC_FP8 Section 2.0): the fp8 atom is also K=32 and the per-lane
+    Tile geometry is IDENTICAL to the f16 :class:`FusedMegaKernelSpec`:
+    the fp8 atom is also K=32 and the per-lane
     fragment width is the same, so only the operand element dtype (2B->1B) and
     the MFMA intrinsic change.
 
@@ -173,7 +175,7 @@ class FusedMegaKernelSpecFp8:
 
 
 # ---------------------------------------------------------------------------
-# Grid + signature (BUILD_SPEC_FP8 Section 2.7 / 2.8)
+# Grid + signature (the grid is ALGORITHM.md §4; the persistent grid, §8.3)
 # ---------------------------------------------------------------------------
 
 
@@ -256,7 +258,7 @@ def _emit_fp8_gateup_group_gemm(
 ) -> Tuple[Value, Value]:
     """Gate + up fp8 GEMM, returning ``(gate_dq, up_dq)`` per-lane f32 vectors.
 
-    Group-accumulator pattern (BUILD_SPEC_FP8 Section 1.2): the outer loop walks
+    Group-accumulator pattern (ALGORITHM.md §2): the outer loop walks
     128-wide groups along the hidden contraction K (= H). Per group, 4
     fp8_16x16x32 atoms accumulate into a FRESH ``group_acc`` (one for gate, one
     for up), then the group is folded into the outer accumulator scaled by
@@ -264,7 +266,7 @@ def _emit_fp8_gateup_group_gemm(
     A read (the quantized activation) is shared across gate and up; only the
     B-side weight scale differs.
 
-    Scale index math (BUILD_SPEC_FP8 Section 1.3), per-128 along the
+    Scale index math (ALGORITHM.md §2), per-128 along the
     contraction and per-128 along the output:
 
         a_scale_off = (m_row // GROUP_K_M) * k_scale_count + kg
@@ -414,7 +416,7 @@ def _load_a_fp8_lds(
     for output row ``m_row`` (= ``m_tile_base + m_in_atom``) the lane reads its
     ``a_per_lane`` contiguous fp8 elements starting at inter column
     ``k_tile_base + k_blk * a_per_lane``. This is the SAME logical ``(m, inter)``
-    cell the dynamic-quant Pass C wrote (BUILD_SPEC_FP8 Section 3.5: the implicit
+    cell the dynamic-quant Pass C wrote (ALGORITHM.md §5.5: the implicit
     reshape -- cshuffle/quant write addr == down MFMA A-read addr).
     """
     m_row = b.add(m_tile_base, lane_decode.m_in_atom)
@@ -442,7 +444,7 @@ def _emit_fp8_down_group_gemm(
 ) -> Value:
     """Down fp8 GEMM for one warp-atom output cell -> per-lane f32 vector.
 
-    Group-accumulator pattern (BUILD_SPEC_FP8 Section 1.2 / 2.2): the outer loop
+    Group-accumulator pattern (ALGORITHM.md §2): the outer loop
     walks 128-wide groups along the inter CONTRACTION (= this TG's inter slice,
     ``tile_n_inter`` = ``inter_slice``). Per group, 4 fp8_16x16x32 atoms
     accumulate into a FRESH ``group_acc``; the group is folded into the outer
@@ -703,7 +705,7 @@ def build_moe_fused_mega_gemm_fp8(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
 
-    # ---- params (BUILD_SPEC_FP8 Section 2.7) ---------------------------
+    # ---- params --------------------------------------------------------
     A = b.param("A", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16)
     WGate = b.param(
         "WGate", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
@@ -789,7 +791,7 @@ def build_moe_fused_mega_gemm_fp8(
     m_block_idx = b.block_id_y()
     expert_idx = b.global_load_i32(BlockExpertIds, m_block_idx)
 
-    # ---- BYTE-BASE FIX (BUILD_SPEC_FP8 Section 2.4): fp8 weights = 1 byte.
+    # ---- BYTE-BASE FIX: fp8 weights = 1 byte.
     elem_bytes_b = b.const_i64(1)
 
     def _b_base(ptr: Value, stride_b: Value) -> Value:
@@ -899,7 +901,7 @@ def build_moe_fused_mega_gemm_fp8(
                     stride_a_scale=stride_a_scale,
                     stride_gate_scale=stride_gate_scale,
                     stride_up_scale=stride_up_scale,
-                    tag=f"{mi}_{ni}",
+                    tag=f"m{mi}_n{ni}",
                 )
                 gate_list.append(g_dq)
                 up_list.append(u_dq)
@@ -912,7 +914,7 @@ def build_moe_fused_mega_gemm_fp8(
         # (indexed by the A-input Hidden row ``m_in_atom``) to output slots that
         # span 4 DIFFERENT output rows; only a row-uniform block scale stays
         # correct under that fold (the same constraint as the activation scale,
-        # BUILD_SPEC_FP8 OPEN RISK #1). The scale is broadcast to every row of
+        # ALGORITHM.md §2). The scale is broadcast to every row of
         # ``scale_view`` so any ``m_in_atom`` read returns the block scale.
         #
         # LEVER (fuse-quant): the per-block amax is reduced from registers as
@@ -1040,7 +1042,7 @@ def build_moe_fused_mega_gemm_fp8(
                         inter_blk_base=inter_blk_base,
                         stride_down_scale=stride_down_scale,
                         m_row_base=m_row_base,
-                        tag=f"d{mi}_{ni}",
+                        tag=f"d_m{mi}_n{ni}",
                     )
                     down_list.append(d_dq)
             # Barrier before the next H_out tile reuses Hidden_smem reads

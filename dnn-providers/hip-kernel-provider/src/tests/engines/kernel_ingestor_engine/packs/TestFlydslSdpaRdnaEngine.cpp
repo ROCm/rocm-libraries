@@ -48,6 +48,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDumpTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaVarlen.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 
 /**
  * @file TestFlydslSdpaRdnaEngine.cpp
@@ -7336,7 +7337,7 @@ TEST(TestFlydslSdpaRngDumpKernelMatch, NeedsTheWriterInTheObjectsShard)
             EXPECT_TRUE(matchesKernel(*engine, dumping.context(), kernel, *dumpBound))
                 << kernel.name;
             auto moved = kernel;
-            moved.originDirectory = std::filesystem::path("/nonexistent") / "FlyDSL"
+            moved.originDirectory = emptyDescriptorTree() / "FlyDSL"
                                     / kernel.originDirectory.parent_path().filename()
                                     / kernel.originDirectory.filename();
             EXPECT_FALSE(matchesKernel(*engine, dumping.context(), moved, *dumpBound))

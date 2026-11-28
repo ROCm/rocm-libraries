@@ -5,8 +5,13 @@
 import pytest
 from rocke.core.arch import ArchTarget
 from rocke.core.dtypes import normalize_dtype
+from rocke.tests.arch_marks import arch_specific
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the test reads the low-bit scaled atoms of the gfx950 and gfx1250 catalogs; gfx942 has no low-bit scaled atom",
+)
 @pytest.mark.parametrize(
     "alias,canonical",
     [

@@ -81,9 +81,17 @@ question, and gains and improved classifications are reported. Support loss,
 invalid provenance/records, and non-comparable probe contracts fail. Remaining
 no-data cells are not qualified; writing also requires a valid generated column.
 
+Every support rule above is about one declaration key, so a CI shard can check
+its own keys: with `--rocke-shard-from-gtest-env`, `--check` probes and
+compares only the keys its shard owns (`rocke.tests.ci_shard`, the same rule as
+the pytest shards), against the committed column cut to those keys. The
+toolchain, method and processor checks run on every shard. The shards of one
+run together check every key once.
+
 Usage:
   python rocke/platform/tools/gen_arch_domain.py            # write the artifact
   python rocke/platform/tools/gen_arch_domain.py --check    # CI: support floor
+  python rocke/platform/tools/gen_arch_domain.py --check --rocke-shard-from-gtest-env
   python rocke/platform/tools/gen_arch_domain.py --only mfma --verbose
   python rocke/platform/tools/gen_arch_domain.py --keep-ir DIR
 """
@@ -104,7 +112,6 @@ from pathlib import Path
 from typing import Callable, Iterator, NamedTuple
 
 from _bounded_run import run_bounded, stop_all
-from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
@@ -132,6 +139,15 @@ def _bootstrap_sys_path() -> None:
 _bootstrap_sys_path()
 
 from rocke.core.arch import domain as _domain
+from rocke.tests.ci_shard import (
+    ACTIVATION_FLAG,
+    ShardKeyListing,
+    add_shard_argument,
+    header_line,
+    list_keys_path,
+    shard_from_arguments,
+)
+from rocke.tests.host_cpus import available_cpus
 
 SCHEMA = _domain.SCHEMA
 # The committed columns are package data, not source-tree data. Resolving them
@@ -194,7 +210,10 @@ PROBE_CFLAGS = ("-O0", "-nogpulib")
 
 # Bounds the sweep, not any one probe: a probe module is one declare and one
 # call, so a healthy probe is quick. Without a budget a single non-terminating
-# probe hangs the run and `--check` never returns.
+# probe hangs the run and `--check` never returns. Keep it far below the
+# TIMEOUT of the `rocke_arch_domain_reproducibility` CTest, so that a hanging
+# probe is recorded as a timeout instead of CTest killing the whole sweep; only
+# on Linux does a probe die with a killed sweep (see `_bounded_run`).
 PROBE_TIMEOUT_S = 60
 
 # Each worker owns an external compiler process, and successful probes briefly
@@ -1093,11 +1112,17 @@ def _decl_table(flavor: str) -> dict[str, str]:
 class _SupportComparison(NamedTuple):
     failures: list[str]
     changes: dict[str, list[str]]
+    # The "timed_out" transitions: working cells whose probe did not finish
+    # within PROBE_TIMEOUT_S. The host was too slow to answer, which leaves the
+    # check unvalidated rather than showing a loss of support.
+    timed_out: list[str]
 
 
 # Rows are recorded states; columns are freshly measured states. Unknown
 # answers are not ordered support levels: resolving one to unavailable improves
 # measurement, while losing a definite negative does not lose working support.
+# A working cell whose probe timed out is "timed_out", not a loss: not
+# finishing on a slow host says nothing about the toolchain's support.
 _CELL_TRANSITIONS: dict[str, dict[str, str]] = {
     STATUS_OK: {
         STATUS_OK: "unchanged",
@@ -1105,7 +1130,7 @@ _CELL_TRANSITIONS: dict[str, dict[str, str]] = {
         STATUS_NAME_ABSENT: "loss",
         STATUS_TARGET_UNSUPPORTED: "loss",
         STATUS_TOOLCHAIN_CRASH: "loss",
-        STATUS_TOOLCHAIN_TIMEOUT: "loss",
+        STATUS_TOOLCHAIN_TIMEOUT: "timed_out",
         STATUS_PROBE_ERROR: "invalid",
     },
     STATUS_ARCH_ABSENT: {
@@ -1452,6 +1477,20 @@ def _serialize_column(doc: dict) -> str:
     return "{\n" + ",\n".join(fields) + "\n}\n"
 
 
+def _column_for_keys(doc: dict, owns: Callable[[str], bool]) -> dict:
+    """``doc`` cut to the declaration keys ``owns`` keeps.
+
+    Every per-key section (``keys``, ``canonical``, ``probe_contracts``) keeps
+    only those keys; the toolchain, processor answers and other metadata stay
+    whole, so the cut column validates and compares like a full one."""
+    per_key = ("keys", "canonical", "probe_contracts")
+    cut = {name: value for name, value in doc.items() if name not in per_key}
+    for name in per_key:
+        if name in doc:
+            cut[name] = {key: value for key, value in doc[name].items() if owns(key)}
+    return cut
+
+
 def _describe_field_changes(before: dict, after: dict) -> str:
     """Name changed fields, distinguishing an absent field from a JSON null."""
     changes = []
@@ -1484,6 +1523,7 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
                 "unvalidated",
             )
         },
+        [],
     )
     try:
         a, b = json.loads(committed), json.loads(fresh)
@@ -1536,11 +1576,13 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
             before, after = before_cell.get("status"), after_cell.get("status")
             transition = _cell_transition(before, after)
             change = f"{key}/{arch}: {before} -> {after}"
-            if transition in ("invalid", "loss"):
+            if transition == "timed_out":
+                result.timed_out.append(change)
+            elif transition in ("invalid", "loss"):
                 result.failures.append(f"{transition} -- {change}")
             elif transition != "unchanged":
                 result.changes[transition].append(change)
-            if after in (
+            if transition != "timed_out" and after in (
                 STATUS_TARGET_UNSUPPORTED,
                 STATUS_TOOLCHAIN_CRASH,
                 STATUS_TOOLCHAIN_TIMEOUT,
@@ -1564,6 +1606,15 @@ def _compare_support(committed: str, fresh: str) -> _SupportComparison:
         elif after["accepted"] and not before["accepted"]:
             result.changes["gain"].append(f"processor {arch}: unsupported -> accepted")
     return result
+
+
+def _observation_summary(observations: list[str], verbose: bool) -> str:
+    """The observations joined, the first five unless ``verbose``, with the
+    count of the rest."""
+    summary = "; ".join(observations if verbose else observations[:5])
+    if not verbose and len(observations) > 5:
+        summary += f" (+{len(observations) - 5} more)"
+    return summary
 
 
 def _print_support_failures(out: Path, failures: list[str]) -> None:
@@ -1874,12 +1925,24 @@ def main() -> int:
             "(CTest uses 77 to report a skip; defaults preserve legacy exits)"
         ),
     )
+    add_shard_argument(
+        ap,
+        help="with --check: check only the declaration keys of this CI shard, "
+        "from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and GTEST_TOTAL_SHARDS "
+        "(rocke.tests.ci_shard); without either, every key",
+        list_help="write the probes the CI shards split, keyed by declaration key, to "
+        "this path instead of checking them",
+    )
     args = ap.parse_args()
     if args.unvalidated_exit_code is not None:
         if not args.check:
             ap.error("--unvalidated-exit-code requires --check")
         if not 1 <= args.unvalidated_exit_code <= 255:
             ap.error("--unvalidated-exit-code must be between 1 and 255")
+    if args.shard_from_gtest_env and not args.check:
+        ap.error(f"{ACTIVATION_FLAG} requires --check")
+    shard = shard_from_arguments(ap, args)
+    listing = list_keys_path(args)
 
     sys.path.insert(0, str(HERE))
     from check_ir_validity import llvm_tool  # same resolution order, one owner
@@ -2041,6 +2104,9 @@ def main() -> int:
         if failures:
             _print_support_failures(out, failures)
             return 1
+        if shard is not None:
+            committed_doc = _column_for_keys(committed_doc, shard.owns)
+            committed_text = _serialize_column(committed_doc)
         blessed_identity = committed_doc["toolchain"]["clang"]
         if blessed_identity and blessed_identity != identity:
             print(
@@ -2053,6 +2119,15 @@ def main() -> int:
     arches = sorted(args.arch) if args.arch else sorted(wired_arches())
     decls = _decl_table(flavor)
     keys = sorted(k for k in decls if not args.only or args.only in k)
+    if listing is not None:
+        probes = {f"{key}/{arch}": key for key in keys for arch in arches}
+        ShardKeyListing(probes).write(listing)
+        return 0
+    if args.shard_from_gtest_env:
+        print(header_line(shard))
+    if shard is not None:
+        print(shard.split_line(keys))
+        keys = [key for key in keys if shard.owns(key)]
     print(f"   arches : {', '.join(arches)}")
     print(f"   keys   : {len(keys)}")
 
@@ -2428,15 +2503,25 @@ def main() -> int:
         ):
             changes = comparison.changes[kind]
             if changes:
-                summary = "; ".join(changes if args.verbose else changes[:5])
-                if not args.verbose and len(changes) > 5:
-                    summary += f" (+{len(changes) - 5} more)"
-                print(f"\n{label}: {len(changes)} -- {summary}")
-        if not comparison.failures:
-            print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
-            return 0
-        _print_support_failures(out, comparison.failures)
-        return 1
+                print(
+                    f"\n{label}: {len(changes)} -- "
+                    f"{_observation_summary(changes, args.verbose)}"
+                )
+        if comparison.timed_out:
+            print(
+                f"\nTIMED OUT: {len(comparison.timed_out)} probes of working cells "
+                f"did not finish within {PROBE_TIMEOUT_S:g}s on this host, so their "
+                "support was not checked -- "
+                f"{_observation_summary(comparison.timed_out, args.verbose)}"
+            )
+        if comparison.failures:
+            _print_support_failures(out, comparison.failures)
+            return 1
+        if comparison.timed_out:
+            print(f"\nUNVALIDATED: {out.name} was not checked in full on this host.")
+            return _unvalidated_exit(args.unvalidated_exit_code, 1)
+        print(f"\nSUPPORT OK: {out.name} retains the baseline support floor.")
+        return 0
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text)

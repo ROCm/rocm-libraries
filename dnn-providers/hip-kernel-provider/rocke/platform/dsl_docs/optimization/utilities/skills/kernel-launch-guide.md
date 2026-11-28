@@ -10,8 +10,8 @@ Provides step-by-step instructions and API reference for properly launching kern
 
 ## Contents
 
-- `rocke-launch-guide.md` - rocke kernel launch instructions
-- `flydsl-launch-guide.md` - FlyDSL kernel launch instructions
+The separate rocke and FlyDSL launch-instruction guides are not in the tree; this page keeps
+the summary below.
 
 ## When to Use
 

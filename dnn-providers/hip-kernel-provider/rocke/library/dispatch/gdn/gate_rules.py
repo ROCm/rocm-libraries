@@ -1,12 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Torch-free decision rules of the GDN/KDA decode fp32 gate and of the
-cold-memory rotation size.
+"""Decision rules of the GDN/KDA decode fp32 gate and of the cold-memory
+rotation size.
 
 The host driver (``builders/gfx950/gdn/gdn_decode.py``) computes the errors of
-one launch against the fp32 reference, and the bytes one launch touches, from
-torch tensors. What it does with those numbers is decided here: whether a
+one launch against its float64 reference, and the bytes one launch touches,
+from host arrays. What it does with those numbers is decided here: whether a
 launch passes the gate, and how many buffer sets one cold-memory rotation
 needs. Every GDN/KDA decode tool that gates (all but the driver's own
 ``--no-check``, which skips the gate by request) ranks and times a
@@ -15,9 +15,9 @@ with :func:`cold_copy_count`, so these are the rules that keep a wrong or NaN
 result from being ranked and a "cold" time from being warm.
 
 They live in ``dispatch`` (below ``builders``, which imports them; see
-``tests/test_library_layering.py``) next to :mod:`.cli_args`, with no torch,
-so the tests that pin them run on a machine without torch, which is where CI
-runs. The tensor code stays in the driver and calls into this module.
+``tests/test_library_layering.py``) next to :mod:`.cli_args`, so the tests that
+pin them need neither the driver nor a device. The array code stays in the
+driver and calls into this module.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from typing import Callable, Optional
 
 from .cli_args import check_rotate_mb, nan_safe_max
 
-# bf16 inputs against an fp32 reference. Observed error grows with batch (more
+# bf16 inputs against a float64 reference. Observed error grows with batch (more
 # state rows accumulate into one output), so the bound is set well above the
 # largest value seen at the batches exercised here while staying far below the
 # magnitude of a real indexing or reduction bug.
@@ -37,7 +37,7 @@ TOL = 1e-2
 
 @dataclasses.dataclass(frozen=True)
 class Gate:
-    """One launch scored against the fp32 reference (``gdn_decode.gate``)."""
+    """One launch scored against the reference (``gdn_decode.gate``)."""
 
     out_err: float
     state_err: float

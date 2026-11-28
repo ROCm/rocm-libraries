@@ -10,7 +10,6 @@ kernel; ``cpp`` needs the binding. Machines without a HIP device skip.
 """
 
 import ctypes
-import importlib.util
 import struct
 
 import numpy as np
@@ -20,6 +19,9 @@ from rocke.core.arch import ArchTarget
 from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import Runtime, get_device_arch
+from rocke.tests.engines import native_engine_or_skip
+
+pytestmark = pytest.mark.gpu
 
 
 @pytest.fixture(scope="module")
@@ -37,8 +39,8 @@ def arch():
 
 @pytest.fixture(params=("python", "cpp"))
 def backend(request):
-    if request.param == "cpp" and importlib.util.find_spec("rocke_engine") is None:
-        pytest.skip("cpp engine needs the rocke_engine binding")
+    if request.param == "cpp":
+        native_engine_or_skip()
     return request.param
 
 

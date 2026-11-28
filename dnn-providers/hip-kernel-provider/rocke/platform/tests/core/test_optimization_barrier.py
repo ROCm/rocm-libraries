@@ -7,7 +7,7 @@ import runpy
 
 import pytest
 
-from rocke.core.backend import _cpp_strict, resolve_backend
+from rocke.core.backend import cpp_strict, resolve_backend
 from rocke.core.ir import (
     BF16,
     BF8E5M2,
@@ -290,7 +290,7 @@ _HIP_ASM_INVALID_CONSTRAINTS = [
 
 def _asm_constraint_kernel(constraints, outputs, operands):
     b = IRBuilder("asm_constraints")
-    values = [b.param(f"value_{index}", F32) for index in range(operands)]
+    values = [b.param(f"value{index}", F32) for index in range(operands)]
     b.inline_asm("s_nop 0", "=v" if outputs else "", values, F32 if outputs else None)
     b.kernel.body.ops[-1].attrs["constraints"] = constraints
     b.ret()
@@ -482,7 +482,7 @@ def test_llvm_inline_asm_rejects_non_bool_sideeffect(
     if roundtrip:
         kernel = parse(serialize(kernel))
     exception = (
-        RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+        RuntimeError if resolve_backend() == "cpp" and cpp_strict() else ValueError
     )
     with pytest.raises(exception, match="LLVM inline asm sideeffect must be a boolean"):
         lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=flavor)

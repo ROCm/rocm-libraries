@@ -39,8 +39,8 @@ __all__ = [
 # raises. Values are the L2 line size for the CDNA parts we have measured against; re-verify before adding a
 # new arch (do not assume gfx90a carries over -- the user's standing rule).
 ARCH_LINE_BYTES = {
-    "gfx90a": 128,  # MI210/MI250 (CDNA2)
-    "gfx942": 128,  # MI300 (CDNA3)
+    "gfx90a": 128,  # CDNA2
+    "gfx942": 128,  # CDNA3
 }
 
 
@@ -162,14 +162,14 @@ def report_for_transaction(txn, *, arch, dims=None, pipeline=None, n_lanes=64):
         strides,
         dtype_info(txn.dtype_name).encoded_bits,
         direction=txn.kind,
+        space=txn.space,
         line_bytes=line_bytes_for(arch),
     )
 
 
-def gate_report(report, objdump_text, *, space):
-    """HARD-GATE a coalescing ``report`` against the compiled ASM. ``space`` is the memory space the modelled
-    access targets (``"global"``/``"lds"``) -- needed to pick the ASM instruction family (``report.direction``
-    and ``report.dtype_bits`` supply the rest). Returns ``(report, achieved_hist, note)``; RAISES (via
+def gate_report(report, objdump_text):
+    """HARD-GATE a coalescing ``report`` against the compiled ASM. The report's ``space``, ``direction`` and
+    ``dtype_bits`` pick the ASM instruction family. Returns ``(report, achieved_hist, note)``; RAISES (via
     :func:`assert_asm_backed`) when the compiler's WORST (min) width in the family is below the b128-ideal the
     layout supports. An EMPTY family is itself a discrepancy -- the render claims an access the kernel never
     emits -- and is raised, never passed. This is the pure gate; :func:`gate_transaction` derives the report
@@ -177,12 +177,12 @@ def gate_report(report, objdump_text, *, space):
     hist = achieved_widths(
         objdump_text,
         direction=report.direction,
-        space=space,
+        space=report.space,
         dtype_bits=report.dtype_bits,
     )
     if not hist:
         raise AssertionError(
-            f"ASM shows NO {report.direction}/{space} access for a modelled transaction "
+            f"ASM shows NO {report.direction}/{report.space} access for a modelled transaction "
             f"-- the render claims an access the kernel never emits; investigate the "
             f"model/recording OR the codegen"
         )
@@ -198,7 +198,7 @@ def gate_transaction(txn, objdump_text, *, arch, dims=None, pipeline=None, n_lan
     report = report_for_transaction(
         txn, arch=arch, dims=dims, pipeline=pipeline, n_lanes=n_lanes
     )
-    return gate_report(report, objdump_text, space=txn.space)
+    return gate_report(report, objdump_text)
 
 
 def gate_recorded_store(

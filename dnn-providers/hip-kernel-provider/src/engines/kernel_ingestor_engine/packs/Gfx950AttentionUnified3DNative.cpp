@@ -483,14 +483,16 @@ double scoreKernel(const MatchContext& /*context*/,
 // ---------------------------------------------------------------------------
 
 /// The segment kernel's signature: 12 pointers (the three scratch outputs first), 4 f32
-/// scalars, three i32 and the runtime shape kernargs (`_tiled_3d_signatures`: head counts and
+/// scalars, three i32 and the runtime shape kernargs (`tiled_3d_signatures`: head counts and
 /// window).
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one; kind and size alone cannot tell the twelve pointers
 /// apart, so without names an operand permutation passes and the kernel reads the wrong
 /// buffers. Keep these spellings identical to build_unified_attention_3d_tiled's `b.param`
-/// calls. Offsets are printed in a mismatch diagnostic and never compared.
+/// calls; TestGfx950AttentionUnified3DSignature checks this list against the one rocKE
+/// declares, generated from rocKE at build time (tests/.../packs/RockeKernelSignatures.hpp).
+/// Offsets are printed in a mismatch diagnostic and never compared.
 std::vector<KernelArgument> unified3DSegmentSignature()
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
@@ -515,14 +517,14 @@ std::vector<KernelArgument> unified3DSegmentSignature()
             KernelArgument{"by_value", F32, 108, "softcap"},
             KernelArgument{"by_value", I32, 112, "num_seqs"},
             KernelArgument{"by_value", I32, 116, "block_table_stride"},
-            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"},
+            KernelArgument{"by_value", I32, 120, "qq_bias_stride0"},
             KernelArgument{"by_value", I32, 124, "num_query_heads"},
             KernelArgument{"by_value", I32, 128, "num_kv_heads"},
             KernelArgument{"by_value", I32, 132, "sliding_window"}};
 }
 
 /// The reduce kernel's signature: the output then the three scratch arrays it folds,
-/// seq_lens and the runtime query head count (`_tiled_3d_signatures`). Names load-bearing as
+/// seq_lens and the runtime query head count (`tiled_3d_signatures`). Names load-bearing as
 /// above; keep them identical to build_unified_attention_reduce_tiled's `b.param` calls. An
 /// LSE-on reduce (@p emitLse) appends lse_ptr.
 std::vector<KernelArgument> unified3DReduceSignature(bool emitLse = false)

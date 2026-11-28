@@ -2262,16 +2262,16 @@ def _build_implicit_gemm_conv_impl(
     # the straight-line drivers instead of a second compile-time copy.
     if p.is_pointwise:
         D_desc = None
-        _always_valid_d = b.const_i32(1)
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-            # Pointwise D is a flat [M, K] matrix; no pad guards apply.
+            # Pointwise D is a flat [M, K] matrix; no pad guards apply, so the
+            # address has no validity predicate (None) beyond the store bounds.
             # Ungrouped, K == kpg. Grouped, the group's columns start at g*kpg
             # (the loaders' k_out_group_base) within a row of all K channels.
             if grouped:
                 k_out = b_.add(k_out_group_base, n_val)
-                return b_.add(b_.mul(m_val, p_K), k_out), _always_valid_d
-            return b_.add(b_.mul(m_val, p_kpg), n_val), _always_valid_d
+                return b_.add(b_.mul(m_val, p_K), k_out), None
+            return b_.add(b_.mul(m_val, p_kpg), n_val), None
 
     else:
         D_desc = make_d_descriptor_dynamic(b, params, is_3d=p.is_3d)

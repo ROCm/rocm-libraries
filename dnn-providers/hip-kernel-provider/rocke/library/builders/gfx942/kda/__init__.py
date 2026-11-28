@@ -7,13 +7,13 @@ launch the kernels in ``kernels.gfx942.kda_chunkwise``. These are the
 chunkwise KDA prefill path (per-channel gate plus delta-rule write), not the
 Gated DeltaNet K5/K6 scan.
 
-Two host lanes share the same packed layout:
+Two host lanes share the packed layout of ``hostpack.py``:
 
-* Torch GPU experiments: ``kda_chunk_fused.check`` /
-  ``launch_packed`` (needs ROCm torch). Used by
+* The builders' own GPU checks: ``kda_chunk_fused.check`` /
+  ``launch_packed``. Used by
   ``library/tests/test_kda_chunkwise_gfx942_numeric.py``.
-* External ``run_manifest`` / ``benchmark.remote_test``: numpy pack +
-  oracle in ``hostpack.py``, registered by importing ``manifest.py``.
+* External ``run_manifest`` / ``benchmark.remote_test``: registered by
+  importing ``manifest.py``.
   The fused example's ``--no-verify --output-dir`` writes a manifest
   with ``kind=kda_chunk_fused_bf16`` and ``runner_module`` pointing here.
   Point ``remote_test.config.ARCHES`` at

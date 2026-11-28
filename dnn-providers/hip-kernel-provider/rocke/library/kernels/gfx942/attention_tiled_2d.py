@@ -41,7 +41,11 @@ from typing import ClassVar, Optional, Tuple
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
-from kernels.common._spec_checks import require_bool
+from kernels.common.attention_tiled_2d_rules import (
+    validate_skip_legacy_qreg,
+    validate_transposed_softmax_valu_opts,
+    validate_transposed_sub_knobs,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -58,6 +62,7 @@ from rocke.core.ir import (
     Value,
     VectorType,
     cache_policy_from_name,
+    type_bits,
 )
 from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
@@ -78,6 +83,7 @@ from rocke.helpers.attention import (
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -279,11 +285,11 @@ class UnifiedAttention2DTiledSpec:
     # over ``REGS_PER_LANE = block_m_per_warp / 4`` register slots
     # per lane instead of 4. The LDS budget grows with ``BLOCK_M``
     # (``Q_lds``, ``P_lds``, ``Acc_lds``), so ``block_m_per_warp=32``
-    # crosses MI355X's 3 → 2 WGs/CU threshold for the prefill workload.
+    # crosses gfx950's 3 → 2 WGs/CU threshold for the prefill workload.
     # Only ``{16, 32}`` are supported; 32 requires ``num_warps``
     # in ``{1, 2, 4}`` so total threads stay within the 1024 CTA cap.
     #
-    # **Measured (MI355X, bf16, HD=64, BS=32, T=64)**: ``block_m_per_warp=32``
+    # **Measured (gfx950, bf16, HD=64, BS=32, T=64)**: ``block_m_per_warp=32``
     # with ``num_warps=4`` (BLOCK_M=128) was 1.6-2.0× SLOWER than the
     # default on every prefill shape we tested, because the doubled
     # ``Q_lds`` + ``P_lds`` + ``Acc_lds`` push the kernel from 3 → 2
@@ -430,7 +436,7 @@ class UnifiedAttention2DTiledSpec:
     # Stages ``k_slice_hd``-wide K slices in a ``ring_depth``-slot ring instead of
     # double-buffering full [T, HD] K tiles. This is the LDS prerequisite for
     # NumPrefetchK/V=3
-    # on MI300X; v1 syncs per slice before adding overlap.
+    # on gfx942; v1 syncs per slice before adding overlap.
     use_k_sliced_ring: bool = False
     # Ring pipeline depth: how many K slices are staged/in-flight at once.
     #   3 (default): depth-3 pipeline (live set {kg, kg+1, kg+2}), 3 LDS slots.
@@ -482,6 +488,10 @@ class UnifiedAttention2DTiledSpec:
     # can remove a barrier/prologue even when full-tile K buffering remains.
     use_q_direct_global: bool = False
     use_v_hbm_direct: bool = False
+    # Read the QK operand K straight from global memory instead of staging it
+    # in K_lds, which shrinks to a one-element stub. Q is otherwise staged in
+    # K_lds, so this also reads Q straight from global memory: it implies
+    # use_q_direct_global.
     use_k_hbm_direct: bool = False
     # Cache policy for async K/V buffer->LDS loads. Gfx942 interprets these aux
     # bits as sc0/nt/swz/sc1, so this stays explicit and benchmarked.
@@ -507,7 +517,9 @@ class UnifiedAttention2DTiledSpec:
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
+        # The LSE output and the K and V read sources: a truthy non-bool such
+        # as "false" must be refused, not read as True.
+        require_bool_fields(self, "emit_lse", "use_k_hbm_direct", "use_v_hbm_direct")
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -575,7 +587,7 @@ class UnifiedAttention2DTiledSpec:
                 f"Other counts would need new MFMA distribution logic. "
                 f"num_warps=8 (BLOCK_M=128, THREADS=512) matches the BLOCK_M "
                 f"the production Triton 2D kernel uses for high-q prefill "
-                f"shapes; both are well within MI355X's 1024-thread CTA cap."
+                f"shapes; both are well within gfx950's 1024-thread CTA cap."
             )
         if self.block_m_per_warp not in (16, 32):
             raise ValueError(
@@ -587,20 +599,6 @@ class UnifiedAttention2DTiledSpec:
                 f"(got {self.num_warps}); other values need new MFMA/launch "
                 f"distribution logic."
             )
-        if self.use_mfma_32x32:
-            if self.block_m_per_warp != 32:
-                raise ValueError(
-                    "use_mfma_32x32 requires block_m_per_warp=32: "
-                    "one 32-row MFMA atom per warp"
-                )
-            if self.tile_size_eff % 32 != 0:
-                raise ValueError(
-                    "use_mfma_32x32 requires tile_size to be a multiple of 32"
-                )
-            if self.head_size % 16 != 0:
-                raise ValueError(
-                    "use_mfma_32x32 requires head_size to be a multiple of 16"
-                )
         if self.use_mfma_32x32x8:
             # gfx942-legal 32x32x8 wide-fragment path. Same 32x32 C layout as
             # the (gfx950-only) 32x32x16 path, but K=8 per atom -- the atom IS
@@ -674,22 +672,9 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError(
                 "use_transposed_qk_32x32 requires use_mfma_32x32 or use_mfma_32x32x8"
             )
-        if self.use_transposed_scalar_state and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_scalar_state requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_invariant_hoist and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_invariant_hoist requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_mask_once and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_mask_once requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_half_local_pv and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_half_local_pv requires use_transposed_qk_32x32"
-            )
+        ok, reason = validate_transposed_sub_knobs(self)
+        if not ok:
+            raise ValueError(reason)
         if self.use_conflict_free_v and not (
             self.use_mfma_32x32x8 and self.use_transposed_qk_32x32
         ):
@@ -825,58 +810,24 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k"
                 )
+            # The direct K read is an i32 offset into the one K cache buffer
+            # resource, so it cannot reach the pages past 2 GiB that i64
+            # addressing exists for: they would read as zero.
+            if self.use_i64_kv_addr:
+                raise ValueError(
+                    "gfx942 tiled 2D spec failed - use_i64_kv_addr=True with "
+                    "use_k_hbm_direct=True, expected use_k_hbm_direct=False: the "
+                    "direct K read is an i32 offset into one K cache buffer "
+                    "resource, which cannot reach pages past 2 GiB"
+                )
         if self.use_global_load_lds_k and self.kv_storage_dtype is not None:
             raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
-        if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
-            raise ValueError("use_mfma32_skip_legacy_qreg requires use_mfma_32x32")
-        if self.use_transposed_mask_limit:
-            if not (
-                (self.use_mfma_32x32 or self.use_mfma_32x32x8)
-                and self.use_transposed_qk_32x32
-                and self.use_transposed_scalar_state
-                and self.use_transposed_mask_once
-            ):
-                raise ValueError(
-                    "transposed softmax VALU opts require the R4_s1mask path"
-                )
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "transposed softmax VALU opts require no sliding window"
-                )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
-                raise ValueError(
-                    "transposed softmax VALU opts do not support softcap, ALiBi, or QQ bias"
-                )
-            if self.use_grouped_kv2_softmax:
-                raise ValueError(
-                    "transposed softmax VALU opts do not support grouped_kv2"
-                )
-        if self.use_grouped_kv2_softmax:
-            if self.dtype != "bf16":
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 is restricted to dtype='bf16'"
-                )
-            if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
-                raise ValueError(
-                    "use_grouped_kv2_softmax requires the transposed 32x32 R4 path"
-                )
-            if self.block_m_per_warp != 32:
-                raise ValueError("use_grouped_kv2_softmax requires block_m_per_warp=32")
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 requires no sliding window"
-                )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, or QQ bias"
-                )
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
-        if self.use_early_v_schedule:
-            if self.use_grouped_kv2_softmax:
-                raise ValueError("use_early_v_schedule does not support grouped_kv2")
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_early_v_schedule v1 does not support FP8 KV")
+        ok, reason = validate_skip_legacy_qreg(self)
+        if not ok:
+            raise ValueError(reason)
+        ok, reason = validate_transposed_softmax_valu_opts(self)
+        if not ok:
+            raise ValueError(reason)
         if self.use_fast_paged_kv_desc:
             if not (
                 self.dtype == "bf16"
@@ -891,6 +842,16 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_fast_paged_kv_desc is restricted to bf16 h64kv8 "
                     "HD=64 BS=32 T=64 num_warps=4"
+                )
+            # The direct K and V reads address the cache through the paged-KV
+            # descriptor, which the fast descriptor path does not build.
+            if self.use_k_hbm_direct or self.use_v_hbm_direct:
+                raise ValueError(
+                    "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
+                    f"use_k_hbm_direct={self.use_k_hbm_direct}, "
+                    f"use_v_hbm_direct={self.use_v_hbm_direct}, expected both "
+                    "False: the direct K and V reads address the cache through the "
+                    "paged-KV descriptor, which the fast descriptor path does not build"
                 )
         if self.use_agpr_alloc_zero:
             _agpr0_r4_s1mask_hlpv = (
@@ -1615,7 +1576,7 @@ def build_unified_attention_2d_tiled(
     softcap_p = b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
-    qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    qq_bias_stride0_p = b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
@@ -1683,7 +1644,7 @@ def build_unified_attention_2d_tiled(
     # MFMA_N`` consecutive PV N-tiles). Two regimes:
     #
     # 1. ``HD <= 64``: use 32-col stripes. The big LDS savings (e.g. NW=4
-    #    T=64 HD=64 drops 16 KiB → 2 KiB) crosses MI355X's 2 → 3 WGs/CU
+    #    T=64 HD=64 drops 16 KiB → 2 KiB) crosses gfx950's 2 → 3 WGs/CU
     #    threshold and is worth a couple of extra sync barriers per CTA.
     #
     # 2. ``HD >= 128``: use full-HD stripes. The old F32 Acc_lds was
@@ -1715,7 +1676,7 @@ def build_unified_attention_2d_tiled(
     # ``(r * (HD/2 + 4)) % 32`` cycles every ~8 rows instead of every 1.
     # That converts the worst case from 16-way to 2-way bank conflict.
     # An internal conv kernel optimization study measured +43% throughput on
-    # MI355X gfx950 from this same trick.
+    # gfx950 from this same trick.
     #
     # We pad by exactly 16 bytes (8 halves) -- not 4 -- to preserve
     # 16-byte alignment for ``ds_write_b128``/``ds_read_b128`` (vec8).
@@ -1765,7 +1726,6 @@ def build_unified_attention_2d_tiled(
     K_LDS_DTYPE = FP8E4M3 if FP8_MFMA_QK else dtype
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
-    Q_BYTES = BLOCK_M * HD * 2
     # Head-dim width of one K slice (spec.k_slice_hd), so k_groups = HD // this.
     # It sets the K_lds row stride and therefore the QK read's LDS bank spread;
     # see the spec field docstring. Validated against head_size and the QK k-step
@@ -1780,34 +1740,46 @@ def build_unified_attention_2d_tiled(
     RING_DEPTH = spec.ring_depth
     K_SLICE_SLOTS = RING_DEPTH
     K_SLICED_ACTIVE = K_SLICED_RING and USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
-    # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
-    K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
-    K_BUF_BYTES = (T * K_SLICE_HD if K_SLICED_ACTIVE else T * HD) * K_LDS_ELEM_BYTES
     # Number of K_lds double-buffer slots. Default 2 (next-tile prefetch overlaps
     # softmax+PV). The OCCUPANCY lever single-buffers K (1 slot) to cut loop LDS
     # from 48KB -> 32KB and reach 2 wg/CU; the next-K issue is then ordered after
     # a post-QK LDS-read drain to close the shared-slot DMA race.
     K_BUFS = K_SLICE_SLOTS if K_SLICED_ACTIVE else (1 if K_SINGLE_BUF else 2)
-    K_TOTAL_BYTES = K_BUFS * K_BUF_BYTES
-    # Q can alias K_lds when (a) the dtypes match and (b) it fits in the
-    # full K_lds region (both slots). When ``BLOCK_M <= T`` Q fits in one
-    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills
-    # into K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather +
-    # store use ``(buf, row, col)`` indexing in both cases.
+    K_HBM_DIRECT = spec.use_k_hbm_direct
+    # The shape K_lds is allocated with. It is the one source for the slot byte
+    # stride and for where Q is staged, so both follow the buffer that actually
+    # exists rather than the logical K tile: the sliced-K ring holds only a
+    # head-dim slice per row, and use_k_hbm_direct allocates a one-element stub
+    # per buffer.
+    if K_SLICED_ACTIVE:
+        K_LDS_SHAPE, K_LDS_NAME = (K_BUFS, T, K_SLICE_HD), "KldsS"
+    elif K_HBM_DIRECT:
+        K_LDS_SHAPE, K_LDS_NAME = (K_BUFS, 1, 1), "KldsStub"
+    else:
+        K_LDS_SHAPE, K_LDS_NAME = (K_BUFS, T, HD), "Klds"
+    _, K_LDS_ROWS, K_LDS_ROW_ELEMS = K_LDS_SHAPE
+    # Bytes of one K_lds slot.
+    K_BUF_BYTES = K_LDS_ROWS * K_LDS_ROW_ELEMS * (type_bits(K_LDS_DTYPE) // 8)
+    # Q is staged through K_lds only when every slot holds full ``[T, HD]`` K
+    # rows. A K_lds without them (the sliced-K ring, the K stub) reads Q
+    # straight from global memory rather than falling back to a Q_lds slab.
+    K_LDS_HAS_FULL_ROWS = K_LDS_ROWS == T and K_LDS_ROW_ELEMS == HD
+    Q_DIRECT_GLOBAL = spec.use_q_direct_global or not K_LDS_HAS_FULL_ROWS
+    # Q can alias K_lds when (a) the dtypes match and (b) the K_lds rows of all
+    # slots hold the ``BLOCK_M`` Q rows. When ``BLOCK_M <= T`` Q fits in one
+    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills into
+    # K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather + store use
+    # ``(buf, row, col)`` indexing in both cases, which the full-rows rule above
+    # guarantees matches the allocated layout.
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
-    Q_DIRECT_GLOBAL = K_SLICED_ACTIVE or spec.use_q_direct_global
     Q_ALIAS_K = (
-        (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
+        (not Q_DIRECT_GLOBAL)
+        and (K_LDS_DTYPE == dtype)
+        and BLOCK_M <= K_BUFS * K_LDS_ROWS
     )
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
-    K_HBM_DIRECT = spec.use_k_hbm_direct
-    if K_SLICED_ACTIVE:
-        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, K_SLICE_HD], name_hint="KldsS")
-    elif K_HBM_DIRECT:
-        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, 1, 1], name_hint="KldsStub")
-    else:
-        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
+    K_lds = b.smem_alloc(K_LDS_DTYPE, list(K_LDS_SHAPE), name_hint=K_LDS_NAME)
     V_BUFS = 1  # single-buffer V (race-free: see comment above)
     # ---- V_lds bank-deconflict swizzle (HIPDNN_GFX942_SWIZZLE_VLDS) ----
     # The plain-atom PV B-operand is read with 4 strided ``ds_read_u16`` loads
@@ -2148,8 +2120,8 @@ def build_unified_attention_2d_tiled(
         K_fp8_lds = b.smem_alloc(FP8E4M3, [2, T, HD], name_hint="Kfp8lds")
         V_fp8_lds = b.smem_alloc(FP8E4M3, [1, T, HD], name_hint="Vfp8lds")
     if Q_DIRECT_GLOBAL:
-        # Sliced-K ring is intentionally smaller than a full Q tile; Q is
-        # gathered directly from global into Q32_reg below and never uses LDS.
+        # Q is gathered directly from global into Q32_reg below and never uses
+        # LDS (the sliced-K ring and the K stub have no full K rows to alias).
         Q_lds = K_lds
     elif Q_ALIAS_K:
         # Reuse K_lds[0] (and K_lds[1] if BLOCK_M > T) as Q-load scratch.
@@ -3839,6 +3811,7 @@ def build_unified_attention_2d_tiled(
         if K_HBM_DIRECT and not K_FP8_MFMA:
             # direct-HBM K via buffer_load (HW OOB->0). Causal mask
             # already zeros past-seq keys, so no software bounds-select (saves VALU).
+            # An i32 offset into key_rsrc, so the spec refuses use_i64_kv_addr with it.
             _lin = b.add(b.mul(k_row, b.const_i32(HD)), k_off)
             _vo, _ = paged_kv_desc.offset(
                 b, tile_idx=_cur_kv_tile[0], linear_half=_lin, kv_head=kv_head_idx
@@ -4911,7 +4884,7 @@ def build_unified_attention_2d_tiled(
                         score = b.fadd(score, add_term)
                     if USE_QQ_BIAS:
                         # qq_bias[qp_r, key_rel_pos] with key_rel_pos = col - ctx.
-                        # Valid range 0 <= key_rel_pos < qq_bias_stride_0 AND
+                        # Valid range 0 <= key_rel_pos < qq_bias_stride0 AND
                         # qp_r is a non-padding query position. The padding-row
                         # guard is required because qb_start_pos can exceed
                         # cur_batch_query_len for the last Q-block of a sequence;
@@ -5833,7 +5806,7 @@ def build_unified_attention_2d_tiled(
     # ``Acc_lds`` is only [BLOCK_M, OUT_STRIPE_COLS] of the working dtype,
     # so the per-CTA epilogue LDS is ``BLOCK_M * 32 * 2`` bytes -- a 75-87%
     # reduction vs the previous ``BLOCK_M * HD * 4`` F32 buffer. That LDS
-    # savings is what gives MI355X room for 3 WGs/CU on prefill workloads
+    # savings is what gives gfx950 room for 3 WGs/CU on prefill workloads
     # (the documented Triton ``num_warps=4`` BLOCK_M=128 configuration runs
     # at 3-4 WGs/CU; we now match that occupancy class).
     N_TILES_PER_STRIPE = OUT_STRIPE_COLS // MFMA_N
@@ -5931,7 +5904,7 @@ def build_unified_attention_2d_tiled(
         # After the O stripes, not before: emitted ahead of them, the LSE store
         # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
         # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
-        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # LSE-off on gfx942 / gfx950 (ROCm 10). Here the O ISA matches LSE-off.
         # Slot r is row wave_row_base + _in_warp_row(r), shared by the 16
         # lane_col lanes (_warp_xor_reduce_sum). Lanes 0/16/32/48
         # (lane_col == 0) write; each owns REGS_PER_LANE rows.
@@ -6078,7 +6051,7 @@ def _build_gfx942_4warp_gqa_lean(
     bt_stride_p = b.param("block_table_stride", I32)
     # Unused here; declared so every later param sits where the shared 2D
     # launch signature packs it.
-    b.param("qq_bias_stride_0", I32)
+    b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
@@ -6407,7 +6380,7 @@ def build_gfx942_4warp_gqa(
     bt_stride_p = b.param("block_table_stride", I32)
     # Unused here; declared so every later param sits where the shared 2D
     # launch signature packs it.
-    b.param("qq_bias_stride_0", I32)
+    b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}

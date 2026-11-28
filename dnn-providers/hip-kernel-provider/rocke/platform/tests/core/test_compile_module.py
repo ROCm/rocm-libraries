@@ -13,14 +13,14 @@ the argument lists their KernelDefs declare.
 from __future__ import annotations
 
 import importlib
-import struct
 from unittest import mock
 
 import pytest
-
+from rocke.analysis import parse_kernel_arguments, parse_kernel_fields
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Region
 from rocke.helpers import KernelModule, ModuleArtifact, compile_module
 from rocke.runtime.comgr import ComgrTimings
+from rocke.tests.llc import code_object_notes
 
 compile_impl = importlib.import_module("rocke.helpers.compile")
 comgr_impl = importlib.import_module("rocke.runtime.comgr")
@@ -193,37 +193,11 @@ def test_link_entry_point_needs_two_modules() -> None:
 # --- real COMGR: one object, both kernels --------------------------------------
 
 
-_NT_AMDGPU_METADATA = 32
-
-
-def _metadata_notes(elf: bytes) -> list:
-    """Every NT_AMDGPU_METADATA payload in an ELF64 LE object, msgpack-decoded."""
-    msgpack = pytest.importorskip("msgpack")
-    (shoff,) = struct.unpack_from("<Q", elf, 0x28)
-    shentsize, shnum = struct.unpack_from("<HH", elf, 0x3A)
-    notes = []
-    for i in range(shnum):
-        (sh_type,) = struct.unpack_from("<I", elf, shoff + i * shentsize + 4)
-        if sh_type != 7:  # SHT_NOTE
-            continue
-        offset, size = struct.unpack_from("<QQ", elf, shoff + i * shentsize + 0x18)
-        pos = offset
-        while pos < offset + size:
-            namesz, descsz, ntype = struct.unpack_from("<III", elf, pos)
-            pos += 12
-            name = elf[pos : pos + namesz].rstrip(b"\0")
-            pos += (namesz + 3) & ~3
-            if ntype == _NT_AMDGPU_METADATA and name == b"AMDGPU":
-                notes.append(msgpack.unpackb(elf[pos : pos + descsz], raw=False))
-            pos += (descsz + 3) & ~3
-    return notes
-
-
-def _signature(kernel: dict) -> list:
+def _signature(arguments) -> list:
     return [
-        (a[".value_kind"], a[".size"], a[".offset"], a.get(".name"))
-        for a in kernel[".args"]
-        if not a[".value_kind"].startswith("hidden_")
+        (a.value_kind, a.size, a.offset, a.name)
+        for a in arguments
+        if not a.value_kind.startswith("hidden_")
     ]
 
 
@@ -242,9 +216,11 @@ def test_compile_module_emits_one_object_exporting_every_kernel(arch: str) -> No
         module, arch=arch, capture_ir_text=False, backend="python"
     )
 
-    notes = _metadata_notes(artifact.hsaco)
-    assert len(notes) == 1, "the HIP runtime reads exactly one metadata note"
-    kernels = {k[".name"]: k for k in notes[0]["amdhsa.kernels"]}
+    notes = code_object_notes(artifact.hsaco)
+    assert (
+        notes.count("NT_AMDGPU_METADATA") == 1
+    ), "the HIP runtime reads exactly one metadata note"
+    kernels = parse_kernel_arguments(notes)
     assert set(kernels) == {"toy_module_scale", "toy_module_merge"}
     assert _signature(kernels["toy_module_scale"]) == [
         ("global_buffer", 8, 0, "X"),
@@ -259,8 +235,10 @@ def test_compile_module_emits_one_object_exporting_every_kernel(arch: str) -> No
         ("by_value", 4, 24, "N"),
     ]
     # Each kernel keeps its own LDS pool through the link.
-    for name in kernels:
-        assert kernels[name][".group_segment_fixed_size"] == 256
+    assert {
+        name: fields["group_segment_fixed_size"]
+        for name, fields in parse_kernel_fields(notes).items()
+    } == {"toy_module_scale": "256", "toy_module_merge": "256"}
 
     # Every kernel lowers to exactly the text it lowers to alone.
     for kernel, text in zip(module.kernels, artifact.llvm_texts):

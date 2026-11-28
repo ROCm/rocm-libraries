@@ -8,7 +8,7 @@ derived relative to each file, so this tree is copy-able verbatim.
 
 Install test dependencies from the platform directory with
 `python -m pip install -r requirements.txt` or `python -m pip install -e '.[dev]'`.
-Both include `ml_dtypes>=0.6.0`, which supplies independent FP4/FP6/FP8 reference
+Both include `ml_dtypes>=0.5.0`, which supplies independent FP4/FP6/FP8 reference
 types. Host tests that need this optional runtime dependency use
 `pytest.importorskip`; a minimal authoring installation can run the remaining
 tests. Required gfx1250 numerical validation needs `ml_dtypes` installed and
@@ -31,7 +31,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library python tests/test_rocke.p
 
 That command covers one test file. A default `python tests/run_all.py` additionally
 runs the corpus validity/domain gates and the full pytest suite, including a
-`ROCKE_BACKEND=both` pass when the extension is importable. Report the actual
+`ROCKE_BACKEND=both` pass when the extension is importable, and the backend
+access-width gate, a compile check kept out of pytest discovery. Report the actual
 command and any disabled or skipped stages; a runner invocation with
 `--no-pytest` or `--no-gate` establishes only its enabled stages.
 
@@ -65,9 +66,9 @@ for what is actually exercised vs. manual/diagnostic/demo.
 
 | Layer | Python (pytest-collected) | C++ / cross-language |
 |---|---|---|
-| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
+| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (built as `rocke_ir_lower_cli`, not a test: the C++ HIP lowerer of the both-engine HIP checks where the binding is absent) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
-| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
+| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
@@ -158,14 +159,19 @@ the tier and CTest entry of a new test, see
    pytest stage reports a skip and GREEN does not imply that it ran. No configured
    test build or no built registered native tests is reported explicitly as a
    skipped stage.
-2. **Diagnostics** (opt-in, not in the gate): `run_diff.py --ir` (IR-canonical
-   diff), `fuzz_diff.py`, `ir_artifact_diff.py`.
+2. **Diagnostics** (opt-in, not in the gate): `fuzz_diff.py`,
+   `ir_artifact_diff.py`, and `run_diff.py --mode ir --canonical`, which
+   separates structural IR drift from SSA-id renumbering. The serialized-IR
+   byte comparison (`--mode ir`) is part of the gate: `check_byte_identity.py`
+   runs it as a lane.
 3. **GPU / manual numeric lanes** (need a HIP device; skipped/not-collected
    otherwise): `differential/numeric.py`, `instances/test_rocke_numeric.py`.
 4. **Manual C++ demos / tools** (not built or registered by CMake/CTest --
-   compile by hand against `librocke_core.a`): `core/ir_lower_cli.cpp`,
-   `instances/jit_demo.cpp`, `instances/gemm_jit_demo.cpp`, plus the build-only
-   `core/smoke.cpp`.
+   compile by hand against `librocke_core.a`): `instances/jit_demo.cpp`,
+   `instances/gemm_jit_demo.cpp`, plus the build-only `core/smoke.cpp`.
+   `core/ir_lower_cli.cpp` is built (`rocke_ir_lower_cli`) and installed but is
+   not a test itself; the `rocke_hip_source_identity` and
+   `rocke_hip_lowering_parity` CTests drive it.
 
 ### Arch-domain reproducibility CTest
 
@@ -304,24 +310,86 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 
 | CTest entry | Scope | Tier / resources |
 |---|---|---|
-| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | quick and higher |
+| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | standard and higher |
+| `rocke_library_attention_bwd_cpu_pytest` | Attention backward host units (`-m "not gpu"`): the backward tuning registries and serving policy, the plan, tile and worklist models, the host checks and refusals, and the dense backward kernel's IR. Takes the compiler environment, so a missing `llvm-objdump` fails instead of skipping. The backward cases it does not run stay recorded in `rocke.tests.pending_lanes`: the slow and the GPU-only files, the device cases of the files it runs (no backward GPU entry exists yet), the files with cases that skip on every CI runner, and the compile-cache cases, whose cache roots assume the source tree (`test_attention_bwd_hsaco_cache.py`, and the one case of `test_attention_bwd_compile.py` the entry deselects). Not registered on Windows | standard and higher; four workers |
 | `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate |
-| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
+| `rocke_library_counted_compiler_gate` | Representative compile/final-ISA/resource subset and canonical full-barrier twins | comprehensive and full; compiler preflight required |
 
-The compiler gate preserves the resource table's existing qualification contract:
-LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/parity
-profiles, not qualified code-object resource lanes; their scheduling and register
-allocation cannot be judged against thresholds calibrated on the reference compiler.
-The two counted gates share the `rocke_counted_sync_gate` CTest resource
-lock. The installed compiler gate forces required mode; a mismatched compiler,
-missing target support, or missing `llvm-objdump` fails once at preflight. The
-source runner treats that gate as optional unless passed
-`--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
-plain `GREEN`.
+Tests use the loaded compiler
+([the test compiler rule](../dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+The compiler gate's resource thresholds keep the toolchain they were calibrated on
+until AICK-3320 unpins them: on any other LLVM flavor (requested or run by the
+loaded compiler) or comgr its preflight skips
+every row, naming the difference, as its `rocke.tests.pending_lanes` record says,
+and the session ends with exit 77, which the installed entry reports as a skip; the
+source runner reports `INCOMPLETE`, never plain `GREEN`, or a failure when passed
+`--require-compiler-gate`. The two counted gates share the
+`rocke_counted_sync_gate` CTest resource lock. The installed compiler gate forces
+required mode for the rest: a toolchain query that fails, a reference comgr without
+a gate arch, or a missing `llvm-objdump` fails once at preflight. The source runner
+treats those as an optional skip unless passed `--require-compiler-gate`.
 See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
 for the reusable placement contract.
+
+## Dense-attention host contracts
+
+The shared dense spec and the concrete gfx950 host spec have native tests because
+validation reasons, kernel identity, LDS admission and launch arguments are not
+all visible in emitted IR:
+
+- `rocke_attention_dense_spec` checks the architecture-neutral spec. Its subclass
+  hook fixtures supply recorded answers; they do not implement a gfx950 spec.
+- `rocke_attention_dense_gfx950_spec` calculates the concrete gfx950 answers from
+  raw spec fields: validation/support reasons, resolved knobs, runtime fields,
+  names, LDS, grids, thread blocks, signatures and runtime scalar values.
+- `rocke_sha256` checks the digest used in tuned kernel names. For float values
+  in those names, the spec uses the same formatter as the IR printer, serializer
+  and HIP lowerer; `rocke_float_format` tests that formatter.
+
+The Python drift guard and native tests consume
+`golden/attention_dense_spec_vectors.json` and
+`golden/attention_dense_gfx950_spec_vectors.json`. After an intended Python change,
+regenerate the vectors and update the native implementation in the same change.
+From `platform/`:
+
+```bash
+PYTHONPATH=python:../library python ../library/tests/test_attention_dense_spec_vectors.py --regenerate
+python -m pytest -q ../library/tests/test_attention_dense_spec_vectors.py
+cmake --build <build> --target rocke_attention_dense_spec rocke_attention_dense_gfx950_spec rocke_sha256 rocke_float_format
+ctest --test-dir <build> -R '^(rocke_attention_dense_spec|rocke_attention_dense_gfx950_spec|rocke_sha256|rocke_float_format)$' --output-on-failure
+```
+
+The native contract binaries embed their vectors and run after relocation without
+source-tree data paths or pybind. They are quick/ffm-quick checks of a shipped
+kernel's identity and launch contract; they do not compile or run GPU kernels.
+The Python drift guard runs in the sharded standard `rocke_library_attention_cpu_pytest`
+entry. Provider installs that ship the shared engine run that entry in strict C++ mode.
+The native gfx950 test also accepts `--vectors FILE` for live host comparisons.
+The gfx950 fixture stores the common problem once and only the raw overrides in
+each case. Expected signatures are shared by index; the native test builds its
+own signature from the input spec rather than using that index to construct it.
+
+The C spec uses the annotations' integer, boolean, double and optional-string
+types, not arbitrary Python numeric coercions. In particular, preserve raw
+optional presence: `None` and an explicit value can resolve identically but have
+different codegen-name hashes. The host runtime-argument preparation separately
+checks the persistent fast-division dividend limit; passing `supports` does not
+imply that those values can be prepared.
+
+With `kv_storage_dtype="fp8e4m3"`, only K and V are FP8. The signature adds
+`k_scale` and `v_scale` (both `f32`) immediately after `scale`, before the shape
+arguments. These scales are supplied by the caller, not by `runtime_args`.
+The K/V address bound uses the stored element width; Q/O remain at the compute
+dtype. The host cases include the one- versus two-byte limit and plain causal
+D64 paging without a sliding window. For FP8 K/V with attention sinks, the
+vectors also pin which rejection wins: an invalid KV segment count or an
+incompatible tile is reported before the unsupported sinks.
+
+This port is host metadata only. The gfx950 dense C++ GPU builders and their
+paired IR emitters are separate work; these tests do not establish builder
+byte identity or GPU numerical correctness.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 
@@ -376,18 +444,20 @@ divergence - the Python builder correctly rejects wave32 WMMA on gfx942.)
 `run_all.py --build-root <build>` builds all configured targets before pytest,
 then obtains each native parity executable from CTest, as listed in
 `NATIVE_PARITY_TESTS`: `rocke_storage` (`ROCKE_STORAGE_TEST`),
-`rocke_ir_types` (`ROCKE_IR_TYPES_TEST`), `rocke_nontemporal_hip`
+`rocke_ir_types` (`ROCKE_IR_TYPES_TEST`), `rocke_float_format`
+(`ROCKE_FLOAT_FORMAT_TEST`), `rocke_nontemporal_hip`
 (`ROCKE_NONTEMPORAL_HIP_TEST`) and `rocke_unsigned_int_ops`
 (`ROCKE_UNSIGNED_INT_OPS_CLI`). Both pytest passes receive those paths, so the
-storage IR/HIP parity, serialization, C++ builder type-rule parity, nontemporal
-HIP-source parity and unsigned integer op C API parity tests run automatically.
+storage IR/HIP parity, serialization, C++ builder type-rule parity, float repr
+parity, nontemporal HIP-source parity and unsigned integer op C API parity
+tests run automatically.
 The installed `rocke_pytest_*` ctest entries set `ROCKE_UNSIGNED_INT_OPS_CLI` themselves.
 `--config` selects the native test configuration (default `Release`). A build
 or fixture-discovery failure stops the runner instead of silently skipping
 coverage.
 
 An explicit `ROCKE_STORAGE_TEST` / `ROCKE_IR_TYPES_TEST` /
-`ROCKE_NONTEMPORAL_HIP_TEST` / `ROCKE_UNSIGNED_INT_OPS_CLI` overrides discovery
+`ROCKE_FLOAT_FORMAT_TEST` / `ROCKE_NONTEMPORAL_HIP_TEST` / `ROCKE_UNSIGNED_INT_OPS_CLI` overrides discovery
 for that binary and must name an existing executable; it does not skip the
 configured build. With no configured build or explicit override, the runner
 reports that parity as skipped; direct pytest invocations can use the same
@@ -451,8 +521,8 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, that each committed lock pins its adapter's cohort, and that each installed bundle records the enrolled cohort and its frozen runner accepts the current request | Host suite; skips the bundle checks for a bundle that is not installed |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
-| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; five minutes per variant |
-| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; five minutes per variant |
+| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; CTest limit in the [GPU reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection) |
+| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; CTest limit in the [GPU reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection) |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of every published
 variant and is on by default in provider builds.
@@ -466,9 +536,6 @@ CMake uses the standard archives and committed locks; verify replacement
 candidates with the offline CLI using explicit `--bundle` and `--lock` paths.
 Each variant retains a separate archive, lock, and installed payload.
 
-The optional `conv_reference/check_torch_reference.py` and
-`sdpa_reference/check_torch_reference.py` are explicit offline oracle audits.
-They are excluded from installation and normal pytest discovery.
 For adding cases, replacing bundles, or enrolling targets, follow the
 [authoritative reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md).
 See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)

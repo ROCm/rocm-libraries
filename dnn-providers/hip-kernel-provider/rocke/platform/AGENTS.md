@@ -62,9 +62,8 @@ govern what you commit and how you describe it.
   comments and commit messages remain qualitative because measured claims there become
   stale and are difficult to review in context.
 - **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
-  other products/software. Do not make unsupported marketing, general superiority,
-- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
   other products/software. Do not make unsupported marketing, general superiority, performance,
+  availability, or roadmap claims. Scoped technical comparisons that satisfy the evidence
   rule above are permitted; marketing language is not. **Protect AMD.**
 - **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
   external Git issue links are OK.
@@ -171,6 +170,8 @@ See [installed CTest environment contracts](../TESTING.md#514-installed-ctest-en
 The ownership map and inventory-comparison recipe are in
 [`tests/README.md`](tests/README.md#cmake-registration-ownership).
 
+### Pull requests
+
 Before updating a PR, run the top-level pre-commit hooks over the PR range from
 the repository root:
 
@@ -186,49 +187,48 @@ review:
 - Put a standalone issue reference in the PR description, e.g.
   `ISSUE ID : AICK-1470`, `JIRA ID : TESTAUTO-6039`, `Fixes #123`, or another
   bot-accepted GitHub issue reference.
-- If any source/code file changes, include an accompanying test file named like
-  `test_<name>.py`, `test_<name>.cpp`, or `<name>_test.*`. For compatibility
-  wrappers or wiring-only Python changes, add a lightweight CPU-only delegation
-  or import test rather than relying on an existing differently named test.
-- Keep the Test plan checklist current and mention any deferred lane explicitly.
+- No tests for the sake of tests. In the PR's Testing section, list the existing
+  tests your change affects and their result. Rank the risks the change carries;
+  a risk's importance decides how much testing it gets. Add or extend a test
+  only for a risk no existing test or case covers, and say why nothing covers
+  it. Show the evidence (log excerpt, run record, GPU output), or say why no
+  test is needed. A PR that changes no code writes
+  `Testing: none needed: no code changed`.
+- Do not add an import-only test to satisfy the PR bot: its "Unit Test" check is
+  a warning, and the Testing section answers it.
+- Keep the Testing section current and mention any deferred lane explicitly.
+
+### Virtualenv for GPU and numeric lanes
 
 Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
-so torch, numpy, and pytest resolve from the same interpreter without the
-relative-path guard scanning local venv metadata. For now, use `~/rocke-venv`:
+so numpy and pytest resolve from the same interpreter without the relative-path
+guard scanning local venv metadata. For now, use `~/rocke-venv`:
 
 ```bash
 python3 -m venv ~/rocke-venv
 . ~/rocke-venv/bin/activate
-python - <<'PY' || python -m pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
-import torch
-print(torch.__version__, torch.version.hip)
-PY
 python -m pip install -r requirements.txt
-python - <<'PY'
-import torch
-print(torch.__version__, torch.version.hip)
-PY
 ```
 
-`requirements.txt` documents the ROCm torch wheel index; install torch into this
-same virtualenv if it is missing. Do **not** use the default PyPI CPU torch for
-GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
+On-GPU lanes also need a HIP-visible device + ROCm `comgr`. Torch is not needed
+(see "No torch" below); its legacy cases skip without it. To run them anyway,
+install a ROCm torch wheel matching the system ROCm into the same virtualenv
+(from the PyTorch wheel index named after that ROCm release), never the default
+PyPI CPU torch, and check it:
 
-### torch is OPTIONAL
+```bash
+python -c 'import torch; print(torch.__version__, torch.version.hip)'
+```
 
-rocke is consumed downstream by PyTorch, so a hard dependency on torch would be
-circular. torch is therefore **optional** and the only hard dep is `numpy`
-(`pyproject.toml` / `requirements.txt`). torch is needed only for three lanes:
+### No torch
 
-1. the `torch.fx` fusion frontend (`torch_backend.py`, `helpers/fuse.py`
-   graph capture);
-2. torch-tensor launch integration (`runtime/torch_interop.py`);
-3. on-GPU numeric verification against torch eager.
-
-Everything else runs torch-free: IR build, lower, `comgr` compile, numpy launch,
-the byte-identity gate, and the CPU test suite (torch-only tests `importorskip`;
-GPU tests skip via a torch-free `/dev/kfd` probe). `tests/run_all.py` is GREEN
-with neither torch nor a GPU installed.
+rocke does not use torch; the only hard dep is `numpy` (`pyproject.toml` /
+`requirements.txt`). The rule, its check (`rocke_no_torch_check`) and the
+allowlist of the uses still being removed are in
+[`TESTING.md` §6](../TESTING.md#6-invariants--contracts). IR build, lower,
+`comgr` compile, numpy launch, the byte-identity gate, and the CPU test suite run
+torch-free (GPU tests skip via a torch-free `/dev/kfd` probe); `tests/run_all.py`
+is GREEN with neither torch nor a GPU installed.
 
 ### ROCm library discovery (libamd_comgr / libamdhip64)
 
@@ -310,6 +310,15 @@ GPU node.
 
 - **Byte-identity**: mirror every emission change in both engines; re-run the gate.
   If you intend to change emitted output, re-bless the golden in the same change.
+- **MMA operands go through the shared operand layer**: an MMA operand or result
+  reaches the instruction's register type only through `core/mma_operand.py` and
+  the forms and rows of `core/isa/matrix_operand_forms.py` / `matrix_calls.py`
+  (C++ twins `mma_operand_internal.h` / `matrix_calls_internal.h`; HIP through
+  `_mma_operand` / `h_mma_operand`). Never hand-write a cast, `bit_cast` or
+  `memcpy` for an MMA operand in a handler; a new atom is a catalog row
+  (`arch_specs.json` and `cpp/core/arch/data.cpp`), which the catalog gate in front
+  of every MMA route requires. See
+  [`dsl_docs/development/extending.md`](dsl_docs/development/extending.md) section 5.1.
 - **Relative paths only**: no file under `rocke/platform/` may hardcode an absolute repo
   path or a path escaping `rocke/platform/`. `tests/run_all.py` enforces this with a grep
   guard; keep anchors derived from `__file__` / `CMAKE_CURRENT_SOURCE_DIR`.
@@ -344,11 +353,10 @@ GPU node.
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
   *Note*: For non-`gfx950` targets, pass `target_architecture` and beware that some code
   paths still silently fall back to `gfx950` on non-GPU systems.
-- **torch is optional, never import it from a library to gain a side effect.**
-  numpy is the only hard dep. torch is needed only for the fusion frontend,
-  torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind
-  `importorskip` in tests and lazy/guarded imports in code. The ROCm-lib
-  resolver must keep discovering `comgr`/HIP without importing torch.
+- **No torch; never import it from a library to gain a side effect.** The rule
+  is in [`TESTING.md` §6](../TESTING.md#6-invariants--contracts) (see "No torch"
+  above). The ROCm-lib resolver must keep discovering `comgr`/HIP without
+  importing torch.
 
 ## Code style
 
@@ -370,6 +378,8 @@ invariants.
   `dsl_docs/architecture/authoring_model.md`.
 - For optimization work, follow
   `dsl_docs/optimization/runbook_compliance.md`.
+- For numerics questions (NaN, infinity, saturation, fp8 encodings,
+  conversions), use the dispatch table in `dsl_docs/numerics/README.md`.
 - If upstream work reveals a new optimization skill, lever, or reusable tactic,
   add it to the optimization skills docs under `dsl_docs/optimization/`.
 - Document every new optimization as a case-study analysis in the example folder
@@ -529,12 +539,14 @@ family's mirror lives in `library/cpp/`, not `cpp/`.
 |---|---|
 | `ROCKE_ARCH_DOMAIN` | `error` \| `warn` (default) \| `off` — what both engines do when a kernel demands an intrinsic the committed arch-domain table says the target cannot lower. `error` refuses the lowering (`ArchDomainError`) unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it; `off` skips the lookup. Any other value raises rather than falling back to the default, because a misspelling is always an attempt to change what the lane does. A wrong measurement is waived per cell, not worked around with this variable; see TESTING.md, the arch-domain gate |
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
-| `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
+| `ROCKE_CPP_STRICT` | `1` = the `cpp` backend raises instead of falling back to the Python engine when the C++ engine cannot lower a kernel, including when no shared `librocke` is found |
+| `ROCKE_REQUIRE_CPP_ENGINE` | `1` = a test run requires the C++ engine: a C++ case whose shared `librocke` is missing fails instead of skipping (`rocke.tests.lanes.skip_until_shared_engine`). The `rocke.tests.require_cpp_engine` pytest plugin sets it and `ROCKE_CPP_STRICT=1`; the installed pytest entries of a build that installs `librocke` beside the package load it |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (AUTO queries loaded COMGR: LLVM <=20, 21/22, 23, or 24; newer majors and unavailable evidence raise; explicit lanes support offline emission) |
 | `ROCKE_PLATFORM_TOOLS_DIR` | directory holding the platform `tools/` scripts (`rocke.assets.platform_tools_dir()`); the installed test payload's `conftest.py` sets it to its staged copy, so `rocke.tests.ir_validity` compiles with the same tool as a checkout. A directory without `check_ir_validity.py` raises rather than skipping the compile checks |
+| `ROCKE_PLATFORM_PARITY_DIR` | the platform parity-emitter directory (`rocke.assets.platform_parity_dir()`), where the library parity emitters load the shared emitter driver `_emit_common.py` from; the installed test payload's `conftest.py` sets it to its staged copy |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |
-| `ROCKE_ONLINE_LIB` / `ROCKE_REPLAY_CLI` | explicit portable-IR shared engine / standalone replay CLI; explicit paths never fall back |
-| `ROCKE_PROVENANCE_MANIFEST` | build-generated expected version/build ID for validating explicit native artifacts in a source-less installed test tree |
+| `ROCKE_ONLINE_LIB` / `ROCKE_REPLAY_CLI` | explicit shared engine (`librocke`) / standalone portable-IR replay CLI; explicit paths never fall back. A relative `ROCKE_REPLAY_CLI` is taken beside the `rocke` package (relative to the directory holding it, `rocke.assets.beside_package`), not the working directory. The name is historical: `ROCKE_ONLINE_LIB` selects the engine the default `cpp` backend lowers with (`rocke.core.native_engine`) as well as the portable-IR one, and without it an installed tree uses the `librocke` beside the `rocke` package. `ROCKE_ONLINE_LIB=none` gives the process no shared engine |
+| `ROCKE_PROVENANCE_MANIFEST` | build-generated expected version/build ID for validating native artifacts (`librocke`, the replay CLI) in a source-less installed test tree; the installed pytest entries set it. A relative value is taken beside the `rocke` package (`rocke.assets.beside_package`), not the working directory |

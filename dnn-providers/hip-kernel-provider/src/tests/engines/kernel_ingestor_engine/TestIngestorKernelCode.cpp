@@ -35,6 +35,7 @@
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 
 /**
  * @file TestIngestorKernelCode.cpp
@@ -55,6 +56,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using hip_kernel_provider::kernel_ingestor_engine::testing::buildPointwiseGraph;
+using hip_kernel_provider::kernel_ingestor_engine::testing::emptyDescriptorTree;
 using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
 using hipdnn_plugin_sdk::HipdnnPluginException;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
@@ -151,7 +153,7 @@ TEST(TestIngestorKernelCode, RejectsALibraryThatEscapesTheDescriptorTree)
 TEST(TestIngestorKernelCode, RejectsAKernelThatStillCarriesItsLaunches)
 {
     GuardHarness harness;
-    auto kernel = makeKpackKernel("/nonexistent", "/nonexistent", "absent.kpack");
+    auto kernel = makeKpackKernel(emptyDescriptorTree(), emptyDescriptorTree(), "absent.kpack");
     kernel.sources.emplace("decode", kernel.source);
     kernel.sources.emplace("merge", kernel.source);
     kernel.source = KernelSource{};

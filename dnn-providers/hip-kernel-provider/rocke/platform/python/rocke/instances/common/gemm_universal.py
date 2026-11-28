@@ -944,8 +944,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # emitter builds and runs fine: a 256x256 C tile is 128 KiB, enough to push
     # a tile that fits comfortably past every cap we have, which silently
     # removed the deepest tiles from cshuffle sweeps. Counted as ``max`` only
-    # where ``gemm.cshuffle_lds_aliased`` is set (gfx1250, where it has run on
-    # silicon); the other targets keep the sum until they have been run with it.
+    # where the arch data sets ``gemm.cshuffle_lds_aliased``, which it does once
+    # the aliased GEMM has run on that arch; the other targets keep the sum.
     #
     # Two flags opt out, and both really are additive. ``cshuffle_no_alias``
     # marks the C tile exclusive so the packer gives it its own byte range.

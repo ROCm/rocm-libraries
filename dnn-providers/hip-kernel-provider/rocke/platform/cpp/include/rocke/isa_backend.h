@@ -38,6 +38,7 @@
 #define ROCKE_ISA_BACKEND_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "rocke/ir.h"
@@ -104,6 +105,16 @@ rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err);
 /* True if rocke_backend_for(gfx) would succeed: `gfx` has a row of its own, or
  * its arch_specs.json row points at a generic target that has one. */
 bool rocke_backend_is_known(const char* gfx);
+
+/* ------------------------------------------------------- MMA catalog gate */
+
+/* Python ISABackend.require_catalog_lists: the one gate in front of every MMA
+ * lowering route, LLVM and HIP. Returns false when target `gfx`'s MMA catalog
+ * lists `op_id` (for a builder-only K=128 f8f6f4 op_id, the row of the same
+ * instruction; Python BUILDER_ONLY_MMA_OP_IDS). Otherwise writes "tile.<op_id>
+ * is not available on <gfx>: its MMA catalog does not list it" into `out` (`cap`
+ * bytes) and returns true. An unknown or NULL `gfx` lists nothing. */
+bool rocke_isa_mma_catalog_refusal(const char* gfx, const char* op_id, char* out, size_t cap);
 
 /* ------------------------------------------------------- module preamble */
 

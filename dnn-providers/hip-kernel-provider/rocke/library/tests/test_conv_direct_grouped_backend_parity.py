@@ -66,12 +66,19 @@ from kernels.conv.engine_bridge import (
     lower_conv_implicit_gemm,
 )
 from rocke.core import backend as bk
+from rocke.tests.lanes import BUILD_VARIANT, skip_until_reason
 
 _HAS_ENGINE = importlib.util.find_spec("rocke_library_engine") is not None
 
 #: The refusal of groups * cpg = groups * kpg = 2^31 (channel_totals_reason).
 _TOTALS_2_31 = "groups * cpg = 2147483648 and groups * kpg = 2147483648 must fit in i32"
-_SKIP = "" if _HAS_ENGINE else "rocke_library_engine extension not importable"
+_SKIP = (
+    ""
+    if _HAS_ENGINE
+    else skip_until_reason(
+        BUILD_VARIANT, reason="rocke_library_engine extension not importable"
+    )
+)
 
 
 def _p4(dtype, N=2, H=13, W=17, groups=32, K=3):
@@ -655,17 +662,20 @@ class TestF32BuilderParity(unittest.TestCase):
                 self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
 
 
-@unittest.skipIf(bool(_SKIP), _SKIP)
 class TestCppLowererOnF32Ir(unittest.TestCase):
     """The C++ lowerer is family-agnostic, so it must lower the Python-built
     fp32 / tf32 kernels to the same ``.ll`` as the Python lowerer -- the XF32
     MFMAs on gfx942, the BF16x3 split on gfx950 and the exact fp32 atoms.
     Each lowerer is called directly, so a C++ refusal fails here instead of
-    passing as a Python fallback."""
+    passing as a Python fallback. It needs the shared engine, not the library
+    module."""
 
     def test_lowerers_agree(self):
         from rocke.core.ir_serialize import serialize
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+        from rocke.tests.engines import native_engine_or_skip
+
+        native_engine_or_skip()  # before the sweep: no case runs without it
 
         cases = []
         for arch, m, k in _TF32_ATOMS:

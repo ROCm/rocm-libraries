@@ -21,6 +21,8 @@ Output row layout (matches CK Tile's reference)::
  yscale[out_row] = dynamic per-row scale
  where i_expert = topk_ids[i_token, i_topk]
 
+An infinite input: see "Dynamic scales" in :mod:`rocke.helpers.quant`.
+
 The kernel launches one CTA per output row; ``block_id_x`` ranges
 over ``[0, topk * tokens)`` and we decode ``(i_topk, i_token)`` from
 the linear index. The expert id is read once per CTA (``tid == 0``
@@ -75,6 +77,7 @@ from ...helpers.quant import (
     quant_ir_type,
     quant_max_abs,
     quantize_scalar_f32,
+    validate_quant_out_dtype,
 )
 from ...helpers.reduction import block_lds_reduce
 from ...helpers.spec import (
@@ -204,22 +207,9 @@ def is_valid_spec(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Tuple[bool,
     except KeyError as e:
         return False, str(e)
 
-    if spec.out_dtype not in ("i8", "fp8e4m3", "bf8e5m2"):
-        return False, f"unsupported out_dtype {spec.out_dtype!r}"
-
-    # fp8/bf8 output goes through ``v_cvt_pk_{fp8,bf8}_f32`` (the
-    # ``llvm.amdgcn.cvt.pk.{fp8,bf8}.f32`` intrinsic), which only exists
-    # on the CDNA (gfx9xx) ISA — RDNA3.5 (gfx1151) has no fp8/bf8 pack
-    # conversion op, so selection would abort with an uncatchable
-    # ``LLVM ERROR: Cannot select``. Reject it as a clean spec error so
-    # callers get a structured reason. The ``i8`` path uses
-    # ``v_cvt_f32_to_i8`` (available everywhere) and stays wave32-valid.
-    if spec.out_dtype in ("fp8e4m3", "bf8e5m2") and target.family != "cdna":
-        return False, (
-            f"out_dtype {spec.out_dtype!r} needs the CDNA-only "
-            f"v_cvt_pk_{{fp8,bf8}}_f32 conversion; {arch} (family "
-            f"{target.family!r}) has no fp8/bf8 pack op -- use out_dtype='i8'"
-        )
+    ok, why = validate_quant_out_dtype(spec.out_dtype, arch)
+    if not ok:
+        return False, why
     if spec.topk < 1:
         return False, f"topk must be >= 1 (got {spec.topk})"
     if spec.experts < 1:
@@ -271,8 +261,8 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
     only cross-lane operation is :func:`block_lds_reduce` (an LDS tree
     over all ``block_size`` lanes, no wave shuffle), so the kernel is
     wave-size agnostic and correct on wave64 (gfx950) and wave32
-    (gfx1151). The default ``"gfx950"`` keeps the wave64 build
-    byte-identical.
+    (gfx1151). For fp8 / bf8 output ``arch`` also picks the bound of its
+    encoding (:func:`quant_max_abs`).
     """
     ok, why = is_valid_spec(spec, arch)
     if not ok:
@@ -280,7 +270,7 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
 
     io_ty = io_ir_type(spec.dtype)
     q_ty = quant_ir_type(spec.out_dtype)
-    qmax = quant_max_abs(spec.out_dtype)
+    qmax = quant_max_abs(spec.out_dtype, arch=arch)
 
     BS, VEC, N = spec.block_size, spec.vec, spec.n_per_block
     topk = spec.topk
@@ -414,7 +404,7 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
     # build a QY tile distribution identical to the X distribution,
     # populate a :class:`StaticDistributedTensor` of dtype ``q_ty`` with
     # the already-scaled f32 chunk values, and let :func:`store_tile`
-    # emit the saturating cvt + ``vec_pack`` + one coalesced
+    # emit the cvt + ``vec_pack`` + one coalesced
     # ``global_store_vN`` per access -- same QY bytes, no hand-rolled
     # ``byte_off`` math.
     chunks = spec.elems_per_thread // VEC
@@ -444,7 +434,11 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])
                 q = quantize_scalar_f32(
-                    b, y_f32, inv_scale=inv_yscale, qdtype=spec.out_dtype
+                    b,
+                    y_f32,
+                    inv_scale=inv_yscale,
+                    qdtype=spec.out_dtype,
+                    arch=arch,
                 )
                 col = b.add(n_off, b.const_i32(i))
                 qy_tile.store_scalar(b, b.const_i32(0), col, value=q)

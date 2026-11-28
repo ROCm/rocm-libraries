@@ -6,7 +6,7 @@
 
 | IR `Type` | Bits | Range (approx.) | Notes |
 |------------|-----:|-----------------------|----------------------------------------|
-| `FP8E4M3` | 8 | +/- 448 | Round-to-nearest-even, hardware clamp |
+| `FP8E4M3` | 8 | +/- 240 (gfx942, FNUZ), +/- 448 (OCP) | Round-to-nearest-even, no saturation |
 | `BF8E5M2` | 8 | +/- 57344 | 5 exponent bits; less precision |
 | `I8` | 8 | -128..127 | Saturating cast from f32 |
 
@@ -14,19 +14,25 @@ The lookup helpers in `helpers/quant.py`:
 
 ```text
 QDType # Literal["i8", "fp8e4m3", "bf8e5m2"] (not an enum)
-QUANT_MAX_ABS # dict: { "i8": 127.0, "fp8e4m3": 448.0, "bf8e5m2": 57344.0 }
 quant_ir_type(qdtype) -> Type # "fp8e4m3" -> FP8E4M3, etc.
 ir_to_qdtype(ir_type) # inverse
-quant_max_abs(qdtype) -> float
+quant_max_abs(qdtype, *, arch) -> float # clamp bound of qdtype on arch
 ```
 
 `QDType` is a string-literal type, so values are plain strings:
 
 ```python
 from rocke.helpers import quant_max_abs, quant_ir_type
-quant_max_abs("fp8e4m3") # 448.0
+quant_max_abs("fp8e4m3", arch="gfx942") # 240.0 (e4m3 FNUZ)
+quant_max_abs("fp8e4m3", arch="gfx950") # 448.0 (OCP e4m3)
+quant_max_abs("i8", arch="gfx950") # 127.0
 quant_ir_type("fp8e4m3") # FP8E4M3 (the IR Type)
 ```
+
+The fp8 / bf8 bound is the largest finite value of the encoding the target
+converts to, `fp8_element_format(dtype, arch)` in `helpers/fp8_encoding.py`: the
+FNUZ encodings on gfx942, the OCP ones on gfx950 and gfx1250. A target with no
+known encoding is refused with a `ValueError`.
 
 ## Per-Element Conversion Ops
 
@@ -41,7 +47,7 @@ cvt_f32_to_i8_sat(v) # round-to-nearest-even + saturate to int8 [-128, 127]
 clamp_f32(v, lo, hi) # fmin(hi, fmax(lo, v)) -> v_med3_f32
 ```
 
-Rounding semantics for all `cvt_f32_to_*`: round-to-nearest-even. Out-of-range f32 inputs to fp8/bf8 are hardware-clamped to the dtype's representable range.
+Rounding semantics for all `cvt_f32_to_*`: round-to-nearest-even. The fp8 / bf8 conversions do not saturate: a value that rounds past the encoding's largest finite value, and +-inf and NaN, become NaN (bf8 on OCP targets: +-inf). Clamp to `quant_max_abs` first for a saturating conversion.
 
 ## Quantization Recipes
 
@@ -49,18 +55,20 @@ Per-tensor symmetric quantization to `fp8e4m3`:
 
 ```python
 from rocke.core.ir import F32, IRBuilder
-from rocke.helpers import quant_max_abs
+from rocke.helpers import quantize_scalar_f32
 
 b: IRBuilder = ...
 scale = b.param("scale", F32)
-clamp_hi = b.const_f32(quant_max_abs("fp8e4m3")) # 448.0
-clamp_lo = b.fneg(clamp_hi)
 
-# f32 input value `v`:
-scaled = b.fmul(v, b.rcp(scale)) # /scale via reciprocal
-clamped = b.clamp_f32(scaled, clamp_lo, clamp_hi)
-fp8 = b.cvt_f32_to_fp8(clamped)
+# f32 input value `v`, quantized for the kernel's target `arch`:
+fp8 = quantize_scalar_f32(b, v, inv_scale=b.rcp(scale), qdtype="fp8e4m3", arch=arch)
 ```
+
+`quantize_scalar_f32` multiplies by the inverse scale, clamps to
+`quant_max_abs(qdtype, arch=arch)` and converts. Finite values and +-inf
+saturate to the bound; NaN stays NaN (the encoding's NaN code). A bare
+`clamp_f32` would turn NaN into the lower bound, which is why the helper
+selects the unclamped value for NaN.
 
 Per-tensor dequantization from `fp8e4m3`:
 
@@ -79,7 +87,8 @@ i8 = b.cvt_f32_to_i8_sat(scaled) # round-to-nearest-even + saturate
 The `helpers/quant.py` module wraps these into:
 
 ```text
-quantize_scalar_f32(b, x_f32, *, inv_scale, qdtype) -> Value
+quantize_scalar_f32(b, x_f32, *, inv_scale, qdtype, arch) -> Value
+quantize_prescaled_f32(b, scaled_f32, *, qdtype, arch) -> Value
 dequantize_scalar_to_f32(b, x_q, *, scale) -> Value
 ```
 
@@ -88,7 +97,9 @@ scale`); pre-computing the reciprocal once per row amortises one
 `v_rcp_f32` over the whole row, which is the same trick CK Tile's
 SmoothQuant pipeline uses. `dequantize_scalar_to_f32` takes the
 **forward** scale so the two are symmetric: `dequant(quant(x, inv_s),
-s) == x` modulo quantisation error.
+s) == x` modulo quantisation error. `quantize_prescaled_f32` is the same clamp
+and conversion for a value the kernel has already scaled some other way,
+for example `x / scale`.
 
 Use the helpers in instance code rather than re-deriving the clamp +
 rounding sequence; every quant kernel

@@ -833,8 +833,14 @@ def test_compare_succeeds_when_the_sweep_does(tmp_path, monkeypatch):
 
 def test_the_comparison_driver_needs_no_torch():
     """conv_compare is a launcher: it has to run where torch is not installed
-    (the benchmark scripts it spawns import it, it does not)."""
+    (the benchmark scripts it spawns import it, it does not). The child gets
+    the library root on its path whatever directory pytest runs from."""
     import subprocess
+
+    from rocke.tests.subprocess_launcher import (
+        rocke_python_command,
+        rocke_subprocess_env,
+    )
 
     probe = (
         "import sys; sys.argv=['x'];"
@@ -842,7 +848,13 @@ def test_the_comparison_driver_needs_no_torch():
         "print('torch' in sys.modules)"
     )
     out = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+        rocke_python_command("-c", probe),
+        env=rocke_subprocess_env(
+            python_paths=(pathlib.Path(__file__).resolve().parents[1],)
+        ),
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert out.stdout.strip() == "False"
 

@@ -2,8 +2,15 @@
 # SPDX-License-Identifier: MIT
 """Numeric correctness tests for the conv backward-data (dgrad) implicit-GEMM kernel.
 
-Builds one dgrad kernel per test case on the running GPU and compares the output
-against a float32 torch reference (``torch.nn.grad.conv2d_input``).  Covers:
+Builds dgrad kernels on the running GPU and compares each output against a
+float64 data-gradient reference of the stored inputs
+(``builders.common.conv_reference.conv_dgrad_reference``).
+``TestConvDgradCorrectness`` checks, per problem, the first sweep candidates of
+each pipeline and epilogue class of a pinned sample of the dgrad sweep
+(``_conv_dgrad_sweep_sample``) against the sweep's ``--verify`` bound, and
+``TestConvDgradCorrectnessFullSample`` (exhaustive, scheduled CI) every
+candidate of the sample; the other classes build the kernels they name.
+Covers:
 
   - stride=1 (direct-store epilogue, no atomics)
   - stride=2 (tilde-decomposition, atomic epilogue)
@@ -13,41 +20,60 @@ against a float32 torch reference (``torch.nn.grad.conv2d_input``).  Covers:
   - gfx1151 / gfx1201 via WMMA candidates
   - gfx1250 via WMMA wavelet pipeline (stride=1 mem + stride>1 / split_k wavelet)
 
-Requires a ROCm GPU and torch (skip otherwise).
+Requires a ROCm GPU (skip otherwise).
 
-Run:
-  PYTHONPATH=rocke/platform/python:rocke/library <torch-python> \
-    rocke/library/tests/test_conv_dgrad_correctness.py
+Run, from rocke/library:
+  PYTHONPATH=../platform/python:. python -m pytest \
+    tests/test_conv_dgrad_correctness.py
 """
 
 from __future__ import annotations
 
-import importlib.util
-import os
+import multiprocessing
 import re
-import subprocess
-import sys
+import time
 import unittest
+from concurrent.futures import (
+    BrokenExecutor,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+)
 
-from rocke.assets import library_root, platform_root
+import numpy as np
+import pytest
+from rocke import compile_kernel
+from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.host_cpus import available_cpus
+from rocke.tests.lanes import arch_skip_reason
 
-_PYDIR = str(platform_root() / "python")
-_LIB_DIR = str(library_root())
+from benchmarks.common import conv_fill
+from benchmarks.common.benchmark_implicit_gemm_conv import (
+    compile_dgrad_sweep_candidate,
+    dgrad_sweep_grid,
+    sample_combos,
+    verify_verdict,
+)
+from builders.common.conv_reference import (
+    conv_dgrad_reference,
+    tf32_reference_inputs,
+    tf32_reference_tol,
+)
+from kernels.common.conv_implicit_gemm import ConvProblem
+from kernels.common.conv_implicit_gemm_dgrad import build_implicit_gemm_conv_dgrad
 
-# The assets roots describe the source checkout. In an installed test artifact
-# the packages sit under tests/ and tests/library instead, so lead with this
-# process's own sys.path -- whatever let pytest import rocke and kernels here
-# is by definition enough for the child -- and keep the derived roots as the
-# source-tree fallback.
-_CHILD_PYTHONPATH = os.pathsep.join(
-    dict.fromkeys([p for p in sys.path if p] + [_PYDIR, _LIB_DIR])
+from ._conv_dgrad_sweep_sample import (
+    CLASS_SAMPLE_SIZE,
+    SWEEP_SAMPLE_FRACTION,
+    SWEEP_SAMPLE_SEED,
+    SWEEP_SAMPLE_TILINGS,
+    ClassSample,
+    every_candidate,
+    first_candidates_per_class,
+    sweep_sample,
 )
 
 ARCH = get_device_arch(0)
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 
 _MFMA_ARCHES = ("gfx90a", "gfx942", "gfx950")
 _WMMA_ARCHES = ("gfx1151", "gfx1201")
@@ -55,168 +81,182 @@ _WMMA_WAVELET_ARCHES = ("gfx1250",)
 _SUPPORTED_ARCHES = _MFMA_ARCHES + _WMMA_ARCHES + _WMMA_WAVELET_ARCHES
 
 _SKIP_REASON = (
-    f"needs a supported ROCm GPU ({', '.join(_SUPPORTED_ARCHES)}) + torch; "
-    f"detected arch={ARCH!r}, torch={'ok' if _HAS_TORCH else 'missing'}"
+    f"needs a supported ROCm GPU ({', '.join(_SUPPORTED_ARCHES)}); "
+    f"detected arch={ARCH!r}"
 )
 
-
-def _run_benchmark(*extra_args, timeout=600):
-    """Run benchmark_implicit_gemm_conv in a subprocess and return (rc, output)."""
-    import io
-
-    env = {
-        **os.environ,
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "PYTHONPATH": _CHILD_PYTHONPATH,
-    }
-    cmd = [
-        sys.executable,
-        "-m",
-        "benchmarks.common.benchmark_implicit_gemm_conv",
-        "--arch",
-        ARCH,
-        "--direction",
-        "dgrad",
-        "--verify",
-        "--sample",
-        "0.05",
-        "--warmup",
-        "1",
-        "--iters",
-        "1",
-        "--jobs",
-        "0",
-        *extra_args,
-    ]
-    # Stream output to the terminal in real time and also collect it for
-    # assertions.  Using Popen + readline avoids the buffering that hides
-    # progress when capture_output=True is used with subprocess.run.
-    buf = io.StringIO()
-    with subprocess.Popen(
-        cmd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    ) as proc:
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            buf.write(line)
-        proc.wait(timeout=timeout)
-    return proc.returncode, buf.getvalue()
+#: Most worker processes the sample compiles in: each worker holds its own
+#: imports and COMGR in memory.
+_MAX_SAMPLE_COMPILE_WORKERS = 32
+#: The share of the pinned sample that must be sweep candidates for a problem.
+#: Over this class's problems, gfx942, gfx950 and gfx90a keep at least 45 % of
+#: the sample, gfx1151 and gfx1201 at least 17 %, and gfx1250 at least 12 %
+#: (counted with ``build_dgrad_sweep_kernel``, no compile). A floor below all of
+#: them still fails a change that silently drops most of the sample.
+_MIN_CANDIDATE_SHARE = 0.1
+#: The fewest (pipeline, epilogue) classes the class sample must check for a
+#: problem. Over this class's problems the sample has candidates in 8 of the 10
+#: classes on gfx90a, gfx942 and gfx950, and in 4 on gfx1151, gfx1201 and
+#: gfx1250 (counted with ``build_dgrad_sweep_kernel``, no compile). A floor below
+#: all of them still fails a change that silently drops most classes.
+_MIN_CHECKED_CLASSES = 3
 
 
-@unittest.skipUnless(ARCH in _SUPPORTED_ARCHES and _HAS_TORCH, _SKIP_REASON)
+# Each test below declares its rough gfx942 CI seconds for the class sample, so
+# the CI shards and their workers share these heavy keys
+# (rocke.tests.ctest_shard).
+@unittest.skipUnless(ARCH in _SUPPORTED_ARCHES, _SKIP_REASON)
 class TestConvDgradCorrectness(unittest.TestCase):
-    """Build and verify dgrad kernels numerically on the running GPU."""
+    """The first sweep candidates of each pipeline and epilogue class compute
+    the right dX.
 
-    def _verify(self, *extra_args, label="", timeout=600):
-        rc, out = _run_benchmark(*extra_args, timeout=timeout)
-        self.assertEqual(
-            rc,
-            0,
-            f"dgrad benchmark failed{' (' + label + ')' if label else ''} "
-            f"on {ARCH}:\n{out[-3000:]}",
+    For each problem, the first ``CLASS_SAMPLE_SIZE`` tile configurations of
+    each (pipeline, epilogue) class of ``SWEEP_SAMPLE_TILINGS``, in its draw
+    order, that are sweep candidates with the test's split-K mode
+    (:func:`first_candidates_per_class`) are built and compiled in worker
+    processes (:func:`compile_dgrad_sweep_candidate`), launched here, and must
+    pass the sweep's ``--verify`` (:func:`verify_verdict`). A kernel that
+    stores its output is launched on poisoned output, an atomic (split-K) one
+    on zeroed output. A build or compile that raises fails the test, and so
+    does a problem for which fewer than ``_MIN_CHECKED_CLASSES`` classes have a
+    candidate. ``TestConvDgradCorrectnessFullSample`` checks every candidate of
+    the sample.
+    """
+
+    @classmethod
+    def _start_compile_pool(cls):
+        # One pool for the class: its workers import the kernel modules once.
+        cls._compile_pool = ProcessPoolExecutor(
+            max_workers=min(available_cpus(), _MAX_SAMPLE_COMPILE_WORKERS),
+            mp_context=multiprocessing.get_context("spawn"),
         )
-        self.assertNotIn(
-            "FAIL",
-            out,
-            f"dgrad numeric FAIL{' (' + label + ')' if label else ''} "
-            f"on {ARCH}:\n{out[-3000:]}",
+
+    @classmethod
+    def setUpClass(cls):
+        cls._start_compile_pool()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._compile_pool.shutdown(cancel_futures=True)
+
+    def _submitter(self, problem: ConvProblem, dtype: str):
+        """``submit(combo)``: start compiling ``combo``'s sweep candidate for
+        ``problem`` in ``dtype`` in the pool."""
+
+        def submit(combo):
+            return self._compile_pool.submit(
+                compile_dgrad_sweep_candidate,
+                combo,
+                problem=problem,
+                dtype=dtype,
+                arch=ARCH,
+            )
+
+        return submit
+
+    def _compile_sample(
+        self, combos: list, problem: ConvProblem, dtype: str
+    ) -> ClassSample:
+        """Build and compile what this class checks of ``combos`` for
+        ``problem`` in ``dtype``: the first candidates of each class."""
+        return first_candidates_per_class(
+            combos, CLASS_SAMPLE_SIZE, self._submitter(problem, dtype)
         )
+
+    def _assert_enough_checked(
+        self, checked: list, combos: list, case: str, counts: str
+    ) -> None:
+        """Fail when ``checked``, the (combo, candidate) pairs checked of
+        ``combos``, cover fewer classes than ``_MIN_CHECKED_CLASSES``."""
+        classes = {(combo.pipeline, combo.epilogue) for combo, _ in checked}
+        self.assertGreaterEqual(
+            len(classes),
+            _MIN_CHECKED_CLASSES,
+            f"too few sampled dgrad classes for {case}: {counts}, "
+            f"{len(classes)} classes",
+        )
+
+    def _verify(self, dtype: str, problem: ConvProblem, *, split_k: int) -> None:
+        """Check the sample's candidates for ``problem`` in ``dtype``;
+        ``split_k`` is 1, or -1 for the split-K resolver's pick."""
+        combos = sweep_sample(split_k)
+        grad_output, weights = _dgrad_inputs(problem, dtype)
+        ref = _dgrad_reference(problem, dtype)
+        try:
+            sample = self._compile_sample(combos, problem, dtype)
+        except BrokenExecutor as error:
+            # A worker died (a crash, out of memory): give the next test a
+            # working pool.
+            self._compile_pool.shutdown(wait=False, cancel_futures=True)
+            type(self)._start_compile_pool()
+            self.fail(f"the compile pool died: {error!r}")
+        failures = list(sample.failures)
+        for _, (spec, artifact) in sample.checked:
+            got = _dgrad_launch(
+                spec,
+                dtype,
+                grad_output,
+                weights,
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                poison=True,
+            )
+            passed, error = verify_verdict(
+                got,
+                ref,
+                compute_dtype=dtype,
+                arch=ARCH,
+                ref_floor=conv_fill.ref_floor("dgrad"),
+            )
+            if not passed:
+                failures.append(f"{artifact.kernel_name}: rel_err={error:.2e}")
+        case = f"{dtype} {problem.short()} split_k={split_k} on {ARCH}"
+        counts = (
+            f"of {len(combos)} sampled, {len(sample.checked)} checked, "
+            f"{sample.not_candidates} tried that are not sweep candidates, "
+            f"{len(failures)} failed"
+        )
+        if failures:
+            self.fail(
+                f"{len(failures)} sampled dgrad candidates failed for {case} "
+                f"({counts}):\n" + "\n".join(failures)
+            )
+        self._assert_enough_checked(sample.checked, combos, case, counts)
 
     # ---- stride=1 (direct store, no atomics) ---------------------------------
 
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp16_stride1(self):
         """fp16 dgrad, stride=1 — single sub-GEMM, direct-store epilogue."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "4",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "1",
-            label="fp16 stride=1",
+            ConvProblem(N=4, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(1)
     def test_bf16_stride1(self):
         """bf16 dgrad, stride=1."""
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "4",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "1",
-            label="bf16 stride=1",
+            ConvProblem(N=4, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp32_stride1(self):
         """fp32 dgrad, stride=1."""
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"fp32 dgrad candidates require MFMA; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp32",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "1",
-            label="fp32 stride=1",
+            ConvProblem(N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+            split_k=1,
         )
 
     # ---- pointwise 1x1 (flat-offset fast path) -------------------------------
 
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp16_pointwise_1x1(self):
         """fp16 dgrad, 1x1/stride1/pad0 ungrouped — the flat-offset fast path.
 
@@ -239,33 +279,14 @@ class TestConvDgradCorrectness(unittest.TestCase):
         not a property of these particular numbers.
         """
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "7",
-            "--Wi",
-            "7",
-            "--C",
-            "64",
-            "--K",
-            "48",
-            "--Y",
-            "1",
-            "--X",
-            "1",
-            "--pH",
-            "0",
-            "--pW",
-            "0",
-            "--split-k",
-            "1",
-            label="fp16 pointwise 1x1",
+            ConvProblem(N=2, Hi=7, Wi=7, C=64, K=48, Y=1, X=1, pH=0, pW=0),
+            split_k=1,
         )
 
     # ---- stride=2 (tilde decomposition, atomic epilogue) ---------------------
 
+    @pytest.mark.rocke_shard_cost(2)
     def test_fp16_stride2(self):
         """fp16 dgrad, stride=2 — tilde decomposition with atomic epilogue."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -273,35 +294,14 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--split-k",
-            "1",
-            label="fp16 stride=2",
+            ConvProblem(
+                N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, sH=2, sW=2
+            ),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(2)
     def test_bf16_stride2(self):
         """bf16 dgrad, stride=2."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -309,35 +309,14 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--split-k",
-            "1",
-            label="bf16 stride=2",
+            ConvProblem(
+                N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, sH=2, sW=2
+            ),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(2)
     def test_bf16_patch_embedding_stride16(self):
         """bf16 dgrad of a 16x16 / stride-16 patch embedding.
 
@@ -350,37 +329,16 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "32",
-            "--Wi",
-            "32",
-            "--C",
-            "3",
-            "--K",
-            "32",
-            "--Y",
-            "16",
-            "--X",
-            "16",
-            "--pH",
-            "0",
-            "--pW",
-            "0",
-            "--sH",
-            "16",
-            "--sW",
-            "16",
-            "--split-k",
-            "1",
-            label="bf16 patch 16x16 stride=16",
+            ConvProblem(
+                N=2, Hi=32, Wi=32, C=3, K=32, Y=16, X=16, pH=0, pW=0, sH=16, sW=16
+            ),
+            split_k=1,
         )
 
     # ---- split_k > 1 (atomic epilogue) ---------------------------------------
 
+    @pytest.mark.rocke_shard_cost(5)
     def test_fp16_split_k(self):
         """fp16 dgrad, split_k auto-selected — exercises atomic reduction path."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -388,289 +346,149 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 f"split_k dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
             )
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "4",
-            "--Hi",
-            "28",
-            "--Wi",
-            "28",
-            "--C",
-            "64",
-            "--K",
-            "128",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "-1",
-            label="fp16 split_k=auto",
+            ConvProblem(N=4, Hi=28, Wi=28, C=64, K=128, Y=3, X=3, pH=1, pW=1),
+            split_k=-1,
         )
 
     # ---- larger realistic shape ----------------------------------------------
 
+    @pytest.mark.rocke_shard_cost(6)
     def test_fp16_resnet_shape(self):
         """fp16 dgrad, ResNet-style shape N8 H56 W56 C64 K64 R3 S3."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "8",
-            "--Hi",
-            "56",
-            "--Wi",
-            "56",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--split-k",
-            "-1",
-            label="fp16 resnet N8H56W56C64K64",
+            ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            split_k=-1,
         )
 
     # ---- grouped (grid-per-group on blockIdx.y) ------------------------------
 
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp16_grouped_stride1(self):
         """fp16 grouped dgrad, groups=4 (cpg=kpg=16), stride=1 direct store."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "4",
-            "--split-k",
-            "1",
-            label="fp16 grouped g4 stride=1",
+            ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=4),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(1)
     def test_bf16_grouped_stride1(self):
         """bf16 grouped dgrad, groups=4, stride=1."""
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "4",
-            "--split-k",
-            "1",
-            label="bf16 grouped g4 stride=1",
+            ConvProblem(N=2, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=4),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(3)
     def test_fp16_grouped_stride2(self):
         """fp16 grouped dgrad, groups=4, stride=2 — tilde decomposition path."""
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--groups",
-            "4",
-            "--split-k",
-            "1",
-            label="fp16 grouped g4 stride=2",
+            ConvProblem(
+                N=2,
+                Hi=16,
+                Wi=16,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                sH=2,
+                sW=2,
+                groups=4,
+            ),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(2)
     def test_fp16_grouped_odd_kpg(self):
         """Non-power-of-two kpg (C=K=48, groups=8 -> cpg=kpg=6): guards against
         the k_sub decode-divisor trap (must divide by kpg, not total K)."""
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "16",
-            "--Wi",
-            "16",
-            "--C",
-            "48",
-            "--K",
-            "48",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "8",
-            "--split-k",
-            "1",
-            label="fp16 grouped g8 cpg=kpg=6",
+            ConvProblem(N=2, Hi=16, Wi=16, C=48, K=48, Y=3, X=3, pH=1, pW=1, groups=8),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(5)
     def test_fp16_grouped_split_k(self):
         """fp16 grouped dgrad with split_k>1 — group on y, split_k on z compose;
         even cpg (=16) keeps the packed <2 x f16> atomic pairs in-group."""
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"split_k dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "4",
-            "--Hi",
-            "28",
-            "--Wi",
-            "28",
-            "--C",
-            "64",
-            "--K",
-            "128",
-            "--Y",
-            "3",
-            "--X",
-            "3",
-            "--pH",
-            "1",
-            "--pW",
-            "1",
-            "--groups",
-            "4",
-            "--split-k",
-            "-1",
-            label="fp16 grouped g4 split_k=auto",
+            ConvProblem(N=4, Hi=28, Wi=28, C=64, K=128, Y=3, X=3, pH=1, pW=1, groups=4),
+            split_k=-1,
         )
 
+    @pytest.mark.rocke_shard_cost(8)
     def test_bf16_depthwise_large_filter(self):
         """Depthwise (cpg=kpg=1) dgrad: a one-column GEMM per group, every
         operand scalar. A tall, asymmetric filter with per-axis "same"
         padding pins the separate Y/X and pH/pW decode."""
         self._verify(
-            "--dtype",
             "bf16",
-            "--N",
-            "2",
-            "--Hi",
-            "14",
-            "--Wi",
-            "14",
-            "--C",
-            "32",
-            "--K",
-            "32",
-            "--Y",
-            "11",
-            "--X",
-            "3",
-            "--pH",
-            "5",
-            "--pW",
-            "1",
-            "--groups",
-            "32",
-            "--split-k",
-            "1",
-            label="bf16 depthwise g32 11x3",
+            ConvProblem(
+                N=2, Hi=14, Wi=14, C=32, K=32, Y=11, X=3, pH=5, pW=1, groups=32
+            ),
+            split_k=1,
         )
 
+    @pytest.mark.rocke_shard_cost(5)
     def test_fp16_depthwise_stride2(self):
         """Depthwise dgrad on the stride-2 tilde decomposition path."""
         if ARCH not in _MFMA_ARCHES:
             self.skipTest(f"stride>1 dgrad requires CDNA atomic-add; running on {ARCH}")
         self._verify(
-            "--dtype",
             "fp16",
-            "--N",
-            "2",
-            "--Hi",
-            "15",
-            "--Wi",
-            "13",
-            "--C",
-            "64",
-            "--K",
-            "64",
-            "--Y",
-            "5",
-            "--X",
-            "3",
-            "--pH",
-            "2",
-            "--pW",
-            "0",
-            "--sH",
-            "2",
-            "--sW",
-            "2",
-            "--groups",
-            "64",
-            "--split-k",
-            "1",
-            label="fp16 depthwise g64 stride=2",
+            ConvProblem(
+                N=2,
+                Hi=15,
+                Wi=13,
+                C=64,
+                K=64,
+                Y=5,
+                X=3,
+                pH=2,
+                pW=0,
+                sH=2,
+                sW=2,
+                groups=64,
+            ),
+            split_k=1,
+        )
+
+
+@pytest.mark.exhaustive
+class TestConvDgradCorrectnessFullSample(TestConvDgradCorrectness):
+    """Every candidate of the sampled dgrad sweep computes the right dX.
+
+    The problems and checks of ``TestConvDgradCorrectness``, for every tile
+    configuration of ``SWEEP_SAMPLE_TILINGS`` that is a sweep candidate
+    (:func:`every_candidate`); a problem fails when fewer than
+    ``_MIN_CANDIDATE_SHARE`` of the sample are candidates. Scheduled CI only:
+    its tests inherit the class sample's shard costs, an underestimate here.
+    """
+
+    def _compile_sample(
+        self, combos: list, problem: ConvProblem, dtype: str
+    ) -> ClassSample:
+        return every_candidate(combos, self._submitter(problem, dtype))
+
+    def _assert_enough_checked(
+        self, checked: list, combos: list, case: str, counts: str
+    ) -> None:
+        self.assertGreaterEqual(
+            len(checked),
+            _MIN_CANDIDATE_SHARE * len(combos),
+            f"too few sampled dgrad candidates for {case}: {counts}",
         )
 
 
@@ -881,57 +699,76 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# K-outer LDS (transpose-read) A/B
+# In-process build and launch
 # ---------------------------------------------------------------------------
-#
-# Every other test in this file shells out to the benchmark driver and greps
-# stdout, which cannot A/B one spec flag. These helpers build and launch a
-# dgrad kernel in-process so the K-outer B tile can be compared against the
-# M-outer default for the identical problem and tiling.
+
+
+def _dgrad_inputs(problem, dtype, seed=0):
+    """The stored ``(dY, W)`` of ``problem`` an in-process launch reads:
+    U(-1, 1) drawn from ``seed``, dY first, as ``dtype`` host data."""
+    p = problem
+    rng = np.random.default_rng(seed)
+    dy = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.Ho, p.Wo, p.K)), dtype)
+    w = storage.encode(rng.uniform(-1.0, 1.0, (p.K, p.Y, p.X, p.cpg)), dtype)
+    return dy, w
 
 
 def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
-    """Launch one dgrad kernel and return dX as a torch tensor (NHWC).
+    """Build, compile and launch one dgrad kernel (:func:`_dgrad_launch`) on
+    the inputs :func:`_dgrad_inputs` draws from ``seed`` for the launched
+    problem, and return dX (NHWC) as float32."""
+    artifact = compile_kernel(
+        build_implicit_gemm_conv_dgrad(spec, arch=ARCH), arch=ARCH
+    )
+    p = spec.problem if problem is None else problem
+    dy, w = _dgrad_inputs(p, dtype, seed)
+    return _dgrad_launch(
+        spec,
+        dtype,
+        dy,
+        w,
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        poison=poison,
+        problem=problem,
+    )
 
-    The kernel is built from ``spec`` (its problem is the build probe) and
+
+def _dgrad_launch(
+    spec, dtype, grad_output, weights, *, hsaco, kernel_name, poison=False, problem=None
+):
+    """Launch the compiled dgrad kernel of ``spec`` on the stored ``dtype``
+    inputs ``grad_output`` (dY) and ``weights`` (W) and return dX (NHWC): the float32 values of the
+    stored output.
+
+    The kernel was built from ``spec`` (its problem is the build probe) and is
     launched on ``problem`` (default: the spec's own), as an AOT binary is:
     the shape travels as kernargs and the sub-GEMM records are packed for the
     launched problem. ``poison=True`` pre-fills dX with 0xFF bytes (NaN in
-    fp16/bf16) when the kernel stores rather than accumulates, so an output
-    the kernel never writes shows up as NaN instead of passing as zero.
+    every stored dtype) when the kernel stores rather than accumulates, so an
+    output the kernel never writes shows up as NaN instead of passing as zero.
     """
     import ctypes
     from dataclasses import replace as dc_replace
 
-    import torch
-
-    from rocke import compile_kernel
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_abi import conv_args_signature
-    from kernels.common.conv_implicit_gemm_dgrad import (
-        build_implicit_gemm_conv_dgrad,
-        pack_sub_gemm_buffer,
-    )
+    from kernels.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
     from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    def _u8(t):
-        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-    artifact = compile_kernel(
-        build_implicit_gemm_conv_dgrad(spec, arch=ARCH), arch=ARCH
-    )
-    td = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
     p = spec.problem if problem is None else problem
-    torch.manual_seed(seed)
-    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
-    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
-    dX = torch.zeros(p.N, p.Hi, p.Wi, p.C, dtype=td)
+    dX = np.zeros((p.N, p.Hi, p.Wi, p.C), dtype=grad_output.dtype)
 
     rt = Runtime()
-    dY_d, W_d, dX_d = rt.alloc(dY.nbytes), rt.alloc(W.nbytes), rt.alloc(dX.nbytes)
-    rt.memcpy_h2d(dY_d, _u8(dY), dY.nbytes)
-    rt.memcpy_h2d(W_d, _u8(W), W.nbytes)
+    dY_d, W_d, dX_d = (
+        rt.alloc(grad_output.nbytes),
+        rt.alloc(weights.nbytes),
+        rt.alloc(dX.nbytes),
+    )
+    rt.memcpy_h2d(dY_d, as_u8_buffer(grad_output), grad_output.nbytes)
+    rt.memcpy_h2d(W_d, as_u8_buffer(weights), weights.nbytes)
     # split-K atomic-add needs a zeroed dX.
     rt.memset(dX_d, 0xFF if (poison and not spec.needs_atomic) else 0, dX.nbytes)
 
@@ -943,9 +780,7 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
 
     # The tilde record buffer is part of the dgrad ABI, not an extension.
     sig = conv_args_signature(dtype, direction="dgrad")
-    launcher = KernelLauncher(
-        hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
-    )
+    launcher = KernelLauncher(hsaco=hsaco, kernel_name=kernel_name, signature=sig)
     launcher(
         ConvArgs.from_problem(
             p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
@@ -953,8 +788,8 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
             int(dY_d),
             int(W_d),
             int(dX_d),
-            dY.nbytes,
-            W.nbytes,
+            grad_output.nbytes,
+            weights.nbytes,
             dX.nbytes,
             sub_gemm_buf=int(sg_d),
             num_sub_gemms=len(sub_gemms),
@@ -965,33 +800,26 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
             fence=True,
         ),
     )
-    out = torch.empty_like(dX)
-    rt.memcpy_d2h(_u8(out), dX_d, dX.nbytes)
+    rt.memcpy_d2h(as_u8_buffer(dX), dX_d, dX.nbytes)
     for d in (dY_d, W_d, dX_d, sg_d):
         rt.free(d)
-    return out
+    return storage.decode(dX, dtype)
 
 
-def _dgrad_reference(problem, dtype, seed=0):
-    """fp32 torch reference dX (NHWC) for the inputs _dgrad_run_inprocess draws."""
-    import torch
+def _dgrad_reference(problem, dtype, seed=0, *, tf32=False):
+    """float64 reference dX (NHWC) of the inputs :func:`_dgrad_inputs` draws.
 
-    td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
-    p = problem
-    torch.manual_seed(seed)
-    # Same draw order as _dgrad_run_inprocess, so the inputs match.
-    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
-    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
-    return torch.nn.grad.conv2d_input(
-        (p.N, p.C, p.Hi, p.Wi),
-        W.float().permute(0, 3, 1, 2).contiguous(),
-        dY.float().permute(0, 3, 1, 2).contiguous(),
-        stride=(p.sH, p.sW),
-        padding=(p.pH, p.pW),
-        dilation=(p.dH, p.dW),
-        groups=p.groups,
-    ).permute(0, 2, 3, 1)
+    ``tf32=True`` masks the fp32 inputs as ``ARCH``'s TF32 MMA reads them
+    (:func:`tf32_reference_inputs`)."""
+    dy, w = (storage.decode(x, dtype) for x in _dgrad_inputs(problem, dtype, seed))
+    if tf32:
+        dy, w = tf32_reference_inputs(dy, ARCH), tf32_reference_inputs(w, ARCH)
+    return conv_dgrad_reference(dy, w, problem)
 
+
+# ---------------------------------------------------------------------------
+# K-outer LDS (transpose-read) A/B
+# ---------------------------------------------------------------------------
 
 # The K-outer B tile runs in two lane-mapping regimes, and the A/B has to cover
 # both: gfx950 is wave64 MFMA reading through ``ds_read_b64_tr_b16`` (4 elements
@@ -1008,8 +836,8 @@ _KOUTER_WAVE32_ATOM = {(32, 64): (16, 32)}  # (warp_tile_mn, tile_k) gfx950 -> w
 
 
 @unittest.skipUnless(
-    ARCH in _KOUTER_WAVE and _HAS_TORCH,
-    f"K-outer dgrad needs {'/'.join(_KOUTER_WAVE)} + torch",
+    ARCH in _KOUTER_WAVE,
+    arch_skip_reason(_KOUTER_WAVE, f"K-outer dgrad needs {'/'.join(_KOUTER_WAVE)}"),
 )
 class TestConvDgradLdsKOuter(unittest.TestCase):
     """The K-outer B tile must be a pure re-layout of the M-outer default."""
@@ -1017,7 +845,6 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
     def _pair(
         self, dtype, *, warp_tile_mn, tile_k, epilogue, split_k, stride=1, Hi=14, K=64
     ):
-        sys.path.insert(0, os.path.abspath(_PYDIR))
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
@@ -1083,11 +910,9 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
         return out
 
     def _assert_exact(self, dtype, **kw):
-        import torch
-
         ref, got = self._pair(dtype, **kw)
         self.assertTrue(
-            torch.equal(ref, got),
+            np.array_equal(ref, got),
             "K-outer is a pure re-layout, so dX must match the M-outer path "
             "bit for bit; a difference means the transpose-read lane mapping "
             "is wrong",
@@ -1133,22 +958,18 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
     def test_kouter_split_k_matches_reference(self):
         # split_k > 1 uses the atomic epilogue, whose accumulation order is not
         # deterministic -- the M-outer kernel does not even reproduce itself
-        # bitwise. Compare against torch within tolerance instead.
-        import torch
-
+        # bitwise. Compare the two within tolerance instead.
         ref, got = self._pair(
             "bf16", warp_tile_mn=32, tile_k=64, epilogue="default", split_k=4
         )
         for out in (ref, got):
-            self.assertFalse(torch.isnan(out.float()).any(), "dX contains NaN")
-        delta = (ref.float() - got.float()).abs().max().item()
-        scale = ref.float().abs().max().item()
+            self.assertFalse(np.isnan(out).any(), "dX contains NaN")
+        delta = float(np.abs(ref - got).max())
+        scale = float(np.abs(ref).max())
         self.assertLess(delta / max(scale, 1e-6), 5e-2)
 
 
-@unittest.skipUnless(
-    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
-)
+@unittest.skipUnless(ARCH in _MFMA_ARCHES, f"needs one of {_MFMA_ARCHES}")
 class TestConvDgradUniformKDecode(unittest.TestCase):
     """``uniform_k_decode`` must compute exactly what the plain K loop computes.
 
@@ -1159,6 +980,19 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
     dilation, grouping and both B layouts -- and the fallback loop the same
     binary runs when kpg is not a multiple of tile_k.
     """
+
+    @staticmethod
+    def _problem(dtype, *, groups=1, K=64, C=64, Hi=14, Y=3, stride=1, dil=1, pad=1):
+        """The problem :meth:`_run` launches: N=2, H=Hi, W=Hi+3, YxY filter."""
+        from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+
+        kw = "convbfp16" if dtype == "bf16" else "convfp16"
+        problem, _dt, _f = parse_miopen_cmd(
+            f"./MIOpenDriver {kw} -n 2 -c {C} -H {Hi} -W {Hi + 3} -k {K} -y {Y} "
+            f"-x {Y} -p {pad} -q {pad} -u {stride} -v {stride} -l {dil} -j {dil} "
+            f"-m conv -g {groups} -F 2 -t 1"
+        )
+        return problem
 
     def _run(
         self,
@@ -1178,19 +1012,22 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
         epilogue="cshuffle",
         split_k=1,
     ):
-        sys.path.insert(0, os.path.abspath(_PYDIR))
-        from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             is_valid_dgrad_spec,
         )
 
-        kw = "convbfp16" if dtype == "bf16" else "convfp16"
-        problem, _dt, _f = parse_miopen_cmd(
-            f"./MIOpenDriver {kw} -n 2 -c {C} -H {Hi} -W {Hi + 3} -k {K} -y {Y} "
-            f"-x {Y} -p {pad} -q {pad} -u {stride} -v {stride} -l {dil} -j {dil} "
-            f"-m conv -g {groups} -F 2 -t 1"
+        problem = self._problem(
+            dtype,
+            groups=groups,
+            K=K,
+            C=C,
+            Hi=Hi,
+            Y=Y,
+            stride=stride,
+            dil=dil,
+            pad=pad,
         )
         wt = 32
         spec = DgradConvSpec(
@@ -1214,21 +1051,28 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
         )
         ok, reason = is_valid_dgrad_spec(spec, ARCH)
         if not ok:
-            self.skipTest(f"invalid spec (uniform_k_decode={ukd}): {reason}")
+            # The case waits for the runner of an arch that takes the spec.
+            self.skipTest(
+                arch_skip_reason(
+                    [
+                        arch
+                        for arch in _MFMA_ARCHES
+                        if is_valid_dgrad_spec(spec, arch)[0]
+                    ],
+                    f"invalid spec (uniform_k_decode={ukd}): {reason}",
+                )
+            )
         spec.validate()
         return _dgrad_run_inprocess(spec, dtype)
 
     def _assert_exact(self, dtype="bf16", **kw):
-        import torch
-
         ref = self._run(dtype, ukd=False, **kw)
         got = self._run(dtype, ukd=True, **kw)
-        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        self.assertFalse(np.isnan(got).any(), "dX contains NaN")
         self.assertTrue(
-            torch.equal(ref, got),
+            np.array_equal(ref, got),
             "uniform_k_decode reorders no work, so dX must match the plain K "
-            f"loop bit for bit; max |diff| = "
-            f"{(ref.float() - got.float()).abs().max().item()}",
+            f"loop bit for bit; max |diff| = {float(np.abs(ref - got).max())}",
         )
 
     def test_stride1_3x3(self):
@@ -1259,14 +1103,12 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
     def _assert_close_split_k(self, **kw):
         # The atomic epilogue's accumulation order is not deterministic, so
         # compare within tolerance.
-        import torch
-
         kw = dict(epilogue="default", split_k=2, tile_k=32, **kw)
         ref = self._run("bf16", ukd=False, **kw)
         got = self._run("bf16", ukd=True, **kw)
-        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
-        delta = (ref.float() - got.float()).abs().max().item()
-        scale = ref.float().abs().max().item()
+        self.assertFalse(np.isnan(got).any(), "dX contains NaN")
+        delta = float(np.abs(ref - got).max())
+        scale = float(np.abs(ref).max())
         self.assertLess(delta / max(scale, 1e-6), 5e-2)
 
     def test_split_k_matches_plain(self):
@@ -1291,31 +1133,17 @@ class TestConvDgradUniformKDecode(unittest.TestCase):
     def test_grouped_split_k(self):
         self._assert_close_split_k(groups=2, C=128, K=128)
 
-    def test_matches_torch_reference(self):
-        import torch
-
+    def test_matches_reference(self):
         got = self._run("bf16", ukd=True, Y=4, stride=2, Hi=15)
-        # Same problem as _run builds: N=2, C=64, H=15, W=18, K=64, 4x4, s2, p1.
-        torch.manual_seed(0)
-        dY = torch.empty(2, 7, 9, 64).uniform_(-1.0, 1.0).to(torch.bfloat16)
-        W = torch.empty(64, 4, 4, 64).uniform_(-1.0, 1.0).to(torch.bfloat16)
-        ref = torch.nn.grad.conv2d_input(
-            (2, 64, 15, 18),
-            W.float().permute(0, 3, 1, 2),
-            dY.float().permute(0, 3, 1, 2),
-            stride=2,
-            padding=1,
-        ).permute(0, 2, 3, 1)
-        self.assertEqual(tuple(got.shape), tuple(ref.shape))
-        delta = (got.float() - ref).abs().max().item()
-        self.assertLess(delta / ref.abs().max().item(), 2e-2)
+        ref = _dgrad_reference(self._problem("bf16", Y=4, stride=2, Hi=15), "bf16")
+        self.assertEqual(got.shape, ref.shape)
+        delta = float(np.abs(got - ref).max())
+        self.assertLess(delta / float(np.abs(ref).max()), 2e-2)
 
 
-@unittest.skipUnless(
-    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
-)
+@unittest.skipUnless(ARCH in _MFMA_ARCHES, f"needs one of {_MFMA_ARCHES}")
 class TestConvDgradPatch(unittest.TestCase):
-    """The patch-embedding dgrad (``DgradConvSpec.patch``) against torch.
+    """The patch-embedding dgrad (``DgradConvSpec.patch``) against the reference.
 
     The parity configs only show that both engines emit the same IR; these
     check the dX it stores: both store epilogues, partial M/N tiles, a K tail
@@ -1337,9 +1165,6 @@ class TestConvDgradPatch(unittest.TestCase):
         tile_k=64,
         dtype="bf16",
     ):
-        import torch
-
-        sys.path.insert(0, os.path.abspath(_PYDIR))
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
@@ -1380,28 +1205,20 @@ class TestConvDgradPatch(unittest.TestCase):
         spec.validate()
         got = _dgrad_run_inprocess(spec, dtype, seed=0)
 
-        # _dgrad_run_inprocess's inputs, regenerated: the folded tensors hold
-        # the unfolded ones' bytes, so they are the same values reshaped.
-        td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
-        torch.manual_seed(0)
-        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
-        W = torch.empty(p.K, p.Y, p.X, p.C).uniform_(-1.0, 1.0).to(td)
-        ref = torch.nn.grad.conv2d_input(
-            (p.N, p.C, p.Hi, p.Wi),
-            W.float().permute(0, 3, 1, 2),
-            dY.float().permute(0, 3, 1, 2),
-            stride=(p.sH, p.sW),
-        ).permute(0, 2, 3, 1)
-        got = got.float().reshape(ref.shape)
-        self.assertFalse(torch.isnan(got).any(), "dX contains NaN")
-        delta = (got - ref).abs().max().item()
+        # The unfolded problem's reference on the same draws: the folded
+        # tensors hold the unfolded ones' bytes, so they are the same values
+        # reshaped.
+        ref = _dgrad_reference(p, dtype, seed=0)
+        got = got.reshape(ref.shape)
+        self.assertFalse(np.isnan(got).any(), "dX contains NaN")
+        delta = float(np.abs(got - ref).max())
         self.assertLess(
-            delta / ref.abs().max().item(), 2e-2, f"max |dX - ref| = {delta}"
+            delta / float(np.abs(ref).max()), 2e-2, f"max |dX - ref| = {delta}"
         )
         # Every pixel no patch covers is exactly zero (the caller's memset).
         uncovered = ref == 0
         if uncovered.any():
-            self.assertEqual(got[uncovered].abs().max().item(), 0.0)
+            self.assertEqual(float(np.abs(got[uncovered]).max()), 0.0)
 
     @staticmethod
     def _problem(**kw):
@@ -1485,7 +1302,7 @@ class TestConvDgradPatch(unittest.TestCase):
 # probe problem with the binary's capabilities (grouped, stride 1), and
 # launched on every case below with the shape in the kernargs. Each is
 # compared bit for bit with the tilde binary (built against a stride-2 probe:
-# runtime record search and loads) on the same launch, and against the torch
+# runtime record search and loads) on the same launch, and against the float64
 # reference with dX poisoned. They all reduce in the same order -- tap-major,
 # output-channel chunk, then the tile's MFMA sequence -- so they must agree
 # exactly. The tap-outer binaries run where the cache would offer them. The cases are
@@ -1513,9 +1330,7 @@ _STRIDE1_CASES = (
 )
 
 
-@unittest.skipUnless(
-    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
-)
+@unittest.skipUnless(ARCH in _MFMA_ARCHES, f"needs one of {_MFMA_ARCHES}")
 class TestConvDgradStride1Specializations(unittest.TestCase):
     """Stride-1 (folded record) AOT binaries vs the tilde binary."""
 
@@ -1611,19 +1426,17 @@ class TestConvDgradStride1Specializations(unittest.TestCase):
         return problem.dH == problem.dW == 1 and problem.kpg % spec.tile_k == 0
 
     def _check(self, label, problem, dtype, outs):
-        import torch
-
         ref = _dgrad_reference(problem, dtype)
         names = list(outs)
         for name in names[1:]:
             self.assertTrue(
-                torch.equal(outs[names[0]], outs[name]),
+                np.array_equal(outs[names[0]], outs[name]),
                 f"{label}: {names[0]} vs {name}, max |diff| = "
-                f"{(outs[names[0]].float() - outs[name].float()).abs().max().item()}",
+                f"{float(np.abs(outs[names[0]] - outs[name]).max())}",
             )
-        got = outs[names[0]].float()
-        self.assertFalse(torch.isnan(got).any(), f"{label}: NaN in dX")
-        bad = (got - ref).abs() > 1e-2 + 1e-2 * ref.abs()
+        got = outs[names[0]]
+        self.assertFalse(np.isnan(got).any(), f"{label}: NaN in dX")
+        bad = np.abs(got - ref) > 1e-2 + 1e-2 * np.abs(ref)
         self.assertEqual(int(bad.sum()), 0, f"{label}: tolerance violations")
 
     def test_folded_record_matches_the_tilde_binary(self):
@@ -1713,8 +1526,8 @@ _HALO_MAX_WO = 72
 
 
 @unittest.skipUnless(
-    ARCH == "gfx950" and _HAS_TORCH,
-    "the dY halo dgrad loop is gfx950 wave64 MFMA + torch",
+    ARCH == "gfx950",
+    arch_skip_reason(("gfx950",), "the dY halo dgrad loop is gfx950 wave64 MFMA"),
 )
 class TestConvDgradDyHalo(unittest.TestCase):
     """The dY halo loop against the reference on adversarial shapes.
@@ -1789,11 +1602,8 @@ class TestConvDgradDyHalo(unittest.TestCase):
         )
 
     def _check(self, label, out, problem, dtype):
-        import torch
-
-        out = out.float()
         ref = _dgrad_reference(problem, dtype)
-        bad = ((out - ref).abs() > 1e-2 + 1e-2 * ref.abs()) | ~torch.isfinite(out)
+        bad = (np.abs(out - ref) > 1e-2 + 1e-2 * np.abs(ref)) | ~np.isfinite(out)
         self.assertEqual(int(bad.sum()), 0, f"{label}: bad elements (NaN/Inf = bad)")
 
     def test_halo_tilings_match_reference(self):
@@ -1813,8 +1623,6 @@ class TestConvDgradDyHalo(unittest.TestCase):
         # A binary sized for the problem's own width and one sized for a much
         # wider image compute the same dX bit for bit: the bucket changes
         # only the LDS the halo tile reserves and the rows the loader skips.
-        import torch
-
         for label, dtype, N, Hi, Wi, C, K, Y, X, g in _HALO_CASES:
             with self.subTest(case=label):
                 p = self._problem(N, Hi, Wi, C, K, Y, X, g)
@@ -1822,13 +1630,11 @@ class TestConvDgradDyHalo(unittest.TestCase):
                 wide = self._spec(Y, X, dtype, dy_halo=2)
                 a = _dgrad_run_inprocess(tight, dtype, poison=True, problem=p)
                 b = _dgrad_run_inprocess(wide, dtype, poison=True, problem=p)
-                self.assertTrue(torch.equal(a, b), label)
+                self.assertTrue(np.array_equal(a, b), label)
                 self._check(label, a, p, dtype)
 
 
-@unittest.skipUnless(
-    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
-)
+@unittest.skipUnless(ARCH in _MFMA_ARCHES, f"needs one of {_MFMA_ARCHES}")
 class TestConvDgradResolvedSplitK(unittest.TestCase):
     """dX is accurate at the degree the split-K resolver picks, and at its cap.
 
@@ -1894,26 +1700,14 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
         ).split_k
 
     def _assert_accurate(self, dtype, split_k):
-        import torch
-
         p = self._problem()
         got = _dgrad_run_inprocess(self._spec(dtype, split_k), dtype)
-        # Same draws as _dgrad_run_inprocess.
-        td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
-        torch.manual_seed(0)
-        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
-        W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0).to(td)
-        ref = torch.nn.grad.conv2d_input(
-            (p.N, p.C, p.Hi, p.Wi),
-            W.float().permute(0, 3, 1, 2),
-            dY.float().permute(0, 3, 1, 2),
-            padding=1,
-        ).permute(0, 2, 3, 1)
-        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        ref = _dgrad_reference(p, dtype)
+        self.assertFalse(np.isnan(got).any(), "dX contains NaN")
         # The benchmark's verify gate: peak-normalised max error.
-        delta = (got.float() - ref).abs().max().item()
+        delta = float(np.abs(got - ref).max())
         self.assertLess(
-            delta / max(ref.abs().max().item(), 1.0),
+            delta / max(float(np.abs(ref).max()), 1.0),
             5e-2,
             f"{dtype} split_k={split_k}",
         )
@@ -1951,11 +1745,10 @@ _TF32_WARP_TILES = {
 
 
 @unittest.skipUnless(
-    ARCH in _TF32_WARP_TILES and _HAS_TORCH,
-    "TF32 dgrad correctness needs gfx942 or gfx950 + torch",
+    ARCH in _TF32_WARP_TILES, "TF32 dgrad correctness needs gfx942 or gfx950"
 )
 class TestConvDgradTf32(unittest.TestCase):
-    """fp32 storage, TF32 MMA (``mma_dtype="tf32"``) against an IEEE fp32 reference.
+    """fp32 storage, TF32 MMA (``mma_dtype="tf32"``) against a float64 reference.
 
     Built and launched in-process (``_dgrad_run_inprocess``), not through the
     benchmark driver, so every case pins exactly one spec.
@@ -1964,8 +1757,6 @@ class TestConvDgradTf32(unittest.TestCase):
     def _check(
         self, *, warp_tile, tile_k, epilogue, split_k, stride, groups=1, Hi=14, K=64
     ):
-        import torch
-
         from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
@@ -2013,30 +1804,10 @@ class TestConvDgradTf32(unittest.TestCase):
         self.assertTrue(ok, reason)
         spec.validate()
         got = _dgrad_run_inprocess(spec, "fp32")
-
-        # The same inputs _dgrad_run_inprocess drew, in its order.
-        p = spec.problem
-        torch.manual_seed(0)
-        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
-        W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
-        dY = tf32_reference_inputs(dY, ARCH)
-        W = tf32_reference_inputs(W, ARCH)
-        # Pin the reference to IEEE fp32: torch 2.10 defaults convolutions to
-        # TF32 where the backend has it.
-        from builders.common.conv_reference import ieee_fp32
-
-        with ieee_fp32():
-            ref = torch.nn.grad.conv2d_input(
-                (p.N, p.C, p.Hi, p.Wi),
-                W.permute(0, 3, 1, 2),
-                dY.permute(0, 3, 1, 2),
-                stride=stride,
-                padding=1,
-                groups=groups,
-            ).permute(0, 2, 3, 1)
-        self.assertEqual(tuple(got.shape), tuple(ref.shape))
-        self.assertFalse(torch.isnan(got).any(), "dX contains NaN")
-        rel = (got - ref).abs().max().item() / ref.abs().max().item()
+        ref = _dgrad_reference(spec.problem, "fp32", tf32=True)
+        self.assertEqual(got.shape, ref.shape)
+        self.assertFalse(np.isnan(got).any(), "dX contains NaN")
+        rel = float(np.abs(got - ref).max()) / float(np.abs(ref).max())
         self.assertLess(
             rel, tf32_reference_tol(ARCH), f"relative-to-peak error {rel:.3e}"
         )
@@ -2089,8 +1860,6 @@ class TestConvDgradTf32(unittest.TestCase):
         # The tap-outer K loop, its dY halo forms and the patch (one-GEMM)
         # decomposition read their fragments through the same TF32 path as
         # the tilde K loop; pin that each still feeds the TF32 atom.
-        import torch
-
         from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
@@ -2129,22 +1898,8 @@ class TestConvDgradTf32(unittest.TestCase):
                     ok, reason = is_valid_dgrad_spec(spec, ARCH)
                     self.assertTrue(ok, reason)
                     got = _dgrad_run_inprocess(spec, "fp32", seed=0)
-                    # _dgrad_run_inprocess's inputs, in its draw order.
-                    torch.manual_seed(0)
-                    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
-                    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
-                    dY = tf32_reference_inputs(dY, ARCH)
-                    W = tf32_reference_inputs(W, ARCH)
-                    ref = torch.nn.grad.conv2d_input(
-                        (p.N, p.C, p.Hi, p.Wi),
-                        W.permute(0, 3, 1, 2).double(),
-                        dY.permute(0, 3, 1, 2).double(),
-                        stride=(p.sH, p.sW),
-                        padding=(p.pH, p.pW),
-                    ).permute(0, 2, 3, 1)
-                    rel = (
-                        (got.double().cpu() - ref).abs().max() / ref.abs().max()
-                    ).item()
+                    ref = _dgrad_reference(p, "fp32", seed=0, tf32=True)
+                    rel = float(np.abs(got - ref).max()) / float(np.abs(ref).max())
                     self.assertLess(
                         rel,
                         tf32_reference_tol(ARCH),
@@ -2153,7 +1908,8 @@ class TestConvDgradTf32(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    ARCH == "gfx950" and _HAS_TORCH, "the cached split-K cshuffle dgrad is gfx950"
+    ARCH == "gfx950",
+    arch_skip_reason(("gfx950",), "the cached split-K cshuffle dgrad is gfx950"),
 )
 class TestConvDgradSplitKCshuffle(unittest.TestCase):
     """Split-K with the cshuffle epilogue: the LDS-staged tile is atomic-added
@@ -2161,7 +1917,7 @@ class TestConvDgradSplitKCshuffle(unittest.TestCase):
 
     The geometry of the cached split-K kernels (16x16x32 atom, K-outer B, 8-wide
     loads); the atomic accumulation order is not deterministic, so dX is held
-    to the fp32 torch reference within tolerance. Each case is launched on a
+    to the float64 reference within tolerance. Each case is launched on a
     problem other than its build probe, as an AOT binary is.
     """
 
@@ -2180,9 +1936,6 @@ class TestConvDgradSplitKCshuffle(unittest.TestCase):
         tile_n=128,
         pipeline="mem",
     ):
-        import torch
-
-        sys.path.insert(0, os.path.abspath(_PYDIR))
         from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
         from kernels.common.conv_implicit_gemm import ConvDataSpec
         from kernels.common.conv_implicit_gemm_dgrad import (
@@ -2226,9 +1979,9 @@ class TestConvDgradSplitKCshuffle(unittest.TestCase):
         p = problem(2, Hi)
         got = _dgrad_run_inprocess(spec, dtype, problem=p)
         ref = _dgrad_reference(p, dtype)
-        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
-        delta = (got.float() - ref).abs().max().item()
-        scale = ref.abs().max().item()
+        self.assertFalse(np.isnan(got).any(), "dX contains NaN")
+        delta = float(np.abs(got - ref).max())
+        scale = float(np.abs(ref).max())
         self.assertLess(delta / max(scale, 1e-6), 2e-2)
 
     def test_fp16_stride1_split4(self):
@@ -2249,5 +2002,92 @@ class TestConvDgradSplitKCshuffle(unittest.TestCase):
         self._check("fp16", split_k=16, vec_c=8, C=72, tile_m=64, tile_n=64)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+def test_the_pinned_sample_is_the_sweeps_draw():
+    """``SWEEP_SAMPLE_TILINGS`` is what the dgrad sweep's ``--sample`` draws
+    from its grid today, in order, so a change to the sweep's axes or its
+    sampling rule fails here instead of silently changing what
+    ``TestConvDgradCorrectness`` and ``TestConvDgradCorrectnessFullSample``
+    cover."""
+    drawn = sample_combos(
+        dgrad_sweep_grid((1,)), SWEEP_SAMPLE_FRACTION, SWEEP_SAMPLE_SEED
+    )
+    assert [tuple(combo)[:-1] for combo in drawn] == list(SWEEP_SAMPLE_TILINGS)
+
+
+def _tile_k_rule(combo):
+    """A stand-in sweep-candidate rule for the class-sample tests: a combo is a
+    candidate unless its tile_k is 16. Earlier combos take longer, so their
+    builds finish out of order."""
+    time.sleep(0.002 * (combo.tile_m % 7))
+    return None if combo.tile_k == 16 else ("built", combo)
+
+
+def _expected_first_candidates(combos, per_class):
+    """The first ``per_class`` combos of each class that ``_tile_k_rule`` takes,
+    classes in their first appearance, and how many non-candidates come before
+    the last of them in their class."""
+    groups: dict = {}
+    for combo in combos:
+        groups.setdefault((combo.pipeline, combo.epilogue), []).append(combo)
+    expected, not_candidates = [], 0
+    for members in groups.values():
+        taken = 0
+        for combo in members:
+            if taken == per_class:
+                break
+            if combo.tile_k == 16:
+                not_candidates += 1
+            else:
+                expected.append(combo)
+                taken += 1
+    return expected, not_candidates
+
+
+@pytest.mark.parametrize("per_class", [1, 2, 5])
+def test_the_class_sample_takes_the_first_candidates_of_each_class(per_class):
+    combos = sweep_sample(1)[:80]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sample = first_candidates_per_class(
+            combos, per_class, lambda combo: pool.submit(_tile_k_rule, combo)
+        )
+    expected, not_candidates = _expected_first_candidates(combos, per_class)
+    assert [combo for combo, _ in sample.checked] == expected
+    assert [built for _, built in sample.checked] == [("built", c) for c in expected]
+    assert sample.not_candidates == not_candidates
+    assert sample.failures == []
+
+
+def test_a_class_sample_build_that_raises_is_a_failure_and_is_not_replaced():
+    combos = sweep_sample(1)[:80]
+    broken = combos[0]
+
+    def build(combo):
+        if combo == broken:
+            raise RuntimeError("compile failed")
+        return _tile_k_rule(combo)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sample = first_candidates_per_class(
+            combos, 2, lambda combo: pool.submit(build, combo)
+        )
+    assert sample.failures == [
+        f"{broken}: build/compile raised RuntimeError('compile failed')"
+    ]
+    group = (broken.pipeline, broken.epilogue)
+    in_group = [c for c, _ in sample.checked if (c.pipeline, c.epilogue) == group]
+    assert len(in_group) == 1
+
+
+def test_a_class_sample_of_no_combo_per_class_is_refused():
+    with pytest.raises(ValueError, match="per_class=0, expected at least 1"):
+        first_candidates_per_class(sweep_sample(1)[:4], 0, lambda combo: None)
+
+
+def test_the_full_sample_takes_every_candidate_in_order():
+    combos = sweep_sample(1)[:40]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sample = every_candidate(combos, lambda combo: pool.submit(_tile_k_rule, combo))
+    assert [combo for combo, _ in sample.checked] == [
+        c for c in combos if c.tile_k != 16
+    ]
+    assert sample.not_candidates == sum(c.tile_k == 16 for c in combos)

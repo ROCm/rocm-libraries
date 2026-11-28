@@ -1,8 +1,8 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * rocke/instance_gfx1151_wmma_gemm.h -- C99 port of the gfx1151 (RDNA3.5 / Strix
- * Halo) WMMA GEMM kernel instance builder rocke/instances/gfx1151/wmma_gemm.py.
+ * rocke/instance_gfx1151_wmma_gemm.h -- C99 port of the gfx1151 (RDNA3.5) WMMA
+ * GEMM kernel instance builder rocke/instances/gfx1151/wmma_gemm.py.
  *
  *   Python (gfx1151/wmma_gemm.py)         C99 (this header)
  *   -----------------------------------   --------------------------------------

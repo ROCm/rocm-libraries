@@ -1,29 +1,30 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host tests (CPU tensors) of the GDN/KDA decode driver's shared timing and
-gate helpers: the cold-memory rotation size, the warm-mode warning, and the
-fp32 gate the sweep and benchmarks score every configuration with, through
-every tool path that gates (``check``, the GDN benchmark, ``--bench``).
+"""Host tests of the GDN/KDA decode driver's shared timing and gate helpers:
+the cold-memory rotation size, the warm-mode warning, and the fp32 gate the
+sweep and benchmarks score every configuration with, through every tool path
+that gates (``check``, the GDN benchmark, ``--bench``).
 
-Needs torch (not a GPU): ``gdn_decode`` imports torch at module level and every
-test builds CPU tensors, so the module skips as a whole where torch is missing.
-What those tensors feed is torch-free and tested everywhere, in
-``dispatch/gdn/test_gate_rules.py`` (the gate's pass test and the rotation
-arithmetic) and in the sweep and benchmark tests (what a tool does with a
-failing verdict); this module checks the driver's tensor code on real tensors."""
+The driver's inputs, reference and gate are host numpy arrays, so everything
+here but the value-set upload runs without a GPU. The pass test and the
+rotation arithmetic themselves are tested in ``dispatch/gdn/test_gate_rules.py``
+and what a tool does with a failing verdict in the sweep and benchmark tests;
+this module checks the driver's array code on real arrays."""
 
 from __future__ import annotations
 
 import dataclasses as dc
 import math
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.runtime.device_array import DeviceArray
+from rocke.runtime.hip_module import get_device_count
 
-torch = pytest.importorskip("torch")
-
-from builders.gfx950.gdn import gdn_decode as g  # noqa: E402
-from kernels.gfx950.gdn_decode import GdnDecodeSpec  # noqa: E402
+from builders.gfx950.gdn import gdn_decode as g
+from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
 PLAIN = GdnDecodeSpec(num_k_heads=4, num_v_heads=8)
 F32 = dc.replace(PLAIN, gate_kind="kda", state_dtype="f32")
@@ -44,7 +45,7 @@ def test_rotation_guarantees_what_the_label_prints(spec, batch, disjoint):
     """One cycle touches at least ``rotate_mb`` MiB, and a set is reused after
     at least ``rotate_mb`` MiB less one set: the two claims ``cold_copies``
     and the timing label make."""
-    inp = g.make_inputs(spec, batch, device="cpu", disjoint_writes=disjoint)
+    inp = g.make_inputs(spec, batch, disjoint_writes=disjoint)
     touched = g.touched_bytes(spec, inp, batch)
     for rotate_mb in (1, 16, 1024):
         copies = g.cold_copies(spec, inp, batch, rotate_mb)
@@ -61,9 +62,9 @@ def test_rotation_guarantees_what_the_label_prints(spec, batch, disjoint):
 
 def test_touched_bytes_counts_each_state_slot_once():
     batch = 6
-    in_place = g.make_inputs(PLAIN, batch, device="cpu", disjoint_writes=False)
-    disjoint = g.make_inputs(PLAIN, batch, device="cpu", disjoint_writes=True)
-    page = in_place["state"][0].numel() * in_place["state"].element_size()
+    in_place = g.make_inputs(PLAIN, batch, disjoint_writes=False)
+    disjoint = g.make_inputs(PLAIN, batch, disjoint_writes=True)
+    page = in_place["state"][0].nbytes
     out = batch * PLAIN.num_v_heads * PLAIN.head_v_dim * 2
     assert g.touched_bytes(PLAIN, in_place, batch) == batch * page + out
     assert g.touched_bytes(PLAIN, disjoint, batch) == 2 * batch * page + out
@@ -71,27 +72,28 @@ def test_touched_bytes_counts_each_state_slot_once():
 
 def test_touched_bytes_counts_the_conv_state_pages_of_a_fused_spec():
     batch = 6
-    in_place = g.make_inputs(FUSED, batch, device="cpu", disjoint_writes=False)
-    disjoint = g.make_inputs(FUSED, batch, device="cpu", disjoint_writes=True)
-    state, conv = in_place["state"], in_place["conv_state"]
-    pages = state[0].numel() * state.element_size()
-    pages += conv[0].numel() * conv.element_size()
+    in_place = g.make_inputs(FUSED, batch, disjoint_writes=False)
+    disjoint = g.make_inputs(FUSED, batch, disjoint_writes=True)
+    pages = in_place["state"][0].nbytes + in_place["conv_state"][0].nbytes
     out = batch * FUSED.num_v_heads * FUSED.head_v_dim * 2
     assert g.touched_bytes(FUSED, in_place, batch) == batch * pages + out
     assert g.touched_bytes(FUSED, disjoint, batch) == 2 * batch * pages + out
 
 
+@pytest.mark.gpu
+@pytest.mark.skipif(not get_device_count(), reason="uploads to a HIP device")
 def test_value_sets_are_independent_copies():
+    """Each set is its own device copy of every input, holding ``inp``'s
+    values; any HIP device will do (nothing is launched)."""
     batch = 3
-    inp = g.make_inputs(FUSED, batch, device="cpu")
+    inp = g.make_inputs(FUSED, batch)
     sets = g.cold_value_sets(FUSED, inp, batch, rotate_mb=1)
     assert len(sets) == g.cold_copies(FUSED, inp, batch, 1)
     for name, value in sets[0].items():
-        if torch.is_tensor(value):
+        if isinstance(value, DeviceArray):
             assert value.data_ptr() != sets[1][name].data_ptr(), name
             if name in inp:
-                assert value.data_ptr() != inp[name].data_ptr(), name
-                assert torch.equal(value, inp[name]), name
+                np.testing.assert_array_equal(value.values(), inp[name], err_msg=name)
     assert len(g.cold_value_sets(FUSED, inp, batch, rotate_mb=0)) == 1
 
 
@@ -100,18 +102,18 @@ def test_cold_value_sets_reject_an_out_of_range_index(rotate_mb):
     """The first copy's validation covers the rest, so a bad index must be
     refused before any value set is returned (also with one warm copy)."""
     batch = 3
-    inp = g.make_inputs(PLAIN, batch, device="cpu", disjoint_writes=False)
+    inp = g.make_inputs(PLAIN, batch, disjoint_writes=False)
     inp["write_indices"][0] = inp["state"].shape[0]
-    with pytest.raises(ValueError, match="out of range"):
+    with pytest.raises(ValueError, match="write_indices spans"):
         g.cold_value_sets(PLAIN, inp, batch, rotate_mb=rotate_mb)
 
 
 @pytest.mark.parametrize("rotate_mb", [0, 1])
 def test_cold_value_sets_reject_a_duplicated_write_index(rotate_mb):
     batch = 3
-    inp = g.make_inputs(PLAIN, batch, device="cpu")
+    inp = g.make_inputs(PLAIN, batch)
     inp["write_indices"][1] = inp["write_indices"][0]
-    with pytest.raises(ValueError, match="unique across active"):
+    with pytest.raises(ValueError, match="unique slots across active"):
         g.cold_value_sets(PLAIN, inp, batch, rotate_mb=rotate_mb)
 
 
@@ -158,24 +160,34 @@ def _exact_launch(spec, inp):
     """What a correct kernel leaves: reference output, written slots updated,
     every other slot untouched."""
     ref = g.reference(spec, inp)
-    written = inp["write_indices"].long()
-    values = {"out": ref[0].to(torch.bfloat16), "state": inp["state"].clone()}
-    values["state"][written] = ref[1].to(inp["state"].dtype)
+    dtypes = g.input_dtypes(spec)
+    written = inp["write_indices"]
+    values = {"out": storage.encode(ref[0], "bf16"), "state": inp["state"].copy()}
+    values["state"][written] = storage.encode(ref[1], dtypes["state"])
     if spec.fuse_conv:
-        values["conv_state"] = inp["conv_state"].clone()
-        values["conv_state"][written] = ref[2].to(inp["conv_state"].dtype)
+        values["conv_state"] = inp["conv_state"].copy()
+        values["conv_state"][written] = storage.encode(ref[2], dtypes["conv_state"])
     return ref, values
+
+
+def _flip_lowest_bit(array):
+    """``array`` with the lowest mantissa bit of its first element flipped:
+    below any tolerance, still a different value."""
+    flipped = array.copy()
+    bits = flipped.reshape(-1).view(np.uint16)
+    bits[0] ^= 1
+    return flipped
 
 
 @pytest.mark.parametrize("spec", [PLAIN, FUSED], ids=["plain", "fused"])
 def test_gate_passes_a_correct_launch_and_rejects_nan_and_misplaced_writes(spec):
     batch = 4
-    inp = g.make_inputs(spec, batch, device="cpu")
+    inp = g.make_inputs(spec, batch)
     ref, values = _exact_launch(spec, inp)
     assert g.gate(spec, inp, values, ref).passed
 
-    nan = dict(values, out=values["out"].clone())
-    nan["out"].view(-1)[0] = float("nan")
+    nan = dict(values, out=values["out"].copy())
+    nan["out"].reshape(-1)[0] = storage.encode(np.nan, "bf16")
     verdict = g.gate(spec, inp, nan, ref)
     assert math.isnan(verdict.worst) and not verdict.passed
 
@@ -184,15 +196,22 @@ def test_gate_passes_a_correct_launch_and_rejects_nan_and_misplaced_writes(spec)
     spare = int(inp["read_indices"][-1]) + batch + 1
     pools = ("state", "conv_state") if spec.fuse_conv else ("state",)
     for pool in pools:
-        spilled = dict(values, **{pool: values[pool].clone()})
-        bits = spilled[pool][spare].view(-1).view(torch.int16)
-        bits[0] ^= 1  # the lowest mantissa bit of one element
+        spilled = dict(values, **{pool: values[pool].copy()})
+        spilled[pool][spare] = _flip_lowest_bit(spilled[pool][spare])
         verdict = g.gate(spec, inp, spilled, ref)
         assert verdict.spill and verdict.worst <= g.TOL and not verdict.passed, pool
 
-    wrong = dict(values, state=values["state"].clone())
-    wrong["state"][inp["write_indices"].long()[0]] += 1.0
+    wrong = dict(values, state=_plus_one(values["state"], inp, "state", spec))
     assert not g.gate(spec, inp, wrong, ref).passed
+
+
+def _plus_one(pool, inp, name, spec):
+    """``pool`` with 1.0 added to the first written slot."""
+    element = g.input_dtypes(spec)[name]
+    slot = inp["write_indices"][0]
+    out = pool.copy()
+    out[slot] = storage.encode(storage.decode(pool[slot], element) + 1.0, element)
+    return out
 
 
 def test_gate_reports_a_wrong_written_conv_state_slot_as_the_conv_error():
@@ -200,12 +219,13 @@ def test_gate_reports_a_wrong_written_conv_state_slot_as_the_conv_error():
     like the state: a wrong value in a written slot fails the gate, and the
     reported cause is ``conv_err`` (the output and the state stay exact)."""
     spec, batch = FUSED, 4
-    inp = g.make_inputs(spec, batch, device="cpu")
+    inp = g.make_inputs(spec, batch)
     ref, values = _exact_launch(spec, inp)
     good = g.gate(spec, inp, values, ref)
     assert good.passed and good.conv_err <= g.TOL
-    wrong = dict(values, conv_state=values["conv_state"].clone())
-    wrong["conv_state"][inp["write_indices"].long()[0]] += 1.0
+    wrong = dict(
+        values, conv_state=_plus_one(values["conv_state"], inp, "conv_state", spec)
+    )
     verdict = g.gate(spec, inp, wrong, ref)
     assert not verdict.passed and not verdict.spill
     assert verdict.conv_err > g.TOL
@@ -217,29 +237,24 @@ def _nan_state_launch(spec, inp, launcher, batch):
     """A ``run_values`` stand-in: the output is exact, one written state
     element is NaN. A finite output must not hide it."""
     _, values = _exact_launch(spec, inp)
-    values["state"][inp["write_indices"].long()[0]].view(-1)[0] = float("nan")
+    nan = storage.encode(np.nan, g.input_dtypes(spec)["state"])
+    values["state"][inp["write_indices"][0]].reshape(-1)[0] = nan
     return values
 
 
 @pytest.fixture
 def nan_state_kernel(monkeypatch):
     """Every launch through the driver writes a NaN state with a finite output
-    (on CPU tensors), and timing anything is a test failure."""
-    real = g.make_inputs
-
-    def cpu_inputs(spec, batch, seed=0, **kw):
-        kw.pop("device", None)
-        return real(spec, batch, seed=seed, device="cpu", **kw)
+    (host arrays, no device), and timing anything is a test failure."""
 
     def timed(*args, **kw):
         raise AssertionError("a configuration that failed the gate was timed")
 
-    monkeypatch.setattr(g, "make_inputs", cpu_inputs)
     monkeypatch.setattr(g, "launcher_for", lambda spec, arch=None: object())
     monkeypatch.setattr(g, "run_values", _nan_state_launch)
     for name in ("device_us", "eager_us", "bench"):
         monkeypatch.setattr(g, name, timed)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(g, "get_device_count", lambda: 1)
 
 
 def test_check_fails_a_nan_state_behind_a_finite_output(nan_state_kernel):
@@ -248,9 +263,12 @@ def test_check_fails_a_nan_state_behind_a_finite_output(nan_state_kernel):
     assert math.isnan(verdict.state_err) and not verdict.passed
 
 
-def test_gdn_benchmark_fails_and_never_times_a_nan_state(nan_state_kernel, capsys):
+def test_gdn_benchmark_fails_and_never_times_a_nan_state(
+    nan_state_kernel, monkeypatch, capsys
+):
     from benchmarks.gfx950.gdn import benchmark_gdn_decode
 
+    monkeypatch.setattr(benchmark_gdn_decode, "get_device_count", lambda: 1)
     assert benchmark_gdn_decode.main(["--batches", "1", "--no-device"]) == 1
     out = capsys.readouterr().out
     assert "FAIL max_err=nan" in out

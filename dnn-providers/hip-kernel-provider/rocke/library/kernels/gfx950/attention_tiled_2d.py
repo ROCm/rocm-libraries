@@ -53,8 +53,13 @@ from kernels.common._lse_store import (
     lse_store,
     unified_lse_offset,
 )
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
+from kernels.common.attention_tiled_2d_rules import (
+    validate_grouped_kv2_and_early_v,
+    validate_skip_legacy_qreg,
+    validate_transposed_softmax_valu_opts,
+    validate_transposed_sub_knobs,
+)
 
 from rocke.core.ir import (
     BF16,
@@ -87,6 +92,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -351,11 +357,11 @@ class UnifiedAttention2DTiledSpec:
     # over ``REGS_PER_LANE = block_m_per_warp / 4`` register slots
     # per lane instead of 4. The LDS budget grows with ``BLOCK_M``
     # (``Q_lds``, ``P_lds``, ``Acc_lds``), so ``block_m_per_warp=32``
-    # crosses MI355X's 3 → 2 WGs/CU threshold for the prefill workload.
+    # crosses gfx950's 3 → 2 WGs/CU threshold for the prefill workload.
     # Only ``{16, 32}`` are supported; 32 requires ``num_warps``
     # in ``{1, 2, 4}`` so total threads stay within the 1024 CTA cap.
     #
-    # **Measured (MI355X, bf16, HD=64, BS=32, T=64)**: ``block_m_per_warp=32``
+    # **Measured (gfx950, bf16, HD=64, BS=32, T=64)**: ``block_m_per_warp=32``
     # with ``num_warps=4`` (BLOCK_M=128) was 1.6-2.0× SLOWER than the
     # default on every prefill shape we tested, because the doubled
     # ``Q_lds`` + ``P_lds`` + ``Acc_lds`` push the kernel from 3 → 2
@@ -544,7 +550,7 @@ class UnifiedAttention2DTiledSpec:
     lse_layout: str = field(default="token_major", kw_only=True)
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.lse_layout not in UNIFIED_LSE_LAYOUTS:
             raise ValueError(
                 f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, "
@@ -552,11 +558,7 @@ class UnifiedAttention2DTiledSpec:
             )
         if self.lse_layout != "token_major" and not self.emit_lse:
             raise ValueError(f"lse_layout={self.lse_layout!r} requires emit_lse")
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool_fields(self, "use_additive_bias")
         if self.kq_lds_pad_halves < 0:
             raise ValueError(
                 "KQ LDS pad width failed - "
@@ -578,7 +580,7 @@ class UnifiedAttention2DTiledSpec:
                 f"Other counts would need new MFMA distribution logic. "
                 f"num_warps=8 (BLOCK_M=128, THREADS=512) matches the BLOCK_M "
                 f"the production Triton 2D kernel uses for high-q prefill "
-                f"shapes; both are well within MI355X's 1024-thread CTA cap."
+                f"shapes; both are well within gfx950's 1024-thread CTA cap."
             )
         if self.block_m_per_warp not in (16, 32):
             raise ValueError(
@@ -593,65 +595,41 @@ class UnifiedAttention2DTiledSpec:
         if self.use_mfma_32x32:
             if self.block_m_per_warp != 32:
                 raise ValueError(
-                    "use_mfma_32x32 requires block_m_per_warp=32: "
-                    "one 32-row MFMA atom per warp"
+                    "use_mfma_32x32 requires one 32-row MFMA atom per warp - "
+                    f"block_m_per_warp={self.block_m_per_warp}, expected 32"
                 )
             if self.tile_size_eff % 32 != 0:
                 raise ValueError(
-                    "use_mfma_32x32 requires tile_size to be a multiple of 32"
+                    "use_mfma_32x32 requires whole 32-row tiles - "
+                    f"tile_size={self.tile_size_eff} (block_size when unset), "
+                    "expected a multiple of 32"
                 )
             if self.head_size % 16 != 0:
                 raise ValueError(
-                    "use_mfma_32x32 requires head_size to be a multiple of 16"
+                    "use_mfma_32x32 requires whole 16-element head steps - "
+                    f"head_size={self.head_size}, expected a multiple of 16"
                 )
         if self.use_transposed_qk_32x32 and not self.use_mfma_32x32:
-            raise ValueError("use_transposed_qk_32x32 requires use_mfma_32x32")
-        if self.use_transposed_scalar_state and not self.use_transposed_qk_32x32:
             raise ValueError(
-                "use_transposed_scalar_state requires use_transposed_qk_32x32"
+                "use_transposed_qk_32x32 requires the 32x32 MFMA atom - "
+                "use_mfma_32x32=False, expected True"
             )
-        if self.use_transposed_invariant_hoist and not self.use_transposed_qk_32x32:
+        ok, reason = validate_transposed_sub_knobs(self)
+        if not ok:
+            raise ValueError(reason)
+        ok, reason = validate_skip_legacy_qreg(self)
+        if not ok:
+            raise ValueError(reason)
+        ok, reason = validate_transposed_softmax_valu_opts(self)
+        if not ok:
+            raise ValueError(reason)
+        # Checked after the shared rules: the C++ spec has no additive-bias
+        # field, so both engines then report the same first refusal.
+        if self.use_transposed_mask_limit and self.use_additive_bias:
             raise ValueError(
-                "use_transposed_invariant_hoist requires use_transposed_qk_32x32"
+                "transposed softmax VALU opts do not support additive bias - "
+                "use_additive_bias=True, expected False"
             )
-        if self.use_transposed_mask_once and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_mask_once requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_half_local_pv and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_half_local_pv requires use_transposed_qk_32x32"
-            )
-        if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
-            raise ValueError("use_mfma32_skip_legacy_qreg requires use_mfma_32x32")
-        if self.use_transposed_mask_limit:
-            if not (
-                self.use_mfma_32x32
-                and self.use_transposed_qk_32x32
-                and self.use_transposed_scalar_state
-                and self.use_transposed_mask_once
-            ):
-                raise ValueError(
-                    "transposed softmax VALU opts require the R4_s1mask path"
-                )
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "transposed softmax VALU opts require no sliding window"
-                )
-            if (
-                self.has_softcap
-                or self.use_alibi
-                or self.use_qq_bias
-                or self.use_additive_bias
-            ):
-                raise ValueError(
-                    "transposed softmax VALU opts do not support softcap, ALiBi, "
-                    "QQ bias, or additive bias"
-                )
-            if self.use_grouped_kv2_softmax:
-                raise ValueError(
-                    "transposed softmax VALU opts do not support grouped_kv2"
-                )
         # Additive bias is emitted only on the score paths the selectors route a
         # bias problem to (16x16 and the plain transposed 32x32 path); the hoisted
         # and mask-once query-head variants and non-transposed 32x32 are not.
@@ -664,38 +642,16 @@ class UnifiedAttention2DTiledSpec:
                 "use_additive_bias does not support use_transposed_invariant_hoist, "
                 "use_transposed_mask_once, or the non-transposed 32x32 path"
             )
-        if self.use_grouped_kv2_softmax:
-            if self.dtype != "bf16":
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 is restricted to dtype='bf16'"
-                )
-            if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
-                raise ValueError(
-                    "use_grouped_kv2_softmax requires the transposed 32x32 R4 path"
-                )
-            if self.block_m_per_warp != 32:
-                raise ValueError("use_grouped_kv2_softmax requires block_m_per_warp=32")
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 requires no sliding window"
-                )
-            if (
-                self.has_softcap
-                or self.use_alibi
-                or self.use_qq_bias
-                or self.use_additive_bias
-            ):
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, "
-                    "QQ bias, or additive bias"
-                )
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
-        if self.use_early_v_schedule:
-            if self.use_grouped_kv2_softmax:
-                raise ValueError("use_early_v_schedule does not support grouped_kv2")
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_early_v_schedule v1 does not support FP8 KV")
+        ok, reason = validate_grouped_kv2_and_early_v(self)
+        if not ok:
+            raise ValueError(reason)
+        # Checked after the shared rules: the C++ spec has no additive-bias
+        # field, so both engines then report the same first refusal.
+        if self.use_grouped_kv2_softmax and self.use_additive_bias:
+            raise ValueError(
+                "use_grouped_kv2_softmax v1 does not support additive bias - "
+                "use_additive_bias=True, expected False"
+            )
         if self.use_v_double_buffer:
             # v1 wires the V[i+1] prefetch through both the early-V and the
             # post-QK issue sites + the 2x partial-wait before PV. Grouped-KV2
@@ -1441,7 +1397,7 @@ def build_unified_attention_2d_tiled(
     softcap_p = b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
-    qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    qq_bias_stride0_p = b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
@@ -1540,7 +1496,7 @@ def build_unified_attention_2d_tiled(
     # MFMA_N`` consecutive PV N-tiles). Two regimes:
     #
     # 1. ``HD <= 64``: use 32-col stripes. The big LDS savings (e.g. NW=4
-    #    T=64 HD=64 drops 16 KiB → 2 KiB) crosses MI355X's 2 → 3 WGs/CU
+    #    T=64 HD=64 drops 16 KiB → 2 KiB) crosses gfx950's 2 → 3 WGs/CU
     #    threshold and is worth a couple of extra sync barriers per CTA.
     #
     # 2. ``HD >= 128``: use full-HD stripes. The old F32 Acc_lds was
@@ -1572,7 +1528,7 @@ def build_unified_attention_2d_tiled(
     # ``(r * (HD/2 + 4)) % 32`` cycles every ~8 rows instead of every 1.
     # That converts the worst case from 16-way to 2-way bank conflict.
     # An internal conv kernel optimization study measured +43% throughput on
-    # MI355X gfx950 from this same trick.
+    # gfx950 from this same trick.
     #
     # We pad by exactly 16 bytes (8 halves) -- not 4 -- to preserve
     # 16-byte alignment for ``ds_write_b128``/``ds_read_b128`` (vec8).
@@ -4165,7 +4121,7 @@ def build_unified_attention_2d_tiled(
                         score = b.fadd(score, add_term)
                     if USE_QQ_BIAS:
                         # qq_bias[qp_r, key_rel_pos] with key_rel_pos = col - ctx.
-                        # Valid range 0 <= key_rel_pos < qq_bias_stride_0 AND
+                        # Valid range 0 <= key_rel_pos < qq_bias_stride0 AND
                         # qp_r is a non-padding query position. The padding-row
                         # guard is required because qb_start_pos can exceed
                         # cur_batch_query_len for the last Q-block of a sequence;
@@ -4968,7 +4924,7 @@ def build_unified_attention_2d_tiled(
     # ``Acc_lds`` is only [BLOCK_M, OUT_STRIPE_COLS] of the working dtype,
     # so the per-CTA epilogue LDS is ``BLOCK_M * 32 * 2`` bytes -- a 75-87%
     # reduction vs the previous ``BLOCK_M * HD * 4`` F32 buffer. That LDS
-    # savings is what gives MI355X room for 3 WGs/CU on prefill workloads
+    # savings is what gives gfx950 room for 3 WGs/CU on prefill workloads
     # (the documented Triton ``num_warps=4`` BLOCK_M=128 configuration runs
     # at 3-4 WGs/CU; we now match that occupancy class).
     N_TILES_PER_STRIPE = OUT_STRIPE_COLS // MFMA_N
@@ -5065,7 +5021,7 @@ def build_unified_attention_2d_tiled(
         # After the O stripes, not before: emitted ahead of them, the LSE store
         # let LLVM fuse the O multiply and FP16 convert into v_fma_mixlo_f16
         # (one rounding; LSE-off rounds twice), moving FP16 O by 1 ulp versus
-        # LSE-off on MI300X/MI355X (ROCm 10). Here the O ISA matches LSE-off.
+        # LSE-off on gfx942 / gfx950 (ROCm 10). Here the O ISA matches LSE-off.
         # Slot r's row is wave_row_base + _in_warp_row(r) (= hoist_row[r]); the
         # 16 lanes of a row group agree, lane_col == 0 (one per lane_rg) writes.
         lse_writer16 = b.cmp_eq(lane_col, b.const_i32(0))

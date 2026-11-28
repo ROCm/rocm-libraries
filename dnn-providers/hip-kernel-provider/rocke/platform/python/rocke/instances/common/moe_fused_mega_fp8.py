@@ -11,34 +11,40 @@ MoE per-expert path with fp8 e4m3 operands and per-128-block f32 scales:
         dequant fold (group-accumulator pattern, scale applied POST-MFMA)
       -> SiLU(gate_dq) * up_dq in f32
       -> DYNAMIC-QUANTIZE the f32 Hidden to fp8 (per-128-block-along-inter,
-         per-row amax/448 scale), stage into a PERSISTENT LDS Hidden_smem,
+         scale amax / the largest value of the target's fp8 encoding), stage
+         into a PERSISTENT LDS Hidden_smem,
          and stash the per-block dynamic scales in an LDS scratch.
+         An infinite Hidden value: see "Dynamic scales" in
+         :mod:`rocke.helpers.quant`.
       -> GEMM2 (down) -- fp8 Hidden . fp8 W_down -> f32 acc, dequant by
          (hidden_dyn_scale * down_scale) -> weighted atomic reduce into Y.
 
-See ``examples/gfx950/fused_mega_moe/docs/BUILD_SPEC_FP8.md`` for the authoritative
-build spec. The dequant ordering follows BUILD_SPEC_FP8 Section 1.2 (the
+The authoritative build spec is not in the tree;
+``examples/gfx950/fused_mega_moe/ALGORITHM.md`` is the in-tree specification, and
+the ``ALGORITHM.md §N`` citations below are its sections. The dequant ordering
+follows ALGORITHM.md §2 (the
 ``block_scale_gemm.py`` group-accumulator pattern): within a 128-wide
 contraction block the scales are constant, so
 ``sum_k (a.sa)(b.sb) = sa.sb . sum_k (a.b)`` -- the scale is applied per
 K-group, post-MFMA, NOT in-instruction (which would mean the E8M0 trap of
 ``cvt_scalef32_pk_f32_fp8x4``).
 
-STAGING STATUS (incremental implementation per BUILD_SPEC_FP8 Phase plan):
+STAGING STATUS (incremental implementation, in stages):
 
 * STAGE 1 (THIS FILE, current state):
     - ``FusedMegaKernelSpecFp8`` (fp8 spec / signature / grid).
-    - the gate+up fp8 GEMM via ``_emit_fp8_gateup_group_gemm`` (fp8 atom,
+    - the gate+up fp8 GEMM via ``_emit_fp8_gateup_fused_kloop`` (fp8 atom,
       fp8 operand loads, per-128-block scale dequant of BOTH accumulators).
     - SiLU(gate)*up in f32.
-    - ``_emit_hidden_dyn_quant_stage``: per-(row, 128-inter-block) amax ->
+    - the dynamic-quant stage: one amax per 128-inter-block over every row of
+      the M tile ->
       dynamic scale -> quantize the f32 Hidden to fp8 and stage into the
       persistent LDS ``Hidden_smem`` + stash the per-block scales in
       ``HiddenScale_smem``.
 * STAGE 2 (THIS FILE, current state): the fp8 down GEMM reading ``Hidden_smem``
   as the LDS-resident A operand (``make_transposed``-equivalent implicit reshape
   -- the dynamic-quant write addr == the down MFMA A-read addr, same logical
-  ``(m, inter)`` cell, BUILD_SPEC_FP8 Section 3.5), with the per-128-group
+  ``(m, inter)`` cell, ALGORITHM.md §5.5), with the per-128-group
   group-accumulator dequant by (``HiddenScale_smem[row, blk]`` * ``down_scale``),
   multiply by the sorted per-token weight, and atomic-add the f32 partial into Y
   (padded rows token id -1 / >= tokens are skipped). Tiled over the H_out output
@@ -72,6 +78,7 @@ from ...core.ir import (
 )
 from ...helpers.asm import mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster
 from ...helpers.atoms import MfmaAtom
+from ...helpers.compile import COMGR_FRESH_PROCESS_ATTR
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
     validate_arch_and_block_size,
@@ -192,16 +199,21 @@ _ASM_MFMA_HAZARD_NOP = int(os.environ.get("ROCKE_FP8_MFMA_NOP", "8"))
 
 # D5 scheduling-cadence sweep knob (additive). Values:
 #   "iglp1" -> (KEPT, default) emit ``b.iglp_opt(1)``
-#              (MFMASmallGemmSingleWaveOpt) once at the top of the gate/up + down
-#              K-loop bodies. The post-RA scheduler then imposes the canned
-#              MFMA/DS interleave for each loop region. Won the D5 sweep:
-#              same-session best-of-5 T1 ~0.1586 vs "none" ~0.1597 (strictly
-#              faster across 3 alternating thermal-controlled pairs, parity PASS,
-#              golden digest unchanged). Mutually exclusive with sched_*barrier
-#              (so no sched_group_barrier is emitted when this is set).
+#              (MFMASmallGemmSingleWaveOpt) once at the top of every down K-loop
+#              body, and of the gate/up K-loop body when that loop stages its
+#              weights through LDS (direct-to-LDS). The scheduler then imposes its
+#              canned MFMA/DS interleave on each loop region. Won the D5 sweep on
+#              the gfx950 direct-to-LDS kernel (strictly faster than "none"
+#              across 3 alternating thermal-controlled pairs, parity PASS, golden
+#              digest unchanged). A gate/up loop without LDS staging reads no
+#              LDS, and there the hint runs the compile out of memory on
+#              compilers older than ROCm 7.11 (``IRBuilder.iglp_opt``) and slows
+#              the gfx942 kernel down on fixed ones, so that loop gets no hint.
+#              Mutually exclusive with sched_*barrier (so no sched_group_barrier
+#              is emitted when this is set).
 #   "none"  -> no scheduler hint (pre-D5 baseline; byte-identical IR).
 #   "sgb"   -> explicit sched_group_barrier cadence in the active DTLA gate/up +
-#              down loops. D5-swept: REGRESSED (~0.166 T1) -> not kept.
+#              down loops. D5-swept: REGRESSED -> not kept.
 _SCHED_CADENCE = os.environ.get("ROCKE_FP8_SCHED", "iglp1").strip().lower()
 
 
@@ -214,9 +226,16 @@ def _emit_loop_cadence_hint(b: IRBuilder, cadence: str | None = None) -> None:
     ``cadence`` (level 9 flag) overrides the import-time ``_SCHED_CADENCE`` env
     default when the spec pins it; ``None`` => use the env default (so the
     default build is byte-identical).
+
+    ``iglp_opt(1)`` also marks the kernel to compile in a fresh process
+    (``COMGR_FRESH_PROCESS_ATTR``; the LLVM IR is unchanged): LLVM's strategy
+    behind it keeps counts across the compiles of a process, and on a compiler
+    older than ROCm 7.11 it can allocate without bound, which the fresh
+    process's memory cap turns into ``ComgrOutOfMemory``.
     """
     if (cadence if cadence is not None else _SCHED_CADENCE) == "iglp1":
         b.iglp_opt(1)
+        b.kernel.attrs[COMGR_FRESH_PROCESS_ATTR] = True
 
 
 # sched_group_barrier mask bits.
@@ -289,8 +308,6 @@ def _emit_mfma_down(
 
 # Group block along the contraction axis (= 4 fp8_16x16x32 atoms).
 GROUP_K = 128
-# fp8e4m3 saturating clamp magnitude.
-FP8_MAX = quant_max_abs("fp8e4m3")  # 448.0
 # pyisa dynamic-quant amax floor.
 AMAX_FLOOR = 1e-6
 
@@ -304,8 +321,8 @@ AMAX_FLOOR = 1e-6
 class FusedMegaKernelSpecFp8:
     """Single-launch fused-MoE mega-kernel spec (FP8 e4m3 block-scale).
 
-    Tile geometry is IDENTICAL to the f16 :class:`FusedMegaKernelSpec`
-    (BUILD_SPEC_FP8 Section 2.0): the fp8 atom is also K=32 and the per-lane
+    Tile geometry is IDENTICAL to the f16 :class:`FusedMegaKernelSpec`:
+    the fp8 atom is also K=32 and the per-lane
     fragment width is the same, so only the operand element dtype (2B->1B) and
     the MFMA intrinsic change.
 
@@ -317,9 +334,10 @@ class FusedMegaKernelSpecFp8:
 
     OPTIMIZATION-LEVER FLAGS (additive; ALL defaults = the final best config, so
     the default-built kernel is golden-digest byte-identical to the pre-flag
-    on-disk kernel -- see ``examples/.../fused_mega/REPRO_PLAN.md``). Each flag
-    selects an ALREADY-EXISTING code path so toggling it OFF reproduces an
-    earlier optimization level:
+    on-disk kernel -- see "Golden-safety" and "Reproduce" in
+    ``examples/gfx950/fused_mega_moe/README.md``). Each flag selects an
+    ALREADY-EXISTING code path so toggling it OFF reproduces an earlier
+    optimization level:
 
     * ``gate_up_k`` / ``down_k`` (level 7, "K=128 hero atom"): MFMA contraction
       width per atom. ``128`` (default, best) -> the ``fp8_16x16x128`` hero atom
@@ -333,6 +351,8 @@ class FusedMegaKernelSpecFp8:
       hint. ``None`` (default) defers to the ``ROCKE_FP8_SCHED`` env var
       (default ``iglp1`` = best); set to ``"iglp1"`` / ``"none"`` / ``"sgb"`` to
       pin the cadence on the spec (overrides the env for this build).
+      ``iglp1`` puts the hint in every down loop and, under direct-to-LDS, in
+      the gate/up loop (see ``_SCHED_CADENCE``).
     """
 
     name: str
@@ -409,7 +429,7 @@ class FusedMegaKernelSpecFp8:
 
 
 # ---------------------------------------------------------------------------
-# Grid + signature (BUILD_SPEC_FP8 Section 2.7 / 2.8)
+# Grid + signature (the grid is ALGORITHM.md §4; the persistent grid, §8.3)
 # ---------------------------------------------------------------------------
 
 
@@ -426,7 +446,7 @@ def moe_fused_mega_fp8_grid(
     return (gx, num_m_blocks, 1)
 
 
-# Default persistent-grid cap: MI355X 256 CU x ~2 blocks/CU at block_size 256.
+# Default persistent-grid cap: gfx950 256 CU x ~2 blocks/CU at block_size 256.
 PERSISTENT_P_CAP = 512
 
 
@@ -468,7 +488,7 @@ def moe_fused_mega_fp8_signature(
         .ptr("WGate", "fp8e4m3")
         .ptr("WUp", "fp8e4m3")
         .ptr("WDown", "fp8e4m3")
-        .ptr("AScale", "f32")  # input_scale, per (token-block, H-block-of-128)
+        .ptr("AScale", "f32")  # input_scale, per (padded A row, H-block-of-128)
         .ptr("WGateScale", "f32")  # fc1_scale gate half, per (E, I-block, H-block)
         .ptr("WUpScale", "f32")  # fc1_scale up half
         .ptr("WDownScale", "f32")  # fc2_scale, per (E, H_out-block, I-block)
@@ -506,133 +526,46 @@ def moe_fused_mega_fp8_signature(
 # ---------------------------------------------------------------------------
 
 
-def _emit_fp8_gateup_group_gemm(
+def _a_scale_row_offsets(
     b: IRBuilder,
     *,
-    A: Value,
-    WGate: Value,
-    WUp: Value,
-    AScale: Value,
-    WGateScale: Value,
-    WUpScale: Value,
     atom: MfmaAtom,
-    lane_decode,
+    lane: Value,
     m_tile_base: Value,
-    n_tile_base: Value,
-    K: Value,
     stride_a_scale: Value,
-    stride_gate_scale: Value,
-    stride_up_scale: Value,
-    tag: str,
-) -> Tuple[Value, Value]:
-    """Gate + up fp8 GEMM, returning ``(gate_dq, up_dq)`` per-lane f32 vectors.
+) -> list[Value]:
+    """The ``AScale`` element offset of the row of each output a lane holds.
 
-    Group-accumulator pattern (BUILD_SPEC_FP8 Section 1.2): the outer loop walks
-    128-wide groups along the hidden contraction K (= H). Per group, 4
-    fp8_16x16x32 atoms accumulate into a FRESH ``group_acc`` (one for gate, one
-    for up), then the group is folded into the outer accumulator scaled by
-    ``a_scale * b_scale`` -- a single ``v_pk_fma_f32`` per accumulator. The
-    A read (the quantized activation) is shared across gate and up; only the
-    B-side weight scale differs.
-
-    Scale index math (BUILD_SPEC_FP8 Section 1.3), per-128 along the
-    contraction and per-128 along the output:
-
-        a_scale_off = (m_row // GROUP_K_M) * k_scale_count + kg
-        b_scale_off = kg * n_scale_count + (n_col // GROUP_K)
-
-    Here the activation amax is per-(token-block, H-block); we use the per-row
-    granularity available to the lane (``m_row``) with the H-block index ``kg``,
-    and the weight scale is per (output-128, contraction-128).
+    ``AScale`` holds one scale per A row and 128-wide contraction group, with
+    row stride ``stride_a_scale``. A lane of the MFMA loads A from one row
+    (``m_in_atom``) but holds ``atom.c_per_lane`` outputs that sit in other
+    rows (:meth:`MfmaAtom.lane_to_output`, the mapping the Pass A store uses),
+    so it needs the scale row of each output: element ``i`` of the result is
+    the offset of output ``i``'s row, before the group index is added.
     """
-    c_group_k = b.const_i32(GROUP_K)
-    c_atom_k = b.const_i32(atom.k)
-    atoms_per_group = GROUP_K // atom.k  # 4
+    offsets = []
+    for i in range(atom.c_per_lane):
+        row_in_atom, _ = atom.lane_to_output(b, lane, i)
+        offsets.append(b.mul(b.add(m_tile_base, row_in_atom), stride_a_scale))
+    return offsets
 
-    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
-    n_col = b.add(n_tile_base, lane_decode.n_in_atom)
 
-    # Per-lane scale offsets vary along the K-group index ``kg`` only.
-    a_row_scale_base = b.mul(m_row, stride_a_scale)
-    n_blk = b.div(n_col, c_group_k)
-
-    zero = atom.zero_acc(b)
-    gate_zero = atom.zero_acc(b)
-    up_zero = atom.zero_acc(b)
-
-    # Outer loop over 128-wide contraction groups: num_groups = K // GROUP_K.
-    num_groups = b.div(K, c_group_k)
-    outer = b.scf_for_iter(
-        b.const_i32(0),
-        num_groups,
-        b.const_i32(1),
-        [(f"gate_outer_{tag}", gate_zero), (f"up_outer_{tag}", up_zero)],
-        iv_name=f"kg_{tag}",
+def _load_a_scales(
+    b: IRBuilder, *, AScale: Value, row_offsets: list[Value], kg: Value
+) -> Value:
+    """The A scales of a lane's outputs for contraction group ``kg``, as a
+    ``<c_per_lane x f32>`` vector: element ``i`` is ``AScale[row_offsets[i] +
+    kg]``, the scale of output ``i``'s row (``_a_scale_row_offsets``)."""
+    return b.vec_pack(
+        [b.global_load_f32(AScale, b.add(offset, kg)) for offset in row_offsets], F32
     )
-    with outer as (kg, (gate_outer, up_outer)):
-        # Per-group scales (one f32 each).
-        a_scale_off = b.add(a_row_scale_base, kg)
-        a_scale_v = b.global_load_f32(AScale, a_scale_off)
-        gate_scale_off = b.add(b.mul(kg, stride_gate_scale), n_blk)
-        up_scale_off = b.add(b.mul(kg, stride_up_scale), n_blk)
-        gate_scale_v = b.global_load_f32(WGateScale, gate_scale_off)
-        up_scale_v = b.global_load_f32(WUpScale, up_scale_off)
-        gate_ab = b.fmul(a_scale_v, gate_scale_v)
-        up_ab = b.fmul(a_scale_v, up_scale_v)
 
-        k_group_base = b.mul(kg, c_group_k)
 
-        # Fresh per-group accumulators; 4 fp8 atoms cover the 128-wide group.
-        ginner = b.scf_for_iter(
-            b.const_i32(0),
-            b.const_i32(atoms_per_group),
-            b.const_i32(1),
-            [(f"g_acc_{tag}", zero), (f"u_acc_{tag}", zero)],
-            iv_name=f"kk_{tag}",
-        )
-        with ginner as (kk, (g_acc, u_acc)):
-            k_tile_base = b.add(k_group_base, b.mul(kk, c_atom_k))
-            a_frag = _load_a_fp8(
-                b,
-                A=A,
-                atom=atom,
-                lane_decode=lane_decode,
-                m_tile_base=m_tile_base,
-                k_tile_base=k_tile_base,
-                K=K,
-            )
-            gb_frag = _load_b_fp8(
-                b,
-                B=WGate,
-                atom=atom,
-                lane_decode=lane_decode,
-                n_tile_base=n_tile_base,
-                k_tile_base=k_tile_base,
-                N=K,
-            )
-            ub_frag = _load_b_fp8(
-                b,
-                B=WUp,
-                atom=atom,
-                lane_decode=lane_decode,
-                n_tile_base=n_tile_base,
-                k_tile_base=k_tile_base,
-                N=K,
-            )
-            g_new = _emit_mfma(b, atom, a_frag, gb_frag, g_acc)
-            u_new = _emit_mfma(b, atom, a_frag, ub_frag, u_acc)
-            b.scf_yield(g_new, u_new)
-        group_gate = ginner.results[0]
-        group_up = ginner.results[1]
-
-        # Fold (post-MFMA, per-group): outer += group * (a_scale * b_scale).
-        gate_scale_vec = b.vector_splat(gate_ab, atom.c_per_lane)
-        up_scale_vec = b.vector_splat(up_ab, atom.c_per_lane)
-        gate_outer_new = b.vector_fma(group_gate, gate_scale_vec, gate_outer)
-        up_outer_new = b.vector_fma(group_up, up_scale_vec, up_outer)
-        b.scf_yield(gate_outer_new, up_outer_new)
-
-    return outer.results[0], outer.results[1]
+def _scale_products(b: IRBuilder, *, a_scales: Value, weight_scale: Value) -> Value:
+    """The per-output dequant factors of one contraction group: ``a_scales``
+    (one per output row, ``_load_a_scales``) times the lane's shared
+    ``weight_scale``, one packed vector multiply."""
+    return b.vector_mul(a_scales, b.vector_splat(weight_scale, a_scales.type.count))
 
 
 def _emit_fp8_gateup_fused_kloop(
@@ -659,9 +592,9 @@ def _emit_fp8_gateup_fused_kloop(
     """Gate + up fp8 GEMM fused across ALL ni cells of one mi row.
 
     COMBINATION lever (gate+up SW-pipeline + wave-pair odd/even MFMA interleave).
-    The legacy ``_emit_fp8_gateup_group_gemm`` ran an INDEPENDENT K-loop per
-    (mi, ni) cell, reloading the shared A operand ``mfmas_n`` times and emitting
-    the two MFMAs (gate, up) of each cell back-to-back -- a bursty pattern that
+    An INDEPENDENT K-loop per (mi, ni) cell (the stage 1 GEMM before this
+    lever) reloads the shared A operand ``mfmas_n`` times and emits the two
+    MFMAs (gate, up) of each cell back-to-back -- a bursty pattern that
     starves the compiler of any load/MFMA overlap window. This fused emitter:
 
     * Runs ONE outer 128-group K-loop carrying ``2 * len(n_tile_bases)`` outer
@@ -686,9 +619,18 @@ def _emit_fp8_gateup_fused_kloop(
     c_atom_k = b.const_i32(atom.k)
     atoms_per_group = GROUP_K // atom.k  # 4
     nni = len(n_tile_bases)
+    # The DTLA path stages the weight operands through LDS; otherwise this loop
+    # reads no LDS at all.
+    stages_b_through_lds = dtla is not None and atoms_per_group == 1
 
-    m_row = b.add(m_tile_base, lane_decode.m_in_atom)
-    a_row_scale_base = b.mul(m_row, stride_a_scale)
+    # One A scale row per output the lane holds (shared by every ni cell).
+    a_scale_row_offsets = _a_scale_row_offsets(
+        b,
+        atom=atom,
+        lane=lane_decode.lane,
+        m_tile_base=m_tile_base,
+        stride_a_scale=stride_a_scale,
+    )
 
     # Per-ni n_col / n_blk for the weight-scale index math.
     n_cols = [b.add(nb, lane_decode.n_in_atom) for nb in n_tile_bases]
@@ -698,22 +640,24 @@ def _emit_fp8_gateup_fused_kloop(
     zero = atom.zero_acc(b)
     iter_args = []
     for ni in range(nni):
-        iter_args.append((f"g_out_{tag}_{ni}", atom.zero_acc(b)))
+        iter_args.append((f"g_out_{tag}_n{ni}", atom.zero_acc(b)))
     for ni in range(nni):
-        iter_args.append((f"u_out_{tag}_{ni}", atom.zero_acc(b)))
+        iter_args.append((f"u_out_{tag}_n{ni}", atom.zero_acc(b)))
 
     num_groups = b.div(K, c_group_k)
     outer = b.scf_for_iter(
         b.const_i32(0), num_groups, b.const_i32(1), iter_args, iv_name=f"kg_{tag}"
     )
     with outer as (kg, outs):
-        _emit_loop_cadence_hint(b, cadence)
+        if stages_b_through_lds:
+            _emit_loop_cadence_hint(b, cadence)
         gate_outer = list(outs[:nni])
         up_outer = list(outs[nni:])
 
         # Per-group scales (hoisted alongside the operand prefetch).
-        a_scale_off = b.add(a_row_scale_base, kg)
-        a_scale_v = b.global_load_f32(AScale, a_scale_off)
+        a_scales = _load_a_scales(
+            b, AScale=AScale, row_offsets=a_scale_row_offsets, kg=kg
+        )
         kg_gate = b.mul(kg, stride_gate_scale)
         kg_up = b.mul(kg, stride_up_scale)
         gate_ab = []
@@ -721,8 +665,8 @@ def _emit_fp8_gateup_fused_kloop(
         for ni in range(nni):
             gsc = b.global_load_f32(WGateScale, b.add(kg_gate, n_blks[ni]))
             usc = b.global_load_f32(WUpScale, b.add(kg_up, n_blks[ni]))
-            gate_ab.append(b.fmul(a_scale_v, gsc))
-            up_ab.append(b.fmul(a_scale_v, usc))
+            gate_ab.append(_scale_products(b, a_scales=a_scales, weight_scale=gsc))
+            up_ab.append(_scale_products(b, a_scales=a_scales, weight_scale=usc))
 
         k_group_base = b.mul(kg, c_group_k)
 
@@ -766,7 +710,7 @@ def _emit_fp8_gateup_fused_kloop(
         g_acc = [zero] * nni
         u_acc = [zero] * nni
 
-        if dtla is not None and atoms_per_group == 1:
+        if stages_b_through_lds:
             # ---- DTLA path (GOAL 1): direct-to-LDS gate+up B operands -------
             # The A activation stays a cheap global->VGPR load (tiny, reused).
             # The dominant WGate/WUp weight streams go global->LDS->MFMA via
@@ -975,10 +919,8 @@ def _emit_fp8_gateup_fused_kloop(
         new_gate = []
         new_up = []
         for ni in range(nni):
-            gvec = b.vector_splat(gate_ab[ni], atom.c_per_lane)
-            uvec = b.vector_splat(up_ab[ni], atom.c_per_lane)
-            new_gate.append(b.vector_fma(g_acc[ni], gvec, gate_outer[ni]))
-            new_up.append(b.vector_fma(u_acc[ni], uvec, up_outer[ni]))
+            new_gate.append(b.vector_fma(g_acc[ni], gate_ab[ni], gate_outer[ni]))
+            new_up.append(b.vector_fma(u_acc[ni], up_ab[ni], up_outer[ni]))
         b.scf_yield(*(new_gate + new_up))
 
     res = outer.results
@@ -1236,7 +1178,7 @@ def _load_a_fp8_lds(
     for output row ``m_row`` (= ``m_tile_base + m_in_atom``) the lane reads its
     ``a_per_lane`` contiguous fp8 elements starting at inter column
     ``k_tile_base + k_blk * a_per_lane``. This is the SAME logical ``(m, inter)``
-    cell the dynamic-quant Pass C wrote (BUILD_SPEC_FP8 Section 3.5: the implicit
+    cell the dynamic-quant Pass C wrote (ALGORITHM.md §5.5: the implicit
     reshape -- cshuffle/quant write addr == down MFMA A-read addr).
     """
     m_row = b.add(m_tile_base, lane_decode.m_in_atom)
@@ -1280,7 +1222,7 @@ def _emit_fp8_down_group_gemm(
 ) -> Value:
     """Down fp8 GEMM for one warp-atom output cell -> per-lane f32 vector.
 
-    Group-accumulator pattern (BUILD_SPEC_FP8 Section 1.2 / 2.2): the outer loop
+    Group-accumulator pattern (ALGORITHM.md §2): the outer loop
     walks 128-wide groups along the inter CONTRACTION (= this TG's inter slice,
     ``tile_n_inter`` = ``inter_slice``). Per group, 4 fp8_16x16x32 atoms
     accumulate into a FRESH ``group_acc``; the group is folded into the outer
@@ -1331,6 +1273,11 @@ def _emit_fp8_down_group_gemm(
         iv_name=f"dg_{tag}",
     )
     with outer as (kg, (down_outer,)):
+        # With the K=128 atom one iteration reads LDS 3 times (the two halves
+        # of the A fragment and its scale), under the 4 that iglp_opt(1) needs
+        # on compilers older than ROCm 7.11. The trip count is a small
+        # constant, so LLVM unrolls this loop fully and its iterations share
+        # one scheduling region with more.
         _emit_loop_cadence_hint(b, cadence)
         # A-side dynamic scale: HiddenScale_smem[m_row, local-inter-block kg].
         a_scale_v = b.vec_extract(
@@ -1657,7 +1604,7 @@ def build_moe_fused_mega_gemm_fp8(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
 
-    # ---- params (BUILD_SPEC_FP8 Section 2.7) ---------------------------
+    # ---- params --------------------------------------------------------
     A = b.param("A", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16)
     WGate = b.param(
         "WGate", PtrType(FP8E4M3, "global"), noalias=True, readonly=True, align=16
@@ -1750,7 +1697,7 @@ def build_moe_fused_mega_gemm_fp8(
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
-    # ---- BYTE-BASE FIX (BUILD_SPEC_FP8 Section 2.4): fp8 weights = 1 byte.
+    # ---- BYTE-BASE FIX: fp8 weights = 1 byte.
     # GOLDEN-GATE NOTE: the byte-multiplier const is created LAZILY (inside
     # ``_b_base``, i.e. right after ``expert_idx`` is loaded) instead of here, so
     # the DEFAULT (non-persistent) op-counter order is byte-identical to the
@@ -1892,7 +1839,10 @@ def build_moe_fused_mega_gemm_fp8(
 
     c_neg_log2e = b.const_f32(-1.4426950408889634)
     one_f32 = b.const_f32(1.0)
-    c_fp8_max = b.const_f32(FP8_MAX)
+    # The hidden activation is requantized to the largest value of the fp8
+    # encoding the target converts to (240 for gfx942's FNUZ, 448 for OCP): the
+    # conversion does not saturate, so a block's largest values must land on it.
+    c_fp8_max = b.const_f32(quant_max_abs("fp8e4m3", arch=arch))
     c_floor = b.const_f32(AMAX_FLOOR)
 
     c_group_k = b.const_i32(GROUP_K)
@@ -1963,7 +1913,7 @@ def build_moe_fused_mega_gemm_fp8(
                 stride_a_scale=stride_a_scale,
                 stride_gate_scale=stride_gate_scale,
                 stride_up_scale=stride_up_scale,
-                tag=f"{mi}",
+                tag=f"m{mi}",
                 dtla=dtla_bundle,
                 cadence=cadence,
             )
@@ -1977,9 +1927,10 @@ def build_moe_fused_mega_gemm_fp8(
         # MANDATORY because the down-GEMM fold applies a single per-lane scalar
         # (indexed by the A-input Hidden row ``m_in_atom``) to output slots that
         # span 4 DIFFERENT output rows; only a row-uniform block scale stays
-        # correct under that fold (the same constraint as the activation scale,
-        # BUILD_SPEC_FP8 OPEN RISK #1). The scale is broadcast to every row of
-        # ``scale_view`` so any ``m_in_atom`` read returns the block scale.
+        # correct under that fold. (Stage 1 does not share this constraint: it
+        # scales each output with the activation scale of its own row.) The
+        # scale is broadcast to every row of ``scale_view`` so any
+        # ``m_in_atom`` read returns the block scale.
         #
         # LEVER (fuse-quant): the per-block amax is reduced from registers as
         # part of Pass A instead of a separate full-block LDS re-read sweep.
@@ -2032,7 +1983,7 @@ def build_moe_fused_mega_gemm_fp8(
                     0,
                 )
                 amax = b.fmax(amax, pw)
-            scale = b.fmul(amax, b.rcp(c_fp8_max))  # amax / 448
+            scale = b.fmul(amax, b.rcp(c_fp8_max))  # amax / fp8 max
             row_bc = b.scf_for_iter(c0, c_block_m, b.const_i32(1), [], iv_name="rb")
             with row_bc as rr:
                 b.smem_store_vN(scale_view.base, [rr, blk], scale, 1)
@@ -2119,7 +2070,7 @@ def build_moe_fused_mega_gemm_fp8(
                         inter_blk_base=inter_blk_base,
                         stride_down_scale=stride_down_scale,
                         m_row_base=m_row_base,
-                        tag=f"d{mi}_{ni}",
+                        tag=f"d_m{mi}_n{ni}",
                         cadence=cadence,
                     )
                     down_list.append(d_dq)

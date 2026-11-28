@@ -13,15 +13,24 @@ access's byte offset from the pool base, and the pool must be at least
 ``N``-aligned. Each check runs per engine: on the Python engine everywhere,
 and on the C++ engine where its binding is built, whose IR must also be
 byte-identical to the Python engine's and whose refusals must be the same.
+A vector store also claims a width: the value it stores must have that many
+lanes, and the builder and the verifier refuse one that does not. The f32
+epilogue store emits an f32 access, so it refuses a value that does not hold
+f32 with a TypeError; ``smem_store_f16`` records an f16 store, so it refuses a
+value that does not hold f16 the same way. Both refuse a value with no type
+first. A one-lane vector stored with ``n=1`` is one element in the LLVM IR and
+in the HIP source, which hipcc compiles.
 """
 
 from __future__ import annotations
 
 import re
+import shutil
 from collections.abc import Callable
 
 import pytest
 from rocke.core.ir import (
+    BF16,
     F16,
     F32,
     F64,
@@ -31,16 +40,21 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
+    Value,
 )
 from rocke.core.ir_serialize import parse
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
+from rocke.core.verify import verify
 from rocke.tests.engines import (
     BACKEND_LANES,
     ENGINES,
     assert_backend_lane_rejects,
     assert_engine_rejects,
+    assert_refused_everywhere,
+    lower_hip_with_engine,
     lower_with_engine,
 )
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 _ARCH = "gfx942"
 
@@ -460,6 +474,78 @@ def test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts(engine, store_a
     assert _alignment_violations(ll) == []
 
 
+def _padded_f32_tile_copy():
+    """An f32 tile whose rows are 6 elements, read and written 4 wide by the
+    f32 epilogue ops.
+
+    Row 1 starts 24 bytes in, so a 4-wide (16-byte) access there is only
+    8-byte aligned: gcd(4, 6) = 2 elements.
+    """
+    b = IRBuilder("lds_align_padded_f32_rows")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [2, 6], name_hint="t")
+    row = b.smem_load_vN_f32(tile, zero, zero, n=4)
+    b.smem_store_vN_f32(tile, [b.const_i32(1), zero], row, 4)
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts(engine):
+    """``smem_load_vN_f32`` / ``smem_store_vN_f32`` into a tile whose
+    innermost dimension is not a multiple of their width claim only what
+    every row start guarantees, as ``smem_load_vN`` / ``smem_store_vN`` do;
+    both engines emit the same IR."""
+    ll = lower_with_engine(
+        _padded_f32_tile_copy(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
+    accesses = re.findall(
+        r"(load|store) <4 x float>.*ptr addrspace\(3\) \S+, align (\d+)$",
+        ll,
+        re.MULTILINE,
+    )
+    assert sorted(accesses) == [("load", "8"), ("store", "8")]
+    assert _alignment_violations(ll) == []
+
+
+def _f32_epilogue_copy_through_an_f16_tile():
+    """An f16 tile whose rows are 12 halves (24 bytes), read and written 4 f32
+    wide (16 bytes) by the f32 epilogue ops, as a kernel that reuses an f16 LDS
+    ring to stage f32 values does.
+
+    Row 1 starts 24 bytes in, so a 16-byte access there is only 8-byte
+    aligned: gcd(16, 24) bytes.
+    """
+    b = IRBuilder("lds_align_f32_epilogue_f16_rows")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F16, [2, 12], name_hint="t")
+    row = b.smem_load_vN_f32(tile, zero, zero, n=4)
+    b.smem_store_vN_f32(tile, [b.const_i32(1), zero], row, 4)
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile(engine):
+    """The f32 epilogue ops may access a tile of another element type, which
+    their indices address in its own elements: the claim is bounded by the
+    tile's row starts in bytes, not in f32 elements; both engines emit the
+    same IR."""
+    ll = lower_with_engine(
+        _f32_epilogue_copy_through_an_f16_tile(),
+        _ARCH,
+        engine=engine,
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )
+    accesses = re.findall(
+        r"(load|store) <4 x float>.*ptr addrspace\(3\) \S+, align (\d+)$",
+        ll,
+        re.MULTILINE,
+    )
+    assert sorted(accesses) == [("load", "8"), ("store", "8")]
+    assert _alignment_violations(ll) == []
+
+
 @pytest.mark.parametrize("engine", ENGINES)
 def test_a_distributed_store_claims_its_element_width(engine):
     """smem_store_distributed writes one element at a time, so each store
@@ -509,28 +595,39 @@ def test_an_eight_byte_element_segment_is_aligned_to_its_width(engine):
     assert segs == ["8"]
 
 
-def _f16_then_one_f32_vector_store(lanes: int):
+def _f16_then_one_f32_vector_store(lanes: int) -> KernelDef:
     """A one-element f16 buffer, then an f32 buffer written at element 1 by
-    one ``smem_store_vN(..., n=1)`` of a ``<lanes x float>`` value. ``n=1``
-    routes the store through the whole-value ``tile.smem_store``."""
-    b = IRBuilder(f"lds_align_f16_one_f32x{lanes}")
-    out = b.param("out", PtrType(F32, "global"))
-    zero = b.const_i32(0)
-    half_buf = b.smem_alloc(F16, [1], name_hint="h")
-    float_buf = b.smem_alloc(F32, [12], name_hint="f")
-    h = b.trunc_f32_to_f16(b.const_f32(1.0))
-    b.smem_store_f16(half_buf, [zero], h)
-    vector = b.global_load_vN(out, zero, F32, lanes, align=4)
-    b.smem_store_vN(float_buf, [b.const_i32(1)], vector, 1)
-    b.smem_store_f16(half_buf, [zero], h)
-    b.ret()
-    return b.kernel
+    one whole-value ``tile.smem_store`` of a ``<lanes x float>`` value.
+    ``smem_store_vN`` refuses a vector whose lanes are not its ``n``, so the
+    kernel is serialized IR, as hand-written IR may still carry it."""
+    return parse(
+        f"""ckdsl.ir v1
+kernel @lds_align_f16_one_f32x{lanes} {{
+  params {{
+    %out : ptr<f32,global>
+  }}
+  region @entry {{
+    %c1 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:0 }}
+    %h2 : smem<f16, [1]> = tile.smem_alloc (  )
+    %f3 : smem<f32, [12]> = tile.smem_alloc (  )
+    %c4 : f32 = arith.constant (  ) {{ ity = s:"f32", value = f:1.0 }}
+    %t5 : f16 = arith.trunc_f32_to_f16 ( %c4 )
+    tile.smem_store ( %h2, %c1, %t5 ) {{ elem_type = s:"f16", rank = i:1 }}
+    %v6 : vec<f32x{lanes}> = memref.global_load_vN ( %out, %c1 ) {{ align = i:4, elem_type = s:"f32", vec = i:{lanes} }}
+    %c7 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:1 }}
+    tile.smem_store ( %f3, %c7, %v6 ) {{ elem_type = s:"vec<f32x{lanes}>", rank = i:1 }}
+    tile.smem_store ( %h2, %c1, %t5 ) {{ elem_type = s:"f16", rank = i:1 }}
+    cf.return (  )
+  }}
+}}
+"""
+    )
 
 
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("lanes", [3, 4])
 def test_a_whole_value_store_claims_element_alignment(engine, lanes):
-    """A vector stored whole (``n=1``, the scalar store, which records no
+    """A vector stored whole (``tile.smem_store``, which records no
     ``align``) claims only its 4-byte element, whatever its width: a
     ``<4 x float>`` at f32 element 1 sits at byte 4 of its segment, so a
     16-byte claim would be false there. The segment stays at byte 4. Both
@@ -545,3 +642,279 @@ def test_a_whole_value_store_claims_element_alignment(engine, lanes):
     segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
     assert segs == ["4"]
     assert _alignment_violations(ll) == []
+
+
+@pytest.mark.parametrize(
+    ("lanes", "n"), [(4, 2), (4, 8), (2, 4), (4, 1), (3, 1), (1, 4)]
+)
+def test_a_store_whose_value_lanes_differ_from_n_is_refused(lanes, n):
+    """The lowerings store the value as an ``n``-element vector, so a value of
+    any other lane count (a scalar has one) would be stored as a type it does
+    not have; for ``n=1`` that includes a wider vector, which is no longer
+    stored whole. The builder adds no op."""
+    b = IRBuilder(f"lds_store_f32x{lanes}_n{n}")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    buf = b.smem_alloc(F32, [16], name_hint="f")
+    if lanes == 1:
+        value = b.global_load(out, zero, F32)
+    else:
+        value = b.global_load_vN(out, zero, F32, lanes, align=4)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError) as refusal:
+        b.smem_store_vN(buf, [zero], value, n)
+    assert str(refusal.value) == f"smem_store_vN failed - lanes={lanes}, expected n={n}"
+    assert len(b.kernel.body.ops) == ops_before
+
+
+def _one_lane_vector_store() -> KernelDef:
+    """A kernel that stores a one-lane f32 vector with ``smem_store_vN(n=1)``."""
+    b = IRBuilder("lds_store_f32x1")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    buf = b.smem_alloc(F32, [16], name_hint="f")
+    one_lane = b.vector_splat(b.global_load(out, zero, F32), 1)
+    b.smem_store_vN(buf, [zero], one_lane, 1)
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_one_lane_vector_is_a_one_element_store(engine):
+    """``n=1`` takes a one-lane vector as it takes a scalar: one element. The
+    verifier accepts it, the LLVM lowering stores it as ``<1 x float>``, and
+    the HIP lowering stores its lane 0, since C++ converts no vector to its
+    element implicitly. Both engines emit the same IR and HIP source."""
+    kernel = _one_lane_vector_store()
+    assert verify(kernel) == []
+    ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
+    assert re.search(
+        r"store <1 x float> \S+, ptr addrspace\(3\) \S+, align 4$", ll, re.MULTILINE
+    )
+    hip = lower_hip_with_engine(kernel, _ARCH, engine=engine)
+    assert re.search(r"^\s*\w+_storage\[\w+\] = \w+\[0\];$", hip, re.MULTILINE)
+
+
+def test_the_hip_source_of_a_one_lane_vector_store_compiles():
+    """hipcc compiles the HIP source of a one-lane vector store; the source is
+    the C++ engine's too (:func:`test_a_one_lane_vector_is_a_one_element_store`
+    holds the two equal)."""
+    if shutil.which("hipcc") is None:
+        skip_until(BUILD_VARIANT, reason="hipcc not found")
+    from rocke.helpers.compile import compile_kernel_via_hipcc
+
+    assert compile_kernel_via_hipcc(_one_lane_vector_store(), arch=_ARCH).hsaco
+
+
+@pytest.mark.parametrize(
+    ("value_line", "lanes", "vec"),
+    [
+        (
+            (
+                "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+                '{ align = i:4, elem_type = s:"f32", vec = i:4 }'
+            ),
+            4,
+            2,
+        ),
+        ('%v3 : f32 = arith.constant (  ) { ity = s:"f32", value = f:1.0 }', 1, 4),
+    ],
+    ids=["vector", "scalar"],
+)
+def test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused(
+    value_line, lanes, vec
+):
+    """Serialized IR reaches the verifier and the lowerings without passing
+    the builder: each reports a ``tile.smem_store_vN`` whose value does not
+    have ``vec`` lanes (a scalar has one), in both engines."""
+    kernel = parse(
+        f"""ckdsl.ir v1
+kernel @lds_store_lanes {{
+  params {{
+    %out : ptr<f32,global>
+  }}
+  region @entry {{
+    %c1 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:0 }}
+    %buf2 : smem<f32, [16]> = tile.smem_alloc (  )
+    {value_line}
+    tile.smem_store_vN ( %buf2, %c1, %v3 ) {{ align = i:4, elem_type = s:"f32", rank = i:1, vec = i:{vec} }}
+    cf.return (  )
+  }}
+}}
+"""
+    )
+    assert_refused_everywhere(
+        kernel,
+        _ARCH,
+        error_type=ValueError,
+        message=f"tile.smem_store_vN failed - lanes={lanes}, expected vec={vec}",
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )
+
+
+@pytest.mark.parametrize(("lanes", "n"), [(4, 2), (2, 4), (4, 1), (1, 4)])
+def test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused(lanes, n):
+    """``smem_store_vN_f32`` stores its value as an ``n``-element f32 vector
+    (a scalar for ``n=1``), so it refuses a value of another lane count as
+    ``smem_store_vN`` does. The builder adds no op."""
+    b = IRBuilder(f"lds_store_f32_epilogue_x{lanes}_n{n}")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [16], name_hint="f")
+    if lanes == 1:
+        value = b.global_load(out, zero, F32)
+    else:
+        value = b.global_load_vN(out, zero, F32, lanes, align=4)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError) as refusal:
+        b.smem_store_vN_f32(tile, [zero], value, n)
+    assert (
+        str(refusal.value)
+        == f"smem_store_vN_f32 failed - lanes={lanes}, expected n={n}"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+def test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused():
+    """``smem_store_vN_f32`` emits an f32 store, so it refuses a value of any
+    other element type. The builder adds no op."""
+    b = IRBuilder("lds_store_f32_epilogue_f16_value")
+    out = b.param("out", PtrType(F16, "global"))
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [16], name_hint="f")
+    value = b.global_load_vN(out, zero, F16, 4, align=2)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(TypeError) as refusal:
+        b.smem_store_vN_f32(tile, [zero], value, 4)
+    assert (
+        str(refusal.value)
+        == "smem_store_vN_f32 failed - value element type='f16', expected f32"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize("value_elem", [F32, BF16])
+def test_an_f16_store_of_a_value_not_holding_f16_is_refused(value_elem):
+    """``smem_store_f16`` records an f16 store, so it refuses a value of any
+    other element type. The builder adds no op."""
+    b = IRBuilder(f"lds_store_f16_{value_elem.name}_value")
+    out = b.param("out", PtrType(value_elem, "global"))
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F16, [16], name_hint="h")
+    value = b.global_load(out, zero, value_elem)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(TypeError) as refusal:
+        b.smem_store_f16(tile, [zero], value)
+    assert (
+        str(refusal.value)
+        == f"smem_store_f16 failed - value element type='{value_elem.name}', expected f16"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize(
+    ("store_name", "tile_element"),
+    [("smem_store_f16", F16), ("smem_store_vN_f32", F32)],
+)
+def test_a_store_of_a_value_with_no_type_is_refused(store_name, tile_element):
+    """A value built by hand can lack a type: ``smem_store_f16`` and
+    ``smem_store_vN_f32`` refuse it as a ``TypeError`` naming its operand,
+    with the operand rule's text, before they read its element type. The
+    builder adds no op."""
+    b = IRBuilder(f"lds_{store_name}_untyped_value")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(tile_element, [16], name_hint="t")
+    untyped = Value("%untyped", None)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(TypeError) as refusal:
+        if store_name == "smem_store_f16":
+            b.smem_store_f16(tile, [zero], untyped)
+        else:
+            b.smem_store_vN_f32(tile, [zero], untyped, 1)
+    assert str(refusal.value) == (
+        f"{store_name} operand 2 failed - type=None, expected an IR type"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+def test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder():
+    """IR edited past the builder can store a value with no type; serialized
+    IR cannot spell one, so only the Python engine receives it here (the
+    native test covers the C++ engine). The verifier reports it and the LLVM
+    and HIP lowerings refuse it as a ``TypeError`` with the builder's text
+    naming the op, before they read its element type."""
+    b = IRBuilder("lds_store_f32_epilogue_untyped_value")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [16], name_hint="f")
+    b.smem_store_vN_f32(tile, [zero], b.const_f32(1.0), 1)
+    b.ret()
+    (store,) = [op for op in b.kernel.body.ops if op.name == "tile.smem_store_vN_f32"]
+    store.operands[-1] = Value("%untyped", None)
+    assert_refused_everywhere(
+        b.kernel,
+        _ARCH,
+        error_type=TypeError,
+        message=(
+            "tile.smem_store_vN_f32 operand 2 failed - type=None, "
+            "expected an IR type"
+        ),
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+        engines=("python",),
+    )
+
+
+@pytest.mark.parametrize(
+    ("value_lines", "vec", "error_type", "message"),
+    [
+        (
+            (
+                "%v3 : vec<f16x4> = memref.global_load_vN ( %outh, %c1 ) "
+                '{ align = i:2, elem_type = s:"f16", vec = i:4 }'
+            ),
+            4,
+            TypeError,
+            "tile.smem_store_vN_f32 failed - value element type='f16', expected f32",
+        ),
+        (
+            (
+                "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+                '{ align = i:4, elem_type = s:"f32", vec = i:4 }'
+            ),
+            2,
+            ValueError,
+            "tile.smem_store_vN_f32 failed - lanes=4, expected vec=2",
+        ),
+    ],
+    ids=["f16-value", "lanes"],
+)
+def test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused(
+    value_lines, vec, error_type, message
+):
+    """Serialized IR reaches the verifier and the lowerings without passing
+    the builder: each refuses an f32 epilogue store whose value does not hold
+    f32 (TypeError) or does not have ``vec`` lanes (ValueError), in both
+    engines."""
+    kernel = parse(
+        f"""ckdsl.ir v1
+kernel @lds_f32_epilogue_contract {{
+  params {{
+    %out : ptr<f32,global>
+    %outh : ptr<f16,global>
+  }}
+  region @entry {{
+    %c1 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:0 }}
+    %buf2 : smem<f32, [16]> = tile.smem_alloc (  )
+    {value_lines}
+    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) {{ elem_type = s:"f32", rank = i:1, vec = i:{vec} }}
+    cf.return (  )
+  }}
+}}
+"""
+    )
+    assert_refused_everywhere(
+        kernel,
+        _ARCH,
+        error_type=error_type,
+        message=message,
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )

@@ -46,9 +46,10 @@ engine identically.
    `rocke/...` ↔ `cpp/...`).
 2. Run the differential gate and confirm the affected families are byte-identical:
    ```bash
-   tools/check_byte_identity.py        # builds the C engine + run_diff --mode ll
+   tools/check_byte_identity.py        # builds the C engine + run_diff --mode ll, then --mode ir
    ```
-   Every family must be GREEN (C-emitted `.ll` == Python-emitted `.ll`). See
+   Every family must be GREEN in both lanes (C-emitted `.ll` == Python-emitted
+   `.ll`, and byte-identical serialized IR). See
    [`engine_contributing.md`](./engine_contributing.md) for modes, the golden
    snapshot, and the per-flavor note.
 3. For a new/changed instance family, validate the binding too:

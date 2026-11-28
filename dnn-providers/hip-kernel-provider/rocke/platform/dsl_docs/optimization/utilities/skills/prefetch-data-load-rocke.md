@@ -171,7 +171,7 @@ spec = GemmSpec(
 
 ## Async Copy (gfx950+)
 
-On CDNA4 (gfx950/MI350X), use hardware async copy for maximum efficiency:
+On CDNA4 (gfx950), use hardware async copy for maximum efficiency:
 
 ```python
 spec = GemmSpec(
@@ -265,14 +265,14 @@ vgpr_prefetch = vgpr_per_tile * prefetch_stages
 # 3-stage: 128 * 3 = 384 VGPRs (SPILL! — exceeds 256 per SIMD on gfx942)
 ```
 
-**Critical thresholds (gfx942/MI300X, per register file):**
+**Critical thresholds (gfx942, per register file):**
 | Arch VGPRs | Waves/SIMD | Status |
 |------------|-----------|--------|
 | ≤ 128 | 2 | Good occupancy |
 | ≤ 256 | 1 | Minimum occupancy |
 | > 256 | **SPILL** | Severe perf regression |
 
-**On gfx950 (MI350X):** Async copy reduces VGPR pressure (no intermediate buffers).
+**On gfx950:** Async copy reduces VGPR pressure (no intermediate buffers).
 
 **How to check current VGPR usage:**
 ```bash
@@ -441,4 +441,4 @@ python dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stat
 For empirical performance data on prefetch strategies, see:
 - `/gemm-optimization-rocke` skill (GEMM-specific pipeline tuning)
 - `/lds-optimization-rocke` skill (LDS double-buffering trade-offs)
-- `.claude/skills/empirical-case-studies/SKILL.md` (Case Study 3: pipeline comparison)
+- `empirical-case-studies.md` (measured case studies)

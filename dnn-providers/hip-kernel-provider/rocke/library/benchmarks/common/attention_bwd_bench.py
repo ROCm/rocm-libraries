@@ -634,13 +634,12 @@ def _torch():
     return torch
 
 
-def allowed_mask(kind: str, sq: int, skv: int, window: int | None, device):
-    """Boolean ``[sq, skv]`` (True = attend), ``None`` for ``none``."""
-    torch = _torch()
+def _mask_from_positions(kind: str, i, j, sq: int, skv: int, window: int | None):
+    """The census mask ``kind`` from query positions ``i`` (a column) and key
+    positions ``j`` (a row): plain comparisons, so numpy and torch arrays both
+    work. ``None`` for ``none``."""
     if kind == "none":
         return None
-    i = torch.arange(sq, device=device).view(-1, 1)
-    j = torch.arange(skv, device=device).view(1, -1)
     if kind == "causal_tl":
         return j <= i
     off = skv - sq
@@ -650,6 +649,24 @@ def allowed_mask(kind: str, sq: int, skv: int, window: int | None, device):
         dd = (i + off) - j
         return (dd >= 0) & (dd < window)
     raise ValueError(kind)
+
+
+def allowed_mask(kind: str, sq: int, skv: int, window: int | None, device):
+    """Boolean ``[sq, skv]`` torch mask on ``device`` (True = attend), ``None`` for
+    ``none``."""
+    torch = _torch()
+    i = torch.arange(sq, device=device).view(-1, 1)
+    j = torch.arange(skv, device=device).view(1, -1)
+    return _mask_from_positions(kind, i, j, sq, skv, window)
+
+
+def allowed_mask_array(kind: str, sq: int, skv: int, window: int | None):
+    """:func:`allowed_mask` as a host numpy array, without torch."""
+    import numpy as np
+
+    i = np.arange(sq).reshape(-1, 1)
+    j = np.arange(skv).reshape(1, -1)
+    return _mask_from_positions(kind, i, j, sq, skv, window)
 
 
 @dataclass

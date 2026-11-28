@@ -301,10 +301,8 @@ def test_mirror_resource_gate(row):
         disassemble,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found")
     arch, cfg, d, var = row

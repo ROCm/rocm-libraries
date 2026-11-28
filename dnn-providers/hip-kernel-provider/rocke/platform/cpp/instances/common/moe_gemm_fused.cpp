@@ -11,32 +11,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/helper_rocke.helpers.transforms.h" /* magic division */
 #include "rocke/instance_gemm_internal.h" /* _emit_mfma / _emit_smem_load / ... */
 #include "rocke/ir_internal.h" /* rocke_i_set_err                              */
-
-/* Magic-division helpers from helper_rocke.helpers.transforms.h. That header
- * is NOT included here: it defines a rich `rocke_tensor_descriptor` struct that
- * collides with the (different) `rocke_tensor_descriptor` in tensor_view.h, which
- * this module needs for TensorView / TileWindow. The two cannot coexist in one
- * TU (see instance_permute_nd.c for the same constraint), so we forward-declare
- * just the two pure magic-division entry points we use. */
-/* C++ build: these are cross-TU C-ABI helpers (defined with C linkage in
- * helpers/transforms.c); the forward decls must be extern "C" so C++ does not
- * mangle the references. No effect in C. */
-#ifdef __cplusplus
-extern "C" {
-#endif
-bool rocke_calculate_magic_numbers(rocke_ir_builder_t* b,
-                                   int divisor,
-                                   uint64_t* out_multiplier,
-                                   int* out_shift);
-rocke_value_t* rocke_do_magic_division(rocke_ir_builder_t* b,
-                                       rocke_value_t* dividend,
-                                       uint64_t multiplier,
-                                       int shift);
-#ifdef __cplusplus
-}
-#endif
 
 /* ------------------------------------------------------------------ guards */
 

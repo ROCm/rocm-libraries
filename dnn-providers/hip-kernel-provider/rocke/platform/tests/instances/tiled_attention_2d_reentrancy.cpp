@@ -5,6 +5,10 @@
  * builders. Each lower_to_llvm call owns and frees an IRBuilder; subsequent
  * calls in this process must not reuse static pointers allocated from a
  * previous builder arena.
+ *
+ * A stale static can corrupt the IR without crashing, so each repeat call's
+ * LLVM text must equal the text the first call with the same builder and spec
+ * returned, byte for byte.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,17 +98,36 @@ static void fill_gfx942_register_pv_wide(rocke_attention_tiled_2d_spec_t* s)
     s->use_register_pv = true;
 }
 
-static int run_case(const tiled_reentrancy_case_t* c, size_t index, size_t count)
+/* The index of the first case before @p index that calls the same builder on
+ * the same spec, or @p index when there is none. */
+static size_t first_call_of(const tiled_reentrancy_case_t* cases, size_t index)
 {
+    size_t earlier;
+
+    for(earlier = 0; earlier < index; ++earlier)
+    {
+        if(cases[earlier].lower == cases[index].lower && cases[earlier].fill == cases[index].fill)
+        {
+            return earlier;
+        }
+    }
+    return index;
+}
+
+/* Lowers case @p index into texts[index]. A repeat of an earlier case must
+ * return exactly the text that case returned. */
+static int run_case(const tiled_reentrancy_case_t* cases, char** texts, size_t index, size_t count)
+{
+    const tiled_reentrancy_case_t* c = &cases[index];
     rocke_attention_tiled_2d_spec_t spec;
-    char* llvm_text = NULL;
     char err[1024];
     rocke_status_t st;
+    size_t first;
 
     memset(err, 0, sizeof(err));
     c->fill(&spec);
-    st = c->lower(&spec, c->arch, ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof(err));
-    if(st != ROCKE_OK || llvm_text == NULL || llvm_text[0] == '\0')
+    st = c->lower(&spec, c->arch, ROCKE_LLVM_FLAVOR_AUTO, &texts[index], err, sizeof(err));
+    if(st != ROCKE_OK || texts[index] == NULL || texts[index][0] == '\0')
     {
         fprintf(stderr,
                 "call %zu/%zu %-24s arch=%s failed: status=%d err=%s\n",
@@ -114,17 +137,33 @@ static int run_case(const tiled_reentrancy_case_t* c, size_t index, size_t count
                 c->arch,
                 (int)st,
                 err[0] != '\0' ? err : "<none>");
-        free(llvm_text);
         return 1;
     }
 
-    printf("call %zu/%zu %-24s arch=%s -> OK ll=%zuB\n",
+    first = first_call_of(cases, index);
+    if(first != index && strcmp(texts[index], texts[first]) != 0)
+    {
+        fprintf(stderr,
+                "call %zu/%zu %-24s arch=%s returned %zuB of LLVM text that differs from "
+                "the %zuB call %zu (%s) returned for the same builder and spec\n",
+                index + 1,
+                count,
+                c->name,
+                c->arch,
+                strlen(texts[index]),
+                strlen(texts[first]),
+                first + 1,
+                cases[first].name);
+        return 1;
+    }
+
+    printf("call %zu/%zu %-24s arch=%s -> OK ll=%zuB%s\n",
            index + 1,
            count,
            c->name,
            c->arch,
-           strlen(llvm_text));
-    free(llvm_text);
+           strlen(texts[index]),
+           first != index ? " (same text as its first call)" : "");
     return 0;
 }
 
@@ -173,14 +212,21 @@ int main(void)
          fill_gfx942_register_pv},
     };
     const size_t count = sizeof(cases) / sizeof(cases[0]);
+    char* texts[sizeof(cases) / sizeof(cases[0])] = {NULL};
     size_t i;
+    int failed = 0;
 
+    for(i = 0; i < count && !failed; ++i)
+    {
+        failed = run_case(cases, texts, i, count);
+    }
     for(i = 0; i < count; ++i)
     {
-        if(run_case(&cases[i], i, count) != 0)
-        {
-            return 1;
-        }
+        free(texts[i]);
+    }
+    if(failed)
+    {
+        return 1;
     }
 
     printf("ALL %zu TILED ATTENTION RE-ENTRANCY CALLS SURVIVED\n", count);

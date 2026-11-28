@@ -445,13 +445,13 @@ scaled and MX GEMM kernels need:
 
 ```text
 # Packed-i4 byte unpack (sign-extend each 4-bit nibble to i32 / f32 /
-# fp8 / bf8). Lowers to ``v_bfe_i32`` (bit-field-extract signed) on
-# the AMDGPU backend.
+# f16). Lowers to ``v_bfe_i32`` (bit-field-extract signed) on the
+# AMDGPU backend.
 unpack_i4_byte_to_pair_i32(b, packed_byte)
 unpack_i4_byte_to_pair_i8(b, packed_byte) # alias of _i32 today
 unpack_i4_byte_to_pair_f32(b, packed_byte)
-dequant_i4_byte_to_fp8_pair(b, packed_byte, *, inv_scale)
-dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
+unpack_i4_byte_to_pair_f16(b, packed_byte)
+dequant_i4_byte_to_f16_pair(b, packed_byte, *, scale)
 
 # OCP MX E8M0 shared-exponent decode + apply.
 # decode_mx_scale_e8m0(e8m0) -> f32 multiplier, per the OCP MX spec:
@@ -465,8 +465,14 @@ apply_mx_scale(b, value_f32, scale_f32)
 add_mx_scaled_dot(b, acc_f32xN, dot_f32xN, a_codes, b_codes)
 # The largest code an A and a B scale may both have before a sum of
 # `products` scaled products (a scaled MFMA) can overflow f32, from the
-# element formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ.
+# element formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ
+# (helpers/fp8_encoding.py).
 largest_safe_mx_scale_code(a_format, b_format, products)
+
+# helpers/fp8_encoding.py: the fp8 / bf8 encoding a target converts to and its
+# matrix cores read (FNUZ on gfx942, OCP on gfx950 and gfx1250), with its
+# largest value.
+fp8_element_format(dtype, arch)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)
 
 # Preshuffled-B tile-major layout helper. The launcher uses
@@ -695,10 +701,10 @@ Higher-level helpers in `helpers/quant.py`:
 
 ```text
 QDType
-QUANT_MAX_ABS # quant range bounds
 quant_ir_type(qdtype)
-quant_max_abs(qdtype)
-quantize_scalar_f32(b, v, scale, qdtype, ...)
+quant_max_abs(qdtype, *, arch) # quant range bound on arch
+quantize_scalar_f32(b, v, *, inv_scale, qdtype, arch)
+quantize_prescaled_f32(b, scaled, *, qdtype, arch) # same clamp + cvt, already scaled
 dequantize_scalar_to_f32(b, v, scale, qdtype, ...)
 ir_to_qdtype(ir_type)
 ```

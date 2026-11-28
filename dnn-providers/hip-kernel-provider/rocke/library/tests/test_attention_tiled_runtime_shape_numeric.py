@@ -37,10 +37,11 @@ import numpy as np
 import pytest
 
 from kernels.common import attention_unified as au
-from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.numeric.storage import decode, encode, round_to
+from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
-from ._attention_device_array import DeviceArray
 
 _CUS = {"gfx942": 304, "gfx950": 256}
 
@@ -285,15 +286,6 @@ def test_d192_pair_takes_the_one_warp_kernel():
         assert spec.head_size == 192 and spec.num_warps == 1, spec
 
 
-def _encode(x, dtype):
-    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
-    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
-
-
-def _decode(x, dtype):
-    return x.astype(np.float32) if dtype == "fp16" else bf16_to_f32(x)
-
-
 def _case(geometry, shape, seed):
     """fp32 q, k, v exact in the kernel dtype, cu_seqlens_q and a block table
     wider than needed whose unused slots point at a poison block."""
@@ -309,7 +301,7 @@ def _case(geometry, shape, seed):
         table[s, :n] = [next(order) for _ in range(n)]
 
     def randn(*dims):
-        return _decode(_encode(rng.standard_normal(dims, np.float32), dtype), dtype)
+        return round_to(rng.standard_normal(dims, np.float32), dtype)
 
     q = randn(sum(q_lens), hq, d)
     k = randn(num_blocks, bs, hkv, d)
@@ -352,7 +344,7 @@ def _reference(q, k, v, cu, table, shape, bs):
     return out
 
 
-def _launch_3d(rt, arch, problem, q, k, v, out, cu, seq_lens, table, scale):
+def _launch_3d(arch, problem, q, k, v, out, cu, seq_lens, table, scale):
     """The 3D segment + reduce pair, launched as ``run_unified_attention_torch``'s
     3D path does (same support check, cache key, segment count and grids)."""
     ok, why = au._explicit_path_supported(problem, None, "3d", arch)
@@ -363,7 +355,7 @@ def _launch_3d(rt, arch, problem, q, k, v, out, cu, seq_lens, table, scale):
     )
     # NaN until the kernels write it, so a skipped workspace slot fails.
     segm_output, segm_max, segm_expsum = (
-        DeviceArray(rt, np.full(spec.shape, np.nan, np.float32))
+        DeviceArray(np.full(spec.shape, np.nan, np.float32))
         for spec in au._attention_3d_workspace_specs(problem, num_segments, None)
     )
     seg_vals = {
@@ -385,8 +377,8 @@ def _launch_3d(rt, arch, problem, q, k, v, out, cu, seq_lens, table, scale):
         "softcap": 0.0,
         "num_seqs": problem.num_seqs,
         "block_table_stride": table.stride(0),
-        "qq_bias_stride_0": 0,
-        **au._runtime_kernarg_values(problem),
+        "qq_bias_stride0": 0,
+        **au.runtime_kernarg_values(problem),
     }
     red_vals = {
         "output_ptr": out,
@@ -394,32 +386,32 @@ def _launch_3d(rt, arch, problem, q, k, v, out, cu, seq_lens, table, scale):
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seq_lens,
-        **au._runtime_kernarg_values(problem),
+        **au.runtime_kernarg_values(problem),
     }
     au._launch_3d_pipeline(prepared, seg_vals, red_vals, stream=0, capturing=False)
 
 
-def _launch(rt, arch, path, problem, geometry, q, k, v, cu, table, kv_lens):
+def _launch(arch, path, problem, geometry, q, k, v, cu, table, kv_lens):
     """Run one shape on ``path``; returns O as float32."""
     d, _, dtype = geometry
-    host_q = _encode(q, dtype)
+    host_q = encode(q, dtype)
     # Every byte 0xFF is NaN in fp16 and bf16: an element the kernel skips
     # fails the check instead of passing on stale memory.
     out_host = np.empty_like(host_q)
     out_host.view(np.uint8)[...] = 0xFF
-    out = DeviceArray(rt, out_host)
+    out = DeviceArray(out_host, dtype)
     args = {
-        "q": DeviceArray(rt, host_q),
-        "k": DeviceArray(rt, _encode(k, dtype)),
-        "v": DeviceArray(rt, _encode(v, dtype)),
+        "q": DeviceArray(host_q, dtype),
+        "k": DeviceArray(encode(k, dtype), dtype),
+        "v": DeviceArray(encode(v, dtype), dtype),
         "out": out,
-        "cu": DeviceArray(rt, cu),
-        "seq_lens": DeviceArray(rt, np.array(kv_lens, dtype=np.int32)),
-        "table": DeviceArray(rt, table),
+        "cu": DeviceArray(cu),
+        "seq_lens": DeviceArray(np.array(kv_lens, dtype=np.int32)),
+        "table": DeviceArray(table),
         "scale": 1.0 / math.sqrt(d),
     }
     if path == "3d":
-        _launch_3d(rt, arch, problem, **args)
+        _launch_3d(arch, problem, **args)
     else:
         au.run_unified_attention_torch(
             problem=problem,
@@ -436,7 +428,7 @@ def _launch(rt, arch, path, problem, geometry, q, k, v, cu, table, kv_lens):
             use_graph=False,
         )
     # The read is a blocking copy, so the launch has finished.
-    return _decode(out.read(), dtype)
+    return decode(out.read(), dtype)
 
 
 def _cache(path):
@@ -458,19 +450,20 @@ def test_pair_numeric_on_one_binary(
     device_arch, monkeypatch, arch, path, geometry, first, second
 ):
     if device_arch != arch:
-        pytest.skip(f"requires a {arch} GPU, found {device_arch or 'no GPU'}")
-    from rocke.runtime.hip_module import Runtime
-
+        pytest.skip(
+            arch_skip_reason(
+                (arch,), f"requires a {arch} GPU, found {device_arch or 'no GPU'}"
+            )
+        )
     # The gfx942 2D graph replay captures through torch; launch eagerly.
     monkeypatch.setenv("HIPDNN_GFX942_2D_GRAPH", "0")
-    rt = Runtime()
     _, bs, _ = geometry
     compiled = None
     for i, shape in enumerate((first, second)):
         problem = _problem(arch, geometry, shape)
         q, k, v, cu, table = _case(geometry, shape, seed=i)
         got = _launch(
-            rt, arch, path, problem, geometry, q, k, v, cu, table, shape["kv_lens"]
+            arch, path, problem, geometry, q, k, v, cu, table, shape["kv_lens"]
         )
         missed = f"shape {i} missed the {path} cache"
         assert _key(problem, path, arch) in _cache(path), missed

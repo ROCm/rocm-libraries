@@ -16,6 +16,12 @@ import shutil
 import sys
 
 import pytest
+from rocke.tests import ctest_listing
+from rocke.tests.ctest_listing import list_ctest_entries
+
+from rocke.tests.engines import IR_LOWER_CLI_ENV
+from rocke.tests.lanes import BUILD_VARIANT, SOURCE_TREE, skip_until
+from rocke.tests.platform_build import cmake_cache_entries
 
 
 @pytest.fixture
@@ -28,6 +34,7 @@ def runner(monkeypatch):
     # and a leaked value would let these tests pass without exercising CTest.
     for var, _, _ in module.NATIVE_PARITY_TESTS:
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv(IR_LOWER_CLI_ENV, raising=False)
     monkeypatch.delenv("ROCKE_BACKEND", raising=False)
     monkeypatch.delenv("ROCKE_TEST_ENGINE_ARCHIVE", raising=False)
     monkeypatch.delenv("ROCKE_ONLINE_LIB", raising=False)
@@ -50,6 +57,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable.touch()
     ir_types = tmp_path / "Debug" / "rocke_ir_types"
     ir_types.touch()
+    float_format = tmp_path / "Debug" / "rocke_float_format"
+    float_format.touch()
     nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
     nontemporal.touch()
     unsigned_int_ops = tmp_path / "Debug" / "rocke_unsigned_int_ops"
@@ -83,6 +92,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "tests": [
                 {"name": "rocke_storage", "command": [str(executable)]},
                 {"name": "rocke_ir_types", "command": [str(ir_types)]},
+                {"name": "rocke_float_format", "command": [str(float_format)]},
                 {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
                 {
                     "name": "rocke_unsigned_int_ops",
@@ -114,6 +124,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--build-root",
             str(tmp_path),
             "--config",
@@ -127,6 +138,9 @@ def test_runner_passes_registered_fixture_to_both_backends(
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
     assert all(env["ROCKE_IR_TYPES_TEST"] == str(ir_types) for _, env in children)
+    assert all(
+        env["ROCKE_FLOAT_FORMAT_TEST"] == str(float_format) for _, env in children
+    )
     assert all(
         env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
     )
@@ -160,9 +174,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
         "--parallel",
         "3",
     ]
-    assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
-    # An explicit override skips the storage lookup; other binaries still resolve.
-    assert any("^rocke_storage$" in cmd for cmd, _ in calls) is not override
+    ctest_listings = [cmd for cmd, _ in calls if "--show-only=json-v1" in cmd]
+    # Native discovery uses one complete listing; ctest_ready obtains the other.
+    assert len(ctest_listings) == 2
+    assert all("-R" not in cmd for cmd in ctest_listings)
 
 
 @pytest.mark.parametrize("built", ["none", "partial", "all"])
@@ -201,6 +216,7 @@ def test_ctest_readiness_and_failure_propagation(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -243,6 +259,7 @@ def test_only_a_successful_unfiltered_arch_domain_gate_suppresses_pytest_delegat
         "--no-gate",
         "--no-ir-validity",
         "--no-both",
+        "--no-backend-width",
         "--build-root",
         str(tmp_path),
     ]
@@ -316,6 +333,7 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--pytest-target",
             selected,
             "--build-root",
@@ -333,6 +351,92 @@ def test_focused_pytest_selection_changes_both_passes_and_labels_the_result(
     assert len(pytest_calls) == 2
     assert all(expected in command for command in pytest_calls)
     assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("gate_rc", [0, 1])
+def test_backend_width_gate_runs_its_named_check_with_the_entrys_pytest_timeout(
+    runner, monkeypatch, tmp_path, gate_rc
+):
+    """The check is outside pytest discovery, so the runner names its file as a stage of its own
+    and keeps its installed CTest entry's per-test bound; a failing check fails the run.
+    """
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, gate_rc)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-gate",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert runner.main() == gate_rc
+    [command] = calls
+    check = Path(command[-3])
+    assert check.name == "check_backend_access_width.py" and check.is_file()
+    assert command[-7:] == [
+        "-m",
+        "pytest",
+        "-c",
+        str(runner.TESTS / "pytest.ini"),
+        str(check),
+        "-rs",
+        f"--timeout={runner.BACKEND_WIDTH_TEST_TIMEOUT_S}",
+    ]
+
+
+@pytest.mark.parametrize("keep_going", [False, True])
+def test_backend_width_gate_waits_for_the_fast_stages_unless_asked_to_keep_going(
+    runner, monkeypatch, tmp_path, capsys, keep_going
+):
+    """The gate compiles kernels, so a failed earlier stage stops the run before it
+    (TESTING.md, section 5.0.1); --keep-going runs it anyway, and the run stays red."""
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        failed_gate = Path(command[1]).name == "check_byte_identity.py"
+        return subprocess.CompletedProcess(command, 1 if failed_gate else 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+            *(["--keep-going"] if keep_going else []),
+        ],
+    )
+
+    assert runner.main() == 1
+    width_checks = [
+        command
+        for command in calls
+        if any(Path(part).name == "check_backend_access_width.py" for part in command)
+    ]
+    assert len(width_checks) == (1 if keep_going else 0)
+    not_run = "backend access-width gate: NOT RUN" in capsys.readouterr().out
+    assert not_run == (not keep_going)
 
 
 @pytest.mark.parametrize(
@@ -355,6 +459,7 @@ def test_corpus_selectors_label_the_overall_result_focused(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -364,6 +469,46 @@ def test_corpus_selectors_label_the_overall_result_focused(
 
     assert runner.main() == 0
     assert "RESULT: FOCUSED GREEN" in capsys.readouterr().out
+
+
+def test_ctest_command_index_rejects_duplicate_names(runner, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        ctest_listing,
+        "list_ctest_entries",
+        lambda *_args, **_kwargs: [
+            {"name": "rocke_storage", "command": ["first"]},
+            {"name": "rocke_storage", "command": ["second"]},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="rocke_storage more than once"):
+        runner._ctest_command_index(tmp_path, "Release", {"rocke_storage"})
+
+
+def test_ctest_command_index_ignores_unrequested_duplicate_names(
+    runner, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        ctest_listing,
+        "list_ctest_entries",
+        lambda *_args, **_kwargs: [
+            {"name": "other", "command": ["first"]},
+            {"name": "rocke_storage", "command": ["storage"]},
+            {"name": "other", "command": ["second"]},
+        ],
+    )
+
+    assert runner._ctest_command_index(tmp_path, "Release", {"rocke_storage"}) == {
+        "rocke_storage": ["storage"]
+    }
+
+
+@pytest.mark.parametrize("commands", [{}, {"rocke_storage": []}])
+def test_native_executable_rejects_missing_or_commandless_registration(
+    runner, commands
+):
+    with pytest.raises(ValueError, match="did not resolve the built rocke_storage"):
+        runner._native_executable({}, commands, "ROCKE_STORAGE_TEST", "rocke_storage")
 
 
 def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
@@ -403,6 +548,7 @@ def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -422,13 +568,16 @@ def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
     assert env["ROCKE_STORAGE_TEST"] == str(executable)
 
 
-def test_installed_runner_bootstraps_staged_hostcaps(runner, tmp_path):
-    installed_tests = tmp_path / "installed" / "tests"
-    arch_domain = installed_tests / "arch_domain"
-    arch_domain.mkdir(parents=True)
+def test_installed_runner_imports_the_package_beside_its_tests(runner, tmp_path):
+    """An installed provider tree holds the rocke package beside tests/, not
+    under python/; the runner finds it there in an isolated interpreter."""
+    installed = tmp_path / "installed"
+    installed_tests = installed / "tests"
+    installed_tests.mkdir(parents=True)
     shutil.copy2(runner.TESTS / "run_all.py", installed_tests / "run_all.py")
-    shutil.copy2(
-        Path(inspect.getfile(runner.available_cpus)), arch_domain / "_hostcaps.py"
+    package = Path(inspect.getfile(runner.available_cpus)).parents[1]
+    shutil.copytree(
+        package, installed / "rocke", ignore=shutil.ignore_patterns("__pycache__")
     )
 
     proc = subprocess.run(
@@ -467,13 +616,18 @@ def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_
 
 def test_arch_domain_ctest_registration_contract(runner, tmp_path):
     if not (runner.ROCKE / "CMakeLists.txt").is_file():
-        pytest.skip("source CMake project is absent from the installed test artifact")
+        skip_until(
+            SOURCE_TREE,
+            reason="source CMake project is absent from the installed test artifact",
+        )
     if not all(shutil.which(tool) for tool in ("cmake", "ctest")):
         pytest.skip("CMake and CTest required for registration regression")
 
     build = tmp_path / "build"
     runner.configure_pytest_build(build, "Release")
-    tests = runner.ctest_tests(build, "Release", "^rocke_arch_domain_reproducibility$")
+    tests = list_ctest_entries(
+        build, config="Release", name_pattern="^rocke_arch_domain_reproducibility$"
+    )
     assert len(tests) == 1
     test = tests[0]
     assert test["name"] == "rocke_arch_domain_reproducibility"
@@ -486,6 +640,7 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
         "--check",
         "--unvalidated-exit-code",
         "77",
+        "--rocke-shard-from-gtest-env",
     ]
     properties = {item["name"]: item["value"] for item in test["properties"]}
     assert properties["SKIP_RETURN_CODE"] == 77
@@ -500,7 +655,10 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
     installed_manifest = (build / "CTestTestfile.cmake.install").read_text()
     assert "add_test(rocke_arch_domain_reproducibility" in installed_manifest
     assert "tests/arch_domain/gen_arch_domain.py" in installed_manifest
-    assert "--check --unvalidated-exit-code 77" in installed_manifest
+    assert (
+        "--check --unvalidated-exit-code 77 --rocke-shard-from-gtest-env"
+        in installed_manifest
+    )
     assert "SKIP_RETURN_CODE 77" in installed_manifest
     assert "RUN_SERIAL TRUE" in installed_manifest
     assert "TIMEOUT 1800" in installed_manifest
@@ -513,6 +671,43 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
 def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):
     assert "ROCKE_STORAGE_TEST" not in runner.native_pytest_env(tmp_path, "Release")
     assert "native storage parity: SKIPPED" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "record", ["rocke_ir_lower_cli.path", "Release/rocke_ir_lower_cli.path"]
+)
+@pytest.mark.parametrize(
+    "relative",
+    ["tests/rocke_ir_lower_cli", "bin/hip_kernel_provider_rocke_ir_lower_cli_test.exe"],
+    ids=["standalone", "provider"],
+)
+def test_recorded_hip_lowering_program_is_passed_to_pytest(
+    runner, tmp_path, record, relative
+):
+    """The configure records the program's path (one record per configuration in a
+    multi-config build), so a provider build's renamed program in bin/ is found."""
+    program = tmp_path / relative
+    program.parent.mkdir(parents=True)
+    program.touch()
+    (tmp_path / record).parent.mkdir(exist_ok=True)
+    (tmp_path / record).write_text(f"{program}\n")
+    env = runner.native_pytest_env(tmp_path, "Release")
+    assert env[IR_LOWER_CLI_ENV] == str(program.resolve())
+
+
+def test_a_built_hip_lowering_program_without_a_record_is_not_guessed(
+    runner, tmp_path, capsys
+):
+    program = tmp_path / "tests" / "rocke_ir_lower_cli"
+    program.parent.mkdir()
+    program.touch()
+    assert IR_LOWER_CLI_ENV not in runner.native_pytest_env(tmp_path, "Release")
+    assert "native HIP lowering program: SKIPPED" in capsys.readouterr().out
+
+
+def test_missing_hip_lowering_program_reports_the_skip(runner, tmp_path, capsys):
+    assert IR_LOWER_CLI_ENV not in runner.native_pytest_env(tmp_path, "Release")
+    assert "native HIP lowering program: SKIPPED" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("subdir", ["", "Release"])
@@ -624,6 +819,7 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
             "--no-gate",
             "--no-ir-validity",
             "--no-arch-domain",
+            "--no-backend-width",
             "--build-root",
             str(tmp_path),
         ],
@@ -637,32 +833,30 @@ def test_fresh_build_prepares_entire_ctest_suite(
     runner, monkeypatch, tmp_path, override
 ):
     if not all(shutil.which(tool) for tool in ("cmake", "ctest", "ninja")):
-        pytest.skip("CMake, CTest, and Ninja required for fresh-build regression")
+        skip_until(
+            BUILD_VARIANT,
+            reason="CMake, CTest, and Ninja required for fresh-build regression",
+        )
     source = tmp_path / "source"
     source.mkdir()
-    # Exercise real build/discovery/execution without requiring a C toolchain.
-    # Copy CMake itself as each executable: `-E true` supplies the trivial
-    # success behavior, and the executable exists only after its target builds.
+    # One parity name proves real CTest discovery, using the existing CMake
+    # executable so the fixture does not create a new program. Its target stamp
+    # proves the parity target built; an unrelated ALL stamp proves setup also
+    # completes the rest of the configured suite after an earlier partial build.
     (source / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(runner_fixture LANGUAGES NONE)\n"
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
-        'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip\n"
-        "             rocke_unsigned_int_ops rocke_arch_target_identity rocke_buffer_rsrc_hip\n"
-        "             rocke_intexpr\n"
-        "             rocke_param_facts\n"
-        "             rocke_gpu_checked_value\n"
-        "             rocke_dtypes)\n"
-        '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
-        '  add_custom_command(OUTPUT "${output}"\n'
-        '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
-        '    COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_COMMAND}" "${output}"\n'
-        "    VERBATIM)\n"
-        '  add_custom_target(${name} ALL DEPENDS "${output}")\n'
-        '  add_test(NAME ${name} COMMAND "${output}" -E true)\n'
-        "endforeach()\n"
+        'set(storage "${CMAKE_CURRENT_BINARY_DIR}/rocke_storage.ready")\n'
+        'add_custom_command(OUTPUT "${storage}"\n'
+        '  COMMAND "${CMAKE_COMMAND}" -E touch "${storage}" VERBATIM)\n'
+        'add_custom_target(rocke_storage ALL DEPENDS "${storage}")\n'
+        'add_test(NAME rocke_storage COMMAND "${CMAKE_COMMAND}" -E true)\n'
+        'set(sentinel "${CMAKE_CURRENT_BINARY_DIR}/whole_suite.ready")\n'
+        'add_custom_command(OUTPUT "${sentinel}"\n'
+        '  COMMAND "${CMAKE_COMMAND}" -E touch "${sentinel}" VERBATIM)\n'
+        'add_custom_target(whole_suite_sentinel ALL DEPENDS "${sentinel}")\n'
     )
     build = tmp_path / "build"
     subprocess.run(
@@ -672,35 +866,33 @@ def test_fresh_build_prepares_entire_ctest_suite(
     subprocess.run(
         ["cmake", "--build", str(build), "--target", "rocke_core"], check=True
     )
+    monkeypatch.setattr(
+        runner,
+        "NATIVE_PARITY_TESTS",
+        (("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),),
+    )
+    executable = tmp_path / "override"
     if override:
         # An external fixture must not suppress the configured suite's build.
-        executable = tmp_path / "override"
         executable.touch()
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
-    assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
-    assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
-    assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
-    assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()
-    assert Path(env["ROCKE_INTEXPR_CLI"]).is_file()
-    assert Path(env["ROCKE_PARAM_FACTS_CLI"]).is_file()
-    assert Path(env["ROCKE_GPU_CHECKED_VALUE_CLI"]).is_file()
-    assert Path(env["ROCKE_ARCH_TARGET_TEST_EXE"]).is_file()
-    assert Path(env["ROCKE_BUFFER_RSRC_HIP_TEST"]).is_file()
-    if override:
-        assert env["ROCKE_STORAGE_TEST"] == str(executable)
-    assert runner.ctest_ready(build, "Release")
-    subprocess.run(
-        ["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure"],
-        check=True,
-    )
+    # The parity entry runs the CMake program that configured the tree, which
+    # need not be the `cmake` on PATH (a launcher script, for one).
+    configured_cmake = Path(cmake_cache_entries(build)["CMAKE_COMMAND"])
+    expected = executable if override else configured_cmake
+    assert env["ROCKE_STORAGE_TEST"] == str(expected.resolve())
+    assert (build / "rocke_storage.ready").is_file()
+    assert (build / "whole_suite.ready").is_file()
 
 
 def test_multi_config_build_supplies_its_archive(runner, monkeypatch, tmp_path):
     if runner.sys.platform != "linux" or not all(
         shutil.which(tool) for tool in ("cmake", "ninja", "c++")
     ):
-        pytest.skip("Linux, CMake, Ninja, and C++ compiler required")
+        skip_until(
+            BUILD_VARIANT, reason="Linux, CMake, Ninja, and C++ compiler required"
+        )
     source = tmp_path / "source"
     source.mkdir()
     (source / "core.cpp").write_text("int fixture() { return 0; }\n")

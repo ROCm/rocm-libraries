@@ -38,6 +38,15 @@ Bias: rank 1-4, right-aligned against ``[B, Hq, Sq, Skv]``; any size-1 axis
 broadcasts. In the ragged layout the bias is indexed by in-batch positions
 and its Sq/Skv extents are the longest per-batch lengths.
 
+Two forward score modifiers the hipDNN node does not have, both off by default:
+
+* ``softcap = c > 0`` caps the scaled scores, ``s = c * tanh(s / c)``, before
+  the bias is added.
+* ``sinks[Hq]`` gives each query head a sink logit that joins every row's
+  softmax denominator and contributes no value: ``O = sum_k p_k V_k`` with
+  ``p_k = exp(s_k) / (exp(sink) + sum_j exp(s_j))``, and ``LSE`` includes the
+  sink term. A row with no kept key then yields ``O = 0`` and ``LSE = sink``.
+
 Backward (:func:`sdpa_reference_bwd`) follows the hipDNN CPU reference
 backward: it consumes the natural-log LSE of the forward, recomputes
 ``P = exp(scale * q.k - LSE)`` on kept cells only, and returns ``dQ``, ``dK``,
@@ -235,20 +244,24 @@ def _expand_bias(bias, B, H, Sq, Skv):
     return np.broadcast_to(bias, want)
 
 
-def _attend(q, k, v, scale, bias2d, band):
-    """One (batch, head) problem. q[sq,D], k[skv,D], v[skv,Dv] -> (o, lse)."""
+def _attend(q, k, v, scale, bias2d, band, *, softcap, sink):
+    """One (batch, head) problem. q[sq,D], k[skv,D], v[skv,Dv] -> (o, lse).
+
+    ``sink`` is the head's sink logit; ``-inf`` (no sink) adds nothing."""
     sq, skv = q.shape[0], k.shape[0]
     if skv == 0:
-        return np.zeros((sq, v.shape[1])), np.full(sq, -np.inf)
+        return np.zeros((sq, v.shape[1])), np.full(sq, sink, dtype=np.float64)
     s = (q @ k.T) * scale
+    if softcap > 0:
+        s = softcap * np.tanh(s / softcap)
     if bias2d is not None:
         s = s + bias2d
     s = np.where(band, s, -np.inf)
-    mx = s.max(axis=1)
+    mx = np.maximum(s.max(axis=1), sink)
     live = np.isfinite(mx)
     safe = np.where(live, mx, 0.0)
     e = np.where(live[:, None], np.exp(s - safe[:, None]), 0.0)
-    den = e.sum(axis=1)
+    den = e.sum(axis=1) + np.where(live, np.exp(sink - safe), 0.0)
     den1 = np.where(live, den, 1.0)
     o = (e / den1[:, None]) @ v
     lse = np.where(live, mx + np.log(den1), -np.inf)
@@ -271,14 +284,20 @@ def sdpa_reference(
     seq_len_kv=None,
     q_offsets=None,
     kv_offsets=None,
+    softcap=0.0,
+    sinks=None,
 ):
     """Float64 SDPA forward. Returns ``(O, LSE)``, both float64.
 
     ``LSE`` is natural-log (``-inf`` for empty rows) and can be cast to fp32.
     Provide ``q_offsets`` and ``kv_offsets`` for the ragged THD layout,
     otherwise inputs are dense 4-D with optional per-batch ``seq_len_q`` /
-    ``seq_len_kv`` counts. ``scale`` defaults to ``1/sqrt(D)``.
+    ``seq_len_kv`` counts. ``scale`` defaults to ``1/sqrt(D)``. ``softcap``
+    (``>= 0``, 0 = off) and ``sinks`` (one logit per query head, ``None`` = off)
+    are the score modifiers in the module docstring.
     """
+    if not (math.isfinite(softcap) and softcap >= 0):
+        raise ValueError(f"softcap must be finite and >= 0, got {softcap}")
     q = np.asarray(q, dtype=np.float64)
     k = np.asarray(k, dtype=np.float64)
     v = np.asarray(v, dtype=np.float64)
@@ -342,6 +361,12 @@ def sdpa_reference(
     if scale is None:
         scale = 1.0 / math.sqrt(D)
     bias_full = None if bias is None else _expand_bias(bias, B, Hq, Smax_q, Smax_kv)
+    if sinks is None:
+        head_sinks = np.full(Hq, -np.inf)
+    else:
+        head_sinks = np.asarray(sinks, dtype=np.float64)
+        if head_sinks.shape != (Hq,):
+            raise ValueError(f"sinks must have shape ({Hq},), got {head_sinks.shape}")
 
     for b in range(B):
         sq, skv = lens_q[b], lens_kv[b]
@@ -351,15 +376,22 @@ def sdpa_reference(
         for h in range(Hq):
             hk, hv = h // (Hq // Hk), h // (Hq // Hv)
             bb = None if bias_full is None else bias_full[b, h, :sq, :skv]
+            modifiers = {"softcap": softcap, "sink": head_sinks[h]}
             if ragged:
                 qs = slice(qo[b], qo[b] + sq)
                 ks = slice(ko[b], ko[b] + skv)
                 o[qs, h], lse[qs, h] = _attend(
-                    q[qs, h], k[ks, hk], v[ks, hv], scale, bb, band
+                    q[qs, h], k[ks, hk], v[ks, hv], scale, bb, band, **modifiers
                 )
             else:
                 o[b, h, :sq], lse[b, h, :sq] = _attend(
-                    q[b, h, :sq], k[b, hk, :skv], v[b, hv, :skv], scale, bb, band
+                    q[b, h, :sq],
+                    k[b, hk, :skv],
+                    v[b, hv, :skv],
+                    scale,
+                    bb,
+                    band,
+                    **modifiers,
                 )
     return o, lse
 

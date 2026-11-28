@@ -139,19 +139,17 @@ static rocke_value_t* rocke_conv_d_addr(rocke_ir_builder_t* b,
     return off;
 }
 
-/* Pointwise D-address closure: flat offset = m * K + k_out, always valid.
+/* Pointwise D-address closure: flat offset = m * K + k_out, with no validity
+ * predicate (NULL) beyond the store bounds: pointwise D has no pad guards.
  * Python: def d_addr(b_, m_val, n_val):
  *             if grouped:
  *                 k_out = b_.add(k_out_group_base, n_val)
- *                 return b_.add(b_.mul(m_val, p_K), k_out), _always_valid_d
- *             return b_.add(b_.mul(m_val, p_kpg), n_val), _always_valid_d
- * where _always_valid_d is ONE const_i32(1) hoisted before the K-loop; every
- * store reuses it, so a fresh constant per call would shift every SSA id. */
+ *                 return b_.add(b_.mul(m_val, p_K), k_out), None
+ *             return b_.add(b_.mul(m_val, p_kpg), n_val), None */
 typedef struct rocke_conv_d_addr_pw_ctx
 {
     rocke_value_t* pitch; /* p_kpg ungrouped (== K), p_K grouped */
     rocke_value_t* k_out_group_base; /* g*kpg, NULL when ungrouped */
-    rocke_value_t* valid; /* the hoisted _always_valid_d */
 } rocke_conv_d_addr_pw_ctx_t;
 
 /* The pointwise D offset: m * pitch + (k_out_group_base + n) grouped, else
@@ -177,7 +175,7 @@ static rocke_value_t* rocke_conv_d_addr_pointwise(rocke_ir_builder_t* b,
     rocke_value_t* off
         = rocke_conv_d_off_pointwise(b, m_global, n_global, pw->pitch, pw->k_out_group_base);
     if(out_valid != NULL)
-        *out_valid = pw->valid;
+        *out_valid = NULL;
     return off;
 }
 
@@ -195,7 +193,6 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      const rocke_warp_grid_t* grid,
                                      rocke_value_t* d_rsrc,
                                      rocke_value_t* ir_d_pitch_pw,
-                                     rocke_value_t* always_valid_d,
                                      const rocke_tensor_descriptor_t* D_desc,
                                      rocke_value_t* k_out_group_base,
                                      rocke_value_t* slab_base,
@@ -228,7 +225,6 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
         rocke_conv_d_addr_pw_ctx_t pw;
         pw.pitch = ir_d_pitch_pw;
         pw.k_out_group_base = k_out_group_base;
-        pw.valid = always_valid_d;
         rocke_direct_epilogue_store(b,
                                     &epi,
                                     accs,
@@ -440,7 +436,6 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
                                        rocke_value_t* ir_d_pitch_pw,
-                                       rocke_value_t* always_valid_d,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
                                        rocke_value_t* k_out_group_base,
@@ -520,7 +515,6 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
         rocke_conv_d_addr_pw_ctx_t pw;
         pw.pitch = ir_d_pitch_pw;
         pw.k_out_group_base = k_out_group_base;
-        pw.valid = always_valid_d;
         rocke_cshuffle_epilogue_store(b,
                                       &epi,
                                       accs,
@@ -681,7 +675,6 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                           &ctx->grid,
                                           ctx->d_rsrc,
                                           ctx->ir_d_pitch_pw,
-                                          ctx->ir_always_valid_d,
                                           ctx->op,
                                           ctx->D_desc,
                                           ctx->d_k_out_group_base,
@@ -731,7 +724,6 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                         &ctx->grid,
                                         ctx->d_rsrc,
                                         ctx->ir_d_pitch_pw,
-                                        ctx->ir_always_valid_d,
                                         ctx->D_desc,
                                         ctx->d_k_out_group_base,
                                         ctx->fwd_split ? ctx->fwd_slab_base : NULL,

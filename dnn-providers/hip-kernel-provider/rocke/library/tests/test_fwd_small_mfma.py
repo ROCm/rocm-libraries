@@ -11,26 +11,21 @@ serving both kernels. GPU (gfx950): 3x3 stride 1
 with image edges on every side, several tiles per block with and without the
 window prefetch and a partial output-channel block; the small-K kernel with
 edges, stride 2, several channel steps, K 1..8 and a 1x7 filter with its own
-column padding -- checked numerically against torch's forward convolution.
+column padding -- checked numerically against a float64 numpy reference of
+the stored operands.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_fwd_small_mfma.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    import torch
-
-    torch.cuda.is_available()
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_fwd_small_mfma import (
@@ -41,6 +36,8 @@ from kernels.common.conv_fwd_small_mfma import (
     fwd_smallc_mfma_reason,
     fwd_smallk_mfma_reason,
 )
+
+from ._direct_conv_numeric import direct_fwd_peak_error
 
 GPU_ARCH = get_device_arch(0)
 
@@ -191,9 +188,7 @@ class TestSmallSpecs(unittest.TestCase):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a few rejected specs (the byte-identity
         gate only covers the IR of specs both engines build)."""
-        import pytest
-
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
@@ -299,9 +294,7 @@ class TestSmallSpecs(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed); a
         missing, mistyped or partial problem raises."""
-        import pytest
-
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.engine_bridge import (
             conv_direct_fwd_smallc_mfma_spec_to_dict,
             conv_direct_fwd_smallk_mfma_spec_to_dict,
@@ -848,9 +841,7 @@ def test_small_mfma_is_served_from_the_cache(tmp_path):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx950":
-        return f"needs gfx950 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
+        return arch_skip_reason(("gfx950",), f"needs gfx950 (got {GPU_ARCH!r})")
     return ""
 
 
@@ -922,52 +913,15 @@ _SMALLK_CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestSmallGpu(unittest.TestCase):
     def _check(self, spec, build):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
         from rocke import compile_kernel
-        from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-        p = spec.problem
         art = compile_kernel(build(spec, GPU_ARCH), arch=GPU_ARCH)
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        x = torch.empty(p.N, p.H, p.W, p.total_c).uniform_(-1, 1).to(td)
-        w = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1, 1).to(td)
-        y = torch.zeros(p.N, p.Ho, p.Wo, p.total_k, dtype=td)
-        rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        bufs = [rt.alloc(t.nbytes) for t in (x, w, y)]
-        try:
-            rt.memcpy_h2d(bufs[0], u8(x), x.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, y.nbytes)  # poison: every element is written
-            vals = ConvArgs.from_problem(p, direction="fwd").to_launch_values(
-                *(int(v) for v in bufs), x.nbytes, w.nbytes, y.nbytes
-            )
-            grid, block = spec.launch_geometry()
-            KernelLauncher(
-                hsaco=art.hsaco,
-                kernel_name=art.kernel_name,
-                signature=conv_direct_args_signature(p.dtype, direction="fwd"),
-            )(vals, config=LaunchConfig(grid=grid, block=block, fence=True))
-            rt.memcpy_d2h(u8(y), bufs[2], y.nbytes)
-        finally:
-            for v in bufs:
-                rt.free(v)
-        ref = torch.nn.functional.conv2d(
-            x.float().permute(0, 3, 1, 2),
-            w.float().permute(0, 3, 1, 2),
-            stride=p.stride,
-            padding=(p.PAD, p.PAD_W),
-        ).permute(0, 2, 3, 1)
-        err = float((y.float() - ref).abs().max() / ref.abs().max())
+        grid, block = spec.launch_geometry()
+        err = direct_fwd_peak_error(art, spec.problem, grid=grid, block=block)
         self.assertLess(err, 1e-2, f"{spec}: rel err {err:.3g}")
 
     def test_smallc(self):

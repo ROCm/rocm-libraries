@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
 from rocke.core.ir import BF16, F16
-from rocke.helpers.spec import kernel_name_join
+from rocke.helpers.spec import kernel_name_join, require_bool_fields
 
 from kernels.common._attention_dense_paged import paged_cache_bytes, paged_tile_check
 from kernels.common.attention_dense_decode import (
@@ -286,8 +286,7 @@ class AttentionDenseSpec:
         if not 1 <= self.waves_per_eu <= 8:
             raise ValueError(f"waves_per_eu must be in [1, 8], got {self.waves_per_eu}")
 
-        if type(self.paged) is not bool:
-            raise ValueError(f"paged must be a bool, got {type(self.paged).__name__}")
+        require_bool_fields(self, "paged")
         if self.paged:
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")
@@ -353,14 +352,8 @@ class AttentionDenseSpec:
         format is an arch-specific knob, so the arch whose loader implements one
         overrides this (gfx950 fp8).
 
-        This is the one arch override the SHARED checks read, via the KV extent
-        in :func:`check_dense_spec_preflight`. The C++ mirror of this spec has
-        no narrow-KV field, so it always computes that extent at 2 B, and a
-        narrow-KV spec would be sized as its wide twin there. Nothing hands the
-        mirror such a spec today: the field lives on the arch subclass, which
-        the mirror does not carry, exactly like ``kv_segments``, ``emit_lse``
-        and ``wide_lds_dma``. Giving the mirror a narrow KV format means giving
-        it the field and the width, not only this property.
+        Both the paged cache bound and the K/V extent in
+        :func:`check_dense_spec_preflight` use the concrete spec's width.
         """
         return 2
 
@@ -580,30 +573,62 @@ class AttentionDenseSpec:
         return kernel_name_join(*parts)
 
 
-#: The one dtype an fp8 KV loader decodes. The K/V pointers are declared OCP
-#: fp8e4m3, so a bf16 or FNUZ tensor is read as OCP and silently produces wrong
-#: output. Compared by name so no torch import is needed, which also rejects
-#: ``torch.float8_e4m3fnuz``.
-OCP_FP8_KV_DTYPE = "torch.float8_e4m3fn"
+#: The one element type an fp8 KV loader decodes. The K/V pointers are declared
+#: OCP fp8e4m3, so a bf16 or FNUZ (``fp8e4m3fnuz``) array is read as OCP and
+#: silently produces wrong output.
+OCP_FP8_KV_DTYPE = "fp8e4m3"
 
 
-def require_ocp_fp8_kv(named_tensors) -> None:
-    """Raise unless every ``(name, tensor)`` is OCP fp8 K/V.
+def require_ocp_fp8_kv(named_arrays) -> None:
+    """Raise unless every ``(name, array)`` is OCP fp8 K/V.
 
     The single home of the fp8 K/V dtype rule. It lives beside
     :attr:`AttentionDenseSpec.kv_elem_bytes`, which is what makes the rule
     load-bearing, so the dispatch binding and the runner enforce one wording
     instead of two. ``kernels`` may not import ``dispatch``, so a checker that
-    both layers share has to live here.
+    both layers share has to live here. Each array is anything
+    :func:`rocke.runtime.device_array.array_info` describes.
     """
-    for name, tensor in named_tensors:
-        dtype = getattr(tensor, "dtype", None)
-        if str(dtype) != OCP_FP8_KV_DTYPE:
+    from rocke.runtime.device_array import array_info
+
+    for name, array in named_arrays:
+        dtype = array_info(array).dtype
+        if dtype != OCP_FP8_KV_DTYPE:
             raise ValueError(
                 f"fp8 dense expects OCP fp8 {name} ({OCP_FP8_KV_DTYPE}), got "
-                f"{dtype!r}; a bf16 or FNUZ tensor is read as OCP fp8 and "
+                f"{dtype!r}; a bf16 or FNUZ array is read as OCP fp8 and "
                 "silently produces wrong output"
             )
+
+
+def validate_dense_sinks(spec, q, sinks) -> None:
+    """Raise unless ``sinks`` matches ``spec.use_sinks``.
+
+    With sinks on, ``sinks`` is the per-query-head sink logit: a contiguous
+    ``[num_query_heads]`` GPU array in q's dtype. Without, it must be ``None``.
+    The single home of the rule both dense runners enforce. ``q`` and ``sinks``
+    are anything :func:`rocke.runtime.device_array.array_info` describes.
+    """
+    if not spec.use_sinks:
+        if sinks is not None:
+            raise ValueError("sinks provided but spec.use_sinks is False")
+        return
+    if sinks is None:
+        raise ValueError("spec.use_sinks=True requires sinks that are not None")
+    from rocke.runtime.device_array import array_info
+
+    info = array_info(sinks)
+    if info.shape != (spec.num_query_heads,):
+        raise ValueError(
+            f"sinks must have shape ({spec.num_query_heads},), got {info.shape}"
+        )
+    q_dtype = array_info(q).dtype
+    if info.dtype != q_dtype:
+        raise ValueError(f"sinks dtype {info.dtype} must match q dtype {q_dtype}")
+    if not info.is_contiguous():
+        raise ValueError("sinks must be contiguous")
+    if info.device is None:
+        raise ValueError("sinks must be a GPU array")
 
 
 def require_fp8_kv_scale(name: str, value, label: str) -> float:
@@ -783,4 +808,5 @@ __all__ = [
     "check_dense_scale",
     "check_dense_spec_preflight",
     "partial_tile_reason",
+    "validate_dense_sinks",
 ]

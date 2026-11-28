@@ -69,6 +69,10 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 # Suppress the "fell back to Python lowerer" warning — expected in environments
 # where the C++ engine extension is not built.
@@ -632,107 +636,119 @@ class _Measured:
     passed: bool | None
 
 
-def _verify(rt, run, out_dev, out_t, ref_out, name: str, dump_fail, u8):
+def _verify(
+    rt, run, out_dev, out_shape, dtype: str, ref_out, name: str, dump_fail
+) -> tuple[bool, bool]:
     """Launch once and compare with the reference: ``(stop, passed)``.
 
     Peak-normalised relative error, ``max|out - ref| / max(max|ref|, 1)``.
     With ``dump_fail`` the first failing kernel's output, reference and
     difference are written there and the run stops.
     """
-    import torch
-
+    import numpy as np
+    from rocke.numeric import storage
+    from rocke.numeric.compare import peak_relative_error
     from rocke.runtime import synchronize_and_release
+    from rocke.runtime.host_buffers import as_u8_buffer
 
-    rt.memset(out_dev, 0, out_t.nbytes)
+    stored = np.empty(out_shape, dtype=storage.host_dtype(dtype))
+    rt.memset(out_dev, 0, stored.nbytes)
     run()
     synchronize_and_release(0)
-    out_cpu = torch.empty_like(out_t)
-    rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
-    out_f32 = out_cpu.float().cuda()
-    diff = out_f32 - ref_out
-    rel_err = float(diff.abs().max() / ref_out.abs().max().clamp(min=1.0))
+    rt.memcpy_d2h(as_u8_buffer(stored), out_dev, stored.nbytes)
+    out_f32 = storage.decode(stored, dtype)
+    rel_err = peak_relative_error(out_f32, ref_out, floor=1.0)
     passed = rel_err < 5e-2
     if passed:
         return False, True
     print(f"  verify {name}: FAIL(rel_err={rel_err:.2e})", flush=True)
     if not dump_fail:
         return False, False
-    import numpy as np
-
     from benchmarks.common.reproduce_kernel import artifact_stem
 
+    diff = out_f32 - ref_out
     dump_dir = Path(dump_fail)
     dump_dir.mkdir(parents=True, exist_ok=True)
     stem = artifact_stem(name)
-    for what, t in (("out", out_f32), ("ref", ref_out), ("diff", diff)):
-        np.savetxt(dump_dir / f"{stem}_{what}.txt", t.cpu().numpy().ravel(), fmt="%.6f")
-    flat = int(diff.abs().argmax())
+    for what, values in (("out", out_f32), ("ref", ref_out), ("diff", diff)):
+        np.savetxt(dump_dir / f"{stem}_{what}.txt", values.ravel(), fmt="%.6f")
+    flat = int(np.abs(diff).argmax())
     print(
         f"  [dump] saved to {dump_dir}/  max_diff at {np.unravel_index(flat, diff.shape)}: "
-        f"out={float(out_f32.flatten()[flat]):.6f} ref={float(ref_out.flatten()[flat]):.6f}",
+        f"out={float(out_f32.flat[flat]):.6f} ref={float(ref_out.flat[flat]):.6f}",
         flush=True,
     )
     return True, False
 
 
+def _reference_output(
+    problem, direction: str, dtype: str, operand, weights
+) -> np.ndarray:
+    """The output the kernel should store for the stored ``operand`` (x for
+    fwd, dy for dgrad) and ``weights``: the float64 convolution of their
+    values, rounded to ``dtype`` and returned as float32."""
+    from builders.common.conv_reference import (
+        conv_dgrad_reference,
+        conv_fwd_reference,
+    )
+    from rocke.numeric import storage
+
+    values = storage.decode(operand, dtype), storage.decode(weights, dtype)
+    if direction == "fwd":
+        exact = conv_fwd_reference(*values, problem)
+    else:
+        exact = conv_dgrad_reference(*values, problem)
+    return storage.round_to(exact, dtype)
+
+
 def _run_case(args, cache, problem, dtype: str, sel) -> int:
-    import ctypes
     import struct
 
     import numpy as np
-    import torch
-
     from dispatch.grouped_convolution import launch_plan_for
+    from rocke.numeric import storage
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
-    def _u8(t):
-        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
     p = problem
     direction = sel.request.direction
-    torch_dt = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
-    torch.manual_seed(42)
+    rng = np.random.default_rng(42)
 
     def _make(*shape):
         if args.debug_init is not None:
-            return torch.full(shape, args.debug_init, dtype=torch_dt)
-        return torch.empty(*shape).uniform_(-1.0, 1.0).to(torch_dt)
+            return storage.encode(np.full(shape, args.debug_init), dtype)
+        return storage.encode(rng.uniform(-1.0, 1.0, shape), dtype)
 
     x_shape = (p.N, p.Hi, p.Wi, p.C)
     y_shape = (p.N, p.Ho, p.Wo, p.K)
-    W_t = _make(p.K, p.Y, p.X, p.C // p.groups)
+    weights = _make(p.K, p.Y, p.X, p.C // p.groups)
     if direction == "fwd":
         in_name, out_name = "x", "y"
-        In_t, Out_t = _make(*x_shape), torch.empty(*y_shape, dtype=torch_dt)
+        operand, out_shape = _make(*x_shape), y_shape
     else:
         in_name, out_name = "dy", "dx"
-        In_t, Out_t = _make(*y_shape), torch.empty(*x_shape, dtype=torch_dt)
+        operand, out_shape = _make(*y_shape), x_shape
+    out_nbytes = int(np.prod(out_shape)) * storage.host_dtype(dtype).itemsize
     flop = float(p.flops)
-    bytes_xfer = float(In_t.nbytes + W_t.nbytes + Out_t.nbytes)
+    bytes_xfer = float(operand.nbytes + weights.nbytes + out_nbytes)
 
     ref_out = None
     if args.verify or args.dump_fail:
-        from builders.common.conv_reference import conv_reference, dgrad_reference
-
-        if direction == "fwd":
-            ref_out = conv_reference(In_t.cuda(), W_t.cuda(), p, out_dtype=torch_dt)
-        else:
-            # Rounded to the output dtype, as conv_reference's out_dtype does.
-            ref_out = dgrad_reference(In_t, W_t, p).to(torch_dt).float()
+        ref_out = _reference_output(p, direction, dtype, operand, weights)
 
     plans = {r.spec.name: launch_plan_for(r.request, r.spec) for r in sel.results}
     rt = Runtime()
-    sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
+    sizes = {in_name: operand.nbytes, "w": weights.nbytes, out_name: out_nbytes}
     # Scratch is sized for the largest plan and shared, as benchmark_direct_conv
     # does; it needs no initial contents.
     for plan in plans.values():
         for name, nbytes in plan.workspaces.items():
             sizes[name] = max(sizes.get(name, 0), nbytes)
     ptrs = {name: rt.alloc(nbytes) for name, nbytes in sizes.items()}
-    rt.memcpy_h2d(ptrs[in_name], _u8(In_t), In_t.nbytes)
-    rt.memcpy_h2d(ptrs["w"], _u8(W_t), W_t.nbytes)
+    rt.memcpy_h2d(ptrs[in_name], as_u8_buffer(operand), operand.nbytes)
+    rt.memcpy_h2d(ptrs["w"], as_u8_buffer(weights), weights.nbytes)
 
     stop = EarlyStop.for_case(args, p, dtype, direction)
     measured: list[_Measured] = []
@@ -746,7 +762,11 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
             # Scoped to this instance alone (unlike `sizes`, which is shared-scratch-wide
             # across every admitted instance): the struct.error guard below must judge the
             # instance that actually raised, not the largest instance anywhere in the sweep.
-            inst_sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
+            inst_sizes = {
+                in_name: operand.nbytes,
+                "w": weights.nbytes,
+                out_name: out_nbytes,
+            }
             inst_sizes.update(plan.workspaces)
             entries = [cache.get(step.identity) for step in plan.steps]
             if any(e is None for e in entries):
@@ -822,11 +842,11 @@ def _run_case(args, cache, problem, dtype: str, sel) -> int:
                         rt,
                         run,
                         ptrs[out_name],
-                        Out_t,
+                        out_shape,
+                        dtype,
                         ref_out,
                         spec.name,
                         args.dump_fail,
-                        _u8,
                     )
                     if stopped:
                         return 1
@@ -1053,7 +1073,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="check every instance against the torch reference before timing it; "
+        help="check every instance against the float64 reference before timing it; "
         "a failing instance never ranks",
     )
     parser.add_argument(

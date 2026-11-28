@@ -43,6 +43,13 @@ from rocke.core.lower_llvm import (
     ArchDomainWarning,
     lower_kernel_to_llvm,
 )
+from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.lanes import (
+    BUILD_VARIANT,
+    SOURCE_TREE,
+    import_or_skip_until,
+    skip_until_reason,
+)
 
 PLATFORM = Path(__file__).resolve().parents[2]
 LOWER_LLVM = PLATFORM / "python" / "rocke" / "core" / "lower_llvm.py"
@@ -56,7 +63,10 @@ _RUN_ALL_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
 # exactly what an installed-package consumer wants run.
 _needs_sources = pytest.mark.skipif(
     not (LOWER_LLVM.exists() and CPP_CORE.exists() and CHECK_GATE.exists()),
-    reason="reads the platform sources, which an installed test layout omits",
+    reason=skip_until_reason(
+        SOURCE_TREE,
+        reason="reads the platform sources, which an installed test layout omits",
+    ),
 )
 
 
@@ -341,7 +351,7 @@ def test_every_binding_requires_a_target() -> None:
     """
     import re
 
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     takes_target = re.compile(r"^\w+\(\w+: dict, arch: str\)")
     offenders = []
     checked = 0
@@ -554,33 +564,35 @@ def test_the_post_pass_is_silent_on_an_unmeasured_declare() -> None:
     assert not [w for w in caught if isinstance(w.message, ArchDomainWarning)]
 
 
-def _aliased_negative_declare() -> tuple[str, str, tuple[str, ...], str]:
-    """A (declare line, arch, keys, flavor) where several keys share one declare
-    and every one of them is a measured negative on that arch.
+def _aliased_negative_declare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[str, str, tuple[str, ...], str]:
+    """A (declare line, arch, keys, flavor) where two keys share one declare and
+    both are measured negatives on that arch.
 
-    Found from the committed tables rather than named, so the test keeps
-    meaning something when the data moves. No committed table has an aliased
-    declare today, so the tests that need one skip until one does.
+    No committed column has such a pair, so one is made from a real negative
+    cell: a second key, ``<key>.alias``, resolves to the same declare line in
+    the flavor's declaration table and reads the same cell from its column. The
+    post-pass then sees exactly the shape it must handle when two committed keys
+    alias one intrinsic.
     """
-    from rocke.core.lower_llvm import _decls_for_flavor
+    from rocke.core import lower_llvm
 
-    for flavor in _committed_flavors():
-        table = arch_domain.load(flavor)
-        if table is None:
-            continue
-        by_decl: dict[str, list[str]] = {}
-        for key, decl in _decls_for_flavor(flavor).items():
-            by_decl.setdefault(decl, []).append(key)
-        for decl, keys in sorted(by_decl.items()):
-            if len(keys) < 2:
-                continue
-            for arch in sorted(set(table.arches(keys[0]))):
-                cells = [table.lookup(k, arch) for k in keys]
-                if all(
-                    c is not None and arch_domain.is_negative(c.status) for c in cells
-                ):
-                    return decl, arch, tuple(sorted(keys)), flavor
-    pytest.skip("no committed column has an all-negative aliased declare")
+    decl, key, arch, flavor = _negative_declare()
+    alias = f"{key}.alias"
+    real_decls = lower_llvm._decls_for_flavor
+
+    def decls_with_alias(asked: str) -> dict[str, str]:
+        decls = real_decls(asked)
+        return {**decls, alias: decls[key]} if asked == flavor else decls
+
+    table = arch_domain.load(flavor)
+    real_lookup = table.lookup
+    monkeypatch.setattr(lower_llvm, "_decls_for_flavor", decls_with_alias)
+    monkeypatch.setattr(
+        table, "lookup", lambda k, a: real_lookup(key if k == alias else k, a)
+    )
+    return decl, arch, tuple(sorted((key, alias))), flavor
 
 
 def test_the_post_pass_reports_every_key_an_aliased_declare_could_be(
@@ -596,7 +608,7 @@ def test_the_post_pass_reports_every_key_an_aliased_declare_could_be(
     """
     from rocke.core.lower_llvm import check_arch_domain_in_ir
 
-    decl, arch, keys, flavor = _aliased_negative_declare()
+    decl, arch, keys, flavor = _aliased_negative_declare(monkeypatch)
     monkeypatch.setenv(arch_domain.MODE_ENV, "warn")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -618,7 +630,7 @@ def test_a_waived_alias_does_not_turn_its_sibling_into_a_refusal(
     """
     from rocke.core.lower_llvm import check_arch_domain_in_ir
 
-    decl, arch, keys, flavor = _aliased_negative_declare()
+    decl, arch, keys, flavor = _aliased_negative_declare(monkeypatch)
     _waive(monkeypatch, (keys[0], arch, flavor))
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
     with warnings.catch_warnings(record=True) as caught:
@@ -640,7 +652,7 @@ def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
     different table than this checkout's, and the post-pass says so."""
     from rocke.core.lower_llvm import check_arch_domain_in_ir
 
-    decl, arch, keys, flavor = _aliased_negative_declare()
+    decl, arch, keys, flavor = _aliased_negative_declare(monkeypatch)
     _waive(monkeypatch)  # nothing waived, whatever is on file
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
     with pytest.raises(ArchDomainError) as excinfo:
@@ -649,6 +661,7 @@ def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
 
 
 BINDINGS = PLATFORM / "cpp" / "bindings"
+_OMITS_CPP = skip_until_reason(SOURCE_TREE, reason="installed layout omits cpp/")
 # Library families bind from library/cpp/bindings (rocke_library_engine); the
 # same rules hold there. Scanned when the sibling tree is present.
 BINDING_SOURCES = [
@@ -659,7 +672,7 @@ BINDING_SOURCES = [
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
     """``rocke_lower_kernel_to_llvm`` has no ``err`` out-parameter.
 
@@ -682,11 +695,12 @@ def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_every_binding_lowering_converts_a_refusal() -> None:
     """A refusal reaches Python as ``ArchDomainError`` only if the binding that
     lowered the kernel hands its status and message to ``throw_if_arch_domain``,
-    directly or through ``take_lowered`` / ``take_ll``. A binding that formats
+    directly or through ``take_lowered`` / ``take_ll`` (or, for the
+    serialized-IR bindings, ``take_serialized_ir_result``). A binding that formats
     its own failure raises a plain ``RuntimeError`` instead, and the two engines
     then disagree about what a refusal is.
 
@@ -697,7 +711,9 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
     scanned too: the Winograd bindings lower in ``winograd_glue.hpp``.
     """
     call = re.compile(r"rocke_\w*to_llvm\w*\(")
-    handled = re.compile(r"take_lowered\(|take_ll\(|throw_if_arch_domain\(")
+    handled = re.compile(
+        r"take_lowered\(|take_ll\(|take_serialized_ir_result\(|throw_if_arch_domain\("
+    )
     offenders = []
     for path in sorted(p for d in BINDING_SOURCES for p in d.glob("*.[ch]pp")):
         text = path.read_text()
@@ -711,16 +727,19 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_every_lowering_helper_converts_a_refusal() -> None:
-    """The scan above trusts ``take_lowered`` / ``take_ll`` by name, so every
-    definition of one must itself hand the status to ``throw_if_arch_domain``.
+    """The scan above trusts ``take_lowered`` / ``take_ll`` /
+    ``take_serialized_ir_result`` by name, so every definition of one must
+    itself hand the status to ``throw_if_arch_domain``.
 
     ``winograd_glue.hpp`` kept a private ``take_lowered`` that formatted every
     failure as a ``RuntimeError``, so a Winograd refusal never reached Python as
     ``ArchDomainError`` while the scan above counted it as converted.
     """
-    definition = re.compile(r"std::string\s+(take_lowered|take_ll)\s*\(")
+    definition = re.compile(
+        r"std::string\s+(take_lowered|take_ll|take_serialized_ir_result)\s*\("
+    )
     found = []
     offenders = []
     for path in sorted(p for d in BINDING_SOURCES for p in d.glob("*.[ch]pp")):
@@ -737,7 +756,7 @@ def test_every_lowering_helper_converts_a_refusal() -> None:
 
 
 @_needs_sources
-@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason=_OMITS_CPP)
 def test_every_binding_module_registers_the_refusal() -> None:
     """``throw_if_arch_domain`` throws ``ArchDomainRefusal``; only a module that
     registers it turns that into ``ArchDomainError`` (a NotImplementedError).
@@ -769,7 +788,7 @@ def test_every_binding_module_raises_a_refusal_as_python_does(module: str) -> No
     """The cpp backend's refusal is the same kind of exception as the Python
     lowerer's: a NotImplementedError, the convention for a kernel the lowerer
     declines for its target (how hsaco_parity counts a refusal)."""
-    engine = pytest.importorskip(module)
+    engine = import_or_skip_until(module, BUILD_VARIANT)
     refused = getattr(engine, "ArchDomainError", None)
     assert refused is not None, f"{module} has no ArchDomainError"
     assert issubclass(refused, NotImplementedError)
@@ -872,6 +891,8 @@ def test_the_cpp_fallback_does_not_warn_twice(monkeypatch: pytest.MonkeyPatch) -
 
     decl, key, arch, flavor = _negative_declare()
     monkeypatch.setenv("ROCKE_BACKEND", "cpp")
+    # The permissive cpp lane: this test is about the fallback itself.
+    monkeypatch.delenv(B.CPP_STRICT_ENV, raising=False)
     monkeypatch.setenv("ROCKE_CPP_QUIET_FALLBACK", "1")
 
     def _boom(*a, **k):
@@ -954,24 +975,33 @@ def _lower_dpp8(flavor: str) -> str:
 
 
 def test_a_borrowing_lane_refuses_at_its_source(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A borrowed column keeps Python and C++ diagnostics on its source lane."""
-    if not arch_domain.COLUMN_ALIASES:
-        pytest.skip("every qualified lane has its own committed column")
+    """A lane with no column of its own enforces its alias's column, and the
+    refusal names the column it read, as waivers and messages must.
+
+    No committed lane borrows today, so one is made: the data directory holds
+    every committed column but the borrowing lane's, and COLUMN_ALIASES points
+    that lane at a column that calls the dpp8 demand negative.
+    """
+    import shutil
+
+    source = _refusing_flavor()
+    lane = next(f for f in _committed_flavors() if f != source)
+    for flavor in _committed_flavors():
+        if flavor != lane:
+            shutil.copy(arch_domain._column_path(flavor), tmp_path)
+    monkeypatch.setattr(arch_domain, "_DATA_DIR", tmp_path)
+    monkeypatch.setattr(arch_domain, "COLUMN_ALIASES", {lane: source})
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
-    tested: list[str] = []
-    for lane, source in arch_domain.COLUMN_ALIASES.items():
-        table = arch_domain.load(source)
-        assert table is not None
-        cell = table.lookup(_DPP8_KEY, _DPP8_ARCH)
-        if cell is None or not arch_domain.is_negative(cell.status):
-            continue
+    arch_domain.load.cache_clear()
+    try:
+        assert arch_domain.column_flavor(lane) == source
         with pytest.raises(ArchDomainError) as refused:
             _lower_dpp8(lane)
-        assert refused.value.flavor == source, lane
-        tested.append(lane)
-    assert tested, "no borrowing lane had the negative test cell"
+    finally:
+        arch_domain.load.cache_clear()
+    assert refused.value.flavor == source
 
 
 def _waive(monkeypatch: pytest.MonkeyPatch, *cells: tuple[str, str, str]) -> None:
@@ -1363,7 +1393,7 @@ def test_both_mode_flags_refusals_over_different_intrinsics(
 
 
 # --------------------------------------------------------------------------
-# the C++ engine itself (needs the rocke_engine extension)
+# the C++ engine itself (needs the shared C++ engine)
 # --------------------------------------------------------------------------
 
 
@@ -1389,14 +1419,14 @@ def test_the_message_text_is_the_one_the_cpp_engine_pins() -> None:
 def test_the_cpp_engine_refuses_with_the_python_message(
     monkeypatch: pytest.MonkeyPatch, flavor: str
 ) -> None:
-    engine = pytest.importorskip("rocke_engine")
+    engine = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     cell = arch_domain.load(flavor).lookup(_DPP8_KEY, _DPP8_ARCH)
     if cell is None or not arch_domain.is_negative(cell.status):
         pytest.skip(f"{_DPP8_KEY} is not negative on {_DPP8_ARCH} at {flavor}")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
-    with pytest.raises(engine.ArchDomainError) as cpp:
+    with pytest.raises(engine.ArchDomainRefusal) as cpp:
         engine.lower_serialized_ir(
             serialize(_dpp8_kernel()), arch=_DPP8_ARCH, flavor=flavor
         )
@@ -1410,7 +1440,7 @@ def test_the_cpp_engine_refuses_with_the_python_message(
 def test_the_cpp_engine_lowers_outside_error_mode(
     monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
-    engine = pytest.importorskip("rocke_engine")
+    engine = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     flavor = _refusing_flavor()
@@ -1424,7 +1454,7 @@ def test_the_cpp_engine_lowers_outside_error_mode(
 def test_the_cpp_engine_rejects_a_misspelled_mode_as_python_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    engine = pytest.importorskip("rocke_engine")
+    engine = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     flavor = _refusing_flavor()
@@ -1446,7 +1476,7 @@ def test_the_cpp_engine_rejects_a_misspelled_mode_for_a_kernel_that_demands_noth
     It used to read it only when a kernel demanded an intrinsic, so a kernel that
     demanded none lowered under a misspelled value because nothing asked.
     """
-    engine = pytest.importorskip("rocke_engine")
+    engine = native_engine_or_skip()
     from rocke.core.ir import IRBuilder
     from rocke.core.ir_serialize import serialize
 
@@ -1463,9 +1493,10 @@ def test_the_cpp_engine_rejects_a_misspelled_mode_for_a_kernel_that_demands_noth
 def test_the_cpp_backend_raises_the_python_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """End to end on the default backend: the engine refuses, the binding
-    raises its ArchDomainError, and the caller gets the Python one."""
-    pytest.importorskip("rocke_engine")
+    """End to end on the default backend: the engine refuses,
+    ``rocke.core.native_engine`` raises its ArchDomainRefusal, and the caller
+    gets the Python one."""
+    native_engine_or_skip()
     flavor = _refusing_flavor()
     monkeypatch.setenv("ROCKE_BACKEND", "cpp")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")

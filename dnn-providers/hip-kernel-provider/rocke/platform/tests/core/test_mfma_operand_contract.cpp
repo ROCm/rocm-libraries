@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -38,19 +39,19 @@ static const mfma_case_t cases[] = {
     {"mfma_f32_32x32x2_f32", "f32", 1, 16, 0, 0, 1},
     {"mfma_f32_16x16x8_xf32", "tf32", 2, 4, 0, 0, 1},
     {"mfma_f32_32x32x4_xf32", "tf32", 2, 16, 0, 0, 1},
-    {"mfma_f32_16x16x16_f16", "f16", 4, 4, 0, 0, 0},
-    {"mfma_f32_16x16x32_f16", "f16", 8, 4, 0, 0, 0},
-    {"mfma_f32_16x16x16_bf16", "bf16", 4, 4, 0, 0, 0},
-    {"mfma_f32_16x16x32_bf16", "bf16", 8, 4, 0, 0, 0},
-    {"mfma_f32_32x32x8_f16", "f16", 4, 16, 0, 0, 0},
-    {"mfma_f32_32x32x8_bf16", "bf16", 4, 16, 0, 0, 0},
-    {"mfma_f32_32x32x16_f16", "f16", 8, 16, 0, 0, 0},
-    {"mfma_f32_32x32x16_bf16", "bf16", 8, 16, 0, 0, 0},
+    {"mfma_f32_16x16x16_f16", "f16", 4, 4, 0, 0, 1},
+    {"mfma_f32_16x16x32_f16", "f16", 8, 4, 0, 0, 1},
+    {"mfma_f32_16x16x16_bf16", "bf16", 4, 4, 0, 0, 1},
+    {"mfma_f32_16x16x32_bf16", "bf16", 8, 4, 0, 0, 1},
+    {"mfma_f32_32x32x8_f16", "f16", 4, 16, 0, 0, 1},
+    {"mfma_f32_32x32x8_bf16", "bf16", 4, 16, 0, 0, 1},
+    {"mfma_f32_32x32x16_f16", "f16", 8, 16, 0, 0, 1},
+    {"mfma_f32_32x32x16_bf16", "bf16", 8, 16, 0, 0, 1},
     {"mfma_f32_4x4x4_f16", "f16", 4, 4, 0, 0, 1},
-    {"mfma_f32_16x16x32_fp8", "fp8e4m3", 8, 4, 0, 0, 0},
-    {"mfma_f32_16x16x32_bf8", "bf8e5m2", 8, 4, 0, 0, 0},
-    {"mfma_f32_32x32x16_fp8", "fp8e4m3", 8, 16, 0, 0, 0},
-    {"mfma_f32_32x32x16_bf8", "bf8e5m2", 8, 16, 0, 0, 0},
+    {"mfma_f32_16x16x32_fp8", "fp8e4m3", 8, 4, 0, 0, 1},
+    {"mfma_f32_16x16x32_bf8", "bf8e5m2", 8, 4, 0, 0, 1},
+    {"mfma_f32_32x32x16_fp8", "fp8e4m3", 8, 16, 0, 0, 1},
+    {"mfma_f32_32x32x16_bf8", "bf8e5m2", 8, 16, 0, 0, 1},
     {"mfma_f32_16x16x128_fp4fp6fp8", "i32", 8, 4, 256, 0, 0},
     {"mfma_f32_16x16x128_fp8", "i32", 8, 4, 256, 0, 0},
     {"mfma_scale_f32_16x16x128_f8f6f4", "i32", 8, 4, 256, 1, 0},
@@ -58,6 +59,17 @@ static const mfma_case_t cases[] = {
     {"mfma_f64_4x4x4_f64", "f64", 1, 1, 0, 0, 1},
     {"mfma_f32_4x4x4_bf16", "bf16", 4, 4, 0, 0, 1},
 };
+
+/* The target a case lowers for, as the Python twin pairs them: gfx942 where its
+ * MMA catalog lists the atom, otherwise gfx950 (also for the builder-only K=128
+ * op_ids, which no catalog row names). The catalog gate refuses an atom on a
+ * target that does not list it, before any operand check this test makes. */
+static const char* case_arch(const mfma_case_t* spec)
+{
+    return rocke_mma_catalog_by_op_id(&rocke_arch_target_from_gfx("gfx942")->mma, spec->id)
+               ? "gfx942"
+               : "gfx950";
+}
 
 static int check_case(const mfma_case_t* spec, int variant, int generic)
 {
@@ -213,7 +225,7 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
         char error[ROCKE_ERR_MSG_CAP] = {};
         auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(f));
         const auto status = rocke_lower_kernel_to_llvm_ex(
-            builder.kernel, flavor, "gfx942", &llvm, error, sizeof(error));
+            builder.kernel, flavor, case_arch(spec), &llvm, error, sizeof(error));
         CHECK(status == (variant ? ROCKE_ERR_VALUE : ROCKE_OK));
         if(variant)
         {
@@ -230,9 +242,12 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
     rocke_strbuf_t hip;
     CHECK(rocke_strbuf_init(&hip, 0) == 0);
     rocke_lower_hip_opts_t opts = {};
-    opts.arch = "gfx942";
+    opts.arch = case_arch(spec);
     const auto status = rocke_lower_kernel_to_hip(&builder, builder.kernel, &opts, &hip);
-    if(spec->hip_supported)
+    // HIP declares no vec<u8xN> type, so an atom it lowers still refuses that
+    // carrier as an unsupported type, as the Python HIP lowering does.
+    const bool hip_has_source_type = strcmp(spec->source, "u8") != 0;
+    if(spec->hip_supported && hip_has_source_type)
     {
         CHECK(status == (variant ? ROCKE_ERR_VALUE : ROCKE_OK));
         if(variant)

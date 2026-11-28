@@ -16,9 +16,10 @@
 #     cannot lower is a kernel bug, and waivers are for wrong measurements;
 #   * no stale waiver: a waived cell that no longer measures negative means the
 #     column was fixed, and the waiver goes in the same change;
-#   * when the rocke_engine extension is importable, the C++ engine in `error`
-#     mode refuses exactly the cases the Python lowerer would, over the same
-#     intrinsic -- one table only helps if both engines act on it alike.
+#   * when the shared C++ engine (librocke, through rocke.core.native_engine)
+#     loads, the C++ engine in `error` mode refuses exactly the cases the
+#     Python lowerer would, over the same intrinsic -- one table only helps if
+#     both engines act on it alike.
 #
 # Lowering is pure Python and the artifact is committed data, so this gate needs
 # no toolchain and rules on every flavor on any host. It overlaps
@@ -142,8 +143,8 @@ def _cpp_verdicts(
             continue
         except BackendMismatch as exc:
             # The backend raises this, not ArchDomainError, when the engine
-            # refused a cell this checkout's table does not: an extension built
-            # from other columns or waivers. That is the disagreement this gate
+            # refused a cell this checkout's table does not: a shared engine
+            # built from other columns or waivers. That is the disagreement this gate
             # exists to find, so it is counted rather than filed below.
             out.append(f"{cid} @ {flavor}: cpp refused, python did not -- {exc}")
             continue
@@ -205,21 +206,16 @@ def main() -> int:
     flavors = [f for f in wanted_flavors if arch_domain.load(f) is not None]
     skipped = [f for f in wanted_flavors if f not in flavors]
 
-    try:
-        import rocke_engine  # noqa: F401 -- only probing for the C++ pass
-    except ImportError:
-        cpp = False
-    else:
-        cpp = True
+    from rocke.core.native_engine import native_lowering_available
+
+    cpp = native_lowering_available()
 
     print("== rocKE arch-domain lane ==")
     print(f"   cases   : {len(keep)}")
     print(f"   flavors : {', '.join(flavors) or '(none)'}")
     if skipped:
         print(f"   skipped : {', '.join(skipped)} (no committed column)")
-    print(
-        f"   engines : {'python + cpp' if cpp else 'python (rocke_engine not importable)'}"
-    )
+    print(f"   engines : {'python + cpp' if cpp else 'python (no shared C++ engine)'}")
     if not flavors:
         print("\nRESULT: RED - no committed arch-domain column to gate against.")
         return 1

@@ -4,10 +4,10 @@
 """Build, qualify, and verify pinned live GPU reference bundles for an operation.
 
 Each ``<operation>_reference/cli.py`` declares a ``ReferenceOperation``: its case
-contract, architecture adapters, metric, optional Torch answers, and manifest
-description. Snapshot export, bundle freezing, authentication, cohort matching,
-and the old/current comparison are shared, so every operation certifies its
-original tolerance in the same way. The snapshot and qualification commands are
+contract, architecture adapters, metric, and manifest description. Snapshot
+export, bundle freezing, authentication, cohort matching, and the old/current
+comparison are shared, so every operation certifies its original tolerance in
+the same way. The snapshot and qualification commands are
 offline maintenance operations. Verification only executes a locked bundle and
 current kernels; it never downloads dependencies, generates independent answers,
 or promotes a baseline. The cases, diff, and status commands only read the
@@ -146,22 +146,6 @@ class Metric:
 
 
 @dataclass(frozen=True)
-class TorchReference:
-    """Optional offline Torch answers that qualification also bounds.
-
-    ``devices`` lists the accepted Torch devices, the default first; with one
-    device, ``--torch-reference`` takes no value. ``prepare(device, architecture)``
-    fails before qualification creates any output if Torch cannot run there, and
-    returns ``cross_check(case, inputs, reference, baseline, parameters)``. Its
-    report gives every Torch answer's ``baseline_error_bound``.
-    """
-
-    devices: tuple[str, ...]
-    help: str
-    prepare: Callable[[str, str], Callable[..., dict]]
-
-
-@dataclass(frozen=True)
 class ReferenceOperation:
     """The operation-specific half of a pinned GPU reference.
 
@@ -176,8 +160,6 @@ class ReferenceOperation:
     manifest qualified before variants records none, and the lock that the
     variant selects identifies it. ``reference`` describes the independent
     reference's implementation, metric, and input generator in each manifest.
-    Without ``torch``, qualification bounds only the independent reference and
-    offers no ``--torch-reference`` option.
     """
 
     name: str
@@ -187,7 +169,6 @@ class ReferenceOperation:
     architectures: ModuleType
     reference: Mapping[str, str]
     metric: Metric
-    torch: TorchReference | None = None
     # Published SDPA manifests predate the operation field. SDPA qualification
     # keeps omitting it, so new manifests keep the published form.
     declares_operation: bool = True
@@ -347,20 +328,10 @@ class ReferenceOperation:
         architecture: str = "gfx942",
         *,
         variant: str | None = None,
-        torch_reference: str | None = None,
     ) -> None:
         """Measure the old version's bounds and require deterministic old outputs."""
         variant = self.architectures.resolve_variant(architecture, variant)
         target = self.architectures.get_adapter(architecture, variant)
-        if torch_reference is not None:
-            if self.torch is None:
-                raise ValueError(f"{self.label} qualification has no Torch reference")
-            if torch_reference not in self.torch.devices:
-                raise ValueError(
-                    f"{self.label} Torch reference device must be one of "
-                    + ", ".join(self.torch.devices)
-                )
-            cross_check = self.torch.prepare(torch_reference, architecture)
         if repetitions < 2:
             raise ValueError("qualification requires at least two old executions")
         metadata = json.loads((baseline / "snapshot.json").read_text())
@@ -431,17 +402,6 @@ class ReferenceOperation:
             parameters = self.metric.parameters(reference)
             old = decode(outputs[0], case.dtype)
             bound = self.metric.distance(old, reference, parameters)
-            torch_report = None
-            if torch_reference is not None:
-                torch_report = cross_check(case, inputs, reference, old, parameters)
-                bound = max(
-                    bound,
-                    *(
-                        r["baseline_error_bound"]
-                        for r in torch_report["results"].values()
-                    ),
-                )
-            # B covers every enabled independent reference on the same inputs.
             budget = ErrorBudget(case.tolerance, bound)
             entries[case.id] = {
                 "case": asdict(case),
@@ -456,8 +416,6 @@ class ReferenceOperation:
                 "qualification_repetitions": repetitions,
                 "compiler": report["compiler"],
             }
-            if torch_report is not None:
-                entries[case.id]["torch_reference"] = torch_report
             print(
                 f"QUALIFIED {case.id}: old_bound={bound:.9g}, "
                 f"comparison_limit={budget.comparison_limit:.9g}, "
@@ -1172,23 +1130,6 @@ class ReferenceOperation:
             default=3,
             help="old executions per case, at least 2 (default: %(default)s)",
         )
-        if self.torch is None:
-            qualification.set_defaults(torch_reference=None)
-        elif len(self.torch.devices) == 1:
-            qualification.add_argument(
-                "--torch-reference",
-                action="store_const",
-                const=self.torch.devices[0],
-                help=self.torch.help,
-            )
-        else:
-            qualification.add_argument(
-                "--torch-reference",
-                nargs="?",
-                const=self.torch.devices[0],
-                choices=self.torch.devices,
-                help=self.torch.help,
-            )
         verification = commands.add_parser(
             "verify",
             help="compare frozen and current kernels on this GPU",
@@ -1329,7 +1270,6 @@ class ReferenceOperation:
                 args.repetitions,
                 args.arch,
                 variant=self._variant(parser, args),
-                torch_reference=args.torch_reference,
             )
         elif args.command == "cases":
             # The text listing groups every variant; JSON describes one cohort.

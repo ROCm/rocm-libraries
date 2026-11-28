@@ -110,6 +110,29 @@ rocke_status_t rocke_lower_kernel_to_llvm_ex(const rocke_kernel_def_t* kernel,
                                              char* err,
                                              size_t err_cap);
 
+/* Parse the serialized ck.dsl.ir/v1 kernel `ir_text` (rocke/ir_serialize.h)
+ * and lower it as rocke_lower_kernel_to_llvm_ex does, for `arch` (NULL or ""
+ * names no target and is refused: there is no default) at `flavor` (AUTO
+ * resolves as documented above, once the text has parsed): the route for a
+ * host that holds a kernel as text rather than as a KernelDef. Every argument
+ * is a C string, a pointer to one or an enum, so an FFI caller mirrors no
+ * engine struct.
+ *
+ * On ROCKE_OK, *out_text receives the IR and *out_message (when out_message is
+ * non-NULL) is NULL. On any other status, *out_text is NULL and *out_message
+ * receives the reason -- the parser's or the lowerer's message, or one naming
+ * the step that failed; never empty -- or NULL if allocating it failed. Both
+ * strings are malloc'd; free them with rocke_text_free (rocke/strbuf.h) or
+ * free(). NULL or empty `ir_text` is ROCKE_ERR_VALUE ("empty IR input"), and so
+ * is a NULL `out_text` ("no output buffer"). An arch-domain refusal is
+ * ROCKE_ERR_ARCH_DOMAIN with the lane's message; every other status is the
+ * parser's or rocke_lower_kernel_to_llvm's. */
+rocke_status_t rocke_lower_serialized_ir_to_llvm(const char* ir_text,
+                                                 const char* arch,
+                                                 rocke_llvm_flavor_t flavor,
+                                                 char** out_text,
+                                                 char** out_message);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

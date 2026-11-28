@@ -24,6 +24,7 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
@@ -72,7 +73,7 @@ def spec_for(a="fp6", b="fp6", mode="wmma_scale", **kwargs):
     "dtype,ml_name", [("fp6", "float6_e2m3fn"), ("bf6", "float6_e3m2fn")]
 )
 def test_all_fp6_codes_against_independent_dtype(dtype, ml_name):
-    ml = pytest.importorskip("ml_dtypes")
+    ml = import_or_skip_until("ml_dtypes", BUILD_VARIANT)
     codes = np.arange(64, dtype=np.uint8).reshape(1, -1)
     actual = decode_fp6(pack_fp6_codes(codes), dtype)
     expected = codes.view(getattr(ml, ml_name)).astype(np.float64)
@@ -126,7 +127,7 @@ def test_arbitrary_fp6_bytes_repack_exactly(arbitrary_fp6_bytes):
     "dtype,ml_name", [("fp6", "float6_e2m3fn"), ("bf6", "float6_e3m2fn")]
 )
 def test_arbitrary_fp6_bytes_decode_independently(arbitrary_fp6_bytes, dtype, ml_name):
-    ml = pytest.importorskip("ml_dtypes", minversion="0.6.0")
+    ml = import_or_skip_until("ml_dtypes", BUILD_VARIANT)
     codes = _fp6_codes_from_bytes(arbitrary_fp6_bytes)
     expected = codes.view(getattr(ml, ml_name)).astype(np.float64)
     actual = decode_fp6(arbitrary_fp6_bytes, dtype)

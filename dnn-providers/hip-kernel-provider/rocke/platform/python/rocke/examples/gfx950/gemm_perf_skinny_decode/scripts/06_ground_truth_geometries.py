@@ -4,7 +4,7 @@
 """Step 6: try the geometries hipBLASLt actually picks.
 
 Ground truth (from `rocprof --hsa-trace` on `torch.matmul(bf16)` for
-M=2 N=4096 K=4096 on gfx950 / MI355X, ROCm 7.0.2):
+M=2 N=4096 K=4096 on gfx950, ROCm 7.0.2):
 
     Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
         ..._GRVWA8_GRVWB8_GSU0_SK3_SVW1_PGR2_PLR1_SIA3_DTLA1_DTLB1...
@@ -83,7 +83,7 @@ CANDIDATES = [
     ("t16x64x128_w1x2", 16, 64, 128, 1, 2, 16, 16, 32, "mem", "interwave", False),
     ("t16x64x256_w1x2", 16, 64, 256, 1, 2, 16, 16, 32, "mem", "interwave", False),
     # Lever C: preshuffle_b on the most promising-looking geometries.
-    # Per docs/preshuffle.md: B is laid out (k_tiles, n_tiles, block_n, block_k)
+    # Preshuffled B is laid out (k_tiles, n_tiles, block_n, block_k)
     # so each tile's load is one contiguous buffer_load_dwordxN burst.
     ("t16x16x128_w1x1_preB", 16, 16, 128, 1, 1, 16, 16, 32, "mem", "interwave", True),
     ("t16x16x256_w1x1_preB", 16, 16, 256, 1, 1, 16, 16, 32, "mem", "interwave", True),

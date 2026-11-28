@@ -19,7 +19,6 @@ import dataclasses
 import math
 import os
 import sys
-import warnings
 
 try:
     import rocke  # noqa: F401
@@ -28,22 +27,34 @@ except ImportError:  # running as a bare script outside the editable install
     _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
     sys.path[:0] = [_RK + "/library", _RK + "/platform/python"]
 
-import torch  # noqa: E402
+import numpy as np  # noqa: E402
+from rocke.core.dtypes import dtype_info  # noqa: E402
+from rocke.helpers.activations import LOG2E  # noqa: E402
+from rocke.numeric import storage  # noqa: E402
+from rocke.numeric.gated_delta import (  # noqa: E402
+    gated_delta_recurrence,
+    gdn_log_decay,
+    l2_normalize,
+    sigmoid,
+)
+from rocke.runtime.device_array import DeviceArray  # noqa: E402
+from rocke.runtime.hip_module import get_device_count  # noqa: E402
 
-from rocke.helpers.activations import LOG2E, SOFTPLUS_THRESHOLD
-from kernels.gfx950.kda_chunkwise import EXP2_CLAMP
-import torch.nn.functional as F  # noqa: E402
-
-from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec, KdaTileSpec  # noqa: E402
+from builders.common.kda_host import initial_state, score  # noqa: E402
+from kernels.gfx950.kda_chunkwise import (  # noqa: E402
+    EXP2_CLAMP,
+    KdaChunkScanSpec,
+    KdaTileSpec,
+)
 
 if __package__:
     from . import kda_chunk_prep as prep_mod  # noqa: E402
     from . import kda_chunk_split as split_mod  # noqa: E402
-    from .kda_chunk_fused import ref_token_serial  # noqa: E402
+    from .kda_chunk_fused import device_state, read_state  # noqa: E402
 else:
     import kda_chunk_prep as prep_mod  # noqa: E402
     import kda_chunk_split as split_mod  # noqa: E402
-    from kda_chunk_fused import ref_token_serial  # noqa: E402
+    from kda_chunk_fused import device_state, read_state  # noqa: E402
 
 TOL = 3e-2
 
@@ -56,16 +67,16 @@ _GENERATOR_CHUNK = 32
 _GENERATOR_MARGIN = 0.9
 
 
-def make_gdn_inputs(B, Hv, Hk, T, DK, DV, gate_low=-0.5, seed=0, device="cuda"):
-    """RAW GDN inputs: un-normalized q/k [B,T,Hk,DK], v [B,T,Hv,DV], raw a/beta [B,T,Hv]."""
-    g = torch.Generator(device=device).manual_seed(seed)
-    kw = dict(device=device, generator=g)
-    q = torch.randn(B, T, Hk, DK, dtype=torch.float32, **kw).bfloat16()
-    k = torch.randn(B, T, Hk, DK, dtype=torch.float32, **kw).bfloat16()
-    v = (torch.randn(B, T, Hv, DV, dtype=torch.float32, **kw) * 0.2).bfloat16()
-    a = (gate_low * torch.rand(B, T, Hv, dtype=torch.float32, **kw)).contiguous()
-    beta = torch.rand(B, T, Hv, dtype=torch.float32, **kw).contiguous()
-    dt_bias = torch.zeros(Hv, dtype=torch.float32, device=device)
+def make_gdn_inputs(B, Hv, Hk, T, DK, DV, gate_low=-0.5, seed=0):
+    """RAW GDN host inputs: un-normalized bf16 q/k [B,T,Hk,DK], bf16 v
+    [B,T,Hv,DV], raw f32 a/beta [B,T,Hv], f32 a_log/dt_bias [Hv]."""
+    rng = np.random.default_rng(seed)
+    q = storage.encode(rng.standard_normal((B, T, Hk, DK)), "bf16")
+    k = storage.encode(rng.standard_normal((B, T, Hk, DK)), "bf16")
+    v = storage.encode(0.2 * rng.standard_normal((B, T, Hv, DV)), "bf16")
+    a = storage.encode(gate_low * rng.random((B, T, Hv)), "fp32")
+    beta = storage.encode(rng.random((B, T, Hv)), "fp32")
+    dt_bias = np.zeros(Hv, dtype=np.float32)
     # Draw the decay rate INSIDE the bound launch_gdn enforces, so no shape can
     # generate an input the guard then refuses. peak = exp(a_log) * softplus(a +
     # dt_bias), and softplus saturates at ln2 for the a <= 0 drawn here, so the
@@ -82,9 +93,9 @@ def make_gdn_inputs(B, Hv, Hk, T, DK, DV, gate_low=-0.5, seed=0, device="cuda"):
     # operative one. randn() alone draws exp>20 in the tail, which made the
     # parity latently flaky as head count grew.
     rate_ceiling = _GENERATOR_MARGIN * decay_limit_for_chunk(_GENERATOR_CHUNK)
-    a_log = torch.randn(Hv, dtype=torch.float32, **kw).clamp(
-        max=math.log(rate_ceiling / math.log(2.0))
-    )
+    a_log = np.minimum(
+        rng.standard_normal(Hv), math.log(rate_ceiling / math.log(2.0))
+    ).astype(np.float32)
     return q, k, v, a, beta, a_log, dt_bias
 
 
@@ -127,9 +138,7 @@ def reject_if_decay_out_of_range(a_log, a, dt_bias, *, chunk):
     launch loop. Returns the observed peak decay exponent.
     """
     limit = decay_limit_for_chunk(chunk)
-    x = a.float() + dt_bias.float()
-    softplus = torch.where(x > SOFTPLUS_THRESHOLD, x, torch.log1p(torch.exp(x)))
-    peak = (torch.exp(a_log.float()) * softplus).abs().max().item()
+    peak = float(np.abs(gdn_log_decay(a, dt_bias, a_log)).max())
     if peak > limit:
         raise ValueError(
             f"GDN decay exponent peak {peak:.3f} exceeds what a {chunk}-token "
@@ -140,23 +149,28 @@ def reject_if_decay_out_of_range(a_log, a, dt_bias, *, chunk):
 
 
 def ref_gdn_raw(q, k, v, a, beta, a_log, dt_bias, scale, kv_group, h0=None):
-    """fp64 oracle: cook like the kernel, expand Hk->Hv, then token-serial."""
-    B, T, Hk, DK = q.shape
+    """float64 oracle on the stored host inputs: cook like the kernel (q/k
+    L2-normalised and rounded to bf16, the scalar softplus gate, beta through
+    a sigmoid), expand Hk->Hv, then walk the recurrence token by token.
+    Returns ``(o [B,Hv,T,DV], final state [B,Hv,DK,DV])``."""
     Hv = v.shape[2]
-    kidx = torch.arange(Hv, device=q.device) // kv_group  # value head -> key head
-    qn = F.normalize(q.float(), dim=-1)[:, :, kidx, :]  # [B,T,Hv,DK]
-    kn = F.normalize(k.float(), dim=-1)[:, :, kidx, :]
-    x = a.float() + dt_bias.float()[None, None, :]  # [B,T,Hv]
-    sp = torch.where(x > SOFTPLUS_THRESHOLD, x, torch.log1p(torch.exp(x)))
-    gate = -torch.exp(a_log.float())[None, None, :] * sp  # [B,T,Hv]
-    gate = gate[..., None].expand(B, T, Hv, DK)  # broadcast to DK
-    bb = torch.sigmoid(beta.float())  # [B,T,Hv]
-    qbh = qn.permute(0, 2, 1, 3).to(torch.bfloat16)
-    kbh = kn.permute(0, 2, 1, 3).to(torch.bfloat16)
-    vbh = v.float().permute(0, 2, 1, 3)
-    gbh = gate.permute(0, 2, 1, 3)
-    bbh = bb.permute(0, 2, 1)
-    return ref_token_serial(qbh, kbh, vbh, gbh, bbh, scale, h0=h0)
+    kidx = np.arange(Hv) // kv_group  # value head -> key head
+    qn = storage.round_to(l2_normalize(storage.decode(q, "bf16")), "bf16")
+    kn = storage.round_to(l2_normalize(storage.decode(k, "bf16")), "bf16")
+    gate = gdn_log_decay(a, dt_bias, a_log)[..., None]  # [B,T,Hv,1]
+
+    def head_major(x):
+        return np.swapaxes(x, 1, 2)
+
+    return gated_delta_recurrence(
+        head_major(qn[:, :, kidx]),
+        head_major(kn[:, :, kidx]),
+        head_major(storage.decode(v, "bf16")),
+        head_major(gate),
+        head_major(sigmoid(beta)),
+        scale=scale,
+        initial_state=h0,
+    )
 
 
 def gdn_specs(DK, DV, kv_group, with_h0):
@@ -184,12 +198,11 @@ def _validate_prefill_inputs(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0):
     tensor narrower than the spec is read past its end with nothing to catch it.
 
     dtype matters as much as shape and no device-side check can see it: bf16 and
-    f16 are both 16 bits, so a mismatched tensor computes every address
+    f16 are both 16 bits, so a mismatched array computes every address
     identically and merely decodes the bytes under the wrong rule. Mirrors
-    ``_validate_decode_inputs`` in the GDN decode driver.
-
-    Metadata only -- ``.shape`` and ``.dtype``, no ``.item()`` -- so this is
-    sync-free and safe to call on every launch.
+    ``validate_inputs`` in the GDN decode driver. The inputs are host arrays in
+    their storage types (bf16 as ``uint16`` bits); shape and dtype only, so it
+    is cheap to call on every launch.
     """
     # Take the head DIMS from the spec, not from the tensors: the kernel is
     # compiled against spec constants, so "what the tensor says" is the thing
@@ -202,7 +215,8 @@ def _validate_prefill_inputs(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0):
     B, T = q.shape[0], q.shape[1]
     Hk, Hv = q.shape[2], v.shape[2]
     DK, DV = prep.head_k, scan.head_v
-    io_dt, st_dt = q.dtype, torch.float32
+    io_dt = storage.host_dtype(dtype_info(prep.dtype).name)
+    st_dt = np.dtype(np.float32)
     want = {
         "q": ((B, T, Hk, DK), io_dt),
         "k": ((B, T, Hk, DK), io_dt),
@@ -221,7 +235,7 @@ def _validate_prefill_inputs(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0):
                 f"{tuple(t.shape)} -- the kernel addresses it from spec "
                 f"constants and would read past its end"
             )
-        if t.dtype is not want_dt:
+        if t.dtype != want_dt:
             raise ValueError(
                 f"{name} dtype {t.dtype} != {want_dt}; the kernel is compiled "
                 f"with a {want_dt} pointer and would reinterpret these bytes"
@@ -235,64 +249,91 @@ def _validate_prefill_inputs(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0):
         )
 
 
-def launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=None):
-    """Raw split GDN launch: heads=Hv (value heads); q/k carry Hk key-heads.
+class GdnPrefillLaunch:
+    """One raw split GDN prefill problem, checked and uploaded: heads=Hv (value
+    heads); q/k carry Hk key-heads. :meth:`run` launches the prep and scan
+    kernels (repeatable: the scan rewrites the outputs from the inputs), and
+    :meth:`results` reads the outputs back.
 
-    Rejects a decay steeper than the chunk can carry before launching: past that
-    bound the exp2 clamp saturates and the kernel returns a bounded, wrong
-    answer that the final state does not reveal.
+    Construction rejects what the kernels cannot run correctly, before
+    anything is uploaded: a sequence that is not a whole number of chunks,
+    inputs that disagree with the specs (:func:`_validate_prefill_inputs`), and
+    a decay steeper than the chunk can carry (past that bound the exp2 clamp
+    saturates and the kernel returns a bounded, wrong answer that the final
+    state does not reveal).
     """
-    B, T, Hk, DK = q.shape
-    Hv, DV = v.shape[2], v.shape[-1]
-    C = scan.tile.chunk
-    # T % C != 0 would silently process floor(T/C) chunks and return the tail
-    # rows of `o` uninitialised -- wrong numbers, no fault. The dispatcher
-    # rejects this (dispatch/gdn/prefill_common.py), but callers reaching the
-    # builder directly bypass that, so the launch boundary enforces it too.
-    if T % C:
-        raise ValueError(
-            f"seqlen {T} must be a multiple of chunk {C}; "
-            f"this family has no varlen path"
+
+    def __init__(self, scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=None):
+        B, T, _, DK = q.shape
+        Hv = v.shape[2]
+        C = scan.tile.chunk
+        # T % C != 0 would silently process floor(T/C) chunks and return the
+        # tail rows of `o` uninitialised -- wrong numbers, no fault. The
+        # dispatcher rejects this (dispatch/gdn/prefill_common.py), but callers
+        # reaching the builder directly bypass that, so the launch boundary
+        # enforces it too.
+        if T % C:
+            raise ValueError(
+                f"seqlen {T} must be a multiple of chunk {C}; "
+                f"this family has no varlen path"
+            )
+        _validate_prefill_inputs(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0)
+        reject_if_decay_out_of_range(a_log, a, dt_bias, chunk=C)
+        self.scan, self.prep = scan, prep
+        self.batch, self.tokens, self.heads = B, T, Hv
+        self.scale = DK**-0.5
+        self.num_chunks = T // C
+        self.tiles = prep_mod.alloc_tiles(B * Hv * self.num_chunks, prep)
+        self.q, self.k, self.v = (DeviceArray(x, prep.dtype) for x in (q, k, v))
+        self.a, self.beta = DeviceArray(a), DeviceArray(beta)
+        self.a_log, self.dt_bias = DeviceArray(a_log), DeviceArray(dt_bias)
+        self.o = DeviceArray.zeros(v.shape, prep.dtype)
+        self.ht = device_state(scan, B, Hv)
+        self.h0 = None if h0 is None else device_state(scan, B, Hv, h0)
+
+    def run(self) -> None:
+        """Launch the raw prep kernel, then the scan, on the default stream."""
+        B, Hv, T, NC = self.batch, self.heads, self.tokens, self.num_chunks
+        prep_mod.run_prep(
+            self.prep,
+            self.q,
+            self.k,
+            self.a,
+            self.beta,
+            self.tiles,
+            self.scale,
+            batch=B,
+            heads=Hv,
+            tseq=T,
+            nc=NC,
+            a_log=self.a_log,
+            dt_bias=self.dt_bias,
         )
-    _validate_prefill_inputs(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0)
-    reject_if_decay_out_of_range(a_log, a, dt_bias, chunk=C)
-    BH, NC = B * Hv, T // C
-    nt = BH * NC
-    ws = prep_mod.alloc_tiles(nt, prep)
-    o = torch.empty_like(v)
-    ht = torch.zeros(B * Hv, DV, DK, dtype=torch.float32, device=q.device)
-    h0t = None
-    if h0 is not None:
-        h0t = h0.transpose(-1, -2).contiguous().view(B * Hv, DV, DK)
-    prep_mod.run_prep(
-        prep,
-        q,
-        k,
-        a,
-        beta,
-        ws,
-        DK**-0.5,
-        batch=B,
-        heads=Hv,
-        tseq=T,
-        nc=NC,
-        a_log=a_log,
-        dt_bias=dt_bias,
-    )
-    split_mod.run_scan(
-        scan,
-        ws,
-        v,
-        o,
-        ht,
-        BH,
-        NC,
-        h0=h0t,
-        batch=B,
-        heads=Hv,
-        tseq=T,
-    )
-    return o, ht.view(B, Hv, DV, DK).transpose(-1, -2)
+        split_mod.run_scan(
+            self.scan,
+            self.tiles,
+            self.v,
+            self.o,
+            self.ht,
+            B * Hv,
+            NC,
+            h0=self.h0,
+            batch=B,
+            heads=Hv,
+            tseq=T,
+        )
+
+    def results(self):
+        """Host ``(o [B,T,Hv,DV] bf16 bits, final state [B,Hv,DK,DV] fp32)``."""
+        return self.o.values(), read_state(self.ht, self.batch, self.heads)
+
+
+def launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=None):
+    """Run one raw split GDN prefill on host inputs (:class:`GdnPrefillLaunch`)
+    and return its host results."""
+    launch = GdnPrefillLaunch(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0)
+    launch.run()
+    return launch.results()
 
 
 def check_gdn(
@@ -320,25 +361,18 @@ def check_gdn(
     q, k, v, a, beta, a_log, dt_bias = make_gdn_inputs(
         B, Hv, Hk, T, DK, DV, gate_low=gate_low, seed=seed
     )
-    h0 = None
-    if with_h0:
-        gen = torch.Generator(device="cuda").manual_seed(7)
-        h0 = (torch.randn(B, Hv, DK, DV, device="cuda", generator=gen) * 0.1).float()
+    h0 = initial_state(B, Hv, DK, DV) if with_h0 else None
     scan, prep = gdn_specs(DK, DV, kv_group, with_h0) if specs is None else specs
     o, ht = launch_gdn(scan, prep, q, k, v, a, beta, a_log, dt_bias, h0=h0)
-    torch.cuda.synchronize()
     o_ref, s_ref = ref_gdn_raw(
         q, k, v, a, beta, a_log, dt_bias, DK**-0.5, kv_group, h0=h0
     )
-    worst = 0.0
-    for got, ref in ((o.permute(0, 2, 1, 3).float(), o_ref), (ht.float(), s_ref)):
-        rel = (got - ref).abs().max() / ref.abs().max().clamp_min(1e-6)
-        worst = max(worst, rel.item())
-    return worst
+    out = np.swapaxes(storage.decode(o, "bf16"), 1, 2)
+    return score((("out", out, o_ref), ("final_state", ht, s_ref)), TOL, verbose=False)
 
 
 def main() -> int:
-    if not torch.cuda.is_available():
+    if not get_device_count():
         print("no HIP device", file=sys.stderr)
         return 2
     worst = 0.0

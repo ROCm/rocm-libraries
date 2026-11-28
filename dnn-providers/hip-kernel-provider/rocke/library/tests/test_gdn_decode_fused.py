@@ -13,7 +13,15 @@ import dataclasses as dc
 import itertools
 import unittest
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.tests.bool_flags import bool_flag_reason
+from rocke.tests.comgr import loaded_compiler_build
+from rocke.tests.pending_lanes import (
+    measured_budget_kernels,
+    measured_scratch_allowance,
+)
 
 from kernels.gfx950.gdn_decode import (
     GdnDecodeSpec,
@@ -23,7 +31,7 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
 )
 
-from ._gdn_decode_compile import compiled_scratch_bytes
+from ._gdn_decode_compile import compile_each
 
 ARCH = "gfx950"
 
@@ -100,7 +108,7 @@ class TestFusedSpec(unittest.TestCase):
                 with self.subTest(flag=flag, bad=bad):
                     ok, why = is_valid_spec(_fused(**{flag: bad}), arch=ARCH)
                     self.assertFalse(ok)
-                    self.assertIn(f"{flag} must be a bool", why)
+                    self.assertEqual(why, bool_flag_reason(flag, bad))
 
     def test_integer_fields_must_be_integers(self):
         for field, bad in (
@@ -187,11 +195,6 @@ class TestFusedSignature(unittest.TestCase):
         self.assertEqual(n[-3:], ["batch_size", "og_stride", "norm_eps"])
 
 
-def _scratch_bytes(spec: GdnDecodeSpec) -> int:
-    """Compile through comgr (no GPU) and return the spilled scratch bytes."""
-    return compiled_scratch_bytes(build_gdn_decode(spec, arch=ARCH), ARCH)
-
-
 _FLAGS = ((True, False), (False, True), (True, True))
 
 # Fused (NW, WTK) tiles at DK = DV = 128, 16/16 heads, BPV = 1 that compile
@@ -204,6 +207,13 @@ _FLAGS = ((True, False), (False, True), (True, True))
 # are only required to lower.
 _NO_SPILL_TILES = ((1, 16), (2, 8), (2, 16), (4, 8), (4, 16), (8, 16))
 _NORM_ONLY_SPILL_TILES = ((1, 1), (1, 2))
+
+# Single-wave conv_once kernels whose loads-first order may spill more than their
+# late order (test_one_wave_conv_once_loads_first_without_a_new_spill) carry a
+# measured, compiler-keyed allowance under this path in
+# rocke.tests.pending_lanes.MEASURED_BUDGETS; every other kernel, and every kernel
+# on another compiler, must spill no more than its late order.
+_MEASURED_BUDGETS_PATH = "library/tests/test_gdn_decode_fused.py"
 
 
 class TestFusedEmission(unittest.TestCase):
@@ -221,9 +231,10 @@ class TestFusedEmission(unittest.TestCase):
                             [e["name"] for e in gdn_decode_signature(s)],
                         )
 
-    # Lowers 344 specs and compiles 116 code objects in one test: about 54 s on the
-    # Windows CI runners, against the suite's 60 s per-test limit, so ordinary runner
-    # variance timed it out. Its own limit leaves headroom without hiding a hang.
+    # Lowers 344 specs and compiles 116 code objects in one test: on one CPU that
+    # comes close to the suite's 60 s per-test limit, so ordinary runner variance
+    # timed it out. Its own limit leaves headroom without hiding a hang.
+    @pytest.mark.rocke_shard_cost(30)
     @pytest.mark.timeout(180)
     def test_lowers_and_compiles_without_scratch(self):
         """Every legal fused tile lowers; the tiles every measured compiler
@@ -231,7 +242,7 @@ class TestFusedEmission(unittest.TestCase):
         (1,16,1), which owns all DV rows plus their taps and weights."""
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-        held = 0
+        held = []
         for gate in ("gdn", "kda"):
             for st in ("bf16", "f32"):
                 for conv, norm in _FLAGS:
@@ -248,20 +259,22 @@ class TestFusedEmission(unittest.TestCase):
                             if not is_valid_spec(s, arch=ARCH)[0]:
                                 continue
                             with self.subTest(name=s.kernel_name()):
+                                kernel = build_gdn_decode(s, arch=ARCH)
                                 ll = _lower_kernel_to_llvm_python(
-                                    build_gdn_decode(s, arch=ARCH),
-                                    arch=ARCH,
-                                    llvm_flavor="llvm20",
+                                    kernel, arch=ARCH, llvm_flavor="llvm20"
                                 )
                                 self.assertIn("define amdgpu_kernel", ll)
                                 if (nw, wtk) in _NO_SPILL_TILES or (
                                     not conv and (nw, wtk) not in _NORM_ONLY_SPILL_TILES
                                 ):
-                                    held += 1
-                                    self.assertEqual(_scratch_bytes(s), 0)
+                                    held.append(kernel)
         # 6 tiles x 12 modes, plus norm-only on the 11 other legal tiles.
-        self.assertEqual(held, 6 * 12 + 11 * 4)
+        self.assertEqual(len(held), 6 * 12 + 11 * 4)
+        for outcome in compile_each(held, ARCH):
+            with self.subTest(name=outcome.kernel_name):
+                self.assertEqual(outcome.scratch_bytes(), 0)
 
+    @pytest.mark.rocke_shard_cost(11)
     def test_one_wave_conv_once_loads_first_without_a_new_spill(self):
         """Where auto_late_row_inputs lets single-wave fuse_conv load its
         rows' state and norm inputs first (conv_once, WTK 4 / 8), the hoisted
@@ -270,8 +283,14 @@ class TestFusedEmission(unittest.TestCase):
         accepts (dpp_reduce, stream_rows, xcd_remap, both hints,
         interleave_cols with an f32 state), in three modes: conv only; conv +
         norm with the per-lane norm inputs; conv + norm with out_lds and
-        norm_gate_once. waves_per_eu stays 0: a floor keeps the late order."""
+        norm_gate_once. waves_per_eu stays 0: a floor keeps the late order.
+        A kernel with a measured budget for this file may spill up to that many
+        bytes more on its measured compiler, and every such name must be one this
+        test builds."""
         from kernels.gfx950 import gdn_decode
+
+        built_names = set()
+        pairs = []  # (name, loads-first kernel, late-order kernel)
 
         modes = (
             dict(fuse_out_norm=False),
@@ -297,16 +316,41 @@ class TestFusedEmission(unittest.TestCase):
                             state_store_hint="streaming",
                             **mode,
                         )
-                        with self.subTest(name=s.kernel_name()):
+                        name = s.kernel_name()
+                        built_names.add(name)
+                        with self.subTest(name=name):
                             self.assertTrue(is_valid_spec(s, arch=ARCH)[0])
                             self.assertFalse(gdn_decode.late_row_inputs(s))
                             late_spec = dc.replace(s, row_loads="late")
                             self.assertTrue(gdn_decode.late_row_inputs(late_spec))
-                            hoisted = _scratch_bytes(s)
-                            late = _scratch_bytes(late_spec)
+                            hoisted_kernel = build_gdn_decode(s, arch=ARCH)
+                            late_kernel = build_gdn_decode(late_spec, arch=ARCH)
                             # the knob reached the emitter: the order moved
-                            self.assertNotEqual(_op_names(s), _op_names(late_spec))
-                            self.assertLessEqual(hoisted, late)
+                            self.assertNotEqual(
+                                _op_names(hoisted_kernel), _op_names(late_kernel)
+                            )
+                            pairs.append((name, hoisted_kernel, late_kernel))
+        outcomes = compile_each(
+            [kernel for _, hoisted, late in pairs for kernel in (hoisted, late)], ARCH
+        )
+        for (name, _, _), hoisted_outcome, late_outcome in zip(
+            pairs, outcomes[0::2], outcomes[1::2]
+        ):
+            with self.subTest(name=name):
+                hoisted = hoisted_outcome.scratch_bytes()
+                late = late_outcome.scratch_bytes()
+                extra = measured_scratch_allowance(
+                    _MEASURED_BUDGETS_PATH, name, loaded_compiler_build()
+                )
+                self.assertLessEqual(
+                    hoisted,
+                    late + extra,
+                    f"{name} spills {hoisted} B loads-first against "
+                    f"{late} B late, over its {extra} B allowance",
+                )
+        self.assertLessEqual(
+            measured_budget_kernels(_MEASURED_BUDGETS_PATH), built_names
+        )
 
     def test_unfused_kernel_has_no_lds_or_barrier(self):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -318,9 +362,9 @@ class TestFusedEmission(unittest.TestCase):
         self.assertNotIn("s.barrier", ll)
 
 
-def _op_names(spec):
-    """Op names of ``spec``'s kernel in emission order (regions inline)."""
-    return [op.name for op in _flat_ops(build_gdn_decode(spec, arch=ARCH))]
+def _op_names(kernel):
+    """Op names of ``kernel`` in emission order (regions inline)."""
+    return [op.name for op in _flat_ops(kernel)]
 
 
 def _flat_ops(kernel):
@@ -473,14 +517,7 @@ class TestFusedBarrier(unittest.TestCase):
 
 
 class TestFusedReference(unittest.TestCase):
-    """Host-side contract of the fused inputs and the fp32 reference (CPU)."""
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            import torch  # noqa: F401
-        except ImportError:  # pragma: no cover - env-dependent
-            raise unittest.SkipTest("torch unavailable")
+    """Host-side contract of the fused inputs and the reference (numpy)."""
 
     @staticmethod
     def spec(**kw):
@@ -491,55 +528,49 @@ class TestFusedReference(unittest.TestCase):
         from kernels.gfx950.gdn_decode import CONV_WIDTH
 
         s = self.spec(fuse_conv=True, fuse_out_norm=True)
-        inp = make_inputs(s, 3, device="cpu")
+        inp = make_inputs(s, 3)
         cd = 2 * 2 * 128 + 2 * 128
         self.assertEqual(s.conv_dim, cd)
-        self.assertEqual(tuple(inp["mixed_qkv"].shape), (3, cd))
+        self.assertEqual(inp["mixed_qkv"].shape, (3, cd))
         self.assertEqual(inp["qkv_stride"], cd)
         # mixed_qkv replaces query/key/value; the fixture follows the contract.
         for name in ("query", "key", "value"):
             self.assertNotIn(name, inp)
-        self.assertEqual(tuple(inp["conv_state"].shape), (7, cd, CONV_WIDTH - 1))
-        self.assertEqual(tuple(inp["conv_weight"].shape), (cd, CONV_WIDTH))
-        self.assertEqual(tuple(inp["out_gate"].shape), (3, 2 * 128))
-        self.assertEqual(tuple(inp["norm_weight"].shape), (128,))
+        self.assertEqual(inp["conv_state"].shape, (7, cd, CONV_WIDTH - 1))
+        self.assertEqual(inp["conv_weight"].shape, (cd, CONV_WIDTH))
+        self.assertEqual(inp["out_gate"].shape, (3, 2 * 128))
+        self.assertEqual(inp["norm_weight"].shape, (128,))
         self.assertEqual(inp["og_stride"], 2 * 128)
         self.assertEqual(inp["norm_eps"], 1e-6)
 
     def test_unfused_inputs_unchanged(self):
-        import torch
-
         from builders.gfx950.gdn.gdn_decode import make_inputs
 
-        plain = make_inputs(self.spec(), 3, device="cpu")
+        plain = make_inputs(self.spec(), 3)
         self.assertNotIn("mixed_qkv", plain)
         self.assertNotIn("out_gate", plain)
         # the norm draws come after every unfused draw: shared inputs match
-        normed = make_inputs(self.spec(fuse_out_norm=True), 3, device="cpu")
+        normed = make_inputs(self.spec(fuse_out_norm=True), 3)
         for name in ("query", "key", "value", "a", "b", "state"):
-            self.assertTrue(torch.equal(plain[name], normed[name]), name)
+            np.testing.assert_array_equal(plain[name], normed[name], err_msg=name)
 
     def test_conv_shift(self):
-        import torch
-
         from builders.gfx950.gdn.gdn_decode import make_inputs, ref_conv_state_after
 
         s = self.spec(fuse_conv=True)
-        inp = make_inputs(s, 3, device="cpu")
+        inp = make_inputs(s, 3)
         after = ref_conv_state_after(s, inp)
-        taps = inp["conv_state"].float()[inp["read_indices"].long()]
-        self.assertTrue(torch.equal(after[..., 0], taps[..., 1]))
-        self.assertTrue(torch.equal(after[..., 1], taps[..., 2]))
-        self.assertTrue(torch.equal(after[..., 2], inp["mixed_qkv"].float()))
+        taps = _bf16_values(inp["conv_state"])[inp["read_indices"]]
+        np.testing.assert_array_equal(after[..., 0], taps[..., 1])
+        np.testing.assert_array_equal(after[..., 1], taps[..., 2])
+        np.testing.assert_array_equal(after[..., 2], _bf16_values(inp["mixed_qkv"]))
 
     def test_conv_changes_output(self):
-        import torch
-
-        from builders.gfx950.gdn.gdn_decode import make_inputs, ref_fp32
+        from builders.gfx950.gdn.gdn_decode import make_inputs, ref_decode_step
 
         s = self.spec(fuse_conv=True)
-        inp = make_inputs(s, 3, device="cpu")
-        o_fused, _ = ref_fp32(s, inp)
+        inp = make_inputs(s, 3)
+        o_fused, _ = ref_decode_step(s, inp)
         # The unfused twin reads the same packed row, unconvolved.
         hk, dk, dv = s.num_k_heads, s.head_k_dim, s.head_v_dim
         row = inp["mixed_qkv"]
@@ -547,82 +578,101 @@ class TestFusedReference(unittest.TestCase):
         plain["query"] = row[:, : hk * dk].reshape(3, 1, hk, dk)
         plain["key"] = row[:, hk * dk : 2 * hk * dk].reshape(3, 1, hk, dk)
         plain["value"] = row[:, 2 * hk * dk :].reshape(3, 1, s.num_v_heads, dv)
-        o_plain, _ = ref_fp32(dc.replace(s, fuse_conv=False), plain)
-        self.assertFalse(torch.allclose(o_fused, o_plain))
+        o_plain, _ = ref_decode_step(dc.replace(s, fuse_conv=False), plain)
+        self.assertFalse(np.allclose(o_fused, o_plain))
 
     def test_norm_gives_unit_rms(self):
-        import torch
-
-        from builders.gfx950.gdn.gdn_decode import make_inputs, ref_fp32
+        from builders.gfx950.gdn.gdn_decode import make_inputs, ref_decode_step
 
         s = self.spec(fuse_out_norm=True)
-        inp = make_inputs(s, 3, device="cpu")
-        inp["out_gate"] = torch.full_like(inp["out_gate"], 30.0)  # sigmoid -> 1
-        inp["norm_weight"] = torch.ones_like(inp["norm_weight"])
+        inp = make_inputs(s, 3)
+        inp["out_gate"] = _bf16_full(inp["out_gate"], 30.0)  # sigmoid -> 1
+        inp["norm_weight"] = np.ones_like(inp["norm_weight"])
         # The raw decode output's RMS is ~1e-4..1e-2 here, so eps must be far
         # below mean(o^2) for the normalised RMS to reach 1.
         inp["norm_eps"] = 1e-12
-        o, _ = ref_fp32(s, inp)
-        rms = o.float().pow(2).mean(-1).sqrt()
-        self.assertTrue(torch.allclose(rms, torch.ones_like(rms), atol=1e-3))
+        o, _ = ref_decode_step(s, inp)
+        rms = np.sqrt((o * o).mean(-1))
+        np.testing.assert_allclose(rms, 1.0, atol=1e-3, equal_nan=False)
 
     def test_norm_gate_activation_follows_gate_kind(self):
         """GDN gates its norm with SiLU (Qwen3-Next), KDA with sigmoid (Kimi
         Linear). A constant gate g scales the normalised output by act(g):
         silu(0) = 0 zeroes the GDN output, and the KDA output at g = 3 is
         sigmoid(3) / sigmoid(0) times its output at g = 0."""
-        import torch
-
-        from builders.gfx950.gdn.gdn_decode import make_inputs, ref_fp32
+        from builders.gfx950.gdn.gdn_decode import make_inputs, ref_decode_step
 
         outs = {}
         for gate in ("gdn", "kda"):
             s = self.spec(gate_kind=gate, fuse_out_norm=True)
-            inp = make_inputs(s, 3, device="cpu")
+            inp = make_inputs(s, 3)
             for g in (0.0, 3.0):
-                inp["out_gate"] = torch.full_like(inp["out_gate"], g)
-                outs[gate, g] = ref_fp32(s, inp)[0]
-        self.assertEqual(outs["gdn", 0.0].abs().max().item(), 0.0)
-        self.assertGreater(outs["gdn", 3.0].abs().max().item(), 0.0)
+                inp["out_gate"] = _bf16_full(inp["out_gate"], g)
+                outs[gate, g] = ref_decode_step(s, inp)[0]
+        self.assertEqual(np.abs(outs["gdn", 0.0]).max(), 0.0)
+        self.assertGreater(np.abs(outs["gdn", 3.0]).max(), 0.0)
         ratio = outs["kda", 3.0] / outs["kda", 0.0]
-        want = torch.sigmoid(torch.tensor(3.0)) / 0.5
-        self.assertTrue(torch.allclose(ratio, want.expand_as(ratio)))
+        np.testing.assert_allclose(
+            ratio, (1.0 / (1.0 + np.exp(-3.0))) / 0.5, equal_nan=False
+        )
 
     def test_out_error_accepts_bf16_rounding_of_the_reference(self):
         """The fused output is O(1..7): bf16 rounding of the exact reference
         must pass, in every fused mode."""
-        from builders.gfx950.gdn.gdn_decode import TOL, make_inputs, out_error, ref_fp32
+        from builders.gfx950.gdn.gdn_decode import (
+            TOL,
+            make_inputs,
+            out_error,
+            ref_decode_step,
+        )
 
         for gate in ("gdn", "kda"):
             for conv, norm in _FLAGS:
                 s = self.spec(gate_kind=gate, fuse_conv=conv, fuse_out_norm=norm)
                 with self.subTest(name=s.kernel_name()):
-                    ref, _ = ref_fp32(s, make_inputs(s, 16, device="cpu"))
-                    self.assertLess(out_error(s, ref.bfloat16(), ref), TOL)
+                    ref, _ = ref_decode_step(s, make_inputs(s, 16))
+                    self.assertLess(out_error(s, storage.encode(ref, "bf16"), ref), TOL)
 
     def test_out_error_rejects_plausible_norm_bugs(self):
         """The scale-aware metric still catches real defects: a dropped output
         gate and a norm taken over the wrong length."""
-        import torch
-
-        from builders.gfx950.gdn.gdn_decode import TOL, make_inputs, out_error, ref_fp32
+        from builders.gfx950.gdn.gdn_decode import (
+            TOL,
+            make_inputs,
+            out_error,
+            ref_decode_step,
+        )
 
         s = self.spec(fuse_conv=True, fuse_out_norm=True)
-        inp = make_inputs(s, 16, device="cpu")
-        ref, _ = ref_fp32(s, inp)
-        no_gate = ref / torch.sigmoid(inp["out_gate"].float().reshape(ref.shape))
-        self.assertGreater(out_error(s, no_gate, ref), TOL)
+        inp = make_inputs(s, 16)
+        ref, _ = ref_decode_step(s, inp)
+        gate = _bf16_values(inp["out_gate"]).reshape(ref.shape)
+        no_gate = ref * (1.0 + np.exp(-gate))  # the sigmoid gate divided out
+        self.assertGreater(out_error(s, storage.encode(no_gate, "bf16"), ref), TOL)
         wrong_len = ref * (2.0**0.5)  # rsqrt(sum/(DV/2)) instead of rsqrt(sum/DV)
-        self.assertGreater(out_error(s, wrong_len, ref), TOL)
+        self.assertGreater(out_error(s, storage.encode(wrong_len, "bf16"), ref), TOL)
 
-    def test_prepare_takes_fused_inputs_without_query(self):
+    def test_validation_takes_fused_inputs_without_query(self):
         """The fused fixture carries no query/key/value (mixed_qkv replaces
-        them), and prepare() must not look for them."""
-        from builders.gfx950.gdn.gdn_decode import make_inputs, prepare
+        them), and the input guard must not look for them."""
+        from builders.gfx950.gdn.gdn_decode import (
+            input_dtypes,
+            make_inputs,
+            validate_inputs,
+        )
 
         s = self.spec(fuse_conv=True, fuse_out_norm=True)
-        values, _ = prepare(s, make_inputs(s, 3, device="cpu"), 3)
-        self.assertEqual(values["out"].device.type, "cpu")
+        self.assertFalse({"query", "key", "value"} & input_dtypes(s).keys())
+        validate_inputs(s, make_inputs(s, 3), 3)
+
+
+def _bf16_values(stored):
+    return storage.decode(stored, "bf16").astype(np.float64)
+
+
+def _bf16_full(like, value):
+    """A bf16 array shaped like ``like`` holding ``value`` everywhere."""
+    return storage.encode(np.full(like.shape, value), "bf16")
 
 
 if __name__ == "__main__":

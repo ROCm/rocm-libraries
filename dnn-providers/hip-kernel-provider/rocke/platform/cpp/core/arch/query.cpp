@@ -979,16 +979,44 @@ static void rocke_set_message(char* message, size_t message_cap, const char* fmt
     va_end(args);
 }
 
+/* End of an AMDHSA triple's architecture field at the start of value, else
+ * NULL: "amdgcn", or "amdgpu" then digits, then optionally "." and lower-case
+ * letters and digits (amdgpu9.42, amdgpu9.0a, amdgpu11). Python: the
+ * amdgcn|amdgpu... alternation in the _TARGET_ID pattern in
+ * rocke.core.arch.target. */
+static const char* rocke_triple_arch_end(const char* value)
+{
+    if(strncmp(value, "amdgcn", 6) == 0)
+        return value + 6;
+    if(strncmp(value, "amdgpu", 6) != 0)
+        return NULL;
+    const char* p = value + 6;
+    if(*p < '0' || *p > '9')
+        return NULL;
+    while(*p >= '0' && *p <= '9')
+        ++p;
+    if(*p == '.')
+    {
+        ++p;
+        if(!rocke_is_lower_alnum(*p))
+            return NULL;
+        while(rocke_is_lower_alnum(*p))
+            ++p;
+    }
+    return p;
+}
+
 /* Start of the target ID when the whole of value has the form parse_target_id
  * accepts, else NULL. Python: the _TARGET_ID pattern in rocke.core.arch.target. */
 static const char* rocke_strict_target_id_start(const char* value)
 {
-    static const char triple[] = "amdgcn-amd-amdhsa-";
+    static const char vendor_os[] = "-amd-amdhsa-";
     static const char unknown_env[] = "unknown-";
     const char* p = value;
-    if(strncmp(p, triple, sizeof(triple) - 1) == 0)
+    const char* arch_end = rocke_triple_arch_end(p);
+    if(arch_end && strncmp(arch_end, vendor_os, sizeof(vendor_os) - 1) == 0)
     {
-        p += sizeof(triple) - 1;
+        p = arch_end + sizeof(vendor_os) - 1;
         if(strncmp(p, unknown_env, sizeof(unknown_env) - 1) == 0)
             p += sizeof(unknown_env) - 1;
         else if(*p == '-')
@@ -1037,8 +1065,9 @@ const char*
     rocke_set_message(err,
                       err_cap,
                       "'%s' is not a target ID: expected an optional amdgcn-amd-amdhsa-- or "
-                      "amdgcn-amd-amdhsa-unknown- prefix, a processor such as gfx942 or "
-                      "gfx11-generic, then any :feature+ or :feature- suffixes",
+                      "amdgcn-amd-amdhsa-unknown- prefix (or the same with amdgpu and a "
+                      "version, such as amdgpu9.42, in place of amdgcn), a processor such as "
+                      "gfx942 or gfx11-generic, then any :feature+ or :feature- suffixes",
                       value);
     return NULL;
 }

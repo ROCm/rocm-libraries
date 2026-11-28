@@ -7,13 +7,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 from rocke.examples.gfx942 import tf32_numerics as numerics
 from rocke.runtime import comgr, hip_module
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -58,16 +58,9 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
             d[-1, 0, 0] = np.nextafter(d[-1, 0, 0], np.float32(np.inf))
         return d, pa, pb
 
-    def native_ir(m, mode):
-        kernel = numerics.build_tf32_mma_probe(numerics.Tf32MmaProbeSpec(m, mode))
-        return "wrong IR" if fault == "builder parity" else numerics.serialize(kernel)
+    def native_lowering(*_args, **_kwargs):
+        return "wrong LLVM" if fault == "lowerer parity" else "mock LLVM"
 
-    native = SimpleNamespace(
-        tf32_mma_probe_serialize_ir=native_ir,
-        lower_serialized_ir=lambda *a, **k: (
-            "wrong LLVM" if fault == "lowerer parity" else "mock LLVM"
-        ),
-    )
     argv = ["tf32_numerics", "--output-dir", output_dir, "--shape", "16"]
     with (
         patch.object(numerics, "corpus", corpus),
@@ -80,12 +73,17 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         patch.object(hip_module, "get_device_arch", return_value="gfx942"),
         patch.object(comgr, "build_hsaco_from_llvm_ir", return_value=(b"mock", None)),
         patch.object(comgr, "resolved_lib_path", return_value="mock COMGR"),
-        patch.dict(sys.modules, {"rocke_engine": native}),
+        patch.object(numerics.native_engine, "require_native_lowering"),
+        patch.object(numerics.native_engine, "lower_serialized_ir", native_lowering),
         patch.object(sys, "argv", argv),
     ):
         numerics.main()
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the CLI validates the native gfx942 xf32 example; gfx950 emulates xf32 with bf16x3 rows",
+)
 @pytest.mark.parametrize("optimization", ["normal", "flag", "environment"])
 @pytest.mark.parametrize(
     "fault",
@@ -95,7 +93,6 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         "B preparation",
         "dense reference",
         "single product",
-        "builder parity",
         "lowerer parity",
         "variant parity",
         "backend parity",

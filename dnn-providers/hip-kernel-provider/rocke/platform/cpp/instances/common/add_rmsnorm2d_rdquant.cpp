@@ -16,13 +16,13 @@
  * build_add_rmsnorm2d_rdquant mirrors the Python build top-to-bottom so a
  * reviewer can diff line by line. It reuses the ported helpers (sweep_row_chunks,
  * block_lds_reduce_pair, tree_reduce, make_global_view / make_tile_window,
- * io_ir_type / quant_ir_type, validate_io / ceil_div_grid / kernel_name_join,
- * ArchTarget).
+ * io_ir_type / quant_ir_type / quant_max_abs / quantize_scalar_f32,
+ * validate_io / ceil_div_grid / kernel_name_join, ArchTarget).
  *
  * NAMED GAP -- helpers not yet exposed by the shared ckc helper headers
  * (make_lds_view, make_naive_tensor_view_packed, TensorView.load_vec_as_f32,
- * TileWindow store/load-vec-as-f32, quant_max_abs / quantize_scalar_f32 /
- * pack_quant_chunk_local_f32 / store_packed_chunk_local) are provided here as
+ * TileWindow store/load-vec-as-f32, pack_quant_chunk_local_f32 /
+ * store_packed_chunk_local) are provided here as
  * fully-ported, file-local shims (rocke_x_*) that emit the identical builder-call
  * sequence as their Python counterparts. These are NOT bare stubs -- every shim
  * emits the complete IR and binds only to the public rocke/ir.h builder surface,
@@ -88,7 +88,7 @@ static rocke_status_t rocke_x_make_lds_view(rocke_ir_builder_t* b,
         return ROCKE_ERR_VALUE;
     }
     smem = rocke_b_smem_alloc(b, dtype, shape, rank, name_hint);
-    st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+    st = rocke_tv_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
     if(st != ROCKE_OK)
     {
         return st;
@@ -135,93 +135,6 @@ static void rocke_x_tensor_view_load_vec_as_f32(rocke_ir_builder_t* b,
             out[i] = is_f32 ? e : rocke_b_cast_to_f32(b, e);
         }
     }
-}
-
-/* quant_max_abs(qdtype): saturating clamp magnitude. quant.py:quant_max_abs. */
-static double rocke_x_quant_max_abs(const char* qdtype)
-{
-    /* NAMED GAP: file-local full port; delete once the shared quant helper is exposed. */
-    if(qdtype == NULL)
-    {
-        return 0.0;
-    }
-    if(strcmp(qdtype, "i8") == 0 || strcmp(qdtype, "int8") == 0)
-    {
-        return 127.0;
-    }
-    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0
-       || strcmp(qdtype, "fp8_e4m3") == 0)
-    {
-        return 448.0;
-    }
-    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0
-       || strcmp(qdtype, "fp8_e5m2") == 0)
-    {
-        return 57344.0;
-    }
-    return 0.0;
-}
-
-/* quant.py:_canon -- normalise a quant dtype alias to its canonical name. */
-static const char* rocke_x_quant_canon(const char* qdtype)
-{
-    if(qdtype == NULL)
-    {
-        return NULL;
-    }
-    if(strcmp(qdtype, "i8") == 0 || strcmp(qdtype, "int8") == 0)
-    {
-        return "i8";
-    }
-    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0
-       || strcmp(qdtype, "fp8_e4m3") == 0)
-    {
-        return "fp8e4m3";
-    }
-    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0
-       || strcmp(qdtype, "fp8_e5m2") == 0)
-    {
-        return "bf8e5m2";
-    }
-    return qdtype;
-}
-
-/* quantize_scalar_f32(b, x_f32, inv_scale, qdtype): scaled -> clamp -> cvt.
- * quant.py:quantize_scalar_f32 (the instance never sets skip_clamp_on_pack, so
- * the always-clamp branch is the only one ported here). q_ty is unused; the
- * dtype-specific cvt op already carries the result IR type. */
-static rocke_value_t* rocke_x_quantize_scalar_f32(rocke_ir_builder_t* b,
-                                                  rocke_value_t* x_f32,
-                                                  rocke_value_t* inv_scale,
-                                                  const char* qdtype,
-                                                  const rocke_type_t* q_ty)
-{
-    /* canon = _canon(qdtype); qmax = quant_max_abs(canon)
-     * c_pos = b.const_f32(qmax); c_neg = b.const_f32(-qmax)
-     * scaled = b.fmul(x_f32, inv_scale)
-     * clamped = b.clamp_f32(scaled, c_neg, c_pos)
-     * return cvt_f32_to_<canon>(clamped) */
-    const char* canon = rocke_x_quant_canon(qdtype);
-    double qmax = rocke_x_quant_max_abs(canon);
-    rocke_value_t* c_pos = rocke_b_const_f32(b, qmax);
-    rocke_value_t* c_neg = rocke_b_const_f32(b, -qmax);
-    rocke_value_t* scaled = rocke_b_fmul(b, x_f32, inv_scale);
-    rocke_value_t* clamped = rocke_b_clamp_f32(b, scaled, c_neg, c_pos);
-    (void)q_ty;
-    if(canon != NULL && strcmp(canon, "i8") == 0)
-    {
-        return rocke_b_cvt_f32_to_i8_sat(b, clamped);
-    }
-    if(canon != NULL && strcmp(canon, "fp8e4m3") == 0)
-    {
-        return rocke_b_cvt_f32_to_fp8(b, clamped);
-    }
-    if(canon != NULL && strcmp(canon, "bf8e5m2") == 0)
-    {
-        return rocke_b_cvt_f32_to_bf8(b, clamped);
-    }
-    (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unreachable canon");
-    return NULL;
 }
 
 /* pack_quant_chunk_local_f32(b, scaled_f32, q_ty, out_dtype): quantise the
@@ -276,7 +189,7 @@ static rocke_value_t* rocke_x_pack_quant_chunk_local_f32(rocke_ir_builder_t* b,
         return out_v;
     }
 
-    /* i8 path (or VEC=2 fp8/bf8): per-element saturating cast + vec_pack. */
+    /* i8 path (or VEC=2 fp8/bf8): per-element cast + vec_pack. */
     {
         rocke_value_t* qs[8];
         for(i = 0; i < n; ++i)
@@ -284,9 +197,9 @@ static rocke_value_t* rocke_x_pack_quant_chunk_local_f32(rocke_ir_builder_t* b,
             rocke_value_t* sf = scaled_f32[i];
             if(strcmp(out_dtype, "i8") == 0)
             {
-                /* b.cvt_f32_to_i8_sat(b.clamp_f32(sf, -127.0, 127.0)) */
-                rocke_value_t* c_neg = rocke_b_const_f32(b, -127.0);
-                rocke_value_t* c_pos = rocke_b_const_f32(b, 127.0);
+                /* b.cvt_f32_to_i8_sat(b.clamp_f32(sf, -_I8_MAX_ABS, _I8_MAX_ABS)) */
+                rocke_value_t* c_neg = rocke_b_const_f32(b, -ROCKE_QUANT_I8_MAX_ABS);
+                rocke_value_t* c_pos = rocke_b_const_f32(b, ROCKE_QUANT_I8_MAX_ABS);
                 rocke_value_t* clamped = rocke_b_clamp_f32(b, sf, c_neg, c_pos);
                 qs[i] = rocke_b_cvt_f32_to_i8_sat(b, clamped);
             }
@@ -436,7 +349,6 @@ bool rocke_add_rmsnorm2d_rdquant_is_valid_spec(const rocke_add_rmsnorm2d_rdquant
 {
     const rocke_arch_target_t* target;
     char buf[ROCKE_ERR_MSG_CAP];
-    bool is_fp8;
 
     if(spec == NULL)
     {
@@ -462,37 +374,9 @@ bool rocke_add_rmsnorm2d_rdquant_is_valid_spec(const rocke_add_rmsnorm2d_rdquant
         return false;
     }
 
-    /* if spec.out_dtype not in ("i8", "fp8e4m3", "bf8e5m2"): ... */
+    /* ok, why = validate_quant_out_dtype(spec.out_dtype, arch) */
+    if(!rocke_validate_quant_out_dtype(spec->out_dtype, arch, buf, sizeof(buf)))
     {
-        const char* od = spec->out_dtype;
-        bool ok_od = od != NULL
-                     && (strcmp(od, "i8") == 0 || strcmp(od, "fp8e4m3") == 0
-                         || strcmp(od, "bf8e5m2") == 0);
-        if(!ok_od)
-        {
-            snprintf(buf,
-                     sizeof(buf),
-                     "unsupported out_dtype %s%s%s",
-                     od ? "'" : "",
-                     od ? od : "None",
-                     od ? "'" : "");
-            rocke_arn_set_reason(reason, reason_cap, buf);
-            return false;
-        }
-    }
-
-    /* if out_dtype in ("fp8e4m3","bf8e5m2") and target.family != "cdna": ... */
-    is_fp8 = (strcmp(spec->out_dtype, "fp8e4m3") == 0 || strcmp(spec->out_dtype, "bf8e5m2") == 0);
-    if(is_fp8 && (target->family == NULL || strcmp(target->family, "cdna") != 0))
-    {
-        snprintf(buf,
-                 sizeof(buf),
-                 "out_dtype '%s' needs the CDNA-only v_cvt_pk_{fp8,bf8}_f32 "
-                 "conversion; %s (family '%s') has no fp8/bf8 pack op -- use "
-                 "out_dtype='i8'",
-                 spec->out_dtype,
-                 arch,
-                 target->family ? target->family : "None");
         rocke_arn_set_reason(reason, reason_cap, buf);
         return false;
     }
@@ -721,12 +605,16 @@ rocke_kernel_def_t* rocke_build_add_rmsnorm2d_rdquant(
     }
 
     /* io_ty = io_ir_type(spec.dtype); q_ty = quant_ir_type(spec.out_dtype);
-     * qmax = quant_max_abs(spec.out_dtype) */
+     * qmax = quant_max_abs(spec.out_dtype, arch=arch) */
     io_ty = rocke_b_io_ir_type(b, spec->dtype);
     q_ty = rocke_b_quant_ir_type(b, spec->out_dtype);
-    qmax = rocke_x_quant_max_abs(spec->out_dtype);
     if(io_ty == NULL || q_ty == NULL)
     {
+        return NULL;
+    }
+    if(rocke_quant_max_abs(spec->out_dtype, arch, &qmax, reason, sizeof(reason)) != ROCKE_OK)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return NULL;
     }
 
@@ -987,9 +875,9 @@ rocke_kernel_def_t* rocke_build_add_rmsnorm2d_rdquant(
                 rocke_value_t* xg_f32 = cached_xg[k * VEC + i];
                 rocke_value_t* y_f32 = rocke_b_fmul(b, xg_f32, inv_rms);
                 /* q = quantize_scalar_f32(b, y_f32, inv_scale=inv_yscale,
-                 *                         qdtype=spec.out_dtype) */
+                 *                         qdtype=spec.out_dtype, arch=arch) */
                 rocke_value_t* q
-                    = rocke_x_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype, q_ty);
+                    = rocke_b_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype, arch);
                 /* col = b.add(n_off, b.const_i32(i)) */
                 rocke_value_t* col = rocke_b_add(b, n_off, rocke_b_const_i32(b, i));
                 /* qy_tile.store_scalar(b, b.const_i32(0), col, value=q) */

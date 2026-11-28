@@ -25,10 +25,10 @@ against the fp32 reference only (see ``test_knob_with_f16_state``).
 state, and every untouched pool page against the fp32 reference, so a knob
 that misplaces, drops or races a write fails. The knobs documented as running
 the same floating-point operations are also compared bit for bit with the
-knob-off kernel on identical inputs (out_lds's f16 output within one f16 ulp,
-see ``_assert_bitwise``).
+knob-off kernel on identical inputs (an f16 output with out_lds, or with
+conv_once under the per-lane norm, within one f16 ulp, see ``_assert_bitwise``).
 
-Needs a real gfx950 and ROCm torch; marked ``gpu`` and skipped elsewhere.
+Needs a real gfx950; marked ``gpu`` and skipped elsewhere.
 """
 
 from __future__ import annotations
@@ -36,30 +36,20 @@ from __future__ import annotations
 import dataclasses as dc
 from itertools import product
 
+import numpy as np
 import pytest
+from rocke.core.dtypes import dtype_info
+from rocke.numeric import storage
+from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 ARCH = "gfx950"
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
 pytestmark = pytest.mark.gpu
 
-
-def _device_is_gfx950() -> bool:
-    # rocke's own query, as the sibling GDN suites do: get_device_arch goes
-    # through hipDeviceGetAttribute and strips the feature flags.
-    if not torch.cuda.is_available():
-        return False
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch() == ARCH
-    except Exception:
-        return False
-
-
 requires_gfx950 = pytest.mark.skipif(
-    not _device_is_gfx950(), reason=f"needs a {ARCH} device"
+    probe_device_arch()[0] != ARCH,
+    reason=arch_skip_reason(("gfx950",), f"needs a {ARCH} device"),
 )
 
 # knob -> the spec overrides that switch it on (norm_gate_once needs conv_once)
@@ -239,63 +229,68 @@ _BITWISE_KNOBS = [
 
 def _f16_ulps(x, y):
     """Elementwise distance in ulps (units in the last place) of two 16-bit
-    float tensors, through their bit patterns mapped to ordered integers."""
+    float arrays, through their bit patterns mapped to ordered integers."""
 
     def ordered(t):
-        i = t.view(torch.int16).to(torch.int32)
-        return torch.where(i < 0, -32768 - i, i)
+        i = t.view(np.int16).astype(np.int32)
+        return np.where(i < 0, -32768 - i, i)
 
-    return (ordered(x) - ordered(y)).abs()
+    return np.abs(ordered(x) - ordered(y))
 
 
 def _assert_bitwise(spec, knob):
     """``spec`` and its knob-off twin give identical output, state and conv
-    state on identical inputs. Exception: out_lds with f16 output may differ by
-    one f16 ulp in ``out``. The knob-off path folds its last multiply and the f16
-    conversion into one v_fma_mixlo_f16 (one rounding), out_lds rounds twice
-    (seen in the ROCm 7.13 code object, not pinned by a test).
+    state on identical inputs. Exception: with f16 output, ``out`` may differ
+    by one f16 ulp under out_lds, or under conv_once with the per-lane norm
+    (fuse_out_norm). The
+    compiler may fold the last multiply and the f32 -> f16 conversion into one
+    v_fma_mixlo_f16 (one rounding) in one kernel and round twice in the other:
+    out_lds rounds twice where the knob-off path folds (seen in the ROCm 7.13
+    code object), and with the norm the LLVM 24 compiler folds every out
+    element of the knob-off kernel and none of the conv_once one, where LLVM
+    20 folds both (seen in the code objects; not pinned by a test).
 
-    Blind spot: with f16 output, an out_lds bug that moves ``out`` by at most
-    one ulp passes here. The bf16-output comparisons run the same IR bit for
-    bit and are the guard for that."""
+    Blind spot: with f16 output, a bug in those kernels that moves ``out`` by
+    at most one ulp passes here. The bf16-output comparisons run the same IR
+    bit for bit and are the guard for that."""
     default = spec.__class__()
+    out_ulps = int(
+        spec.dtype == "f16"
+        and (knob == "out_lds" or (knob == "conv_once" and spec.fuse_out_norm))
+    )
     _assert_same_bits(
         dc.replace(spec, **{k: getattr(default, k) for k in KNOBS[knob]}),
         spec,
-        knob=knob,
+        out_ulps=out_ulps,
     )
 
 
-def _assert_same_bits(off, spec, *, knob=None, batch=3, state_ulps=0):
+def _assert_same_bits(off, spec, *, batch=3, out_ulps=0, state_ulps=0):
     """``off`` and ``spec`` give identical output, state and conv state on
-    identical inputs, except the out_lds f16 ``out`` ulp of
-    :func:`_assert_bitwise` (``knob``); with ``state_ulps``, the state may
-    differ by up to that many f16 ulps per element."""
+    identical inputs, except that ``out`` may differ by up to ``out_ulps`` and
+    the state by up to ``state_ulps`` f16 ulps per element."""
     from builders.gfx950.gdn.gdn_decode import (
-        drain,
-        launch,
+        input_dtypes,
         launcher_for,
         make_inputs,
-        prepare,
+        run_values,
     )
 
     inp = make_inputs(off, batch)
-    arms = []
-    for s in (off, spec):
-        values, cfg = prepare(s, inp, batch)
-        launch(launcher_for(s), values, cfg)
-        drain()
-        arms.append(values)
+    arms = [run_values(s, inp, launcher_for(s), batch) for s in (off, spec)]
+    dtypes = dict(input_dtypes(spec), out=dtype_info(spec.dtype).name)
+    allowed_ulps = {"out": out_ulps, "state": state_ulps}
     for key in ("out", "state") + (("conv_state",) if spec.fuse_conv else ()):
         a, b = arms[0][key], arms[1][key]
-        if key == "out" and knob == "out_lds" and spec.dtype == "f16":
+        if allowed_ulps.get(key):
             ulps = int(_f16_ulps(a, b).max())
-            assert ulps <= 1, (spec.kernel_name(), key, ulps)
-        elif key == "state" and state_ulps:
-            ulps = int(_f16_ulps(a, b).max())
-            assert ulps <= state_ulps, (spec.kernel_name(), key, ulps)
+            assert ulps <= allowed_ulps[key], (spec.kernel_name(), key, ulps)
         else:
-            assert torch.equal(a, b), (spec.kernel_name(), key)
+            # Equal values (+0 == -0, NaN never equal), as the knob-off kernel
+            # is the reference here.
+            values_a = storage.decode(a, dtypes[key])
+            values_b = storage.decode(b, dtypes[key])
+            assert np.array_equal(values_a, values_b), (spec.kernel_name(), key)
 
 
 @requires_gfx950
@@ -489,8 +484,8 @@ def test_knob_with_f16_io(knob, state_dtype, gate):
     """f16 I/O is an admitted dtype, and the knobs add f16-sensitive loads and
     stores (conv_once's per-channel taps, out_lds's packed stores, the
     interleave_cols runs): each knob against the fp32 reference, and the
-    bit-for-bit knobs also against the knob-off kernel (out_lds's ``out``
-    within one f16 ulp)."""
+    bit-for-bit knobs also against the knob-off kernel (an f16 ``out`` within
+    one ulp where ``_assert_bitwise`` allows it)."""
     for spec in _f16_io_specs(knob, gate, state_dtype):
         _assert_exact(spec, 3)
         if knob in _BITWISE_KNOBS:

@@ -13,6 +13,7 @@ of one case run side by side to keep the cost of this file low.
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import os
 import re
 import shutil
@@ -24,8 +25,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-
-from rocke.tests import ctest_shard
+from rocke.tests import ci_shard, ctest_shard
 
 PACKAGE_ROOT = Path(ctest_shard.__file__).resolve().parents[2]
 FLAG = ctest_shard.ACTIVATION_FLAG
@@ -125,6 +125,68 @@ def test_resolve_shard_reads_the_process_environment(monkeypatch):
     assert ctest_shard.resolve_shard(from_gtest=True)[0] == "2/4"
 
 
+def _runner_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="runner")
+    ci_shard.add_shard_argument(
+        parser,
+        help="check only this shard's share",
+        list_help="write this run's cases instead of checking them",
+    )
+    return parser
+
+
+def test_a_runner_without_the_flag_has_no_shard(monkeypatch):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ROCKE_TEST_SHARD", "1/4")
+    parser = _runner_parser()
+    assert ci_shard.shard_from_arguments(parser, parser.parse_args([])) is None
+
+
+def test_a_runner_with_the_flag_takes_the_gtest_shard(monkeypatch):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GTEST_TOTAL_SHARDS", "4")
+    monkeypatch.setenv("GTEST_SHARD_INDEX", "3")
+    parser = _runner_parser()
+    shard = ci_shard.shard_from_arguments(parser, parser.parse_args([FLAG]))
+    assert shard == ci_shard.Shard("3/4", "GTEST_SHARD_INDEX=3, GTEST_TOTAL_SHARDS=4")
+
+
+def test_a_runner_reports_a_malformed_shard_as_a_usage_error(monkeypatch, capsys):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ROCKE_TEST_SHARD", "4/4")
+    parser = _runner_parser()
+    with pytest.raises(SystemExit) as exit_info:
+        ci_shard.shard_from_arguments(parser, parser.parse_args([FLAG]))
+    assert exit_info.value.code == 2
+    assert "rocke-ctest-shard: shard '4/4' out of range" in capsys.readouterr().err
+
+
+def test_a_runner_refuses_the_listing_flag_without_the_shard_flag(capsys):
+    parser = _runner_parser()
+    arguments = parser.parse_args([ci_shard.LIST_KEYS_FLAG, "keys.json"])
+    with pytest.raises(SystemExit) as exit_info:
+        ci_shard.shard_from_arguments(parser, arguments)
+    assert exit_info.value.code == 2
+    assert (
+        f"{ci_shard.LIST_KEYS_FLAG} needs {ci_shard.ACTIVATION_FLAG}"
+        in capsys.readouterr().err
+    )
+
+
+def test_a_runner_reads_its_listing_path_only_when_it_is_given(monkeypatch):
+    for name in ctest_shard.CHILD_ENV_EXCLUDED:
+        monkeypatch.delenv(name, raising=False)
+    parser = _runner_parser()
+    listing = parser.parse_args([FLAG, ci_shard.LIST_KEYS_FLAG, "keys.json"])
+    assert ci_shard.list_keys_path(listing) == Path("keys.json")
+    assert ci_shard.list_keys_path(parser.parse_args([FLAG])) is None
+
+
 # ------------------------------------------------------------------------- shard rule
 # Shard of each key for n = 2, 3, 4 and 8. The values pin the hash, so that
 # developer runs and CI map a test to the same shard on every change.
@@ -147,6 +209,192 @@ GOLDEN_SHARDS = {
 @pytest.mark.parametrize("key, shards", GOLDEN_SHARDS.items())
 def test_the_shard_of_a_key_does_not_change(key, shards):
     assert tuple(ctest_shard.shard_of(key, n) for n in (2, 3, 4, 8)) == shards
+
+
+def test_the_shards_of_one_run_split_any_keys_between_them():
+    # The rule the golden runners share with the plugin (rocke.tests.ci_shard).
+    keys = [f"family{index}" for index in range(40)]
+    shards = [ci_shard.Shard(f"{index}/4") for index in range(4)]
+    owned = [[key for key in keys if shard.owns(key)] for shard in shards]
+    every_owned = [key for keys_of_shard in owned for key in keys_of_shard]
+    assert sorted(every_owned) == sorted(keys)
+    counts = "/".join(str(len(keys_of_shard)) for keys_of_shard in owned)
+    for shard, keys_of_shard in zip(shards, owned):
+        assert shard.split_line(keys) == (
+            f"rocke-ctest-shard {shard.spec}: split {counts} of 40; "
+            f"kept {len(keys_of_shard)}"
+        )
+
+
+def _keys_hashed_to(shard, total, count):
+    """``count`` keys whose hash shard of ``total`` is ``shard``."""
+    keys = (f"heavy{index}" for index in range(10_000))
+    return [key for key in keys if ci_shard.shard_of(key, total) == shard][:count]
+
+
+def test_keys_without_a_cost_keep_the_hash_rule():
+    keys = [f"family{index}" for index in range(200)]
+    for costs in (None, {}, {"not-selected": 5.0}):
+        assert ci_shard.place_keys(keys, 4, costs) == {
+            key: ci_shard.shard_of(key, 4) for key in keys
+        }
+
+
+def test_costed_keys_spread_heaviest_first_onto_the_least_loaded_shard():
+    # Eight equal heavy keys that all hash to shard 0: the hash rule would
+    # run all of them there; by cost each shard runs two.
+    heavy = _keys_hashed_to(0, 4, 8)
+    light = [f"light{index}" for index in range(30)]
+    costs = {key: 10.0 for key in heavy}
+    placement = ci_shard.place_keys(light + heavy, 4, costs)
+    assert sorted(placement[key] for key in heavy) == [0, 0, 1, 1, 2, 2, 3, 3]
+    assert all(placement[key] == ci_shard.shard_of(key, 4) for key in light)
+    # Unequal costs: the heaviest goes alone, the rest fill the other shards.
+    costs = dict(zip(heavy[:5], (30.0, 10.0, 10.0, 10.0, 10.0)))
+    placement = ci_shard.place_keys(heavy[:5], 4, costs)
+    load = [0.0] * 4
+    for key, shard in placement.items():
+        load[shard] += costs[key]
+    assert sorted(load) == [10.0, 10.0, 20.0, 30.0]
+    assert placement[heavy[0]] == 0  # the heaviest stays on its hash shard
+
+
+def test_every_shard_of_a_run_keeps_its_share_of_costed_keys_once():
+    keys = [f"case{index}" for index in range(60)]
+    costs = {key: float(1 + index % 7) for index, key in enumerate(keys[:25])}
+    shards = [ci_shard.Shard(f"{index}/4") for index in range(4)]
+    kept = [shard.keeps(keys, costs) for shard in shards]
+    assert sum(len(keys_of_shard) for keys_of_shard in kept) == len(keys)
+    assert set().union(*kept) == set(keys)
+    assert ci_shard.Shard("0,2/4").keeps(keys, costs) == kept[0] | kept[2]
+    # Repeated keys (the tests of one parameter set) count in the split.
+    repeated = keys + keys[:10]
+    counts = [len(keys_of_shard) for keys_of_shard in kept]
+    for key in keys[:10]:
+        counts[next(i for i, k in enumerate(kept) if key in k)] += 1
+    split = "/".join(map(str, counts))
+    assert shards[1].split_line(repeated, costs) == (
+        f"rocke-ctest-shard 1/4: split {split} of 70; kept {counts[1]}"
+    )
+
+
+@pytest.mark.parametrize("cost", [0, -1.0, float("nan"), float("inf"), True, "3"])
+def test_a_cost_that_is_not_a_positive_number_is_an_error(cost):
+    with pytest.raises(ValueError, match="is not a positive finite number"):
+        ci_shard.place_keys(["key"], 4, {"key": cost})
+
+
+def test_a_shard_key_listing_reads_back_what_it_wrote(tmp_path):
+    listing = ci_shard.ShardKeyListing(
+        key_of_case={"t.py::test[a]": "t.py[a]", "t.py::test[b]": "t.py[b]"},
+        costs={"t.py[a]": 30.0},
+        worker_costs={"t.py[a]": 20.0},
+        run_alone_cases=frozenset({"t.py::test[b]"}),
+    )
+    listing.write(tmp_path / "keys.json")
+    assert ci_shard.ShardKeyListing.read(tmp_path / "keys.json") == listing
+
+
+@pytest.mark.parametrize(
+    "field, value, message",
+    [
+        ("costs", {"t.py[x]": 1.0}, r"costs keys=\['t.py\[x\]'\]"),
+        ("worker_costs", {"t.py[x]": 1.0}, r"worker_costs keys=\['t.py\[x\]'\]"),
+        ("run_alone_cases", frozenset({"t.py::x"}), r"run_alone_cases=\['t.py::x'\]"),
+    ],
+)
+def test_a_shard_key_listing_refuses_a_cost_or_case_it_does_not_list(
+    field, value, message
+):
+    with pytest.raises(ValueError, match="ShardKeyListing failed - " + message):
+        ci_shard.ShardKeyListing(
+            **{"key_of_case": {"t.py::test[a]": "t.py[a]"}, field: value}
+        )
+
+
+def test_a_shard_key_listing_refuses_a_cost_that_is_not_positive():
+    with pytest.raises(ValueError, match="is not a positive finite number"):
+        ci_shard.ShardKeyListing({"t.py::test[a]": "t.py[a]"}, costs={"t.py[a]": 0})
+
+
+def _golden_runner():
+    """The installed golden runner, imported by path: beside this file in a
+    checkout, one level up in an installed tree."""
+    here = Path(__file__).resolve().parent
+    for candidate in (here, here.parent):
+        script = candidate / "rocke_installed_golden_test.py"
+        if script.is_file():
+            spec = importlib.util.spec_from_file_location("golden_runner", script)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+    pytest.skip("rocke_installed_golden_test.py is not in this tree")
+
+
+def test_the_golden_runner_lists_the_cases_its_shards_split(
+    tmp_path, monkeypatch, capsys
+):
+    """Under LIST_KEYS_FLAG the runner writes the cases a sharded check splits,
+    each its own key: the case ids of the harness and the golden, and placed by
+    place_keys they split as the check's own split line says."""
+    runner = _golden_runner()
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    listing_path = tmp_path / "keys.json"
+    flags = [ci_shard.ACTIVATION_FLAG, ci_shard.LIST_KEYS_FLAG, str(listing_path)]
+    assert runner.main(flags) == 0
+    listing = ci_shard.ShardKeyListing.read(listing_path)
+    assert listing.key_of_case
+    assert all(case == key for case, key in listing.key_of_case.items())
+    import rocke_ir_parity_harness  # on the path main() set up
+    from rocke.core.ir_golden import golden_case_ids, load_golden
+
+    case_ids = {case["case_id"] for case in rocke_ir_parity_harness.cases()}
+    case_ids |= golden_case_ids(load_golden(runner._find_golden()))
+    assert set(listing.key_of_case) == case_ids
+    placement = ci_shard.place_keys(listing.key_of_case.values(), 4)
+    counts = [list(placement.values()).count(shard) for shard in range(4)]
+
+    # Only the split line is wanted here, not the golden comparison itself.
+    monkeypatch.setattr(rocke_ir_parity_harness, "check_golden", lambda *_, **__: [])
+    for name, value in _gtest(0).items():
+        monkeypatch.setenv(name, value)
+    capsys.readouterr()
+    assert runner.main([ci_shard.ACTIVATION_FLAG]) == 0
+    split = "/".join(map(str, counts))
+    assert f"split {split} of {sum(counts)}" in capsys.readouterr().out
+
+
+def test_the_golden_runner_refuses_to_list_without_the_shard_flag(
+    tmp_path, monkeypatch, capsys
+):
+    runner = _golden_runner()
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    with pytest.raises(SystemExit) as refused:
+        runner.main([ci_shard.LIST_KEYS_FLAG, str(tmp_path / "keys.json")])
+    assert refused.value.code == 2
+    assert f"{ci_shard.LIST_KEYS_FLAG} needs {ci_shard.ACTIVATION_FLAG}" in (
+        capsys.readouterr().err
+    )
+
+
+def test_a_shard_names_its_source_in_the_header_line():
+    assert ci_shard.header_line(None) == "rocke-ctest-shard: off"
+    shard = ci_shard.current_shard(_gtest(1), from_gtest=True)
+    assert ci_shard.header_line(shard) == (
+        "rocke-ctest-shard: 1/4 (GTEST_SHARD_INDEX=1, GTEST_TOTAL_SHARDS=4)"
+    )
+    assert ci_shard.current_shard(_gtest(1)) is None
+    with pytest.raises(ValueError, match="out of range"):
+        ci_shard.Shard("4/4")
+
+
+def test_an_import_of_the_shard_rule_needs_no_pytest():
+    code = "import sys, rocke.tests.ci_shard; sys.exit('pytest' in sys.modules)"
+    environment = {
+        **ctest_shard.unsharded_environment(),
+        "PYTHONPATH": str(PACKAGE_ROOT),
+    }
+    subprocess.run([sys.executable, "-c", code], env=environment, check=True)
 
 
 @pytest.mark.parametrize("dtype", ["fp16-64"])
@@ -566,6 +814,154 @@ def test_a_child_pytest_started_by_a_test_is_not_sliced(tmp_path):
     (run,) = _pytest_side_by_side(outer, [_Run(("test_outer.py",), _gtest(index))])
     assert run.returncode == 0, run.stdout + run.stderr
     assert "1 passed" in run.stdout
+
+
+_HEAVY_KEYS = [
+    key
+    for key in (f"test_mod.py[h{index}]" for index in range(10_000))
+    if ci_shard.shard_of(key, 4) == 0
+][:8]
+
+
+def _costed_module():
+    """A module whose eight ``heavy`` parameters all hash to shard 0 of 4 and
+    declare a cost, beside forty unmarked ones."""
+    heavy = [key.removeprefix("test_mod.py[").removesuffix("]") for key in _HEAVY_KEYS]
+    return textwrap.dedent(
+        f"""
+        import pytest
+
+        cost = pytest.mark.{ctest_shard.SHARD_COST_MARKER}
+
+        @pytest.mark.parametrize("name", {heavy!r})
+        @cost(10)
+        def test_heavy(name):
+            pass
+
+        @pytest.mark.parametrize("i", range(40))
+        def test_light(i):
+            pass
+        """
+    )
+
+
+def test_declared_costs_spread_heavy_tests_over_the_shards(tmp_path):
+    project = _project(tmp_path, _costed_module())
+    runs = [_Run(("-v", "-W", "error"), _gtest(k)) for k in range(4)]
+    runs.append(_Run(("-v", "-W", "error"), _gtest(0, 1)))
+    *results, whole = _pytest_side_by_side(project, runs)
+    for run in (*results, whole):
+        assert run.returncode == 0, run.stdout + run.stderr
+    shards = [_passed(run.stdout) for run in results]
+    _assert_partition(shards, _passed(whole.stdout))
+    assert [len([i for i in ids if "test_heavy" in i]) for ids in shards] == [2] * 4
+    assert len({_split_line(run.stdout).group(2) for run in results}) == 1
+
+
+def test_a_conftest_selection_places_costed_tests_like_the_plugin(tmp_path):
+    conftest = (
+        "from rocke.tests import ctest_shard\n"
+        "\n"
+        "\n"
+        "def pytest_configure(config):\n"
+        "    ctest_shard.register_shard_cost_marker(config)\n"
+        "\n"
+        "\n"
+        "def pytest_collection_modifyitems(config, items):\n"
+        "    if not ctest_shard.owns_selection(config):\n"
+        "        ctest_shard.select_items(config, items)\n"
+    )
+    project = _project(tmp_path, _costed_module(), conftest)
+    shard = {"ROCKE_TEST_SHARD": "2/4"}
+    plugin, conftest_only = _pytest_side_by_side(
+        project,
+        [
+            _Run(("-v", "-W", "error"), shard, flag=False),
+            _Run(("-v", "-W", "error"), shard, flag=False, plugin=False),
+        ],
+    )
+    for run in (plugin, conftest_only):
+        assert run.returncode == 0, run.stdout + run.stderr
+    assert _passed(plugin.stdout) == _passed(conftest_only.stdout)
+    assert len([i for i in _passed(plugin.stdout) if "test_heavy" in i]) == 2
+
+
+@pytest.mark.parametrize("mark", ["(0)", "()", "(1, 2)", "(seconds=3)", "('x')"])
+def test_a_malformed_cost_mark_is_a_usage_error(tmp_path, mark):
+    source = (
+        "import pytest\n\n"
+        f"@pytest.mark.{ctest_shard.SHARD_COST_MARKER}{mark}\n"
+        "def test_one():\n    pass\n"
+    )
+    project = _project(tmp_path, source)
+    # With a shard and without one: the mark is checked in every run.
+    for run in _pytest_side_by_side(project, [_Run((), _gtest(0)), _Run(flag=False)]):
+        assert run.returncode == pytest.ExitCode.USAGE_ERROR, run.stdout + run.stderr
+        assert "test_mod.py::test_one: " in run.stderr
+
+
+# ------------------------------------------------------------------ cost mark drift
+def test_a_cost_mark_is_off_relative_to_the_runs_median_ratio():
+    declared = {"a": 1.0, "b": 2.0, "c": 4.0, "slow": 1.0, "fast": 8.0}
+    # a, b and c run at 3 measured seconds per declared unit: the run's scale.
+    measured = {"a": 3.0, "b": 6.0, "c": 12.0, "slow": 9.0, "fast": 6.0}
+    assert ctest_shard.drifted_cost_marks(declared, measured) == {
+        "fast": 0.25,
+        "slow": 3.0,
+    }
+    # Exactly the tolerance away from the scale is still in bounds.
+    assert ctest_shard.drifted_cost_marks(declared, measured, tolerance=4.0) == {}
+
+
+def test_a_cost_mark_without_a_measurement_is_not_judged():
+    assert ctest_shard.drifted_cost_marks({"a": 1.0, "b": 1.0}, {"a": 5.0}) == {}
+    assert ctest_shard.drifted_cost_marks({"a": 1.0}, {}) == {}
+
+
+@pytest.mark.parametrize("tolerance", [0.5, float("nan")])
+def test_a_cost_mark_tolerance_below_one_is_an_error(tolerance):
+    with pytest.raises(ValueError, match="is not at least 1"):
+        ctest_shard.drifted_cost_marks({"a": 1.0}, {"a": 1.0}, tolerance)
+
+
+_DRIFT_MODULE = textwrap.dedent(
+    f"""
+    import time
+
+    import pytest
+
+    cost = pytest.mark.{ctest_shard.SHARD_COST_MARKER}
+
+    @pytest.mark.parametrize("name", ["even0", "even1", "even2"])
+    @cost(1)
+    def test_even(name):
+        time.sleep(0.05)
+
+    @cost(1)
+    def test_slow():
+        time.sleep(0.4)
+
+    @cost(1)
+    def test_skipped():
+        pytest.skip("a key with a skip is not judged")
+
+    @cost(100)
+    def test_failing():
+        assert False, "a key with a failure is not judged"
+    """
+)
+
+
+def test_a_run_warns_only_about_a_drifted_cost_mark_of_passing_tests(tmp_path):
+    project = _project(tmp_path, _DRIFT_MODULE)
+    (run,) = _pytest_side_by_side(project, [_Run(flag=False)])
+    # The failing test, not the warning, sets the exit status.
+    assert run.returncode == pytest.ExitCode.TESTS_FAILED, run.stdout + run.stderr
+    warned = [line for line in run.stdout.splitlines() if " cost mark of " in line]
+    assert len(warned) == 1, run.stdout
+    assert warned[0].startswith(
+        "rocke-ctest-shard: cost mark of test_mod.py::test_slow is off: declared 1 s"
+    ), warned[0]
 
 
 def test_owns_selection_only_when_loaded_as_a_plugin(tmp_path):

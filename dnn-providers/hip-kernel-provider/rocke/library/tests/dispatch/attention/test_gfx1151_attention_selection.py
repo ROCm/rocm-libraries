@@ -5,6 +5,7 @@ request -> spec policy, tuned candidates, and cross-architecture isolation."""
 
 import dataclasses
 import json
+import re
 import unittest
 from unittest import mock
 
@@ -41,6 +42,7 @@ from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     is_valid_spec as prefill_is_valid,
 )
 from rocke.dispatch.core import PinRefused, pin_to_spec, stable_json_hash
+from rocke.tests.bool_flags import bool_flag_refusal
 
 PREFILL = "attention_rdna_wmma_prefill"
 DECODE = "attention_rdna_wmma_decode"
@@ -853,8 +855,16 @@ class TestRdnaWmmaTunedCandidates(unittest.TestCase):
 
     def test_query_side_options_are_validated(self):
         for fields, message in (
-            (dict(dense_q="false", layout="paged"), "dense_q must be a bool"),
-            (dict(seqused_q=1, layout="paged"), "seqused_q must be a bool"),
+            (
+                dict(dense_q="false", layout="paged"),
+                re.escape(
+                    bool_flag_refusal("dense_q", "false", what="AttentionRequest")
+                ),
+            ),
+            (
+                dict(seqused_q=1, layout="paged"),
+                re.escape(bool_flag_refusal("seqused_q", 1, what="AttentionRequest")),
+            ),
             (dict(dense_q=True, layout="ragged"), "dense_q requires layout='paged'"),
             (dict(dense_q=True), "dense_q requires layout='paged'"),
             (dict(seqused_q=True, layout="dense"), "seqused_q requires layout="),

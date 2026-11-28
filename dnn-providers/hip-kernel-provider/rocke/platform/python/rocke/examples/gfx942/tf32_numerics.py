@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
+from rocke.core import native_engine
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, _resolve_llvm_flavor
@@ -139,9 +140,11 @@ def run(output_dir, backend="both", shapes=(16, 32)):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     engines = ("python", "cpp") if backend == "both" else (backend,)
-    native = None
     if "cpp" in engines:
-        import rocke_engine as native  # Required: no fallback.
+        # Required: no fallback to the Python engine. The C++ engine lowers the
+        # Python-built probe through the shared engine's C ABI; whether the
+        # C++ probe builder makes the same kernel is test_tf32's to check.
+        native_engine.require_native_lowering()
     flavor = _resolve_llvm_flavor()
     summary = {
         "arch": arch,
@@ -161,16 +164,7 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                 kernel = build_tf32_mma_probe(spec)
                 ir = serialize(kernel)
                 if engine == "cpp":
-                    ir_native = native.tf32_mma_probe_serialize_ir(m, mode)
-                    if ir != ir_native:
-                        raise RuntimeError(
-                            f"m={m} mode={mode}: builder parity mismatch"
-                        )
-                    ll = native.lower_serialized_ir(
-                        ir_native,
-                        arch="gfx942",
-                        flavor=flavor,
-                    )
+                    ll = native_engine.lower_serialized_ir(ir, "gfx942", flavor)
                     if ll != _lower_kernel_to_llvm_python(
                         kernel, arch="gfx942", llvm_flavor=flavor
                     ):

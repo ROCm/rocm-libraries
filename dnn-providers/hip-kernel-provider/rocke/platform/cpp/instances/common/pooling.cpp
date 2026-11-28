@@ -72,14 +72,10 @@
  *                            (f32 demote/pack) + raw_ptr_buffer_store.
  * ===================================================================== */
 
-/* NB: the rich named-coord rocke_tensor_descriptor (helpers.transforms.h, already
- * included above) and the simple shape/stride descriptor in
- * helpers.tensor_view.h share the struct tag ``rocke_tensor_descriptor`` but are
- * different types -- the two headers cannot coexist in one TU. The pooling store
- * path needs only a packed buffer view, so we carry the flat shape directly here
- * (a self-contained mirror of helpers/tensor_view.py's buffer TensorView) and
- * compute the packed offset inline; this keeps the byte-identical op stream
- * without dragging in the conflicting header. */
+/* The pooling store path needs only a packed buffer view, so we carry the flat
+ * shape directly here (a self-contained mirror of helpers/tensor_view.py's
+ * buffer TensorView) and compute the packed offset inline, keeping the
+ * byte-identical op stream. */
 #define ROCKE_POOL_TV_MAX_RANK 8
 
 /* helpers/tensor_view.py: BufferResource (rsrc + soffset + num_bytes). */
@@ -356,6 +352,13 @@ bool rocke_pooling2d_is_valid_spec(const rocke_pooling2d_spec_t* spec,
         return false;
     }
     rocke_arena_destroy(&arena);
+
+    /* if spec.dtype == "bf16": reject (store_tile has an f16 buffer store only). */
+    if(strcmp(spec->dtype, "bf16") == 0)
+    {
+        POOL_REASON("bf16 output is not supported (the store is f16 only); use f16");
+        return false;
+    }
 
     /* if spec.op not in ("max","avg","sum"): reject. */
     if(strcmp(spec->op, "max") != 0 && strcmp(spec->op, "avg") != 0 && strcmp(spec->op, "sum") != 0)

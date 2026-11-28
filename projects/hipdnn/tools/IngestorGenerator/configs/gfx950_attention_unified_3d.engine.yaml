@@ -324,7 +324,7 @@ launch_surface:
     kmd_fields: [dtype]
     guard: >
       unified3DSegmentSignature() is the 19-argument segment form (12 pointers, 4 f32
-      scalars, num_seqs, block_table_stride, qq_bias_stride_0) and unified3DReduceSignature()
+      scalars, num_seqs, block_table_stride, qq_bias_stride0) and unified3DReduceSignature()
       the 5-pointer reduce form. Each is validated at prepare() time against its own code
       object by buildIngestorKernelCode(..., expectedSignature); names are load-bearing.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified3DSignature.cpp

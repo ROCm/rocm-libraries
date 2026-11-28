@@ -27,7 +27,7 @@ from kernels.common import attention_unified as au
 from rocke.core.arch.target import known_arches
 from rocke.runtime.hip_module import get_device_arch
 
-from ._attention_device_array import DeviceArray as _DeviceArray
+from rocke.runtime.device_array import DeviceArray
 
 _HQ, _HKV, _D, _BS = 8, 2, 64, 16
 _ATOL = 1e-2
@@ -42,13 +42,6 @@ pytestmark = [
         reason=f"needs a GPU with a known attention target, found {_ARCH}",
     ),
 ]
-
-
-@pytest.fixture(scope="module")
-def rt():
-    from rocke.runtime.hip_module import Runtime
-
-    return Runtime()
 
 
 def _case(q_lens, kv_lens, row_width, *, seed):
@@ -104,16 +97,16 @@ def _reference(q, k, v, cu, table, q_lens, kv_lens):
     return out
 
 
-def _launch(rt, problem, q, k, v, cu, kv_lens, block_table):
-    out = _DeviceArray(rt, np.zeros_like(q))
+def _launch(problem, q, k, v, cu, kv_lens, block_table):
+    out = DeviceArray(np.zeros_like(q))
     au.run_unified_attention_torch(
         problem=problem,
-        q=_DeviceArray(rt, q),
-        k=_DeviceArray(rt, k),
-        v=_DeviceArray(rt, v),
+        q=DeviceArray(q),
+        k=DeviceArray(k),
+        v=DeviceArray(v),
         out=out,
-        cu_seqlens_q=_DeviceArray(rt, cu),
-        seqused_k=_DeviceArray(rt, np.array(kv_lens, dtype=np.int32)),
+        cu_seqlens_q=DeviceArray(cu),
+        seqused_k=DeviceArray(np.array(kv_lens, dtype=np.int32)),
         softmax_scale=1.0 / math.sqrt(_D),
         block_table=block_table,
         softcap=0.0,
@@ -123,20 +116,20 @@ def _launch(rt, problem, q, k, v, cu, kv_lens, block_table):
 
 
 @pytest.mark.parametrize("view_of_wider", (False, True), ids=("wide", "view"))
-def test_wide_block_table_rows(rt, view_of_wider):
+def test_wide_block_table_rows(view_of_wider):
     q_lens, kv_lens = [5, 1, 9], [37, 20, 61]
     row_width = math.ceil(max(kv_lens) / _BS) + 6
     alloc_width = row_width + 5 if view_of_wider else row_width
     problem, q, k, v, cu, table = _case(q_lens, kv_lens, alloc_width, seed=0)
-    dev = _DeviceArray(rt, table, shape=(len(q_lens), row_width))
+    dev = DeviceArray(table, shape=(len(q_lens), row_width))
     assert dev.stride(0) > math.ceil(problem.max_seqlen_k / _BS)
-    got = _launch(rt, problem, q, k, v, cu, kv_lens, dev)
+    got = _launch(problem, q, k, v, cu, kv_lens, dev)
     want = _reference(q, k, v, cu, table, q_lens, kv_lens)
     max_abs = float(np.abs(got - want).max())
     assert max_abs <= _ATOL, f"max_abs {max_abs:.3e} vs fp32 reference"
 
 
-def test_one_binary_serves_different_batches(rt):
+def test_one_binary_serves_different_batches():
     """Shapes that differ only in batch geometry share a key; the second
     launch must reuse the first binary and still match the reference."""
     first = ([4, 2], [30, 17], 4)
@@ -144,7 +137,7 @@ def test_one_binary_serves_different_batches(rt):
     launchers = None
     for i, (q_lens, kv_lens, width) in enumerate((first, second)):
         problem, q, k, v, cu, table = _case(q_lens, kv_lens, width, seed=i)
-        got = _launch(rt, problem, q, k, v, cu, kv_lens, _DeviceArray(rt, table))
+        got = _launch(problem, q, k, v, cu, kv_lens, DeviceArray(table))
         if launchers is None:
             launchers = len(au._SCALAR_LAUNCHERS)
         else:

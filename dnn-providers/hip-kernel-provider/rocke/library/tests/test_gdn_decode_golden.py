@@ -36,6 +36,8 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "gdn_decode_gfx950_ir_sha256.json"
 )
+# This golden's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "gdn_decode"
 _ARCH = "gfx950"
 
 # Pin the library root ahead of everything on sys.path so that running this file
@@ -45,8 +47,10 @@ if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
 
+@functools.cache
 def _cases():
-    """case id -> zero-arg builder returning a KernelDef.
+    """case id -> zero-arg builder returning a KernelDef. Built once per process:
+    listing the knob cases lowers each knob's spec pair.
 
     Covers the default spec, the reference path, every legal registered
     tile's base configuration (every knob at its default) for both gate
@@ -458,43 +462,45 @@ def _current_flavor():
     return _resolve_llvm_flavor()
 
 
-def _sha_for(build, flavor):
+def _sha_of(kernel, flavor):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-    llvm = _lower_kernel_to_llvm_python(build(), arch=_ARCH, llvm_flavor=flavor)
+    llvm = _lower_kernel_to_llvm_python(kernel, arch=_ARCH, llvm_flavor=flavor)
     data = llvm.encode("utf-8")
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
-def _run(flavor):
-    """One flavor's golden sub-document, for ``check_golden``. A lowering error
-    propagates with its traceback."""
-    cases = {}
+def _run_flavors(flavors, failures=None, owns_case=None):
+    """Each flavor's golden sub-document. Every case (or every case whose id
+    ``owns_case`` accepts) is built once and lowered at each flavor. A build or
+    lowering error propagates with its traceback, unless ``failures`` is a
+    list: then the case is left out and the error appended."""
+    cases = {flavor: {} for flavor in flavors}
     for cid, build in _cases().items():
-        sha, nbytes = _sha_for(build, flavor)
-        cases[cid] = {"sha256": sha, "bytes": nbytes}
-    return {"cases": cases}
+        if owns_case is not None and not owns_case(cid):
+            continue
+        try:
+            kernel = build()
+            records = {flavor: _sha_of(kernel, flavor) for flavor in flavors}
+        except Exception as exc:
+            if failures is None:
+                raise
+            failures.append(f"{cid}: {exc}")
+            continue
+        for flavor, (sha, nbytes) in records.items():
+            cases[flavor][cid] = {"sha256": sha, "bytes": nbytes}
+    return {flavor: {"cases": by_id} for flavor, by_id in cases.items()}
 
 
 def _build_doc():
     from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
 
+    failures = []
     doc = {
         "schema": "gdn_decode_gfx950.ir_golden_sha256/v1",
         "aliases": GOLDEN_ALIASES,
-        "flavors": {},
+        "flavors": _run_flavors(GOLDEN_PROFILE_FLAVORS, failures),
     }
-    failures = []
-    for flavor in GOLDEN_PROFILE_FLAVORS:
-        cases = {}
-        for cid, build in _cases().items():
-            try:
-                sha, nbytes = _sha_for(build, flavor)
-            except Exception as exc:  # pragma: no cover - diagnostic only
-                failures.append(f"{flavor}/{cid}: {exc}")
-                continue
-            cases[cid] = {"sha256": sha, "bytes": nbytes}
-        doc["flavors"][flavor] = {"cases": cases}
     if failures:
         raise RuntimeError(
             "refusing to write golden fixture with lowering failures:\n  "
@@ -503,9 +509,30 @@ def _build_doc():
     return doc
 
 
-def test_gdn_decode_ir_matches_golden():
+#: The cases dealt by id into this many chunks (``rocke.tests.ci_shard.shard_of``),
+#: one test each, so their lowering spreads over CI shards and workers.
+_CHECK_CHUNKS = 4
+
+
+def pytest_generate_tests(metafunc):
+    # One test per chunk of the cases. A hook rather than a decorator keeps
+    # pytest out of the --write script path.
+    if "chunk" in metafunc.fixturenames:
+        import pytest
+
+        cost = pytest.mark.rocke_shard_cost(5)
+        metafunc.parametrize(
+            "chunk", [pytest.param(chunk, marks=cost) for chunk in range(_CHECK_CHUNKS)]
+        )
+
+
+def test_gdn_decode_ir_matches_golden(chunk):
+    """The cases of one chunk lower to their golden hashes at every flavor, and
+    the golden holds no other case of the chunk."""
     import pytest
-    from rocke.core.ir_golden import check_golden
+    from rocke.core.golden_file import rerecord_hint
+    from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden
+    from rocke.tests.ci_shard import shard_of
 
     if not _GOLDEN.exists():
         pytest.skip("gdn_decode golden fixture missing; generate with --write")
@@ -518,12 +545,20 @@ def test_gdn_decode_ir_matches_golden():
         if not entry.get("sha256")
     ]
     assert not unrecorded, "\n  ".join(unrecorded)
+
+    def owns_case(case_id: str) -> bool:
+        return shard_of(case_id, _CHECK_CHUNKS) == chunk
+
     # Every flavor in LLVM_FLAVORS, from any host, so a datalayout or intrinsic
-    # change for a flavor this host does not run still fails here.
-    drift = check_golden(_GOLDEN, _run)
+    # change for a flavor this host does not run still fails here. GOLDEN_FLAVORS
+    # are the flavors check_golden compares when given none.
+    runs = _run_flavors(GOLDEN_FLAVORS, owns_case=owns_case)
+    drift = check_golden(_GOLDEN, runs.__getitem__, owns_case=owns_case)
     assert not drift, (
-        "gdn_decode IR drift vs golden (re-record with --write if intended):\n  "
+        "gdn_decode IR drift vs golden:\n  "
         + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
     )
 
 
@@ -572,7 +607,7 @@ def test_golden_ir_check_rejects_entry_without_sha256(monkeypatch, tmp_path):
     monkeypatch.setattr(sys.modules[__name__], "_GOLDEN", fixture)
 
     with pytest.raises(AssertionError, match="no sha256 recorded"):
-        test_gdn_decode_ir_matches_golden()
+        test_gdn_decode_ir_matches_golden(chunk=0)
 
 
 def test_config_coverage_rejects_entry_without_sha256(monkeypatch, tmp_path):
@@ -603,12 +638,12 @@ def test_config_coverage_rejects_entry_without_sha256(monkeypatch, tmp_path):
 def test_build_doc_refuses_lowering_failure(monkeypatch):
     import pytest
 
-    monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object()})
+    monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object})
 
     def fail_lowering(*_):
         raise RuntimeError("synthetic lowering failure")
 
-    monkeypatch.setattr(sys.modules[__name__], "_sha_for", fail_lowering)
+    monkeypatch.setattr(sys.modules[__name__], "_sha_of", fail_lowering)
 
     with pytest.raises(RuntimeError, match="refusing to write"):
         _build_doc()
@@ -630,8 +665,8 @@ def test_gate_kind_actually_moves_the_ir():
     gdn = GdnDecodeSpec()
     kda = _dc.replace(gdn, gate_kind="kda")
 
-    gdn_sha, _ = _sha_for(lambda: build_gdn_decode(gdn, arch=_ARCH), flavor)
-    kda_sha, _ = _sha_for(lambda: build_gdn_decode(kda, arch=_ARCH), flavor)
+    gdn_sha, _ = _sha_of(build_gdn_decode(gdn, arch=_ARCH), flavor)
+    kda_sha, _ = _sha_of(build_gdn_decode(kda, arch=_ARCH), flavor)
 
     assert gdn_sha != kda_sha, "gate_kind did not change the emitted IR"
     assert gdn.kernel_name() != kda.kernel_name(), "gate_kind did not change the name"
@@ -664,9 +699,11 @@ def test_gdn_cases_carry_no_kda_marker():
 
 if __name__ == "__main__":
     if "--write" in sys.argv:
-        _GOLDEN.parent.mkdir(parents=True, exist_ok=True)
-        _GOLDEN.write_text(json.dumps(_build_doc(), indent=2, sort_keys=True) + "\n")
+        from rocke.core.golden_file import write_golden_json
+
+        write_golden_json(_GOLDEN, _build_doc())
         print(f"wrote {_GOLDEN}")
     else:
-        test_gdn_decode_ir_matches_golden()
+        for chunk in range(_CHECK_CHUNKS):
+            test_gdn_decode_ir_matches_golden(chunk)
         test_every_shipped_configuration_is_recorded()

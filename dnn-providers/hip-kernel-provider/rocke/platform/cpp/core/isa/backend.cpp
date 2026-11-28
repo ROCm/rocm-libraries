@@ -163,6 +163,48 @@ bool rocke_backend_is_known(const char* gfx)
     return registry_row_for(gfx) != NULL;
 }
 
+/* =========================== MMA catalog gate =========================== */
+
+/* The op_ids of the two K=128 f8f6f4 builder methods, each with the catalog
+ * row of the same instruction (Python BUILDER_ONLY_MMA_OP_IDS). Their A and B
+ * formats are op attributes, so no catalog row of their own can state them; the
+ * gate admits them on a target whose catalog lists that row.
+ * TODO: make these builder aliases that emit the per-format catalog op_ids, then
+ * delete this table. */
+typedef struct builder_only_mma_op
+{
+    const char* op_id;
+    const char* listed_as;
+} builder_only_mma_op_t;
+
+static const builder_only_mma_op_t BUILDER_ONLY_MMA_OP_IDS[] = {
+    {"mfma_scale_f32_16x16x128_f8f6f4", "mfma_f32_16x16x128_fp8"},
+    {"mfma_f32_16x16x128_fp4fp6fp8", "mfma_f32_16x16x128_fp8"},
+};
+
+/* The catalog row whose presence admits `op_id`: its builder-only row, else
+ * op_id itself. */
+static const char* catalog_row_admitting(const char* op_id)
+{
+    for(const builder_only_mma_op_t& builder_only : BUILDER_ONLY_MMA_OP_IDS)
+        if(strcmp(op_id, builder_only.op_id) == 0)
+            return builder_only.listed_as;
+    return op_id;
+}
+
+bool rocke_isa_mma_catalog_refusal(const char* gfx, const char* op_id, char* out, size_t cap)
+{
+    const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
+    if(target && rocke_mma_catalog_by_op_id(&target->mma, catalog_row_admitting(op_id)))
+        return false;
+    snprintf(out,
+             cap,
+             "tile.%s is not available on %s: its MMA catalog does not list it",
+             op_id,
+             gfx ? gfx : "(unknown)");
+    return true;
+}
+
 /* ============================ module preamble =========================== */
 
 const char* rocke_isa_triple(const rocke_isa_backend_t* be)

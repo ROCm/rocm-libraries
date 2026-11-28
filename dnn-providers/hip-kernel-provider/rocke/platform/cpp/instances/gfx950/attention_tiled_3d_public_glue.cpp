@@ -7,15 +7,10 @@
  * 3D attention).
  *
  * SCOPE (this TU only):
- *   - The shared spec PODs' _default() / _validate() (__post_init__) and every
- *     @property accessor (num_queries_per_kv, block_m=16, block_q, tile_size,
- *     dtype_ir, kernel_name via kernel_name_join). These
- *     spec struct/default definitions are GUARDED against the gfx942 3D header's
- *     duplicate definitions (the two arch ports share the identical frozen
- *     dataclass shape -- see the SHARED SPEC POD note in
- *     rocke/instance_gfx950_attention_tiled_3d.h). When the gfx942 3D header is
- *     ALSO present in the build, that sibling TU owns these symbols; this TU's
- *     copies are skipped via ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_H.
+ *   - The spec _validate() (__post_init__) and every @property accessor
+ *     (num_queries_per_kv, block_m=16, block_q, tile_size, dtype_ir,
+ *     kernel_name via kernel_name_join). The spec structs and their _default()
+ *     are shared with the gfx942 port (rocke/instance_attention_tiled_3d_spec.h).
  *     (Python lines 99-185, 958-982.)
  *   - supports_tiled_3d coverage gate (pure host predicate, static reasons,
  *     routed through validate_tiled_attention_arch).  (Python lines 188-250.)
@@ -56,26 +51,17 @@
 #include <string.h>
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape    */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom, make_c_warp_dstr_encoding */
 #include "rocke/helper_rocke.helpers.distribution.h" /* make_static_tile_distribution            */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join                     */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
+#include "rocke/instance_gfx950_attention_tiled_3d.h"
+#include "rocke/instance_gfx950_attention_tiled_3d_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 #include "rocke/lower_llvm.h"
-/* SHARED SPEC POD ownership: the gfx942 and gfx950 3D ports share the byte-
- * identical rocke_unified_attention_3d_tiled_spec_t / _reduce_tiled_spec_t PODs and
- * their _default() builders. When both arch ports are linked together those
- * non-arch-prefixed symbols would collide. Including the gfx942 3D header first
- * defines ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_H, which makes the gfx950 header
- * skip the duplicate spec typedefs/decls and makes this TU skip the duplicate
- * _default() definitions below -- the gfx942 TU owns them. The structs are
- * byte-identical so the single shared definition is correct for both. */
-#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
-#include "rocke/instance_gfx942_attention_tiled_3d.h"
-#include "rocke/instance_gfx950_attention_tiled_3d.h"
-#include "rocke/instance_gfx950_attention_tiled_3d_internal.h"
 
 /* Module consts (Python module-level MFMA_M / MFMA_N). */
 #define ROCKE_ATTN3D950_MFMA_M 16
@@ -182,52 +168,6 @@ static bool rocke_attn3d950_validate_arch(const char* eff_arch,
     }
     return false;
 }
-
-/* ===================================================================== *
- *  SHARED SPEC POD -- _default / _validate / @property
- *
- *  These definitions are byte-identical across the gfx942 and gfx950 3D
- *  ports; when the gfx942 header is present it owns them (see the header's
- *  SHARED SPEC POD guard). The accessor / build / lower symbols below carry
- *  the gfx950_ prefix and are always defined here.
- * ===================================================================== */
-#ifndef ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_H
-
-rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void)
-{
-    rocke_unified_attention_3d_tiled_spec_t s;
-    memset(&s, 0, sizeof(s));
-    /* required fields stay zero/NULL (caller must set). Defaulted fields: */
-    s.use_alibi = false;
-    s.use_qq_bias = false;
-    s.num_seqs = 0;
-    s.has_waves_per_eu = false;
-    s.waves_per_eu = 0;
-    s.kv_storage_dtype = NULL;
-    s.has_tile_size_override = false;
-    s.tile_size_override = 0;
-    s.use_invariant_hoist = false;
-    s.use_wide_kv_load = false;
-    s.use_i64_kv_addr = false;
-    s.use_decode_grid = false;
-    s.kv_cache_policy = "all";
-    s.use_kv_lds_swizzle = false;
-    s.use_wave_page_id_load = false;
-    s.emit_lse = false;
-    return s;
-}
-
-rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void)
-{
-    rocke_unified_attention_reduce_tiled_spec_t s;
-    memset(&s, 0, sizeof(s));
-    s.has_waves_per_eu = false;
-    s.waves_per_eu = 0;
-    s.emit_lse = false;
-    return s;
-}
-
-#endif /* !ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_H (shared spec POD defaults) */
 
 /* __post_init__: kv_storage_dtype must be None or 'fp8e4m3'. */
 bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(

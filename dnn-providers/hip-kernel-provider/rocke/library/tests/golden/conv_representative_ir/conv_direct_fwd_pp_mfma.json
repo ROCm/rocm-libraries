@@ -1,30 +1,31 @@
 {
   "aliases": {},
+  "fingerprint": "a2108612e116d0b119d63338f3d29c275c504c0a44b9c787437b31fc633071e2",
   "flavors": {
     "llvm20": {
       "cases": {
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk256": {
           "arch": "gfx950",
-          "bytes": 1215455,
+          "bytes": 1246016,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk256_bf16",
-          "sha256": "1024fecede0233b741967c3c62046e114e45383ea72319759369eed6b2cc13bf",
+          "sha256": "03c214c553cc9f20491fcf392c5d0d0dfbd6ee835052b29983463dc41770fce8",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk64": {
           "arch": "gfx950",
-          "bytes": 612505,
+          "bytes": 627589,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk64_bf16",
-          "sha256": "15c4abad135175664d379914b9e48011ef8f9910d4aa05299b92ae74f9cfae12",
+          "sha256": "8ad134fecad463e77b707b8acff6d5062881642ea8aeac338f635f4f47d3bf3a",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/fp16_k3_bk128": {
           "arch": "gfx950",
-          "bytes": 796514,
+          "bytes": 816757,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk128",
-          "sha256": "c7eb82e5987e29996dabc07e39a27dc44dc8c796adb843ab9de7968ede3ebda7",
+          "sha256": "a8a3c2f2c49ac8549a3b49e29ed56eb036593fa2e7c828de2ffd320d03e17abb",
           "status": "ok"
         }
       },
@@ -34,26 +35,26 @@
       "cases": {
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk256": {
           "arch": "gfx950",
-          "bytes": 1215600,
+          "bytes": 1246161,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk256_bf16",
-          "sha256": "f958aaa4f308418fc72e1044b1f294d07af943ae0060cd315b8d34ae4f235c12",
+          "sha256": "41d41c0e321a3b9e47bf5efc5a6b2ca9bc7bbd817667f13a59f80ad32c7ecb1b",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk64": {
           "arch": "gfx950",
-          "bytes": 612667,
+          "bytes": 627751,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk64_bf16",
-          "sha256": "354e711d63f8f7293823c70caad07a6e082e38f45624ef92d424e13300e9b564",
+          "sha256": "2bcfcfad15c72f1d529731d3fe7c82e71d69362ee2adcdcb307e8659b302d7ab",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/fp16_k3_bk128": {
           "arch": "gfx950",
-          "bytes": 796694,
+          "bytes": 816937,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk128",
-          "sha256": "ac54cdcda4a6b1db250c4670223f24ff14dd1c3b7eb2aa5596558b3759f33f40",
+          "sha256": "ddde05aab4dbd302605f0132158d2eec5d5a3926323e5ca0e3d1cf41a5c341ff",
           "status": "ok"
         }
       },
@@ -63,26 +64,26 @@
       "cases": {
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk256": {
           "arch": "gfx950",
-          "bytes": 1215664,
+          "bytes": 1246225,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk256_bf16",
-          "sha256": "511ed26ea85d7b8b466351593045ed2c6ddc7cdd482a1d8b53d48b8cfa5f9d4e",
+          "sha256": "488624168fa134abf068c69aa86b34b28eabf45d7f597ef3a77553c4cb63782b",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk64": {
           "arch": "gfx950",
-          "bytes": 612731,
+          "bytes": 627815,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk64_bf16",
-          "sha256": "606fb36e2714ff59c072838fbd127a5b7598353765f1c8ce0b189045090f73f1",
+          "sha256": "77cfcfe80cfe5a15b9e82e55f1e149b51672e141f1fd27191d4b5288be2a4f20",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/fp16_k3_bk128": {
           "arch": "gfx950",
-          "bytes": 796758,
+          "bytes": 817001,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk128",
-          "sha256": "93d686c5bd3abd8fc340d74de77958c5184cc087910a7bd4c7c20190bcef8307",
+          "sha256": "eef9de69bab9b17e95118480f109cf344f587f1c8efac164cb39409138af567d",
           "status": "ok"
         }
       },
@@ -92,26 +93,26 @@
       "cases": {
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk256": {
           "arch": "gfx950",
-          "bytes": 1215664,
+          "bytes": 1246225,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk256_bf16",
-          "sha256": "511ed26ea85d7b8b466351593045ed2c6ddc7cdd482a1d8b53d48b8cfa5f9d4e",
+          "sha256": "488624168fa134abf068c69aa86b34b28eabf45d7f597ef3a77553c4cb63782b",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/bf16_k3_bk64": {
           "arch": "gfx950",
-          "bytes": 612731,
+          "bytes": 627815,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk64_bf16",
-          "sha256": "606fb36e2714ff59c072838fbd127a5b7598353765f1c8ce0b189045090f73f1",
+          "sha256": "77cfcfe80cfe5a15b9e82e55f1e149b51672e141f1fd27191d4b5288be2a4f20",
           "status": "ok"
         },
         "conv_direct_fwd_pp_mfma/gfx950/fp16_k3_bk128": {
           "arch": "gfx950",
-          "bytes": 796758,
+          "bytes": 817001,
           "family": "conv_direct_fwd_pp_mfma",
           "kernel_name": "fwd_pp_mfma_f3x3_p1_bk128",
-          "sha256": "93d686c5bd3abd8fc340d74de77958c5184cc087910a7bd4c7c20190bcef8307",
+          "sha256": "eef9de69bab9b17e95118480f109cf344f587f1c8efac164cb39409138af567d",
           "status": "ok"
         }
       },

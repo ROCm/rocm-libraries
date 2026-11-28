@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import unittest
 
+from rocke.tests.engines import skip_without_cpp_engine
+
 
 class TestVectorWidthReason(unittest.TestCase):
     """Direct unit coverage of the predicate both engines mirror."""
@@ -206,14 +208,16 @@ class TestCppTwinAgrees(_SharedGeometry, unittest.TestCase):
     """
 
     def setUp(self):
+        from rocke.core import BackendError, import_engine
+
+        from kernels.conv.engine_bridge import ENGINE_MODULE
+
         try:
-            from rocke.core import import_engine
-
-            from kernels.conv.engine_bridge import ENGINE_MODULE
-
             self._eng = import_engine(ENGINE_MODULE)
-        except Exception as e:  # noqa: BLE001 -- extension not built here
-            self.skipTest(f"rocke_library_engine extension unavailable: {e}")
+        except BackendError as e:  # the extension is not built here
+            skip_without_cpp_engine(
+                e, f"rocke_library_engine extension unavailable: {e}"
+            )
 
     def _dict(self, *, dtype_d: str, vector_size_c: int) -> dict:
         # Built directly (not via conv_implicit_gemm_spec_to_dict, which only

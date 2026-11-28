@@ -998,7 +998,7 @@ def store_tile(
         if window.dtype.name in quant_dtypes:
             # Quant outputs (i8 / fp8e4m3 / bf8e5m2): the Y slots hold the
             # already-scaled f32 chunk. Reproduce the legacy packed-store
-            # byte layout exactly -- per-element saturating cvt + vec_pack
+            # byte layout exactly -- per-element cvt + vec_pack
             # (the helpers.quant.pack_quant_chunk_local_f32 op stream) then
             # one coalesced vector store (helpers.quant.store_packed_chunk_local
             # layout: <N x q_ty> bitcast to the matching dword store).
@@ -1031,7 +1031,7 @@ def _pack_quant_local(b: IRBuilder, scaled_f32: List[Value], *, q_ty: Type) -> V
     :func:`rocke.helpers.quant.pack_quant_chunk_local_f32`: a 4-wide fp8 /
     bf8 chunk routes through the packed ``v_cvt_pk_{fp8,bf8}_f32`` intrinsic
     (stitched with ``vec_concat`` for the 8-wide case); i8 (and 2-wide
-    fp8/bf8) uses per-element saturating scalar cvt + ``vec_pack``. Kept
+    fp8/bf8) uses per-element scalar cvt + ``vec_pack``. Kept
     inline so :func:`store_tile` does not import the quant module (it lives
     in a different helper layer).
     """

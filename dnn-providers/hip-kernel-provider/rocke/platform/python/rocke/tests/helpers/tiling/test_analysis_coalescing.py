@@ -13,6 +13,7 @@ from rocke.helpers.tiling.analysis import (
     analyze_coalescing,
     assert_asm_backed,
     vector_transactions,
+    widest_vector_units,
 )
 from rocke.helpers.tiling.transforms import interleave_idx
 
@@ -42,8 +43,80 @@ def test_addr_fn_from_strides_is_generic():
 def test_b128_cap_from_vector_transactions():
     # a lane holding 8 contiguous f32 (stride-1) must split into TWO b128 transactions (4 f32 each), not one
     mp = {(0, r): (r, 0) for r in range(8)}
-    ts, maxt = vector_transactions(mp, addr_fn_from_strides((1, 64)), dtype_bits=32)
+    ts, maxt = vector_transactions(
+        mp, addr_fn_from_strides((1, 64)), dtype_bits=32, space="lds"
+    )
     assert maxt == 2  # 8 f32 / (b128 = 4 f32) = 2 transactions
+
+
+def test_only_lds_splits_a_run_that_starts_mid_vector():
+    # One lane holds 8 contiguous f16 starting one element past a 16-byte boundary. An LDS access must
+    # be aligned to its width, so the run splits into narrower aligned pieces; a global access needs no
+    # alignment, so it is one 16-byte access.
+    lane_cells = {(0, r): (0, r + 1) for r in range(8)}
+    addr_fn = addr_fn_from_strides((64, 1))
+    _ts, lds_accesses = vector_transactions(
+        lane_cells, addr_fn, dtype_bits=16, space="lds"
+    )
+    _ts, global_accesses = vector_transactions(
+        lane_cells, addr_fn, dtype_bits=16, space="global"
+    )
+    # LDS: b16, b32, b64, b16 -- the widest access each start's alignment allows.
+    assert lds_accesses == 4
+    assert global_accesses == 1
+
+
+def test_an_unknown_space_is_refused():
+    lane_cells = {(0, 0): (0, 0)}
+    with pytest.raises(
+        ValueError, match="vector_transactions failed - space='shared', expected one of"
+    ):
+        vector_transactions(
+            lane_cells, addr_fn_from_strides((64, 1)), dtype_bits=16, space="shared"
+        )
+    with pytest.raises(
+        ValueError, match="analyze_coalescing failed - space='shared', expected one of"
+    ):
+        analyze_coalescing(
+            lane_cells, ("M", "N"), (64, 1), 16, space="shared", line_bytes=128
+        )
+
+
+@pytest.mark.parametrize(
+    "run_units,unit_bits,max_bits,other_strides,widest",
+    [
+        # The cap: at most 128 bits of bytes, halves, words and doublewords.
+        (64, 8, 128, (), 16),
+        (64, 16, 128, (), 8),
+        (64, 32, 128, (), 4),
+        (64, 64, 128, (), 2),
+        # A narrower cap.
+        (64, 16, 64, (), 4),
+        # The widest power of two dividing the run: 12 halves take 4 at a time, 6 take 2.
+        (12, 16, 128, (), 4),
+        (6, 16, 128, (), 2),
+        # Another stride narrows it.
+        (8, 16, 128, (258,), 2),
+        # Nothing wider than one unit divides the run.
+        (7, 16, 128, (), 1),
+        (8, 128, 128, (), 1),
+    ],
+)
+def test_widest_vector_units(run_units, unit_bits, max_bits, other_strides, widest):
+    assert (
+        widest_vector_units(
+            run_units, unit_bits, max_bits=max_bits, other_strides=other_strides
+        )
+        == widest
+    )
+
+
+@pytest.mark.parametrize("unit_bits,max_bits", [(0, 128), (-8, 128), (256, 128)])
+def test_widest_vector_units_refuses_a_unit_outside_the_cap(unit_bits, max_bits):
+    with pytest.raises(
+        ValueError, match="widest_vector_units failed - .* expected 0 < unit_bits"
+    ):
+        widest_vector_units(8, unit_bits, max_bits=max_bits)
 
 
 def test_crc_m_contig_scatters_n_contig_coalesces():
@@ -54,6 +127,7 @@ def test_crc_m_contig_scatters_n_contig_coalesces():
         (1, 64),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )
     n = analyze_coalescing(
@@ -62,6 +136,7 @@ def test_crc_m_contig_scatters_n_contig_coalesces():
         (64, 1),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )
     assert (
@@ -81,6 +156,7 @@ def test_labels_and_stride1_axis_by_name():
         ("M", "N"),
         (1, 64),
         32,
+        space="global",
         line_bytes=128,
     )
     n = analyze_coalescing(
@@ -88,6 +164,7 @@ def test_labels_and_stride1_axis_by_name():
         ("M", "N"),
         (64, 1),
         32,
+        space="global",
         line_bytes=128,
     )
     assert m.stride1_axis == "M" and n.stride1_axis == "N"
@@ -101,7 +178,7 @@ def test_operand_agnostic_A_and_B():
         (lane, r): (lane, r) for lane in range(64) for r in range(4)
     }  # coord (M,K), K stride-1
     a = analyze_coalescing(
-        a_dist, ("M", "K"), (4, 1), 16, direction="load", line_bytes=128
+        a_dist, ("M", "K"), (4, 1), 16, direction="load", space="global", line_bytes=128
     )  # f16 A load
     assert (
         a.stride1_axis == "K" and a.per_instruction[0].vw_elems == 4
@@ -110,7 +187,7 @@ def test_operand_agnostic_A_and_B():
         (lane, r): (lane, r) for lane in range(64) for r in range(4)
     }  # coord (N,K), K stride-1
     b = analyze_coalescing(
-        b_dist, ("N", "K"), (4, 1), 16, direction="load", line_bytes=128
+        b_dist, ("N", "K"), (4, 1), 16, direction="load", space="global", line_bytes=128
     )
     assert b.stride1_axis == "K"
 
@@ -120,10 +197,10 @@ def test_direction_is_honored():
     native = _native_c()
     dist = _shuffle(native, interleave_idx(1, 16, 64))
     store = analyze_coalescing(
-        dist, ("M", "N"), (1, 64), 32, direction="store", line_bytes=128
+        dist, ("M", "N"), (1, 64), 32, direction="store", space="global", line_bytes=128
     )
     load = analyze_coalescing(
-        dist, ("M", "N"), (1, 64), 32, direction="load", line_bytes=128
+        dist, ("M", "N"), (1, 64), 32, direction="load", space="global", line_bytes=128
     )
     assert store.direction == "store" and load.direction == "load"
     assert len(store.per_instruction) == len(
@@ -141,6 +218,7 @@ def test_reconcile_flags_ideal_vs_achieved_gap():
         (64, 1),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )
     assert r.ideal_vw_elems == 4
@@ -161,6 +239,7 @@ def test_asm_gate_raises_when_asm_disagrees():
         (64, 1),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )
     assert_asm_backed(r, 4)  # matches -> passes
@@ -181,7 +260,7 @@ def test_multiple_small_thread_tiles_fill_gaps_across_phases():
                 8 + r,
             )  # patch B: N in {8,9} -- a GAP between the two patches
     rep = analyze_coalescing(
-        dist, ("M", "N"), (0, 1), 16, direction="store", line_bytes=128
+        dist, ("M", "N"), (0, 1), 16, direction="store", space="global", line_bytes=128
     )
     assert (
         len(rep.per_instruction) == 2

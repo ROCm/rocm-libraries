@@ -3,8 +3,8 @@
 
 """On-device numerics for the fused conv1d / gated-RMSNorm decode modes.
 
-Scored against the whole-tensor fp32 reference with the fused steps applied
-(``ref_fp32`` runs the conv1d + SiLU first and the gated RMSNorm last, with
+Scored against the whole-array float64 reference with the fused steps applied
+(``ref_decode_step`` runs the conv1d + SiLU first and the gated RMSNorm last, with
 the gate activation of each gate kind's model). ``check`` compares the output,
 the written recurrent state, the written conv state, and every untouched page
 of both pools, so a misplaced write fails.
@@ -22,7 +22,7 @@ capability, independent of any tile selection policy. The dispatched path
 (request -> dispatch -> launch) is covered in
 ``test_gdn_decode_gfx950_numeric.py`` (``test_request_fields_reach_the_launch``).
 
-Needs a real gfx950 and ROCm torch; marked ``gpu`` and skipped elsewhere. The
+Needs a real gfx950; marked ``gpu`` and skipped elsewhere. The
 spec rules, ABI, reference and IR are covered on CPU by
 ``test_gdn_decode_fused.py``.
 """
@@ -32,30 +32,20 @@ from __future__ import annotations
 import dataclasses as dc
 from itertools import product
 
+import numpy as np
 import pytest
+from rocke.core.dtypes import dtype_info
+from rocke.numeric import storage
+from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 ARCH = "gfx950"
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
 pytestmark = pytest.mark.gpu
 
-
-def _device_is_gfx950() -> bool:
-    # rocke's own query (hipDeviceGetAttribute, feature flags stripped), as in
-    # test_gdn_decode_gfx950_numeric.py, rather than a substring of torch's.
-    if not torch.cuda.is_available():
-        return False
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch() == ARCH
-    except Exception:
-        return False
-
-
 requires_gfx950 = pytest.mark.skipif(
-    not _device_is_gfx950(), reason=f"needs a {ARCH} device"
+    probe_device_arch()[0] != ARCH,
+    reason=arch_skip_reason(("gfx950",), f"needs a {ARCH} device"),
 )
 
 FLAGS = [(True, False), (False, True), (True, True)]
@@ -92,6 +82,10 @@ def _launch(spec, inp, batch):
     from builders.gfx950.gdn.gdn_decode import launcher_for, run_values
 
     return run_values(spec, inp, launcher_for(spec), batch)
+
+
+def _same_bits(got, want):
+    return np.array_equal(got.view(np.uint8), want.view(np.uint8))
 
 
 @requires_gfx950
@@ -171,10 +165,11 @@ def test_norm_with_gqa_heads(state_dtype):
 @requires_gfx950
 @pytest.mark.parametrize("gate", ["gdn", "kda"])
 def test_strided_rows(gate):
-    """mixed_qkv and out_gate as row slices of wider buffers: the kernel must
-    read each row from row * stride, and only the first conv_dim / Hv*Dv
-    channels of it."""
-    from builders.gfx950.gdn.gdn_decode import gate as score, make_inputs, reference
+    """mixed_qkv and out_gate as rows of wider buffers: the kernel must read
+    each row from row * stride, and only the first conv_dim / Hv*Dv channels
+    of it."""
+    from builders.gfx950.gdn.gdn_decode import gate as score
+    from builders.gfx950.gdn.gdn_decode import make_inputs, reference
 
     spec = _fused(gate_kind=gate, fuse_conv=True, fuse_out_norm=True)
     batch = 5
@@ -183,12 +178,11 @@ def test_strided_rows(gate):
         row = inp[name]
         # 24 extra elements keep each row on a 16 B boundary; fill them with
         # garbage that would show up in the output if read.
-        wide = torch.full(
-            (batch, row.shape[1] + 24), 1e4, dtype=row.dtype, device=row.device
-        )
+        garbage = storage.encode(1e4, "bf16")
+        wide = np.full((batch, row.shape[1] + 24), garbage, dtype=row.dtype)
         wide[:, : row.shape[1]] = row
-        inp[name] = wide[:, : row.shape[1]]
-        inp[stride_name] = wide.stride(0)
+        inp[name] = wide
+        inp[stride_name] = wide.shape[1]
     values = _launch(spec, inp, batch)
     verdict = score(spec, inp, values, reference(spec, inp))
     assert verdict.passed, verdict
@@ -205,9 +199,10 @@ def test_skip_sentinel_in_fused_mode(gate, num_warps):
     # writes) cannot express. Every comparison fails on NaN.
     from builders.gfx950.gdn.gdn_decode import (
         TOL,
+        input_dtypes,
         make_inputs,
         ref_conv_state_after,
-        ref_fp32,
+        ref_decode_step,
     )
 
     spec = _fused(
@@ -215,32 +210,36 @@ def test_skip_sentinel_in_fused_mode(gate, num_warps):
     )
     batch = 6
     inp = make_inputs(spec, batch)
-    ref_out, ref_state = ref_fp32(spec, inp)
+    ref_out, ref_state = ref_decode_step(spec, inp)
     ref_conv = ref_conv_state_after(spec, inp)
-    skipped = torch.tensor([1, 4], device=inp["read_indices"].device)
-    skipped_writes = inp["write_indices"][skipped].long()
+    skipped = np.array([1, 4])
+    skipped_writes = inp["write_indices"][skipped]
     inp["read_indices"][skipped] = -1
     inp["write_indices"][skipped] = -1
-    active = torch.ones(batch, dtype=torch.bool, device=skipped.device)
+    active = np.ones(batch, dtype=bool)
     active[skipped] = False
     values = _launch(spec, inp, batch)
+    dtypes = input_dtypes(spec)
 
-    out = values["out"].float()
-    assert torch.equal(out[skipped], torch.zeros_like(out[skipped]))
-    written = inp["write_indices"][active].long()
-    o_err = (out[active] - ref_out[active]).abs() / ref_out[active].abs().clamp(min=1)
-    assert o_err.max().item() < TOL
+    assert not values["out"][skipped].any()  # all-zero bits: +0.0 everywhere
+    out = storage.decode(values["out"], dtype_info(spec.dtype).name)
+    written = inp["write_indices"][active]
+    o_err = np.abs(out[active] - ref_out[active]) / np.maximum(
+        np.abs(ref_out[active]), 1.0
+    )
+    assert o_err.max() < TOL
     for name, ref in (("state", ref_state), ("conv_state", ref_conv)):
         got = values[name]
-        assert (got.float()[written] - ref[active]).abs().max().item() < TOL, name
-        assert torch.equal(got[skipped_writes], inp[name][skipped_writes]), name
+        err = np.abs(storage.decode(got, dtypes[name])[written] - ref[active]).max()
+        assert err < TOL, name
+        assert _same_bits(got[skipped_writes], inp[name][skipped_writes]), name
         # Every slot no active lane writes (the skipped lanes' slots and the
         # spare pages) is bit-identical to the pool before the launch; ``inp``
-        # still holds it, since the launch ran on clones.
-        untouched = torch.ones(got.shape[0], dtype=torch.bool, device=got.device)
+        # still holds it, since the launch ran on device copies.
+        untouched = np.ones(got.shape[0], dtype=bool)
         untouched[written] = False
         assert untouched.any(), name
-        assert torch.equal(got[untouched], inp[name][untouched]), name
+        assert _same_bits(got[untouched], inp[name][untouched]), name
 
 
 @requires_gfx950
@@ -253,7 +252,8 @@ def test_conv_in_place_slots(gate, num_warps, fuse_out_norm):
     explicit without the norm, the norm reduction's own with it). The 16-wave
     case is the one that goes red when the barrier is removed (module
     docstring)."""
-    from builders.gfx950.gdn.gdn_decode import gate as score, make_inputs, reference
+    from builders.gfx950.gdn.gdn_decode import gate as score
+    from builders.gfx950.gdn.gdn_decode import make_inputs, reference
 
     spec = _fused(
         gate_kind=gate,

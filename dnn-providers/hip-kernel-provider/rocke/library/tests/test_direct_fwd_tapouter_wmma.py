@@ -6,29 +6,21 @@ CPU: the spec validator, shape independence of the IR, the AOT grid and the
 cross-engine agreement of the validator, kernel name, grid and LDS size. GPU
 (gfx1250): edges on every side (windows shifted by the top / left padding,
 taps skipped wholly), ragged tiles, groups, a channel tail, both dtypes,
-several transfers per operand and a 3-deep ring, checked against torch's
-conv2d.
+several transfers per operand and a 3-deep ring, checked against a float64
+numpy reference of the stored operands (no torch).
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_direct_fwd_tapouter_wmma.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it (see
-    # test_direct_conv_correctness.py).
-    import torch
-
-    torch.cuda.is_available()
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_fwd_tapouter_wmma import (
     DirectFwdTapOuterSpec,
@@ -36,6 +28,8 @@ from kernels.common.conv_direct_fwd_tapouter_wmma import (
     tapouter_reason,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
+
+from ._direct_conv_numeric import direct_fwd_peak_error
 
 GPU_ARCH = get_device_arch(0)
 VARIANT = "direct_fwd_tapouter_wmma"
@@ -120,9 +114,7 @@ class TestTapOuterSpec(unittest.TestCase):
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs."""
-        import pytest
-
-        eng = pytest.importorskip("rocke_library_engine")
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
@@ -205,9 +197,7 @@ class TestTapOuterSpec(unittest.TestCase):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 
@@ -229,60 +219,20 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestTapOuterGpu(unittest.TestCase):
     def _check(self, pkw, knobs):
-        from kernels.common.conv_abi import conv_direct_args_signature
-        from kernels.common.conv_args import ConvArgs
         from rocke import compile_kernel
-        from rocke.runtime.hip_module import Runtime
-        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         p = _problem(**pkw)
         spec = DirectFwdTapOuterSpec(problem=p, **knobs)
         self.assertIsNone(tapouter_reason(spec, GPU_ARCH))
         kernel = build_direct_fwd_tapouter_wmma(spec, GPU_ARCH)
         art = compile_kernel(kernel, arch=GPU_ARCH)
-        td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        x = torch.empty(p.N, p.H, p.W, p.total_c).uniform_(-1, 1).to(td)
-        w = torch.empty(p.total_k, p.KH, p.KW, p.cpg).uniform_(-1, 1).to(td)
-        y = torch.zeros(p.N, p.Ho, p.Wo, p.total_k, dtype=td)
-        rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-        bufs = [rt.alloc(t.nbytes) for t in (x, w, y)]
-        try:
-            rt.memcpy_h2d(bufs[0], u8(x), x.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(w), w.nbytes)
-            rt.memset(bufs[2], 0x7F, y.nbytes)  # poison: every element is written
-            vals = ConvArgs.from_problem(p, direction="fwd").to_launch_values(
-                *(int(v) for v in bufs), x.nbytes, w.nbytes, y.nbytes
-            )
-            KernelLauncher(
-                hsaco=art.hsaco,
-                kernel_name=art.kernel_name,
-                signature=conv_direct_args_signature(p.dtype, direction="fwd"),
-            )(
-                vals,
-                config=LaunchConfig(
-                    grid=spec.grid(), block=(spec.threads_per_block, 1, 1), fence=True
-                ),
-            )
-            rt.memcpy_d2h(u8(y), bufs[2], y.nbytes)
-        finally:
-            for v in bufs:
-                rt.free(v)
-        ref = torch.nn.functional.conv2d(
-            x.float().permute(0, 3, 1, 2),
-            w.float().permute(0, 3, 1, 2),
-            padding=p.PAD,
-            dilation=(p.dil_h, p.dil_w),
-            groups=p.groups,
-        ).permute(0, 2, 3, 1)
-        err = float((y.float() - ref).abs().max() / ref.abs().max())
+        err = direct_fwd_peak_error(
+            art, p, grid=spec.grid(), block=(spec.threads_per_block, 1, 1)
+        )
         self.assertLess(err, 1e-2, f"{pkw} {knobs}: rel err {err:.3g}")
 
     def test_cases(self):

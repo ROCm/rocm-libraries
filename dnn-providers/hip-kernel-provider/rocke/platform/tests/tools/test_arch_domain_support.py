@@ -10,9 +10,13 @@ compiler sweep remains a separate CTest.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import json
+import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -21,6 +25,7 @@ from unittest import mock
 
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import _resolve_llvm_flavor
+from rocke.tests import ci_shard
 
 # CMake stages the standalone generator and its private imports beside installed
 # tests. Prefer that copy when present; never reach back into a source checkout.
@@ -185,20 +190,25 @@ class PackagedColumnTest(unittest.TestCase):
                     self.assertEqual(cell["status"], expect)
 
 
+def _toolchain(arch: str) -> dict:
+    """A valid llvm22 toolchain record that probed ``arch`` only."""
+    return {
+        "flavor": "llvm22",
+        "clang": "AMD clang version 22.0.0git (... roc-7.2.4 26084 abc)",
+        "arches": [arch],
+        "generator": G.GENERATOR,
+        "probe_cflags": ["-O0", "-nogpulib"],
+        "probe_timeout_s": 60,
+    }
+
+
 class SupportComparisonTest(unittest.TestCase):
     """Supported capabilities are a floor; observations retain their states."""
 
     ARCH = "gfx942"
 
     def _doc(self, status=G.STATUS_OK, **toolchain) -> str:
-        tc = {
-            "flavor": "llvm22",
-            "clang": "AMD clang version 22.0.0git (... roc-7.2.4 26084 abc)",
-            "arches": [self.ARCH],
-            "generator": G.GENERATOR,
-            "probe_cflags": ["-O0", "-nogpulib"],
-            "probe_timeout_s": 60,
-        }
+        tc = _toolchain(self.ARCH)
         tc.update(toolchain)
         return json.dumps(
             {
@@ -764,6 +774,7 @@ class SupportComparisonTest(unittest.TestCase):
             "invalid",
             "unknown_changed",
             "unavailable_changed",
+            "timed_out",
         }
         for before, row in G._CELL_TRANSITIONS.items():
             with self.subTest(before=before):
@@ -804,7 +815,6 @@ class SupportComparisonTest(unittest.TestCase):
             G.STATUS_NAME_ABSENT,
             G.STATUS_TARGET_UNSUPPORTED,
             G.STATUS_TOOLCHAIN_CRASH,
-            G.STATUS_TOOLCHAIN_TIMEOUT,
         ):
             with self.subTest(status=status):
                 self.assertEqual(G._cell_transition(G.STATUS_OK, status), "loss")
@@ -815,6 +825,24 @@ class SupportComparisonTest(unittest.TestCase):
                 self.assertIn(
                     f"a.b/{self.ARCH}: ok -> {status}", comparison.failures[0]
                 )
+
+    def test_a_working_cell_whose_probe_timed_out_is_unvalidated_not_lost(self):
+        """A probe that did not finish says the host was slow, not that the
+        toolchain lost support: the cell is reported as timed out, and no
+        failure is recorded."""
+        self.assertEqual(
+            G._cell_transition(G.STATUS_OK, G.STATUS_TOOLCHAIN_TIMEOUT), "timed_out"
+        )
+        comparison = G._compare_support(
+            self._doc(), self._doc(G.STATUS_TOOLCHAIN_TIMEOUT)
+        )
+        self.assertEqual(comparison.failures, [])
+        self.assertEqual(
+            comparison.timed_out,
+            [f"a.b/{self.ARCH}: ok -> {G.STATUS_TOOLCHAIN_TIMEOUT}"],
+        )
+        # Reported once, as timed out, not again as no-data.
+        self.assertEqual(comparison.changes["unvalidated"], [])
 
     def test_gains_and_measurement_improvements_pass(self):
         for before, after, category in (
@@ -1132,3 +1160,188 @@ class SupportComparisonGfx950Test(SupportComparisonTest):
     """Apply the same support floor and diagnostic contracts to gfx950."""
 
     ARCH = "gfx950"
+
+
+class ShardedCheckTest(unittest.TestCase):
+    """A CI shard checks the keys it owns; the shards together check them all."""
+
+    SHARDS = 4
+    ARCH = "gfx942"
+
+    def _column(self, statuses: dict[str, str]) -> dict:
+        def cell(status: str) -> dict:
+            if status == G.STATUS_OK:
+                return {"status": status, "verified_on": "llvm22"}
+            return {"status": status, "verified_on": "llvm22", "evidence": "diag"}
+
+        contract = G._probe_contract(
+            G.ProbeSpec("declare i32 @llvm.test(i32)", None, None)
+        )
+        return {
+            "schema": G.SCHEMA,
+            "toolchain": _toolchain(self.ARCH),
+            "keys": {key: {self.ARCH: cell(s)} for key, s in statuses.items()},
+            "canonical": {key: f"llvm.{key}" for key in statuses},
+            "probe_contracts": {
+                key: contract for key, s in statuses.items() if s == G.STATUS_OK
+            },
+            "processors": {self.ARCH: {"accepted": True}},
+        }
+
+    @staticmethod
+    def _findings(comparison) -> set[tuple[str, str]]:
+        """Each failure and change, with the coverage line split per key."""
+        found = set()
+        for line in comparison.failures:
+            match = re.fullmatch(
+                r"intrinsic coverage changed: missing (\[.*\]), new (\[.*\])", line
+            )
+            if match is None:
+                found.add(("failure", line))
+                continue
+            for side, listed in zip(("missing", "new"), match.groups()):
+                found |= {(side, key) for key in ast.literal_eval(listed)}
+        for kind, lines in comparison.changes.items():
+            found |= {(kind, line) for line in lines}
+        return found
+
+    @staticmethod
+    def _key_of(kind: str, text: str) -> str:
+        """The declaration key a finding is about: the listed key of a
+        coverage finding, else the ``key/arch`` cell after any ``kind --``."""
+        if kind in ("missing", "new"):
+            return text
+        return re.sub(r"^\w+ -- ", "", text).split("/", 1)[0]
+
+    def _shard(self, index: int):
+        return ci_shard.Shard(f"{index}/{self.SHARDS}")
+
+    def test_the_shards_together_report_what_the_whole_check_reports(self):
+        transitions = {
+            # key: (baseline status, current status); None is an absent key.
+            "kept.ok": (G.STATUS_OK, G.STATUS_OK),
+            "lost.one": (G.STATUS_OK, G.STATUS_ARCH_ABSENT),
+            "lost.two": (G.STATUS_OK, G.STATUS_TOOLCHAIN_CRASH),
+            "gained.one": (G.STATUS_ARCH_ABSENT, G.STATUS_OK),
+            "gained.two": (G.STATUS_NAME_ABSENT, G.STATUS_OK),
+            "degraded": (G.STATUS_ARCH_ABSENT, G.STATUS_TOOLCHAIN_TIMEOUT),
+            "improved": (G.STATUS_TARGET_UNSUPPORTED, G.STATUS_ARCH_ABSENT),
+            "unknown": (G.STATUS_TOOLCHAIN_CRASH, G.STATUS_TARGET_UNSUPPORTED),
+            "renamed.old": (G.STATUS_ARCH_ABSENT, None),
+            "renamed.new": (None, G.STATUS_ARCH_ABSENT),
+            "stable.a": (G.STATUS_NAME_ABSENT, G.STATUS_NAME_ABSENT),
+            "stable.b": (G.STATUS_ARCH_ABSENT, G.STATUS_ARCH_ABSENT),
+        }
+        baseline = self._column(
+            {k: before for k, (before, _) in transitions.items() if before}
+        )
+        current = self._column(
+            {k: after for k, (_, after) in transitions.items() if after}
+        )
+        # The keys must spread over more than one shard for this to prove more
+        # than the whole check.
+        owners = {ci_shard.shard_of(key, self.SHARDS) for key in transitions}
+        self.assertGreater(len(owners), 1)
+
+        whole = G._compare_support(
+            G._serialize_column(baseline), G._serialize_column(current)
+        )
+        self.assertTrue(whole.failures)
+        union = set()
+        for index in range(self.SHARDS):
+            owns = self._shard(index).owns
+            part = G._compare_support(
+                G._serialize_column(G._column_for_keys(baseline, owns)),
+                G._serialize_column(G._column_for_keys(current, owns)),
+            )
+            for kind, text in self._findings(part):
+                self.assertTrue(
+                    owns(self._key_of(kind, text)), f"shard {index} reported {text}"
+                )
+                union.add((kind, text))
+        self.assertEqual(union, self._findings(whole))
+
+    def test_every_committed_column_cuts_into_valid_disjoint_shards(self):
+        for path in sorted(G.DATA_DIR.glob("intrinsic_arch_domain.*.json")):
+            doc = json.loads(path.read_text())
+            with self.subTest(column=path.name):
+                seen = {
+                    name: set() for name in ("keys", "canonical", "probe_contracts")
+                }
+                for index in range(self.SHARDS):
+                    cut = G._column_for_keys(doc, self._shard(index).owns)
+                    self.assertEqual(G._validate_column(cut, path.name), [])
+                    for name, keys in seen.items():
+                        self.assertFalse(keys & set(cut[name]))
+                        keys |= set(cut[name])
+                    for name in ("toolchain", "processors", "schema"):
+                        self.assertEqual(cut[name], doc[name])
+                for name, keys in seen.items():
+                    self.assertEqual(keys, set(doc[name]))
+
+
+class ShardKeyListingTest(unittest.TestCase):
+    """Under ``LIST_KEYS_FLAG`` the generator writes the probes a sharded check
+    splits instead of probing them, keyed by declaration key."""
+
+    def test_the_listing_is_refused_without_the_shard_flag(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(G.__file__)),
+                "--check",
+                ci_shard.LIST_KEYS_FLAG,
+                "keys.json",
+            ],
+            capture_output=True,
+            text=True,
+            env=self._environment(),
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(
+            f"{ci_shard.LIST_KEYS_FLAG} needs {ci_shard.ACTIVATION_FLAG}",
+            result.stderr,
+        )
+
+    @staticmethod
+    def _environment() -> dict[str, str]:
+        """This process's environment without a CI shard, with the rocke
+        package on the generator's path."""
+        environment = ci_shard.unsharded_environment()
+        rocke_root = str(Path(ci_shard.__file__).resolve().parents[2])
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [rocke_root, environment.get("PYTHONPATH", "")]
+        )
+        return environment
+
+    def test_each_declaration_key_lists_one_probe_per_wired_arch(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            listing_path = Path(scratch) / "keys.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(G.__file__)),
+                    "--check",
+                    "--unvalidated-exit-code",
+                    "77",
+                    ci_shard.ACTIVATION_FLAG,
+                    ci_shard.LIST_KEYS_FLAG,
+                    str(listing_path),
+                ],
+                capture_output=True,
+                text=True,
+                env=self._environment(),
+                check=False,
+            )
+            if result.returncode == 77:
+                self.skipTest("no LLVM toolchain this generator can validate with")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            listing = ci_shard.ShardKeyListing.read(listing_path)
+        arches = sorted(wired_arches())
+        probes_of: dict[str, list[str]] = {}
+        for probe, key in listing.key_of_case.items():
+            probes_of.setdefault(key, []).append(probe)
+        self.assertTrue(probes_of)
+        for key, probes in probes_of.items():
+            self.assertEqual(sorted(probes), [f"{key}/{arch}" for arch in arches])

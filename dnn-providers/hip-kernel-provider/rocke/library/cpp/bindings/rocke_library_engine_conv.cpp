@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "conv_glue.hpp"
 #include "family_glue.hpp"
 
 extern "C" {
@@ -65,38 +66,12 @@ namespace
 
 using rocke_bind::dict_bool;
 using rocke_bind::dict_int;
+using rocke_bind::dict_spec_flag;
 using rocke_bind::dict_str;
 using rocke_bind::serialize_kernel;
 using rocke_bind::take_lowered;
 using rocke_bind::verify_kernel;
-
-/* ======================= conv: shared problem ======================= */
-
-/* Fill a rocke_conv_problem_t from a "problem" sub-dict (used by
- * conv_implicit_gemm and img2col, which share the same field set). */
-void fill_conv_problem(rocke_conv_problem_t* p, const py::dict& d)
-{
-    p->N = dict_int(d, "N", p->N);
-    p->Hi = dict_int(d, "Hi", p->Hi);
-    p->Wi = dict_int(d, "Wi", p->Wi);
-    p->C = dict_int(d, "C", p->C);
-    p->K = dict_int(d, "K", p->K);
-    p->Y = dict_int(d, "Y", p->Y);
-    p->X = dict_int(d, "X", p->X);
-    p->sH = dict_int(d, "sH", p->sH);
-    p->sW = dict_int(d, "sW", p->sW);
-    p->pH = dict_int(d, "pH", p->pH);
-    p->pW = dict_int(d, "pW", p->pW);
-    p->dH = dict_int(d, "dH", p->dH);
-    p->dW = dict_int(d, "dW", p->dW);
-    p->groups = dict_int(d, "groups", p->groups);
-    p->is_3d = dict_bool(d, "is_3d", p->is_3d);
-    p->Di = dict_int(d, "Di", p->Di);
-    p->Z = dict_int(d, "Z", p->Z);
-    p->sD = dict_int(d, "sD", p->sD);
-    p->pD = dict_int(d, "pD", p->pD);
-    p->dD = dict_int(d, "dD", p->dD);
-}
+using rocke_conv_bind::fill_conv_problem;
 
 /* ========================= conv_implicit_gemm ======================= */
 
@@ -108,7 +83,7 @@ void fill_conv_acc_epilogue(rocke_conv_acc_epilogue_t* e, const py::dict& d)
         e->bias = d["bias"].cast<double>();
     if(d.contains("scale") && !d["scale"].is_none())
         e->scale = d["scale"].cast<double>();
-    e->relu = dict_bool(d, "relu", e->relu);
+    e->relu = dict_spec_flag(d, "ConvAccumulatorEpilogue", "relu", e->relu);
     if(d.contains("clamp_min") && !d["clamp_min"].is_none())
     {
         e->has_clamp_min = true;

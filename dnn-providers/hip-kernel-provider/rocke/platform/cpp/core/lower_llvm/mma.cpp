@@ -25,6 +25,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
+#include "rocke/isa_backend.h" /* the float-WMMA spec tables */
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/matrix_calls_internal.h"
@@ -32,6 +33,7 @@
 #include "rocke/mfma_scale_internal.h"
 #include "rocke/mma_operand_internal.h"
 #include "rocke/tf32_internal.h"
+#include "rocke/wmma_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 namespace ckc
@@ -100,6 +102,16 @@ static void validate_mfma(rocke_lower_t* L,
                                                  scaled,
                                                  message,
                                                  sizeof(message));
+    if(error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+}
+
+/* Python validate_mfma for a fixed-signature MFMA `op_id`
+ * (rocke_fixed_mfma_operand_error), failing `L` with its text. */
+static void validate_fixed_mfma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
+{
+    char message[160];
+    const char* error = rocke_fixed_mfma_operand_error(op, op_id, message, sizeof(message));
     if(error)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
 }
@@ -506,10 +518,15 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mma: missing op_id attribute");
     }
 
+    char tf32_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof(tf32_error)))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
+    /* The catalog gate (Python ISABackend.emit_mma): an op_id the target's MMA
+     * catalog does not list is refused before any handler below emits. */
+    rocke_ll_require_catalog_op(L, op_id);
+
     if(const auto* atom = rocke_gfx950_scaled_mfma(op_id))
     {
-        if(!L->backend || strcmp(L->backend->gfx, "gfx950") != 0)
-            rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "scaled MFMA requires gfx950");
         if(const char* error = rocke_scaled_mfma_error(op_id, op->operands, op->num_operands))
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
         if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
@@ -530,9 +547,6 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
             rocke_ll_operand(L, op->operands[4]));
         return;
     }
-    char tf32_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof tf32_error))
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
 
     /* An emulated atom is expanded here, before ISA dispatch, so the expansion
      * is written once rather than per ISA family. Native atoms -- every atom
@@ -543,12 +557,11 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
 
-    /* The backend's first step (Python ISABackend.emit_mma): an op_id described
-     * as data is lowered from its matrix call; every other op_id keeps its
-     * hand-written handler below. */
+    /* An op_id described as data is lowered from its matrix call (Python
+     * ISABackend.emit_mma); every other op_id keeps its hand-written handler
+     * below. */
     if(const rocke_matrix_call_t* call = rocke_matrix_call_for(op_id))
     {
-        rocke_ll_require_catalog_op(L, op_id);
         rocke_ll_emit_matrix_call(L, op, op_id, call);
         return;
     }
@@ -662,17 +675,8 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     char concrete_name[160];
     snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
     op_name = concrete_name;
-    /* Admitted on any target whose MMA catalog lists the atom (Python
-     * ISABackend.emit_scaled_wmma), never by the target's name. */
-    rocke_ll_require_catalog_op(L, spec->op_id);
     if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_NOTIMPL,
-                      "%s requires llvm23 (ROCm 7.13+), got %s",
-                      op_name,
-                      rocke_llvm_flavor_name(L->flavor));
-    }
+        rocke_ll_refuse_llvm23_matrix_op(L, spec->op_id);
     if(op->num_operands != 5 || op->num_results != 1)
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands and 1 result", op_name);
@@ -776,121 +780,32 @@ static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* 
 /* bitcast to <W x i16> before the call (call_elt != ssa_elt).            */
 /* ====================================================================== */
 
-/* Local float-WMMA spec table, a faithful copy of the Python backend tables
- * (_RDNA_WMMA for RDNA3/3.5 + _RDNA_GFX12_WMMA for RDNA4). Held here rather than
- * via rocke/isa_backend.h to avoid the header's own `rocke_isa_backend` struct
- * colliding with the lowerer's same-named backend struct. The op_ids are
- * disjoint between the two families, so one flat table resolves both: gfx12
- * op_ids carry the "wmma_gfx12_" prefix (8-wide fragments), the rest are
- * RDNA3/3.5 (16-wide). */
-/* The call shape a float-WMMA intrinsic takes. RDNA3/3.5 and RDNA4 share the
- * plain 3-operand (A, B, C) form; gfx1250 does not, so the shape has to travel
- * with the spec rather than be inferred from the fragment width. */
-typedef enum _wmma_shape
+/* The float-WMMA spec of `op_id` (no "tile." prefix), from the ISA backend's
+ * tables (Python _RDNA_WMMA, _RDNA_GFX12_WMMA, _GFX1250_WMMA and
+ * _GFX1250_WMMA_FP8). The op_ids are disjoint between the families, so the
+ * first table that lists the op_id holds its spec. NULL when none does. */
+static const rocke_wmma_spec_t* _wmma_spec_for(const char* op_id)
 {
-    /* (<W x elt> A, <W x elt> B, <8 x float> C) -- gfx11 / gfx12 */
-    WMMA_SHAPE_AB_C = 0,
-    /* (i1 negA, <16 x elt> A, i1 negB, <16 x elt> B, i16 fmt, <8 x float> C,
-     * i1 reuseA, i1 reuseB) -- gfx1250 K=32 f16/bf16 */
-    WMMA_SHAPE_GFX1250,
-    /* (<8 x i32> A, <8 x i32> B, i16 fmt, <8 x float> C, i1, i1) -- gfx1250
-     * K=64 fp8/bf8, where a lane's fragment is 32 packed bytes */
-    WMMA_SHAPE_GFX1250_FP8
-} _wmma_shape_t;
+    char op_name[96];
+    const int length = snprintf(op_name, sizeof(op_name), "tile.%s", op_id);
+    if(length < 0 || (size_t)length >= sizeof(op_name))
+    {
+        return NULL;
+    }
+    const rocke_wmma_spec_t* spec = rocke_isa_wmma_lookup(op_name);
+    if(spec == NULL)
+    {
+        spec = rocke_isa_wmma_gfx12_lookup(op_name);
+    }
+    if(spec == NULL)
+    {
+        spec = rocke_isa_wmma_gfx1250_lookup(op_name);
+    }
+    return spec;
+}
 
-typedef struct _wmma_spec
-{
-    const char* op_id; /* the tile.mma op_id (no "tile." prefix)        */
-    const char* decl_key; /* _need() key                                   */
-    const char* intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
-    const char* ssa_elt; /* SSA operand element type                      */
-    const char* call_elt; /* call-site operand element type                */
-    int frag_width; /* A/B operand vector width (16 RDNA3/3.5, 8 RDNA4) */
-    _wmma_shape_t shape; /* which intrinsic signature to emit             */
-} _wmma_spec_t;
-
-static const _wmma_spec_t WMMA_SPECS[] = {
-    /* _RDNA_WMMA (RDNA3/3.5, frag_width 16) */
-    {"wmma_f32_16x16x16_f16",
-     "wmma.f32.16x16x16.f16",
-     "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16",
-     "half",
-     "half",
-     16,
-     WMMA_SHAPE_AB_C},
-    {"wmma_f32_16x16x16_bf16",
-     "wmma.f32.16x16x16.bf16",
-     "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16",
-     "bfloat",
-     "i16",
-     16,
-     WMMA_SHAPE_AB_C},
-    /* _RDNA_GFX12_WMMA (RDNA4, frag_width 8) */
-    {"wmma_gfx12_f32_16x16x16_f16",
-     "wmma.gfx12.f32.16x16x16.f16",
-     "llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v8f16",
-     "half",
-     "half",
-     8,
-     WMMA_SHAPE_AB_C},
-    {"wmma_gfx12_f32_16x16x16_bf16",
-     "wmma.gfx12.f32.16x16x16.bf16",
-     "llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16",
-     "bfloat",
-     "i16",
-     8,
-     WMMA_SHAPE_AB_C},
-    /* _GFX1250_WMMA (K=32, frag_width 16). Note bf16 keeps ssa_elt ==
-     * call_elt: the gfx1250 intrinsic takes <16 x bfloat> directly, so unlike
-     * gfx11/gfx12 there is NO i16 bitcast. */
-    {"wmma_gfx1250_f32_16x16x32_f16",
-     "wmma.gfx1250.f32.16x16x32.f16",
-     "llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16",
-     "half",
-     "half",
-     16,
-     WMMA_SHAPE_GFX1250},
-    {"wmma_gfx1250_f32_16x16x32_bf16",
-     "wmma.gfx1250.f32.16x16x32.bf16",
-     "llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16",
-     "bfloat",
-     "bfloat",
-     16,
-     WMMA_SHAPE_GFX1250},
-    /* _GFX1250_WMMA_FP8 (K=64). A/B are passed as <8 x i32> (mma_operand). */
-    {"wmma_gfx1250_f32_16x16x64_fp8_fp8",
-     "wmma.gfx1250.f32.16x16x64.fp8.fp8",
-     "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-    {"wmma_gfx1250_f32_16x16x64_fp8_bf8",
-     "wmma.gfx1250.f32.16x16x64.fp8.bf8",
-     "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-    {"wmma_gfx1250_f32_16x16x64_bf8_fp8",
-     "wmma.gfx1250.f32.16x16x64.bf8.fp8",
-     "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-    {"wmma_gfx1250_f32_16x16x64_bf8_bf8",
-     "wmma.gfx1250.f32.16x16x64.bf8.bf8",
-     "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32",
-     "i32",
-     "i32",
-     8,
-     WMMA_SHAPE_GFX1250_FP8},
-};
-static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
-
-/* Mirrors core/wmma.py::validate_unscaled_wmma. Validate actual SSA types;
- * re-resolving the catalog cannot check a caller's independent src2/dst values. */
+/* core/wmma.py::validate_unscaled_wmma (rocke_unscaled_wmma_operand_error),
+ * failing `L` with its text. */
 static void _validate_unscaled_wmma(rocke_lower_t* L,
                                     const rocke_op_t* op,
                                     const rocke_type_t* elem,
@@ -898,66 +813,34 @@ static void _validate_unscaled_wmma(rocke_lower_t* L,
                                     const rocke_type_t* source_elem,
                                     int source_count)
 {
-    if(op->num_operands != 3 || op->num_results != 1)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unscaled WMMA expects 3 operands and 1 result");
-    const rocke_type_t* types[] = {op->operands[2]->type, op->results[0]->type};
-    for(const auto* type : types)
-        if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != count
-           || !rocke_type_eq(type->elem, elem))
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "unscaled WMMA requires src2 and dst to be vec<%sx%d>",
-                          elem->name,
-                          count);
-    for(int role = 0; role < 2; ++role)
-    {
-        const auto* type = op->operands[role]->type;
-        if(rocke_type_eq(source_elem, rocke_i32()))
-        {
-            const char* op_id = rocke_attr_get_str(&op->attrs, "op_id");
-            if(!op_id)
-                op_id = op->name + 5;
-            rocke_mma_operand_needs_reinterpret(op_id,
-                                                role == 0 ? ROCKE_MMA_ROLE_SRC0
-                                                          : ROCKE_MMA_ROLE_SRC1,
-                                                type,
-                                                mma_register_vector(L, source_elem, source_count),
-                                                L->backend->gfx);
-        }
-        else if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != source_count
-                || !rocke_type_eq(type->elem, source_elem))
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "unscaled WMMA requires src%d to be vec<%sx%d>",
-                          role,
-                          source_elem->name,
-                          source_count);
-    }
+    char message[160];
+    const char* error
+        = rocke_unscaled_wmma_operand_error(op,
+                                            elem,
+                                            count,
+                                            mma_register_vector(L, source_elem, source_count),
+                                            L->backend->gfx,
+                                            message,
+                                            sizeof(message));
+    if(error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
 }
 
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
 {
-    const _wmma_spec_t* spec = NULL;
     const rocke_value_t *a, *b, *c;
     const char *a_arg, *b_arg;
-    int w, i;
+    int w;
 
     if(!rocke_ll_live(L))
     {
         return;
     }
 
-    for(i = 0; i < WMMA_SPECS_N; i++)
-    {
-        if(strcmp(WMMA_SPECS[i].op_id, op_id) == 0)
-        {
-            spec = &WMMA_SPECS[i];
-            break;
-        }
-    }
+    const rocke_wmma_spec_t* spec = _wmma_spec_for(op_id);
     if(spec == NULL)
     {
-        /* WMMA_SPECS above covers exactly the Python _RDNA_WMMA (gfx11),
+        /* The backend tables cover exactly the Python _RDNA_WMMA (gfx11),
          * _RDNA_GFX12_WMMA (gfx12) and _GFX1250_WMMA / _GFX1250_WMMA_FP8
          * op_ids -- the full set of hand-written WMMAs reachable on every
          * WMMA backend rocke_ll_backend_for resolves. */
@@ -979,7 +862,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     w = spec->frag_width;
 
     rocke_ll_need(L, spec->decl_key);
-    if(spec->shape == WMMA_SHAPE_GFX1250_FP8)
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250_FP8)
     {
         /* A and B are passed as the intrinsic's <8 x i32> (32 low-bit bytes per
          * lane); a <32 x i8> fragment is reinterpreted with one bitcast. */
@@ -1019,7 +902,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
         b_arg = b_cast;
     }
 
-    if(spec->shape == WMMA_SHAPE_GFX1250)
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250)
     {
         /* gfx1250 8-operand form: (i1 negA, A, i1 negB, B, i16 fmt, C,
          * i1 reuseA, i1 reuseB). The negate / format / reuse immediates are
@@ -1041,7 +924,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
                        rocke_ll_operand(L, c));
         return;
     }
-    if(spec->shape == WMMA_SHAPE_GFX1250_FP8)
+    if(spec->shape == ROCKE_WMMA_SHAPE_GFX1250_FP8)
     {
         /* gfx1250 K=64 6-operand form: (A, B, i16 fmt, C, i1, i1), format and
          * reuse immediates pinned to 0 (plain unscaled MMA). */
@@ -1085,7 +968,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
  * <4 x bfloat> -> <4 x i16>), then emits a single MFMA call. They differ only
  * by five literal strings (decl key, intrinsic, src0/src1 element-vector
  * spelling, src2 spelling, dst spelling) plus the optional bitcast target. This
- * mirrors the WMMA_SPECS / _emit_wmma idiom already used in this file. */
+ * mirrors the table-driven _emit_wmma idiom already used in this file. */
 typedef struct _mfma_spec
 {
     const char* op_id; /* the tile.mma op_id (no "tile." prefix)         */
@@ -1231,14 +1114,15 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
 
     if(!rocke_ll_live(L))
         return;
-    char source_type[48], accumulator_type[48], result_type[48];
-    rocke_mfma_ssa_type(spec->src01_ty, source_type, sizeof(source_type));
-    rocke_mfma_ssa_type(spec->src2_ty, accumulator_type, sizeof(accumulator_type));
-    rocke_mfma_ssa_type(spec->dst_ty, result_type, sizeof(result_type));
-    // XF32 SSA values retain their logical type before the fixed carrier cast.
     if(rocke_tf32_mma_count(spec->op_id))
-        snprintf(source_type, sizeof(source_type), "vec<tf32x2>");
-    validate_mfma(L, op, source_type, accumulator_type, result_type);
+    {
+        // XF32 SSA values retain their logical type before the fixed carrier cast.
+        char accumulator_type[32];
+        rocke_mfma_accumulator_type(spec->op_id, accumulator_type, sizeof(accumulator_type));
+        validate_mfma(L, op, "vec<tf32x2>", accumulator_type, accumulator_type);
+    }
+    else
+        validate_fixed_mfma(L, op, spec->op_id);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1327,10 +1211,6 @@ void rocke_ll_lower_mfma_fp8_bf8(
     {
         return;
     }
-    char accumulator_type[48];
-    snprintf(accumulator_type, sizeof(accumulator_type), "vec<f32x%d>", out_vec);
-    const char* source_type = strcmp(dtype, "fp8") == 0 ? "vec<fp8e4m3x8>" : "vec<bf8e5m2x8>";
-    validate_mfma(L, op, source_type, accumulator_type, accumulator_type);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1369,7 +1249,7 @@ static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op)
     const char *a_arg, *b_arg, *c_elem, *d_elem;
     if(!rocke_ll_live(L))
         return;
-    validate_mfma(L, op, "f64", "vec<f64x1>", "vec<f64x1>");
+    validate_fixed_mfma(L, op, "mfma_f64_4x4x4_f64");
     rocke_ll_need(L, "mfma.f64.4x4x4f64");
     a_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_SRC0, rocke_f64());
     b_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_SRC1, rocke_f64());
@@ -1394,21 +1274,33 @@ static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_16x16x32_fp8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "fp8", 4, "16x16x32.fp8.fp8");
 }
 
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_16x16x32_bf8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "bf8", 4, "16x16x32.bf8.bf8");
 }
 
 static void _op_tile_mfma_f32_32x32x16_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_32x32x16_fp8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "fp8", 16, "32x32x16.fp8.fp8");
 }
 
 static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_32x32x16_bf8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "bf8", 16, "32x32x16.bf8.bf8");
 }
 

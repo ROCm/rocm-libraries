@@ -6,7 +6,7 @@ forward (router → sort → gather → gate/up GEMM → SiLU → down GEMM →
 weighted reduce, as `5 + 3·E` launches on one HIP stream). It is the
 canonical performance harness for the CK DSL MoE work, and is distinct
 from the single-launch mega-kernel in
-[`examples/gfx950/fused_mega_moe/`](../../fused_mega_moe/) (same math,
+[`examples/gfx950/fused_mega_moe/`](../fused_mega_moe/) (same math,
 opposite kernel structure).
 
 > **New to fused MoE, or want the kernel strategy?**
@@ -25,9 +25,9 @@ opposite kernel structure).
 | [`ALGORITHM.md`](ALGORITHM.md) | the math, data layout, and per-stage steps of the chained pipeline |
 | [`fused_moe_e2e_perf.py`](fused_moe_e2e_perf.py) | four-way end-to-end perf + correctness harness: CK DSL vs torch eager vs Triton vs CK Tile C++ |
 | [`tune_gate_up_silu.py`](tune_gate_up_silu.py) | tile-shape × activation-barrier (`packed`/`dual`/`interleaved`) sweep for the fused gate/up/SiLU GEMM |
-| [`test_fused_moe_preshuffle.py`](test_fused_moe_preshuffle.py) | end-to-end parity + perf for the preshuffled-B and active-tile-skip knobs on `FusedMoeForward` (HIP-graph-replayed, 6 scenarios) |
-| [`test_preshuffle_b.py`](test_preshuffle_b.py) | standalone parity + perf for `trait.preshuffle_b=True` on a single `BatchedGemm` |
-| [`test_active_tile_skip.py`](test_active_tile_skip.py) | standalone parity + perf for `trait.active_tile_skip=True` on a single `BatchedGemm` (all-active = zero overhead, all-inactive ≈ 13× faster) |
+| [`fused_moe_preshuffle_check.py`](fused_moe_preshuffle_check.py) | end-to-end parity + perf for the preshuffled-B and active-tile-skip knobs on `FusedMoeForward` (HIP-graph-replayed, 6 scenarios) |
+| [`preshuffle_b_check.py`](preshuffle_b_check.py) | standalone parity + perf for `trait.preshuffle_b=True` on a single `BatchedGemm` |
+| [`active_tile_skip_check.py`](active_tile_skip_check.py) | standalone parity + perf for `trait.active_tile_skip=True` on a single `BatchedGemm` (all-active = zero overhead, all-inactive ≈ 13× faster) |
 | `__init__.py` | package marker |
 
 The two `tune_*` / `fused_moe_e2e_perf.py` scripts share input
@@ -64,7 +64,7 @@ latency (ms), correctness vs the torch reference (max abs / mean abs
    atomic-add into an `f32 Y` accumulator). This is **not** a tuned
    production Triton kernel — it's a fair-baseline reference. AITER's
    tuned `e2e_moe` Triton kernel currently crashes with a
-   memory-access fault on MI355X (gfx950); the script falls back to
+   memory-access fault on gfx950; the script falls back to
    this purpose-written kernel until that is fixed upstream.
 4. **CK Tile C++** — `build/bin/tile_example_fused_moe` invoked via
    `subprocess` with matching `-t / -e / -k / -h / -i / -prec_*`
@@ -210,7 +210,7 @@ per-expert loop driving small per-expert matmuls"** — measured in
 real conditions for both, with no fp16↔fp32 traffic that wouldn't
 happen in production.
 
-### Latest results (MI355X, gfx950, ROCm 7.2, torch 2.12)
+### Latest results (gfx950, ROCm 7.2, torch 2.12)
 
 `--attempts 10 --warmup 3 --dtype f16`. Speedup is `(other) / (CK DSL)`,
 so values > 1 mean CK DSL is faster.
@@ -609,7 +609,7 @@ tiles per CTA), so the in-tile B-load is a smaller fraction of the
 kernel time.
 
 Bitwise parity holds across every test (`rel=0.00e+00` on all
-six scenarios in `examples/gfx950/moe/test_fused_moe_preshuffle.py`).
+six scenarios in `examples/gfx950/moe/fused_moe_preshuffle_check.py`).
 
 The lever is now an env-toggleable knob in
 `examples/gfx950/moe/fused_moe_e2e_perf.py`:
@@ -655,7 +655,7 @@ GEMM kernels:
   (`_moe_batched_gemm_launcher`,
   `_moe_interleaved_gate_up_silu_launcher`).
 
-Standalone BatchedGemm validation (`examples/gfx950/moe/test_active_tile_skip.py`):
+Standalone BatchedGemm validation (`examples/gfx950/moe/active_tile_skip_check.py`):
 
 ```text
 B=8 M=32 N=4096 K=4096, tile=(32,128,64)
@@ -695,7 +695,7 @@ nearly half the gap on `decode_T1_E16` (where 7 of 8 inactive
 experts get skipped). On already-fully-active shapes (small,
 prefill_T128 with high topk*tokens density), ATS is within ±1 % of
 baseline — measured zero overhead. Bitwise parity (`rel=0.00e+00`)
-on every test scenario in `examples/gfx950/moe/test_fused_moe_preshuffle.py`.
+on every test scenario in `examples/gfx950/moe/fused_moe_preshuffle_check.py`.
 
 The lever is exposed via:
 
@@ -740,7 +740,7 @@ implementations that already solved the problem" applies directly.
 ### Caveats / known issues
 
 - **AITER `e2e_moe` Triton kernel crashes** with a memory-access
-  fault on MI355X / gfx950 regardless of torch / ROCm version (likely
+  fault on gfx950 regardless of torch / ROCm version (likely
   an AITER kernel-arch mismatch). The script's `run_triton` path uses
   a purpose-written single-kernel fallback instead. Re-enable AITER
   once the gfx950 issue is fixed upstream.
@@ -833,7 +833,7 @@ PYTHONPATH=python python \
   --attempts 10 --warmup 3
 ```
 
-### Latest results (MI355X, gfx950, ROCm 7.2, torch 2.12)
+### Latest results (gfx950, ROCm 7.2, torch 2.12)
 
 `--attempts 10 --warmup 3`. Latency in ms (mean over 10 graph-replay
 iterations); lower is better. The best per scenario is bolded.
@@ -938,24 +938,24 @@ cd <composablekernel-checkout>
 # End-to-end parity + perf for the preshuffle / active-tile-skip knobs
 # on FusedMoeForward (HIP-graph-replayed, 6 scenarios). Optional:
 # --warmup N (default 10), --iters N (default 50).
-python python/rocke/examples/gfx950/moe/test_fused_moe_preshuffle.py
+python python/rocke/examples/gfx950/moe/fused_moe_preshuffle_check.py
 
 # Standalone BatchedGemm parity + perf for trait.preshuffle_b=True.
 # Optional: --B --M --N --K --tile_m --tile_n --tile_k
 #           --pipeline --scheduler --epilogue --iters
-python python/rocke/examples/gfx950/moe/test_preshuffle_b.py
+python python/rocke/examples/gfx950/moe/preshuffle_b_check.py
 
 # Standalone BatchedGemm parity + perf for trait.active_tile_skip=True
 # (all-active vs all-inactive timing). Optional:
 # --B --M --N --K --tile_m --tile_n --tile_k
-python python/rocke/examples/gfx950/moe/test_active_tile_skip.py
+python python/rocke/examples/gfx950/moe/active_tile_skip_check.py
 ```
 
-`test_fused_moe_preshuffle.py` gates every variant at `rel ≤ 5e-2` vs
+`fused_moe_preshuffle_check.py` gates every variant at `rel ≤ 5e-2` vs
 the no-preshuffle baseline (the levers are bitwise-identical in
-practice — `rel = 0` is reported on every scenario). `test_preshuffle_b.py`
+practice — `rel = 0` is reported on every scenario). `preshuffle_b_check.py`
 gates the preshuffled kernel against a torch reference (K-scaled f16
 tolerance) **and** bitwise (`≤ 1e-3`) against the non-preshuffled
-kernel. `test_active_tile_skip.py` gates both the all-active and the
+kernel. `active_tile_skip_check.py` gates both the all-active and the
 half-skipped cases bitwise (`≤ 1e-3`), and checks that skipped output
 rows stay zero.

@@ -5,7 +5,9 @@
 CPU only: the committed census, performance classes and the
 class-representative generator, competitor arm rules, the paired verdict and
 cliff rules, planning, the results-directory guard, and the fp32 chunked
-reference (checked against an fp64 autograd reference on CPU tensors).
+reference (checked on CPU tensors against the float64
+``rocke.numeric.sdpa_reference.sdpa_reference_bwd``; those tests need torch,
+which the harness's reference runs on).
 """
 
 from __future__ import annotations
@@ -18,8 +20,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from rocke.numeric.sdpa_reference import sdpa_reference_bwd
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
 from benchmarks.common import attention_bwd_bench as bb
+from benchmarks.common import attention_bwd_rocke_arm as ra
 
 # Synthetic constants for the rule tests (the shipped values live in a private file).
 CONSTS = {
@@ -318,53 +323,38 @@ def test_cli_count_and_list_arms_print_no_measurements(capsys):
 
 # --------------------------------------------------------------------------- reference
 def _fp64_grads(problem, o_io=None):
-    """float64 gradients on exactly the given inputs: ``Dsum`` from ``o_io``
-    (the I/O-dtype O a backward consumes; the stored-inputs convention of the
-    test oracle), or from the fp64 O when ``o_io`` is None."""
-    torch = pytest.importorskip("torch")
+    """float64 gradients on exactly the given inputs, from
+    ``rocke.numeric.sdpa_reference.sdpa_reference_bwd`` with the cell's census
+    mask as a band (``attention_bwd_rocke_arm.band_fields``): ``Dsum`` from
+    ``o_io`` (the I/O-dtype O a backward consumes; the stored-inputs convention
+    of the test oracle), or from the fp64 O when ``o_io`` is None. Returned as
+    torch tensors, like the problem's."""
+    torch = import_or_skip_until("torch", TICKET)
     c = problem.cell
     q, k, v, do = (
-        t.detach().double() for t in (problem.q, problem.k, problem.v, problem.do)
+        t.detach().double().cpu().numpy()
+        for t in (problem.q, problem.k, problem.v, problem.do)
     )
-    gk, gv = c.hq // c.hkv, c.hq // c.h_v
-
-    def one(qq, kk, vv, dd, oo, mask):
-        # qq / dd / oo: [H, Lq, D]; kk: [Hk, Lk, D]; vv: [Hv, Lk, D]
-        ke, ve = kk.repeat_interleave(gk, 0), vv.repeat_interleave(gv, 0)
-        s = torch.matmul(qq, ke.transpose(-1, -2)) * problem.scale
-        if mask is not None:
-            s = s.masked_fill(~mask, float("-inf"))
-        p = torch.softmax(s, -1).nan_to_num(0.0)
-        o = torch.matmul(p, ve) if oo is None else oo
-        delta = (dd * o).sum(-1, keepdim=True)
-        ds = p * (torch.matmul(dd, ve.transpose(-1, -2)) - delta)
-        dq = torch.matmul(ds, ke) * problem.scale
-        dke = torch.matmul(ds.transpose(-1, -2), qq) * problem.scale
-        dve = torch.matmul(p.transpose(-1, -2), dd)
-        dk = dke.view(kk.shape[0], gk, *dke.shape[1:]).sum(1)
-        dv = dve.view(vv.shape[0], gv, *dve.shape[1:]).sum(1)
-        return dq, dk, dv
-
-    oi = None if o_io is None else o_io.detach().double()
+    o = None if o_io is None else o_io.detach().double().cpu().numpy()
+    band = ra.band_fields(c)
+    kw = {
+        "left_bound": band.get("left_bound"),
+        "right_bound": band.get("right_bound"),
+        "top_left": not band.get("bottom_right", False),
+        "causal": band.get("causal", False),
+        "causal_bottom_right": band.get("causal_bottom_right", False),
+    }
     if c.is_thd:
-        dq, dk, dv = torch.zeros_like(q), torch.zeros_like(k), torch.zeros_like(v)
-        oq = ok = 0
-        for lq, lk in zip(c.seqlens, c.kv_lengths):
-            sq, sk = slice(oq, oq + lq), slice(ok, ok + lk)
-            t = lambda x, sl: x[sl].transpose(0, 1)  # noqa: E731
-            m = bb.allowed_mask(c.mask, lq, lk, c.window, q.device)
-            g = one(t(q, sq), t(k, sk), t(v, sk), t(do, sq),
-                    None if oi is None else t(oi, sq), m)  # fmt: skip
-            dq[sq], dk[sk], dv[sk] = (x.transpose(0, 1) for x in g)
-            oq, ok = oq + lq, ok + lk
-        return dq, dk, dv
-    m = bb._dense_attn_mask(problem)
-    outs = [
-        one(q[b], k[b], v[b], do[b], None if oi is None else oi[b],
-            None if m is None else (m[b, 0] if m.dim() == 4 else m))
-        for b in range(c.b)
-    ]  # fmt: skip
-    return tuple(torch.stack([o[i] for o in outs]) for i in range(3))
+        kw.update(q_offsets=problem.cu_q.tolist(), kv_offsets=problem.cu_kv.tolist())
+    else:
+        kw.update(
+            seq_len_q=c.padded_q or (c.sq,) * c.b,
+            seq_len_kv=c.padded_kv or (c.skv,) * c.b,
+        )
+    grads = sdpa_reference_bwd(
+        q, k, v, o, do, scale=problem.scale, recompute_lse=True, **kw
+    )
+    return tuple(torch.from_numpy(g) for g in (grads.dq, grads.dk, grads.dv))
 
 
 REF_CELLS = [
@@ -393,7 +383,7 @@ REF_CELLS = [
 
 @pytest.mark.parametrize("cell", REF_CELLS, ids=lambda c: c.id)
 def test_chunked_reference_matches_fp64_autograd(cell):
-    pytest.importorskip("torch")
+    import_or_skip_until("torch", TICKET)
     problem = bb.make_problem(cell, seed=3, device="cpu")
     ref = bb.reference_backward(problem, q_block=7, head_block=3)
     want = _fp64_grads(problem, ref.o.to(problem.q.dtype))
@@ -438,7 +428,7 @@ def test_chunked_reference_matches_fp64_autograd(cell):
 
 
 def test_odd_stride_cells_are_not_eight_aligned():
-    pytest.importorskip("torch")
+    import_or_skip_until("torch", TICKET)
     p = bb.make_problem(REF_CELLS[-1], seed=1, device="cpu")
     assert p.q.stride(-1) == 1 and any(s % 8 for s in p.q.stride()[:-1])
 
@@ -455,7 +445,7 @@ def test_kv_growth():
 def test_reference_dsum_uses_the_io_dtype_output():
     """The reference follows the stored-inputs convention: with the exact O it
     would differ on rows that attend two keys (near-cancelling dQ)."""
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TICKET)
     cell = bb.Cell("tl", 32, 2, 2, 1, 24, 24, "causal_tl", "bf16", "bshd")
     problem = bb.make_problem(cell, seed=7, device="cpu")
     ref = bb.reference_backward(problem)
@@ -470,7 +460,7 @@ def test_reference_dsum_uses_the_io_dtype_output():
 
 @pytest.mark.parametrize("cell", REF_CELLS, ids=lambda c: c.id)
 def test_fp64_samples_match_the_fp64_oracle(cell):
-    torch = pytest.importorskip("torch")
+    torch = import_or_skip_until("torch", TICKET)
     problem = bb.make_problem(cell, seed=5, device="cpu")
     ref = bb.reference_backward(problem, q_block=5, head_block=2)
     o_io = ref.o.to(problem.q.dtype)
@@ -509,7 +499,7 @@ def test_fp64_sample_threshold_and_spread():
 
 
 def test_reference_cache_roundtrip_checks_the_inputs(tmp_path):
-    pytest.importorskip("torch")
+    import_or_skip_until("torch", TICKET)
     cell = REF_CELLS[0]
     problem = bb.make_problem(cell, seed=3, device="cpu")
     ref = bb.reference_backward(problem)

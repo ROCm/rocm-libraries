@@ -72,7 +72,7 @@ barriers, wrong epilogue indexing).
 
 See `python/rocke/helpers/README.md` for a top-to-bottom worked
 example that uses every helper in this module, and
-`python/rocke/TRANSFORM_DAG.md` for how the coord-transform algebra
+`dsl_docs/architecture/transform_dag.md` for how the coord-transform algebra
 in `rocke.helpers.transforms` composes with these helpers to build full
 convolution kernels in the CK Tile style.
 """
@@ -222,9 +222,8 @@ from .fusion_validation import (
 )
 from .geometry import WarpGrid
 from .grid import (
-    NUM_XCDS_MI300X,
-    NUM_XCDS_MI325X,
-    NUM_XCDS_MI350X,
+    NUM_XCDS_GFX942,
+    NUM_XCDS_GFX950,
     SuperTileSwizzleResult,
     chiplet_aware_super_tile,
     chiplet_aware_super_tile_dynamic,
@@ -316,20 +315,21 @@ from .sparse_iter import (
 )
 from .pipeline import SoftwarePipeline
 from .i4_dequant import (
-    dequant_i4_byte_to_bf8_pair,
     dequant_i4_byte_to_f16_pair,
-    dequant_i4_byte_to_fp8_pair,
     unpack_i4_byte_to_pair_f16,
     unpack_i4_byte_to_pair_f32,
     unpack_i4_byte_to_pair_i32,
     unpack_i4_byte_to_pair_i8,
 )
-from .mx_scale import (
+from .fp8_encoding import (
     BF8_E5M2_FNUZ,
     BF8_E5M2_OCP,
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
-    MxElementFormat,
+    Fp8ElementFormat,
+    fp8_element_format,
+)
+from .mx_scale import (
     add_mx_scaled_dot,
     apply_mx_scale,
     decode_mx_scale_e8m0,
@@ -344,12 +344,13 @@ from .preshuffle import (
 from .quant import (
     LogicalQDType,
     QDType,
-    QUANT_MAX_ABS,
     dequantize_scalar_to_f32,
     ir_to_qdtype,
     quant_ir_type,
     quant_max_abs,
+    quantize_prescaled_f32,
     quantize_scalar_f32,
+    validate_quant_out_dtype,
 )
 from .reduction import (
     ReduceCombine,
@@ -487,9 +488,8 @@ __all__ = [
     "make_autotune_key",
     "spec_replace",
     # Chiplet / grid swizzle (multi-XCD L2 locality)
-    "NUM_XCDS_MI300X",
-    "NUM_XCDS_MI325X",
-    "NUM_XCDS_MI350X",
+    "NUM_XCDS_GFX942",
+    "NUM_XCDS_GFX950",
     "SuperTileSwizzleResult",
     "chiplet_aware_super_tile",
     "chiplet_aware_super_tile_dynamic",
@@ -669,26 +669,27 @@ __all__ = [
     # Quantisation (f32 <-> {i8, fp8e4m3, bf8e5m2})
     "LogicalQDType",
     "QDType",
-    "QUANT_MAX_ABS",
     "dequantize_scalar_to_f32",
     "ir_to_qdtype",
     "quant_ir_type",
     "quant_max_abs",
+    "quantize_prescaled_f32",
     "quantize_scalar_f32",
+    "validate_quant_out_dtype",
     # i4 packed-weight dequant
-    "dequant_i4_byte_to_bf8_pair",
     "dequant_i4_byte_to_f16_pair",
-    "dequant_i4_byte_to_fp8_pair",
     "unpack_i4_byte_to_pair_f16",
     "unpack_i4_byte_to_pair_f32",
     "unpack_i4_byte_to_pair_i32",
     "unpack_i4_byte_to_pair_i8",
-    # MX (microscaling) shared-exponent helpers
+    # fp8 / bf8 element encodings and the one each target uses
     "BF8_E5M2_FNUZ",
     "BF8_E5M2_OCP",
     "FP8_E4M3_FNUZ",
     "FP8_E4M3_OCP",
-    "MxElementFormat",
+    "Fp8ElementFormat",
+    "fp8_element_format",
+    # MX (microscaling) shared-exponent helpers
     "add_mx_scaled_dot",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",

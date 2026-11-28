@@ -24,6 +24,7 @@ import dataclasses as dc
 import unittest
 from itertools import product
 
+import pytest
 from kernels.gfx950.gdn_decode import (
     GdnDecodeSpec,
     build_gdn_decode,
@@ -31,8 +32,9 @@ from kernels.gfx950.gdn_decode import (
     gdn_decode_signature,
     is_valid_spec,
 )
+from rocke.tests.compiler_tools import require_hsaco_tools
 
-from ._gdn_decode_compile import compiled_scratch_bytes
+from ._gdn_decode_compile import compile_each, compiled_scratch_bytes
 
 ARCH = "gfx950"
 
@@ -348,10 +350,13 @@ class TestEmission(unittest.TestCase):
         # 1188 B with ROCm 7.13 on gfx950). Require only that it compiles.
         _compiled_scratch_bytes(GdnDecodeSpec(simple=True))
 
+    @pytest.mark.rocke_shard_cost(13)
     def test_registered_tiles_compile(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
         from dispatch.gdn.gfx950 import spec_id_for
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         # Register-bound tiles: warp_threads_k=1 gives each lane the whole K
         # reduction, so these sit at the 512-VGPR limit and whether (and how
         # much) they spill depends on the compiler. Measured on gfx950, bf16
@@ -380,9 +385,13 @@ class TestEmission(unittest.TestCase):
             )
             registered = {result.candidate.spec_id for result in results}
             self.assertLessEqual(may_spill, registered, "stale may_spill entry")
-            for result in results:
+            outcomes = compile_each(
+                [build_gdn_decode(r.spec.kernel_spec, arch=ARCH) for r in results],
+                ARCH,
+            )
+            for result, outcome in zip(results, outcomes):
                 with self.subTest(spec_id=result.candidate.spec_id):
-                    scratch = _compiled_scratch_bytes(result.spec.kernel_spec)
+                    scratch = outcome.scratch_bytes()
                     if result.candidate.spec_id in may_spill:
                         self.assertLessEqual(scratch, spill_budget_bytes[gate_kind])
                     else:
@@ -391,6 +400,8 @@ class TestEmission(unittest.TestCase):
     def test_every_auto_configuration_compiles_without_spilling(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         # Every case's tile and knob stack, on each state width (f32 doubles
         # the state registers each lane loads), in every fused mode: the
         # one-flag modes run the row less the knobs they cannot read, and
@@ -402,6 +413,7 @@ class TestEmission(unittest.TestCase):
             (False, True, 16),
             (False, True, 32),
         )
+        dispatched = []  # (state dtype, the configuration auto runs)
         for gate_kind in ("gdn", "kda"):
             for (conv, norm, heads_v), state_dtype in product(
                 modes, ("bf16", "f16", "f32")
@@ -416,9 +428,14 @@ class TestEmission(unittest.TestCase):
                     fuse_conv=conv,
                     fuse_out_norm=norm,
                 )
-                spec = dispatch_gdn_decode(req).spec
-                with self.subTest(tuning_id=spec.tuning_id, state=state_dtype):
-                    self.assertEqual(_compiled_scratch_bytes(spec.kernel_spec), 0)
+                dispatched.append((state_dtype, dispatch_gdn_decode(req).spec))
+        outcomes = compile_each(
+            [build_gdn_decode(spec.kernel_spec, arch=ARCH) for _, spec in dispatched],
+            ARCH,
+        )
+        for (state_dtype, spec), outcome in zip(dispatched, outcomes):
+            with self.subTest(tuning_id=spec.tuning_id, state=state_dtype):
+                self.assertEqual(outcome.scratch_bytes(), 0)
 
     def test_auto_does_not_spill_off_the_measured_head_dims(self):
         # The sweep ran at DK = DV = 128. The fused f32 GDN row's
@@ -426,6 +443,8 @@ class TestEmission(unittest.TestCase):
         # longer fits and the kernel spills, so auto must not run it there.
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
+        # Every case analyzes a code object: without the tools, skip as a whole.
+        require_hsaco_tools()
         for dk, dv in ((256, 128), (256, 256), (128, 256)):
             req = GdnDecodeRequest(
                 batch=16,

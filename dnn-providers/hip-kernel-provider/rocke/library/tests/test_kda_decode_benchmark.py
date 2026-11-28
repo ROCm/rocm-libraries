@@ -8,19 +8,21 @@ from __future__ import annotations
 import sys
 import types
 
+import numpy as np
 import pytest
 
-from ._gdn_gate_support import BAD_VERDICTS, GOOD
 from benchmarks.gfx950.gdn import benchmark_kda_decode as bench
 
+from ._gdn_gate_support import BAD_VERDICTS, GOOD
 
-def test_main_reports_unavailable_device_backend(monkeypatch, capsys):
-    monkeypatch.setattr(bench, "_load_device_backend", lambda: False)
+
+def test_main_reports_an_unavailable_device(monkeypatch, capsys):
+    monkeypatch.setattr(bench, "get_device_count", lambda: 0)
 
     assert bench.main([]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == "requires ROCm torch and a visible HIP device\n"
+    assert captured.err == "requires a visible HIP device\n"
 
 
 @pytest.mark.parametrize("batches", ["", "1,,2", "a", "1,x", "0", "-3,1", "1,0"])
@@ -28,7 +30,7 @@ def test_malformed_or_non_positive_batches_are_a_usage_error(
     batches, capsys, monkeypatch
 ):
     """Refused before any device is looked at: exit 2 naming the flag."""
-    monkeypatch.setattr(bench, "_load_device_backend", lambda: False)
+    monkeypatch.setattr(bench, "get_device_count", lambda: 0)
     with pytest.raises(SystemExit) as err:
         bench.main(["--batches", batches])
     assert err.value.code == 2
@@ -93,28 +95,21 @@ def test_production_variants_derive_from_the_dispatched_tile():
 def test_default_run_fails_and_never_times_a_nan_state(monkeypatch):
     """A variant whose output is exact but whose written state holds a NaN
     fails the shared fp32 gate and is never timed."""
-    torch = pytest.importorskip("torch")
-    from builders.gfx950.gdn import gdn_decode as g
+    from rocke.numeric import storage
 
-    # Bind the lazily loaded launch helpers so they can be patched; the
-    # result (a device being visible) does not matter on this CPU path.
-    bench._load_device_backend()
-    real = g.make_inputs
+    from builders.gfx950.gdn import gdn_decode as g
 
     def nan_state(spec, inp, launcher, batch):
         ref = g.reference(spec, inp)
-        written = inp["write_indices"].long()
-        state = inp["state"].clone()
-        state[written] = ref[1].to(state.dtype)
-        state[written[0]].view(-1)[0] = float("nan")
-        return {"out": ref[0].to(torch.bfloat16), "state": state}
+        written = inp["write_indices"]
+        state = inp["state"].copy()
+        state[written] = storage.encode(ref[1], "bf16")
+        state[written[0]].reshape(-1)[0] = storage.encode(np.nan, "bf16")
+        return {"out": storage.encode(ref[0], "bf16"), "state": state}
 
     def timed(*args, **kw):
         raise AssertionError("a variant that failed the gate was timed")
 
-    monkeypatch.setattr(
-        bench, "make_inputs", lambda spec, batch: real(spec, batch, device="cpu")
-    )
     monkeypatch.setattr(bench, "launcher_for", lambda spec, arch=None: object())
     monkeypatch.setattr(g, "run_values", nan_state)
     monkeypatch.setattr(bench, "eager_us", timed)
@@ -131,14 +126,14 @@ def test_default_run_fails_and_never_times_a_nan_state(monkeypatch):
     assert all("fp32 gate failed (worst nan" in m for m in failures.messages)
 
 
-# The tests below are the torch-free twins of the NaN test above and of
+# The tests below are the stand-in twins of the NaN test above and of
 # ``test_gdn_decode_timing.py``'s benchmark test: the benchmarks gate through
-# the driver's ``Gate`` (``dispatch.gdn.gate_rules``, no torch), so a stand-in
-# for the launch that returns a bad ``Gate`` exercises the benchmark's own
-# decision with the real pass test where torch is missing, as in CI.
+# the driver's ``Gate`` (``dispatch.gdn.gate_rules``), so a stand-in for the
+# launch that returns a bad ``Gate`` exercises the benchmark's own decision
+# with the real pass test for every way a verdict can fail.
 def _kda_run(monkeypatch, verdict):
-    """``run_default`` with the launch helpers (loaded lazily, they need
-    torch) bound to stand-ins that return ``verdict``; the timed calls."""
+    """``run_default`` with the launch helpers bound to stand-ins that return
+    ``verdict``; the timed calls."""
     timed = []
 
     def eager(*args, **kwargs):
@@ -151,7 +146,7 @@ def _kda_run(monkeypatch, verdict):
         "gate_launch": lambda spec, inp, batch, launcher: verdict,
         "eager_us": eager,
     }.items():
-        monkeypatch.setattr(bench, name, stand_in, raising=False)
+        monkeypatch.setattr(bench, name, stand_in)
     monkeypatch.setattr(bench, "inputs_for_variant", lambda name, fused, raw: {})
     failures = bench.run_default(
         batches=(1,),
@@ -180,8 +175,9 @@ def test_the_kda_benchmark_never_times_a_launch_the_gate_fails(monkeypatch, verd
 
 
 def _gdn_benchmark_run(monkeypatch, capsys, verdict):
-    """``benchmark_gdn_decode.main`` against a stand-in driver (and torch)
-    whose ``check`` returns ``verdict``: ``(exit code, printed, timed calls)``."""
+    """``benchmark_gdn_decode.main`` against a stand-in driver (and a visible
+    device) whose ``check`` returns ``verdict``: ``(exit code, printed, timed
+    calls)``."""
     from benchmarks.gfx950.gdn import benchmark_gdn_decode
 
     timed = []
@@ -197,8 +193,7 @@ def _gdn_benchmark_run(monkeypatch, capsys, verdict):
     driver.eager_us = eager
     driver.device_us = lambda *args, **kwargs: None
     driver.timing_label = lambda rotate_mb: f"rotate {rotate_mb}"
-    cuda = types.SimpleNamespace(is_available=lambda: True)
-    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(cuda=cuda))
+    monkeypatch.setattr(benchmark_gdn_decode, "get_device_count", lambda: 1)
     monkeypatch.setitem(sys.modules, "builders.gfx950.gdn.gdn_decode", driver)
     code = benchmark_gdn_decode.main(["--batches", "1", "--no-device"])
     return code, capsys.readouterr().out, timed
@@ -284,9 +279,7 @@ def test_tile_sweep_runs_the_table_sweep_stage_one_and_fails_closed(
         return rows
 
     monkeypatch.setattr(bench.table_sweep, "stage1_shape", fake_stage1)
-    # The driver (and its ROTATE_MB) is loaded lazily and needs torch; the fake
-    # run needs only the cold target, so supply it without loading the driver.
-    monkeypatch.setattr(bench, "ROTATE_MB", 1024, raising=False)
+    monkeypatch.setattr(bench, "ROTATE_MB", 1024)
     failures = bench.run_sweep(
         batches=(1, 8),
         num_k_heads=32,

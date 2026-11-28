@@ -21,7 +21,7 @@ via the canonical two-pass row recipe::
  inv_yscale = 1 / yscale_m
 
  pass 2 (per row m):
- qy_n = quantize(x_n * smscale_n, inv_yscale) # rounded + saturated
+ qy_n = quantize(x_n * smscale_n, inv_yscale) # rounded, within quant_max
 
 The compute layer is f32 (matches CK Tile's ``ComputeDataType``); the
 ``out_dtype`` selects both the clamp range and the rounding op
@@ -58,6 +58,8 @@ Implementation notes:
 * ``eps`` (passed as an f32 kernel arg) guards the
  ``yscale = amax / quant_max`` division against pathological rows
  where ``amax == 0``. Matches the CK Tile reference's ``eps`` arg.
+ It does not guard an infinite input: see "Dynamic scales" in
+ :mod:`rocke.helpers.quant`.
 
 Pass-2 vector-store recipe:
 
@@ -66,8 +68,9 @@ Pass-2 vector-store recipe:
   / :func:`IRBuilder.cvt_pk_bf8_f32x4` — one packed ``v_cvt_pk_fp8_f32``
   per four f32 lanes, matching AITER's ``scaled_fp8_conversion_vec``
   in ``csrc/include/quant_common.cuh`` (``q8x4_t`` vec4 store path).
-  The hardware saturates on conversion so the explicit
-  :func:`clamp_f32` from :func:`quantize_scalar_f32` is skipped.
+  It applies no clamp: the conversion does not saturate, and the row
+  scale (``amax / quant_max_abs``) already keeps every value within the
+  bound of the target's encoding.
 * For ``out_dtype == "i8"`` (and for ``VEC == 2`` on every quant
   dtype), the per-element :func:`quantize_scalar_f32` call is kept
   (the IR has no packed ``v_cvt_pk_i8`` primitive today), but the
@@ -100,6 +103,7 @@ from ...helpers.quant import (
     quant_ir_type,
     quant_max_abs,
     quantize_scalar_f32,
+    validate_quant_out_dtype,
 )
 from ...helpers.reduction import block_lds_reduce
 from ...helpers.spec import (
@@ -231,22 +235,9 @@ def is_valid_spec(spec: SmoothQuantSpec, arch: str = "gfx950") -> Tuple[bool, st
     except KeyError as e:
         return False, str(e)
 
-    if spec.out_dtype not in ("i8", "fp8e4m3", "bf8e5m2"):
-        return False, f"unsupported out_dtype {spec.out_dtype!r}"
-
-    # fp8/bf8 output goes through ``v_cvt_pk_{fp8,bf8}_f32`` (the
-    # ``llvm.amdgcn.cvt.pk.{fp8,bf8}.f32`` intrinsic), which only exists
-    # on the CDNA (gfx9xx) ISA — RDNA3.5 (gfx1151) has no fp8/bf8 pack
-    # conversion op, so selection would abort with an uncatchable
-    # ``LLVM ERROR: Cannot select``. Reject it as a clean spec error so
-    # callers get a structured reason. The ``i8`` path uses
-    # ``v_cvt_f32_to_i8`` (available everywhere) and stays wave32-valid.
-    if spec.out_dtype in ("fp8e4m3", "bf8e5m2") and target.family != "cdna":
-        return False, (
-            f"out_dtype {spec.out_dtype!r} needs the CDNA-only "
-            f"v_cvt_pk_{{fp8,bf8}}_f32 conversion; {arch} (family "
-            f"{target.family!r}) has no fp8/bf8 pack op -- use out_dtype='i8'"
-        )
+    ok, why = validate_quant_out_dtype(spec.out_dtype, arch)
+    if not ok:
+        return False, why
     ok, why = validate_io(
         IOSpecRule(
             dtype=spec.dtype,
@@ -292,9 +283,9 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
     plus a single :func:`block_lds_reduce` amax fold — the reduction is
     an LDS tree over all ``block_size`` lanes (no cross-lane wave
     shuffle), so it is wave-size agnostic and correct on both wave64
-    (gfx950) and wave32 (gfx1151). ``arch`` is only used to validate the
-    per-WG LDS / thread budget against :class:`ArchTarget`; the default
-    ``"gfx950"`` keeps the wave64 build byte-identical.
+    (gfx950) and wave32 (gfx1151). ``arch`` validates the per-WG LDS /
+    thread budget against :class:`ArchTarget` and, for fp8 / bf8 output,
+    picks the bound of its encoding (:func:`quant_max_abs`).
     """
     ok, why = is_valid_spec(spec, arch)
     if not ok:
@@ -302,7 +293,7 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
 
     io_ty = io_ir_type(spec.dtype)
     q_ty = quant_ir_type(spec.out_dtype)
-    qmax = quant_max_abs(spec.out_dtype)
+    qmax = quant_max_abs(spec.out_dtype, arch=arch)
 
     BS, VEC, N = spec.block_size, spec.vec, spec.n_per_block
 
@@ -395,8 +386,8 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
 
     # ``yscale = max(amax, eps) / quant_max``. ``fmax`` against ``eps``
     # avoids div-by-zero on all-zero rows (which CK Tile guards the
-    # same way; without it the reciprocal is +inf and the cvt produces
-    # the wrong saturation direction).
+    # same way): without it the reciprocal is +inf and a zero times it is
+    # NaN. ``eps`` must keep ``yscale`` a normal f32 (eps >= about 1e-30).
     safe_amax = b.fmax(total_amax, eps)
     yscale = b.fmul(safe_amax, b.const_f32(1.0 / qmax))
     inv_yscale = b.rcp(yscale)
@@ -415,7 +406,7 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
     # same ``n_off = k*BS*VEC + tid*VEC (+i)`` column addressing), populate
     # a :class:`StaticDistributedTensor` of dtype ``q_ty`` with the
     # already-scaled f32 chunk values, and let :func:`store_tile` do the
-    # saturating cvt + ``vec_pack`` + one coalesced ``global_store_vN``
+    # cvt + ``vec_pack`` + one coalesced ``global_store_vN``
     # per access. This reproduces the same QY bytes as the previous
     # :func:`pack_quant_chunk_local_f32` + :func:`store_packed_chunk_local`
     # path while removing the hand-rolled ``byte_off`` arithmetic.
@@ -438,7 +429,7 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])
                 # Y slots hold the already-scaled f32 chunk; store_tile
-                # applies the dtype-specific saturating cvt + pack.
+                # applies the dtype-specific cvt + pack.
                 qy_dt.set([0, k, i], b.fmul(y_f32, inv_yscale))
         store_tile(b, qy_tile, qy_dt, ps=[[tid]])
     else:
@@ -450,7 +441,11 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])
                 q = quantize_scalar_f32(
-                    b, y_f32, inv_scale=inv_yscale, qdtype=spec.out_dtype
+                    b,
+                    y_f32,
+                    inv_scale=inv_yscale,
+                    qdtype=spec.out_dtype,
+                    arch=arch,
                 )
                 col = b.add(n_off, b.const_i32(i))
                 qy_tile.store_scalar(b, b.const_i32(0), col, value=q)

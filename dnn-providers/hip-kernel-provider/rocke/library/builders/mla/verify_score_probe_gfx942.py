@@ -77,6 +77,9 @@ import sys
 from typing import NamedTuple, Sequence
 
 import numpy as np
+from rocke.helpers import compile_kernel
+from rocke.numeric import storage
+from rocke.runtime.hip_module import Runtime, get_device_arch
 
 from builders.mla.ref_mla_attn import (
     DEFAULT_ROPE_LAYOUT,
@@ -96,8 +99,6 @@ from kernels.mla.mla_prefill_gfx942 import (
     mla_prefill_score_probe_grid,
     supports_mla_prefill,
 )
-from rocke.helpers import compile_kernel
-from rocke.runtime.hip_module import Runtime, get_device_arch
 
 # --------------------------------------------------------------------------
 # Scenario table
@@ -251,39 +252,6 @@ LSE_ATOL = 1.7e-2
 # --------------------------------------------------------------------------
 
 
-def _bf16_bits(a: np.ndarray) -> np.ndarray:
-    """fp32 -> the raw ``uint16`` bf16 payload, round-to-nearest-even.
-
-    Done by hand rather than via ``ml_dtypes``, which is not in the shared venv;
-    bf16 is just fp32 truncated to its top 16 bits, so the only real work is the
-    tie-break. Inputs here are finite by construction, so NaN payload
-    preservation is not a concern.
-    """
-    u = np.ascontiguousarray(a, dtype=np.float32).view(np.uint32)
-    return ((u + 0x7FFF + ((u >> 16) & 1)) >> 16).astype(np.uint16)
-
-
-def _bf16(a: np.ndarray) -> np.ndarray:
-    """Round-trip through bf16 and back to fp32.
-
-    Inputs are generated pre-rounded so that the kernel and the oracle read the
-    *same* numbers; the only precision gap left is the one the kernel introduces
-    internally, which is what the tolerance is actually budgeting for.
-    """
-    return (_bf16_bits(a).astype(np.uint32) << 16).view(np.float32)
-
-
-def _bf16_from_bits(bits: np.ndarray) -> np.ndarray:
-    """Raw ``uint16`` bf16 payload -> fp32. The decode half of :func:`_bf16`.
-
-    Used on the way *back* from the device, where ``out`` is stored as bf16 and
-    numpy has no native bf16 to read it as.
-    """
-    return (np.ascontiguousarray(bits, dtype=np.uint16).astype(np.uint32) << 16).view(
-        np.float32
-    )
-
-
 # bf16 quiet NaN. Seeded into the device ``out`` buffer before launch for the
 # same reason ``scores`` is seeded with fp32 NaN: a slot the kernel never writes
 # must fail loudly instead of reading back as a plausible zero -- and zero is
@@ -379,7 +347,9 @@ def make_problem(
     )
 
     def rand(*shape, std=1.0):
-        return _bf16(rng.standard_normal(shape).astype(np.float32) * std)
+        return storage.round_to(
+            rng.standard_normal(shape).astype(np.float32) * std, "bf16"
+        )
 
     # Unit-variance regime: activations ~ N(0, 1) and each projection weight
     # ~ N(0, 1/fan_in), so the projected Q, K_nope, K_rope and V are all
@@ -446,15 +416,16 @@ def bf16_model(p: Problem, q: np.ndarray) -> list:
     """
     out = []
     gathered = gather_paged_kv(p.c_kv, p.k_rope, p.block_table, p.cu_seqlens_k)
-    q_bf = _bf16(q)
+    q_bf = storage.round_to(q, "bf16")
     for i, (latent, rope) in enumerate(gathered):
         lo, hi = int(p.cu_seqlens_q[i]), int(p.cu_seqlens_q[i + 1])
         k_nope, _ = _expand_latent_kv(latent, p.w_uk, p.geom)
         k_full = np.concatenate(
             [
-                _bf16(k_nope),
+                storage.round_to(k_nope, "bf16"),
                 np.broadcast_to(
-                    _bf16(rope)[:, None, :], k_nope.shape[:2] + (rope.shape[-1],)
+                    storage.round_to(rope, "bf16")[:, None, :],
+                    k_nope.shape[:2] + (rope.shape[-1],),
                 ),
             ],
             axis=-1,
@@ -531,10 +502,10 @@ def _load(kernel, *, arch: str):
 def _shared_inputs(p: Problem, q: np.ndarray) -> tuple:
     """The seven read-only buffers both entry points take, in ABI order."""
     return (
-        ("q", _bf16_bits(q)),
-        ("c_kv", _bf16_bits(p.c_kv)),
-        ("k_rope", _bf16_bits(p.k_rope)),
-        ("w_uk", _bf16_bits(p.w_uk)),
+        ("q", storage.encode(q, "bf16")),
+        ("c_kv", storage.encode(p.c_kv, "bf16")),
+        ("k_rope", storage.encode(p.k_rope, "bf16")),
+        ("w_uk", storage.encode(p.w_uk, "bf16")),
         ("cu_q", p.cu_seqlens_q.astype(np.int32)),
         ("cu_k", p.cu_seqlens_k.astype(np.int32)),
         ("bt", p.block_table.astype(np.int32)),
@@ -687,27 +658,24 @@ def run_full_on_device(spec: MlaPrefillSpec, p: Problem, q: np.ndarray, *, arch:
     )
     rt.sync()
 
-    out = _bf16_from_bits(_download(rt, bufs["out"], host_out_bits))
+    out = storage.decode(_download(rt, bufs["out"], host_out_bits), "bf16")
     lse = _download(rt, bufs["lse"], host_lse)
     for dev in bufs.values():
         rt.free(dev)
     return out, lse
 
 
-def _torch_bmm_bf16(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """``a @ b`` per batch on the device via ``torch.bmm`` in bf16, back as fp32.
+def _bmm_bf16(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """``a @ b`` per batch as a bf16 batched GEMM computes it, back as fp32.
 
     The unfused path's two head projections are batched GEMMs outside the
-    kernel; running them through ``torch.bmm`` on the same device checks the
-    real composition rather than a host model of it.
+    kernel. This is a host model of one: bf16 operands, a wide accumulation
+    (float64 here, fp32 on a device), the result rounded to bf16. It can differ
+    from a device GEMM by one bf16 step where the accumulation order decides a
+    rounding.
     """
-    import torch
-
-    ta = torch.from_numpy(np.ascontiguousarray(a, dtype=np.float32))
-    tb = torch.from_numpy(np.ascontiguousarray(b, dtype=np.float32))
-    ta = ta.to(device="cuda", dtype=torch.bfloat16)
-    tb = tb.to(device="cuda", dtype=torch.bfloat16)
-    return torch.bmm(ta, tb).float().cpu().numpy()
+    operands = (storage.round_to(x, "bf16").astype(np.float64) for x in (a, b))
+    return storage.round_to(np.matmul(*operands), "bf16")
 
 
 def _run_unfused_on_device(
@@ -724,8 +692,8 @@ def _run_unfused_on_device(
     d_nope, r_kv = spec.d_nope, spec.r_kv
 
     # Qa_nope[h] = Q_nope[h] @ W_UK[h, :, :d_nope]ᵀ, bf16 out of an fp32 GEMM.
-    q_bf = _bf16(q)
-    qa_nope = _torch_bmm_bf16(
+    q_bf = storage.round_to(q, "bf16")
+    qa_nope = _bmm_bf16(
         q_bf[:, :, :d_nope].transpose(1, 0, 2),
         p.w_uk[:, :, :d_nope].transpose(0, 2, 1),
     ).transpose(1, 0, 2)
@@ -740,9 +708,9 @@ def _run_unfused_on_device(
         (
             ("out", host_lat_bits),
             ("lse", host_lse),
-            ("qa", _bf16_bits(qa)),
-            ("c_kv", _bf16_bits(p.c_kv)),
-            ("k_rope", _bf16_bits(p.k_rope)),
+            ("qa", storage.encode(qa, "bf16")),
+            ("c_kv", storage.encode(p.c_kv, "bf16")),
+            ("k_rope", storage.encode(p.k_rope, "bf16")),
             ("cu_q", p.cu_seqlens_q.astype(np.int32)),
             ("cu_k", p.cu_seqlens_k.astype(np.int32)),
             ("bt", p.block_table.astype(np.int32)),
@@ -766,16 +734,14 @@ def _run_unfused_on_device(
     )
     rt.launch(fn, _fwd_grid(spec, g), mla_prefill_block(spec), args)
     rt.sync()
-    latent = _bf16_from_bits(_download(rt, bufs["out"], host_lat_bits))
+    latent = storage.decode(_download(rt, bufs["out"], host_lat_bits), "bf16")
     lse = _download(rt, bufs["lse"], host_lse)
     for dev in bufs.values():
         rt.free(dev)
 
     # out[h] = latent[h] @ W_UV[h], W_UV = W_UK[h, :, d_nope:]. A NaN in the
     # latent (an unwritten slot) propagates to its whole output row.
-    out = _torch_bmm_bf16(latent.transpose(1, 0, 2), p.w_uk[:, :, d_nope:]).transpose(
-        1, 0, 2
-    )
+    out = _bmm_bf16(latent.transpose(1, 0, 2), p.w_uk[:, :, d_nope:]).transpose(1, 0, 2)
     return np.ascontiguousarray(out), lse
 
 
@@ -934,7 +900,7 @@ def verify_full(
             continue
 
         abs_o, rel_o, peak = _residual(live_out_got, live_out_ref)
-        _, rel_bf, _ = _residual(live_out_got, _bf16(live_out_ref))
+        _, rel_bf, _ = _residual(live_out_got, storage.round_to(live_out_ref, "bf16"))
         abs_l, rel_l, peak_l = _residual(l_got[alive], l_ref[alive])
         worst_out, worst_lse = max(worst_out, abs_o), max(worst_lse, abs_l)
         worst_rel = max(worst_rel, rel_o)
@@ -1195,16 +1161,13 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--absorbed-query",
         action="store_true",
-        help="--mode full only: verify the unfused path -- torch.bmm absorb, the "
-        "absorbed_query kernel, torch.bmm W_UV -- against the same oracle",
+        help="--mode full only: verify the unfused path -- bmm absorb, the "
+        "absorbed_query kernel, bmm W_UV (both bmm modelled on the host) -- "
+        "against the same oracle",
     )
     args = ap.parse_args(argv)
-    if args.absorbed_query and not args.dry_run:
-        if args.mode != "full":
-            ap.error("--absorbed-query needs --mode full")
-        # Bind torch (and its bundled comgr) before the first kernel compile,
-        # as the live benchmark does.
-        import torch  # noqa: F401
+    if args.absorbed_query and not args.dry_run and args.mode != "full":
+        ap.error("--absorbed-query needs --mode full")
 
     if args.list_scenarios:
         for name, sc in SCENARIOS.items():

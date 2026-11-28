@@ -47,17 +47,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
-
 from ..core.ir import F32, I32, IRBuilder, PtrType, Value, VectorType
+from .fp8_encoding import Fp8ElementFormat
 
 
 __all__ = [
-    "BF8_E5M2_FNUZ",
-    "BF8_E5M2_OCP",
-    "FP8_E4M3_FNUZ",
-    "FP8_E4M3_OCP",
-    "MxElementFormat",
     "add_mx_scaled_dot",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",
@@ -75,28 +69,8 @@ _E8M0_LARGEST_FINITE_CODE = 254
 _F32_SAFE_SUM_EXPONENT = 127
 
 
-@dataclass(frozen=True)
-class MxElementFormat:
-    """An element format's largest finite magnitude, which bounds the products
-    of an MX group (:func:`largest_safe_mx_scale_code`). ``name`` says which
-    encoding it is (for example ``"E4M3 FNUZ"``).
-    """
-
-    name: str
-    largest_value: float
-
-
-# The fp8 and bf8 encodings matrix cores read. OCP: E4M3 (bias 7, largest 448)
-# and E5M2 (bias 15, largest 57344). FNUZ: the same bit layouts with the bias
-# one higher and no infinities or negative zero (largest 240 and 57344).
-FP8_E4M3_OCP = MxElementFormat("OCP E4M3", 448.0)
-BF8_E5M2_OCP = MxElementFormat("OCP E5M2", 57344.0)
-FP8_E4M3_FNUZ = MxElementFormat("E4M3 FNUZ", 240.0)
-BF8_E5M2_FNUZ = MxElementFormat("E5M2 FNUZ", 57344.0)
-
-
 def largest_safe_mx_scale_code(
-    a_format: MxElementFormat, b_format: MxElementFormat, products: int
+    a_format: Fp8ElementFormat, b_format: Fp8ElementFormat, products: int
 ) -> int:
     """The largest E8M0 code an A and a B scale may both have so that a sum of
     ``products`` scaled A x B products stays a binade below the f32 overflow

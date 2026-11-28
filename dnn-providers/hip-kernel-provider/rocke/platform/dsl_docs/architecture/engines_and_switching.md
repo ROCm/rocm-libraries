@@ -38,7 +38,7 @@ flowchart LR
 
 **The seams (interconnect points):**
 1. **`ROCKE_BACKEND` / `resolve_backend()`** — picks which back end lowers a *Python-authored* kernel (`rocke/core/backend.py`).
-2. **The `rocke_engine` pybind module** — exposes the C++ engine to Python: the generic `lower_serialized_ir(ir_text, arch)`, the per-family `<fam>_lower_llvm` / `_serialize_ir` / `_verify`, and `build_id()` / `engine_version()`.
+2. **The shared engine `librocke` and the `rocke_engine` pybind module** — expose the C++ engine to Python. `rocke.core.native_engine` reaches `librocke`'s C ABI through ctypes for the generic serialized-IR lowering (`rocke_lower_serialized_ir_to_llvm`, `..._to_hip_text`); the pybind module adds the per-family `<fam>_lower_llvm` / `_serialize_ir` / `_verify` and `build_id()` / `engine_version()`.
 3. **The IR seam** — `serialize(KernelDef)` (Python) → `rocke_ir_parse` (C++): a Python-built kernel reaches the C++ lowerer as serialized `ck.dsl.ir/v1` text (the C++ engine can't take a Python object directly). This is the path the `cpp` backend uses for arbitrary kernels.
 4. **The byte-identity gate** — `tools/check_byte_identity.py` / `run_diff`; `both` mode asserts it at runtime. Keeps the two back ends equal (see [`engine_parity.md`](../development/engine_parity.md)).
 5. **The hipDNN provider** — the pure-C++ runtime that links the C++ engine (below).
@@ -49,8 +49,8 @@ flowchart LR
 flowchart TD
   call["compile_kernel(kernel) /<br/>lower_kernel_to_llvm(kernel)"] --> rb{"resolve_backend()<br/>arg &gt; ROCKE_BACKEND &gt; default (cpp)"}
   rb -->|python| py["native Python lowerer"]
-  rb -->|cpp| chk{"rocke_engine importable?"}
-  chk -->|yes| cpp["serialize → rocke_engine.lower_serialized_ir"]
+  rb -->|cpp| chk{"librocke found?"}
+  chk -->|yes| cpp["serialize → native_engine.lower_serialized_ir<br/>(librocke C ABI)"]
   chk -->|no| fb["fallback → Python lowerer<br/>(recorded; ROCKE_CPP_STRICT=1 to forbid)"]
   rb -->|both| dual["run python + cpp,<br/>assert byte-identical (raises on drift)"]
 ```
@@ -58,7 +58,7 @@ flowchart TD
 How to choose, in precedence order:
 - **Per call:** `compile_kernel(kernel, backend="python"|"cpp"|"both")` (also `lower_kernel_to_llvm(..., backend=)`).
 - **Per process:** `export ROCKE_BACKEND=cpp|python|both`.
-- **Default:** `cpp` (the C++ engine), which **auto-falls back to the Python lowerer** if `rocke_engine` isn't built — set `ROCKE_CPP_STRICT=1` to turn that fallback into an error.
+- **Default:** `cpp` (the C++ engine), which **auto-falls back to the Python lowerer** if no shared `librocke` is found (`ROCKE_ONLINE_LIB`, or one installed beside the `rocke` package) — set `ROCKE_CPP_STRICT=1` to turn that fallback into an error.
 - `both` runs both and raises on any divergence — the in-process differential check.
 - `python` selects the native lowerer (and is the differential oracle).
 

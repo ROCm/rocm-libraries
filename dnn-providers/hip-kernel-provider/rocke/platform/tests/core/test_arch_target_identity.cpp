@@ -85,8 +85,9 @@ static void check_parse(const char* value, const char* expected)
         snprintf(want,
                  sizeof(want),
                  "'%s' is not a target ID: expected an optional amdgcn-amd-amdhsa-- or "
-                 "amdgcn-amd-amdhsa-unknown- prefix, a processor such as gfx942 or "
-                 "gfx11-generic, then any :feature+ or :feature- suffixes",
+                 "amdgcn-amd-amdhsa-unknown- prefix (or the same with amdgpu and a "
+                 "version, such as amdgpu9.42, in place of amdgcn), a processor such as "
+                 "gfx942 or gfx11-generic, then any :feature+ or :feature- suffixes",
                  value);
         ok = result == NULL && out[0] == '#' && strcmp(err, want) == 0;
     }
@@ -325,6 +326,13 @@ int main(int argc, char** argv)
     check_parse("gfx950", "gfx950");
     check_parse("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-", "gfx942:sramecc+:xnack-");
     check_parse("amdgcn-amd-amdhsa-unknown-gfx9-4-generic:xnack+", "gfx9-4-generic:xnack+");
+    // Newer compilers write the architecture field as amdgpu plus a version.
+    check_parse("amdgpu9.42-amd-amdhsa-unknown-gfx942", "gfx942");
+    check_parse("amdgpu9.0a-amd-amdhsa--gfx90a:xnack-", "gfx90a:xnack-");
+    check_parse("amdgpu11-amd-amdhsa-unknown-gfx11-generic", "gfx11-generic");
+    check_parse("amdgpu-amd-amdhsa-unknown-gfx950", NULL);
+    check_parse("amdgpu9.-amd-amdhsa-unknown-gfx950", NULL);
+    check_parse("amdgpu9.50-amd-amdhsa-linux-gfx950", NULL);
     check_parse("", NULL);
     check_parse("notgfx950", NULL);
     check_parse("amdgcn-amd-amdhsa-unknown-:gfx950", NULL);

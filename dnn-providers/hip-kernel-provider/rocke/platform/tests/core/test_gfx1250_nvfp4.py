@@ -33,6 +33,7 @@ from rocke.instances.gfx1250.nvfp4_gemm import (
     nvfp4_gemm_grid,
     nvfp4_gemm_signature,
 )
+from rocke.tests.bool_flags import bool_flag_reason, bool_flag_refusal
 
 
 @pytest.mark.parametrize(
@@ -165,24 +166,27 @@ def test_block_spec_rejects_non_boolean_flags(field, value, entrypoint, monkeypa
     from rocke.instances.gfx1250 import block_scaled_gemm
 
     spec = NvFp4GemmSpec("invalid_flag", 16, 16, 128).block_spec()
-    diagnostic = f"{field} must be a bool"
     if entrypoint == "constructor":
-        with pytest.raises(TypeError, match=diagnostic):
+        with pytest.raises(ValueError) as refusal:
             replace(spec, **{field: value})
+        assert str(refusal.value) == bool_flag_refusal(
+            field, value, what="BlockScaledGemmSpec"
+        )
         return
 
+    diagnostic = bool_flag_reason(field, value)
     # Exercise the last admission gate even if construction was bypassed.
     object.__setattr__(spec, field, value)
     if entrypoint == "validator":
         ok, reason = is_valid_block_spec(spec)
-        assert not ok and diagnostic in reason
+        assert not ok and reason == diagnostic
     else:
 
         def unexpected(*args, **kwargs):
             pytest.fail("invalid flag reached IR construction")
 
         monkeypatch.setattr(block_scaled_gemm, "IRBuilder", unexpected)
-        with pytest.raises(ValueError, match=diagnostic):
+        with pytest.raises(ValueError, match=re.escape(diagnostic)):
             build_block_scaled_gemm(spec)
 
 

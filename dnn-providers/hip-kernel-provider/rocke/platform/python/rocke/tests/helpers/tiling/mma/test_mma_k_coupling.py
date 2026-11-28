@@ -51,6 +51,7 @@ from rocke.helpers.tiling.visualization import layout_render as lr
 from rocke.tests.engines import ENGINES, lower_with_engine
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_kernel_target_accepts
+from rocke.tests.lanes import arch_skip_reason
 from rocke.tests.llvm_ir import intrinsic_calls
 
 _CATALOG = load_mma_traits()
@@ -336,7 +337,11 @@ def test_driven_fp8_by_fp4_tile_computes_the_product() -> None:
     _run_k_coupled_tile(_fp8_fp4_mma(), a_fp8=True, target="gfx950")
 
 
-@pytest.mark.skip(reason="has not run on gfx1250 hardware yet; enable once it has")
+@pytest.mark.skip(
+    reason=arch_skip_reason(
+        ("gfx1250",), "has not run on gfx1250 hardware yet; enable once it has"
+    )
+)
 @pytest.mark.usefixtures("any_gpu")
 def test_driven_tile_with_two_m_blocks_per_lane_computes_the_product() -> None:
     # Both of a lane's M blocks of A must meet the same B registers, on every one of the eight atoms.

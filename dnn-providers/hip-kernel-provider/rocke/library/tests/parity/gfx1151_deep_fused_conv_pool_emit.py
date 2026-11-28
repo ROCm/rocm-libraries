@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/gfx1151_deep_fused_conv_pool_emit.py -- Python reference emitter
-# for the gfx1151 (RDNA3.5 / Strix Halo, wave32, WMMA 16x16x16) deep fused
+# for the gfx1151 (RDNA3.5, wave32, WMMA 16x16x16) deep fused
 # conv0 -> conv1 -> maxpool kernel. Selects one of N sampled spec configs by
 # argv[1], builds the Gfx1151DeepFusedConvPoolSpec via the gfx1151 shim's
 # make_deep_fused_conv_pool_spec, builds the kernel via

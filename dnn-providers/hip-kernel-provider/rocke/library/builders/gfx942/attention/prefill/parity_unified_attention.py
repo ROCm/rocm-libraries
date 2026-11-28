@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx942 (CDNA3 / MI300X) unified-attention 2D tiled SDPA-fwd parity + latency.
+"""gfx942 (CDNA3) unified-attention 2D tiled SDPA-fwd parity + latency.
 
 Torch-reference-only correctness + latency harness for the gfx942 narrow /
 wide (flash-regime) tiled attention kernel
@@ -774,7 +774,7 @@ def _build_kernel(s: Shape):
     """
     from rocke import compile_kernel
     from kernels import build_unified_attention_2d_tiled, supports_tiled_2d
-    from kernels.common.attention_unified import _tiled_2d_signature
+    from kernels.common.attention_unified import tiled_2d_signature
     from rocke.runtime import KernelLauncher
 
     spec, config = _build_spec(s)
@@ -810,7 +810,7 @@ def _build_kernel(s: Shape):
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,
-        signature=_tiled_2d_signature("gfx942", s.dtype),
+        signature=tiled_2d_signature("gfx942", s.dtype),
         cache_key=("gfx942_attn_example", spec.kernel_name(), config),
     )
     return launcher, spec, config

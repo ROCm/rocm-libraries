@@ -24,10 +24,12 @@ import os
 import unittest
 from unittest.mock import patch
 
+from rocke.core.native_engine import BINARY_ABI, check_binary_abi
 from rocke.portable_ir.examples import recipe_toy
 from rocke.portable_ir.src import abi
 from rocke.portable_ir.src.recipe_bundle import cbor_encode
 from rocke.portable_ir.utils.recipe_expand import ExpandError, expand_recipe
+from rocke.tests.lanes import skip_until_shared_engine
 
 ARCHS = ("gfx942", "gfx950")
 
@@ -85,12 +87,10 @@ class TestBinaryAbiRefusal(unittest.TestCase):
     """
 
     def _adopt(self, reports):
-        from rocke.portable_ir.src import online
-
-        online._check_abi(_StubLibrary(reports), "/stub/librocke.so")
+        check_binary_abi(_StubLibrary(reports), "/stub/librocke.so")
 
     def test_a_library_built_for_this_abi_is_accepted(self):
-        self._adopt(abi.BINARY_ABI)
+        self._adopt(BINARY_ABI)
 
     def test_a_newer_library_is_refused(self):
         """Old bindings meeting a new library: the case a struct growing makes real.
@@ -100,27 +100,39 @@ class TestBinaryAbiRefusal(unittest.TestCase):
         next element -- which still passes every check the client makes unless
         this one refuses first."""
         with self.assertRaises(RuntimeError) as cm:
-            self._adopt(abi.BINARY_ABI + 1)
-        self.assertIn(f"binary ABI v{abi.BINARY_ABI + 1}", str(cm.exception))
+            self._adopt(BINARY_ABI + 1)
+        self.assertIn(f"binary ABI v{BINARY_ABI + 1}", str(cm.exception))
 
     def test_an_older_library_is_refused(self):
         with self.assertRaises(RuntimeError) as cm:
-            self._adopt(abi.BINARY_ABI - 1)
-        self.assertIn(f"binary ABI v{abi.BINARY_ABI - 1}", str(cm.exception))
+            self._adopt(BINARY_ABI - 1)
+        self.assertIn(f"binary ABI v{BINARY_ABI - 1}", str(cm.exception))
 
     def test_previous_native_layout_is_refused_before_binding(self):
-        """ABI11 tags cover incompatible layouts, not the combined native ABI."""
-        from rocke.portable_ir.src import online
+        """Every earlier native layout from ABI 8 on is refused by the one
+        loader before any binding is attached, and is not kept."""
+        from rocke.core import native_engine
 
-        for reports in (8, 9, 10, 11):
-            with (
-                self.subTest(reports=reports),
-                patch.object(online, "_check_source_freshness"),
-                patch.object(online, "_bind") as bind,
-            ):
-                with self.assertRaisesRegex(RuntimeError, f"binary ABI v{reports}"):
-                    online._adopt(_StubLibrary(reports), "/stub/librocke.so")
-                bind.assert_not_called()
+        loaded = (native_engine._engine, native_engine._engine_path)
+        native_engine._engine, native_engine._engine_path = None, None
+        try:
+            for reports in range(8, BINARY_ABI):
+                with (
+                    self.subTest(reports=reports),
+                    patch.object(
+                        native_engine.ctypes,
+                        "CDLL",
+                        return_value=_StubLibrary(reports),
+                    ),
+                    patch.object(native_engine, "check_build_id"),
+                    patch.object(native_engine, "_bind") as bind,
+                ):
+                    with self.assertRaisesRegex(RuntimeError, f"binary ABI v{reports}"):
+                        native_engine.load_shared_engine("/stub/librocke.so")
+                    bind.assert_not_called()
+                    self.assertIsNone(native_engine.loaded_shared_engine_path())
+        finally:
+            native_engine._engine, native_engine._engine_path = loaded
 
     def test_pre_indexed_mma_library_is_refused(self):
         """ABI 5 lacks the indexed MMA layout even with buffer-capable views."""
@@ -309,7 +321,6 @@ def _online_lib():
     return online.resolve_library_path(build=False)
 
 
-@unittest.skipIf(_online_lib() is None, "no shared librocke; run online.build_lib()")
 class TestCEngineAgrees(unittest.TestCase):
     """The C engine has to make the same admission decisions as the Python one.
 
@@ -318,18 +329,21 @@ class TestCEngineAgrees(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        os.environ["ROCKE_ONLINE_LIB"] = _online_lib()
+        library = _online_lib()
+        if library is None:
+            skip_until_shared_engine("no shared librocke; run online.build_lib()")
+        os.environ["ROCKE_ONLINE_LIB"] = library
         from rocke.portable_ir.src import online
 
         cls.online = online
         cls.lib = online.load()
 
     def test_levels_match_the_python_mirror(self):
-        """src/abi.py hard-codes both numbers; cpp/include/rocke/abi.h defines
-        them. Nothing but this test stops the two from drifting apart, and a
-        Python generator that thought it was newer than the engine would stamp
-        artifacts the engine then refuses."""
-        self.assertEqual(self.lib.rocke_abi_version(), abi.BINARY_ABI)
+        """src/abi.py and rocke.core.native_engine hard-code the two numbers;
+        cpp/include/rocke/abi.h defines them. Nothing but this test stops the
+        two from drifting apart, and a Python generator that thought it was
+        newer than the engine would stamp artifacts the engine then refuses."""
+        self.assertEqual(self.lib.rocke_abi_version(), BINARY_ABI)
         self.assertEqual(self.lib.rocke_recipe_abi_level(), abi.RECIPE_ABI)
 
     def test_non_int_returns_have_an_explicit_restype(self):

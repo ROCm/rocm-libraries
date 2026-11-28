@@ -29,6 +29,7 @@ from numbers import Integral
 from typing import Tuple
 
 from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
+from rocke.helpers.spec import bool_flag_reason
 
 from .common import normalize_dtype
 
@@ -214,9 +215,8 @@ def prefill_request_errors(req: OperatorRequest) -> list:
         if isinstance(value, bool) or not isinstance(value, Integral):
             errors.append(f"{name} must be an int, got {type(value).__name__}")
     for name in ("has_initial_state", "store_final_state"):
-        value = getattr(req, name)
-        if type(value) is not bool:
-            errors.append(f"{name} must be a bool, got {value!r}")
+        if (reason := bool_flag_reason(name, getattr(req, name))) is not None:
+            errors.append(reason)
     if req.chunk_size is not None and (
         isinstance(req.chunk_size, bool) or not isinstance(req.chunk_size, Integral)
     ):

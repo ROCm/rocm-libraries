@@ -44,6 +44,7 @@ __all__ = [
     "conv_desc_names",
     "conv_direct_arg_names",
     "conv_direct_args_signature",
+    "conv_direct_output_dtype",
     "conv_direct_transform_signature",
     "conv_fwd_problem_block",
     "conv_manifest_args_signature",
@@ -513,18 +514,27 @@ def conv_args_signature(
     )
 
 
+def conv_direct_output_dtype(dtype: str, direction: str = "fwd") -> str:
+    """Element type of a direct kernel's output ``D`` for activation / filter
+    element type ``dtype``: the wgrad kernel accumulates dW through fp32
+    atomics, so its ``D`` is always ``fp32``; every other direction writes
+    ``dtype``."""
+    return "fp32" if direction == "wgrad" else dtype
+
+
 def conv_direct_args_signature(
     dtype: str = "fp16", *, direction: str = "fwd"
 ) -> List[Dict[str, Any]]:
     """Direct grouped-conv AOT launch signature.
 
-    ``dtype`` is the activation/filter element type (``fp16`` or ``bf16``).
-    The wgrad kernel accumulates dW through fp32 atomics, so its ``D`` is
-    always ``fp32``.
+    ``dtype`` is the activation/filter element type (``fp16`` or ``bf16``);
+    ``D`` carries :func:`conv_direct_output_dtype`.
     """
-    dtype_d = "fp32" if direction == "wgrad" else dtype
     return _conv_signature(
-        conv_direct_arg_names(direction=direction), dtype, dtype, dtype_d
+        conv_direct_arg_names(direction=direction),
+        dtype,
+        dtype,
+        conv_direct_output_dtype(dtype, direction),
     )
 
 

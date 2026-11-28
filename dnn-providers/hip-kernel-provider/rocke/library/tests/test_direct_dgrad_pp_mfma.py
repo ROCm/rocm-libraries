@@ -4,23 +4,28 @@
 (``conv_direct_dgrad_pp_mfma``, variant ``direct_dgrad_pp_mfma``).
 
 CPU: the validator, the transposed problem, the AOT grid and the cache offer.
-GPU (gfx950): dX against torch's input gradient for 3x3 and 5x5 at every
+GPU (gfx950): dX against a float64 numpy input gradient of the stored operands
+for 3x3 and 5x5 at every
 block_k, both dtypes, with image edges on every side (extents that are not a
 multiple of the 16x16 tile), partial dY channel chunks (K not a multiple of
 64), partial dX channel blocks, and dX channel counts that end inside a
 16-byte weight granule.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_direct_dgrad_pp_mfma.py -v
 """
 
 from __future__ import annotations
 
-import importlib.util
 from dataclasses import replace
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
+from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from kernels.common.conv_direct_dgrad_pp_mfma import (
     DgradPpMfmaSpec,
@@ -31,23 +36,14 @@ from kernels.common.conv_direct_dgrad_pp_mfma import (
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 
+from ._direct_conv_numeric import (
+    direct_dgrad_reference,
+    direct_fwd_reference,
+    launch_direct_conv,
+    poisoned,
+)
+
 _VARIANT = "direct_dgrad_pp_mfma"
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-
-
-def _gpu_arch():
-    if not _HAS_TORCH:
-        return None
-    import torch
-
-    if not torch.cuda.is_available():
-        return None
-    from rocke.runtime.hip_module import get_device_arch
-
-    return get_device_arch(0)
-
-
-_GPU = pytest.mark.skipif(not _HAS_TORCH, reason="needs torch and a gfx950 GPU")
 
 
 def _dgrad(N=2, H=37, W=41, C=136, K=96, KH=3, dtype="bf16"):
@@ -145,8 +141,7 @@ def test_transposed_problem_matches_cpu_dgrad(KH, KW, PAD, dil, pad_w):
     """The forward conv over the transposed problem (flipped, k<->c
     transposed filter) is the CPU dgrad: same dX extents and values. An
     implicit pad_w stays -1 only when the column flip equals the row flip
-    (dil_w*(KW-1) == dil_h*(KH-1)); else it is dil_w*(KW-1)-PAD. The padding
-    and extent checks need no torch; only the value check does."""
+    (dil_w*(KW-1) == dil_h*(KH-1)); else it is dil_w*(KW-1)-PAD."""
     dh, dw = dil
     d = replace(
         _dgrad(N=1, H=9, W=11, C=4, K=3, KH=KH),
@@ -163,25 +158,15 @@ def test_transposed_problem_matches_cpu_dgrad(KH, KW, PAD, dil, pad_w):
         assert tp.pad_w == dw * (KW - 1) - d.PAD_W, (d, tp)
     assert (tp.Ho, tp.Wo) == (d.H, d.W), (d, tp)
 
-    torch = pytest.importorskip("torch")
-    torch.manual_seed(0)
-    w = torch.randn(d.total_k, d.total_c, KH, KW, dtype=torch.float64)
-    dy = torch.randn(d.N, d.total_k, d.Ho, d.Wo, dtype=torch.float64)
-    ref = torch.nn.grad.conv2d_input(
-        (d.N, d.total_c, d.H, d.W),
-        w,
-        dy,
-        padding=(d.PAD, d.PAD_W),
-        dilation=(dh, dw),
-    )
-    got = torch.nn.functional.conv2d(
-        dy,
-        w.flip(2, 3).transpose(0, 1),
-        padding=(tp.PAD, tp.PAD_W),
-        dilation=(tp.dil_h, tp.dil_w),
-    )
+    rng = np.random.default_rng(0)
+    w = rng.standard_normal((d.total_k, KH, KW, d.total_c))
+    dy = rng.standard_normal((d.N, d.Ho, d.Wo, d.total_k))
+    ref = direct_dgrad_reference(d, dy, w)
+    # The transposed filter: flipped taps, input and output channels swapped.
+    got = direct_fwd_reference(tp, dy, w[:, ::-1, ::-1, :].transpose(3, 1, 2, 0))
     assert got.shape == ref.shape, (d, tp)
-    torch.testing.assert_close(got, ref)
+    # torch.testing.assert_close's float64 bounds.
+    np.testing.assert_allclose(got, ref, rtol=1e-7, atol=1e-7)
 
 
 def test_reasons():
@@ -390,7 +375,7 @@ def test_engines_agree_on_specs():
     """The C++ engine's validator, kernel name, grid and LDS size match
     Python's over the AOT grid and a set of rejected specs (the byte-identity
     gate only covers the IR of specs both engines build)."""
-    eng = pytest.importorskip("rocke_library_engine")
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_dgrad_pp_mfma_spec_to_dict
 
     specs = []
@@ -444,7 +429,7 @@ def test_engines_agree_on_specs():
 
 def test_binding_rejects_bad_input():
     """A missing, mistyped or partial problem raises in the binding."""
-    eng = pytest.importorskip("rocke_library_engine")
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_dgrad_pp_mfma_spec_to_dict
 
     good = conv_direct_dgrad_pp_mfma_spec_to_dict(
@@ -478,7 +463,7 @@ def test_binding_rejects_bad_input():
 def test_backend_lowers_through_both_engines():
     """``lower_conv_direct_dgrad_pp_mfma`` gives the same .ll on the Python
     and the C++ engine."""
-    pytest.importorskip("rocke_library_engine")
+    import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import lower_conv_direct_dgrad_pp_mfma
 
     spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()), block_k=256)
@@ -506,30 +491,19 @@ def test_python_backend_needs_no_engine(monkeypatch):
 # --------------------------------------------------------------------------- GPU
 
 
-def _launch(spec, a, b, d):
-    import torch
+def _launch(spec, dy, w, dx_shape):
+    """Run ``spec`` (a forward over the transposed problem) on stored ``dy`` /
+    ``w``; ``dX`` starts NaN, so an element the kernel does not write fails."""
     from rocke import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
 
     p = spec.problem
     art = compile_kernel(build_dgrad_pp_mfma(spec, arch="gfx950"), arch="gfx950")
-    launcher = KernelLauncher(
-        hsaco=art.hsaco,
-        kernel_name=art.kernel_name,
-        signature=conv_direct_args_signature(p.dtype),
-    )
-    values = ConvArgs.from_problem(p).to_launch_values(
-        a.data_ptr(), b.data_ptr(), d.data_ptr(), a.nbytes, b.nbytes, d.nbytes
-    )
     grid, block = spec.launch_geometry()
-    launcher(values, config=LaunchConfig(grid=grid, block=block))
-    torch.cuda.synchronize()
+    dx = poisoned(dx_shape, p.dtype, 0xFF)
+    return launch_direct_conv(art, p, (dy, w), dx, grid=grid, block=block)
 
 
-@_GPU
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize(
     "kh,block_k,C,K",
@@ -542,27 +516,17 @@ def _launch(spec, a, b, d):
         (5, 128, 92, 136),
     ],
 )
-def test_dgrad_matches_torch(dtype, kh, block_k, C, K):
-    if _gpu_arch() != "gfx950":
-        pytest.skip("needs a gfx950 GPU")
-    import torch
-
+def test_dgrad_matches_the_reference(dtype, kh, block_k, C, K):
+    current_device_arch_in(("gfx950",), subject="the ping-pong MFMA dgrad")
     p = _dgrad(C=C, K=K, KH=kh, dtype=dtype)
     spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(p), block_k=block_k)
     assert dgrad_pp_mfma_reason(spec) is None
-    td = torch.bfloat16 if dtype == "bf16" else torch.float16
-    torch.manual_seed(0)
-    dy = torch.empty(p.N, p.Ho, p.Wo, p.kpg, dtype=td, device="cuda").uniform_(-1, 1)
-    w = torch.empty(p.kpg, kh, kh, p.cpg, dtype=td, device="cuda").uniform_(-1, 1)
-    dx = torch.full((p.N, p.H, p.W, p.cpg), float("nan"), dtype=td, device="cuda")
-    _launch(spec, dy, w, dx)
-    ref = torch.nn.grad.conv2d_input(
-        (p.N, p.cpg, p.H, p.W),
-        w.permute(0, 3, 1, 2).float(),
-        dy.permute(0, 3, 1, 2).float(),
-        padding=p.PAD,
-    ).permute(0, 2, 3, 1)
-    assert not torch.isnan(dx).any()
+    rng = np.random.default_rng(0)
+    dy = storage.encode(rng.uniform(-1, 1, (p.N, p.Ho, p.Wo, p.kpg)), dtype)
+    w = storage.encode(rng.uniform(-1, 1, (p.kpg, kh, kh, p.cpg)), dtype)
+    dx = storage.decode(_launch(spec, dy, w, (p.N, p.H, p.W, p.cpg)), dtype)
+    ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
+    assert not np.isnan(dx).any()
     tol = 2e-2 if dtype == "bf16" else 5e-3
-    rel = float((dx.float() - ref).abs().max() / ref.abs().max().clamp(min=1))
+    rel = peak_relative_error(dx, ref, floor=1.0)
     assert rel < tol, rel

@@ -107,7 +107,29 @@ typedef struct rocke_matrix_arg
     rocke_matrix_arg_kind_t operand; /* A or B, whose flag a SIGNEDNESS arg passes */
 } rocke_matrix_arg_t;
 
-/* One MMA instruction's call. `decl_key` NULL means the intrinsic name. */
+/* Whether operand `operand` (A or B) of `catalog_op` is signed: the value of its
+ * signedness flag (Python Signedness.flag), read from the operand's dtype in
+ * the catalog row with the IR's own unsigned test (rocke_type_is_unsigned).
+ * Throws ckc::ValueError, with the Python text, when `operand` is not A or B
+ * or its dtype is not an integer. Every lowering that passes a signedness flag
+ * reads it here. */
+bool rocke_matrix_operand_is_signed(const rocke_mma_op_t* catalog_op,
+                                    rocke_matrix_arg_kind_t operand);
+
+/* The table rows of one integer matrix instruction, one per operand signedness
+ * (Python integer_mma_op_ids): `op_id` for signed A and B, then `op_id` with
+ * _u<bits>_i<bits> (A unsigned), _i<bits>_u<bits> (B unsigned) and
+ * _u<bits>_u<bits> appended, each row {op_id, value}. */
+#define ROCKE_INTEGER_MMA_ROWS(op_id, bits, value)                                              \
+    {op_id, value}, {op_id "_u" #bits "_i" #bits, value}, {op_id "_i" #bits "_u" #bits, value}, \
+    {                                                                                           \
+        op_id "_u" #bits "_u" #bits, value                                                      \
+    }
+
+/* One MMA instruction's call. `decl_key` NULL means the intrinsic name.
+ * `requires_llvm23` marks a call whose intrinsic only the LLVM 23 target-op
+ * profile declares this way; the lowering refuses it below that profile
+ * (rocke_matrix_call_lowers_at, rocke_ll_refuse_llvm23_matrix_op). */
 typedef struct rocke_matrix_call
 {
     const char* intrinsic;
@@ -118,6 +140,7 @@ typedef struct rocke_matrix_call
     rocke_matrix_form_t c;
     rocke_matrix_form_t result;
     const char* decl_key;
+    bool requires_llvm23;
 } rocke_matrix_call_t;
 
 /* One table row: an op_id and its call (Python MATRIX_CALLS item). */
@@ -132,6 +155,10 @@ const rocke_matrix_call_entry_t* rocke_matrix_calls(int* out_count);
 
 /* The call for `op_id`, or NULL when a hand-written handler lowers it. */
 const rocke_matrix_call_t* rocke_matrix_call_for(const char* op_id);
+
+/* Whether the lowering emits `call` at `flavor` (Python MatrixCall.lowers_at):
+ * always, unless it requires_llvm23 and `flavor` lacks that profile. */
+bool rocke_matrix_call_lowers_at(const rocke_matrix_call_t* call, rocke_llvm_flavor_t flavor);
 
 /* The declaration-table key a call needs (Python MatrixCall.key). */
 const char* rocke_matrix_call_key(const rocke_matrix_call_t* call);
@@ -156,10 +183,11 @@ const char* rocke_matrix_call_declaration(const rocke_matrix_call_t* call,
 
 typedef struct rocke_lower rocke_lower_t;
 
-/* The lowering target's catalog row for `op_id`; fails with
- * ROCKE_ERR_NOTIMPL "tile.<op_id> is not available on <gfx>: its MMA catalog
- * does not list it" where the catalog does not list it (Python
- * ISABackend._require_catalog_lists, same text). */
+/* The lowering target's catalog row for `op_id`; fails with ROCKE_ERR_NOTIMPL
+ * and the refusal of rocke_isa_mma_catalog_refusal (Python
+ * ISABackend.require_catalog_lists, same text) where the catalog does not list
+ * it. NULL, without failing, for a builder-only op_id the gate admits: no row
+ * names it. */
 const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id);
 
 /* Check the complete operand form without recording declarations or emitting
@@ -180,13 +208,20 @@ const char* rocke_ll_matrix_operand(rocke_lower_t* L,
                                     rocke_matrix_arg_kind_t kind,
                                     const rocke_matrix_form_t* form);
 
+/* Fail with ROCKE_ERR_NOTIMPL, "tile.<op_id> requires llvm23 (ROCm 7.13+), got
+ * <flavor>": the lowerer's flavor lacks the LLVM 23 target-op profile the op's
+ * intrinsic needs (Python refuse_llvm23_matrix_op). */
+[[noreturn]] void rocke_ll_refuse_llvm23_matrix_op(rocke_lower_t* L, const char* op_id);
+
 /* Lower MMA op `op` (operands A, B, C) with op_id `op_id` through `call`
  * (Python emit_matrix_call): each operand through its form, the immediates as
  * written, each signedness flag from the target's catalog row for `op_id`, the
  * call, the result through its form. The call's declaration is
  * the one the lowerer resolves for its key; a call outside the table (one a
  * test builds) registers its derived declaration dynamically, and a resolved
- * text that differs from the derived one is refused. */
+ * text that differs from the derived one is refused. A call that does not
+ * lower at the lowerer's flavor (rocke_matrix_call_lowers_at) is refused
+ * before anything else. */
 void rocke_ll_emit_matrix_call(rocke_lower_t* L,
                                const rocke_op_t* op,
                                const char* op_id,

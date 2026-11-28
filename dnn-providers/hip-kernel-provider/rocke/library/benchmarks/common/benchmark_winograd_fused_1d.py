@@ -26,9 +26,10 @@ from typing import List
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 from benchmarks.common.benchmark_winograd_conv import (  # noqa: E402
-    _u8,
     make_inputs,
+    read_back_drained,
     reference,
+    upload_drained,
     verify_error,
 )
 from benchmarks.common.benchmark_winograd_gen import parse_variant  # noqa: E402
@@ -59,11 +60,11 @@ def build_cfg(item):
 
 
 def run_case(problem, variant, cfgs, args, arch, ref_cache):
-    import torch  # noqa: F401
     from rocke import compile_kernel
     from rocke.runtime import time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
     from kernels.common import conv_winograd_gen as WG
     from kernels.common.conv_winograd_fused_1d_wmma import fused_signature
 
@@ -89,11 +90,11 @@ def run_case(problem, variant, cfgs, args, arch, ref_cache):
     if not built:
         return None
 
-    x_t, w_t, y_t = make_inputs(problem, "fp16", seed=args.seed)
+    x, w = make_inputs(problem, "fp16", seed=args.seed)
     ref = None
     if args.verify:
         if problem not in ref_cache:
-            ref_cache[problem] = reference(x_t, w_t, problem, "fp16")
+            ref_cache[problem] = reference(x, w, problem, "fp16")
         ref = ref_cache[problem]
     rt = Runtime()
     sizes = dict(built[0][1].buffer_bytes())
@@ -102,11 +103,8 @@ def run_case(problem, variant, cfgs, args, arch, ref_cache):
     bufs = {k: int(rt.alloc(max(v, 4))) for k, v in sizes.items()}
     out = []
     try:
-        rt.sync()
-        for key, t in (("x", x_t), ("w", w_t)):
-            h = t.contiguous().pin_memory()
-            rt.memcpy_h2d(bufs[key], _u8(h), h.nbytes)
-            rt.sync()
+        upload_drained(rt, bufs["x"], x)
+        upload_drained(rt, bufs["w"], w)
         k1 = KernelLauncher(
             hsaco=k1_art.hsaco,
             kernel_name=k1_art.kernel_name,
@@ -120,13 +118,8 @@ def run_case(problem, variant, cfgs, args, arch, ref_cache):
         rt.sync()
 
         def read_y():
-            import torch
-
-            rt.sync()
-            o = torch.empty_like(y_t, device="cpu").pin_memory()
-            rt.memcpy_d2h(_u8(o), bufs["y"], o.nbytes)
-            rt.sync()
-            return o
+            y_shape = (problem.N, problem.Ho, problem.Wo, problem.K)
+            return read_back_drained(rt, bufs["y"], y_shape, "fp16")
 
         for cfg, spec, art in built:
             lau = KernelLauncher(
@@ -213,8 +206,6 @@ def main(argv=None) -> int:
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--arch", default=None)
     args = ap.parse_args(argv)
-
-    import torch  # noqa: F401
 
     from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
     from rocke.runtime.hip_module import get_device_arch

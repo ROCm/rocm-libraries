@@ -19,6 +19,8 @@ import unittest
 from contextlib import contextmanager
 from unittest import mock
 
+from rocke.tests.bool_flags import bool_flag_reason
+
 from dispatch.mla import (
     FAMILY,
     MLA_ABI_VERSION,
@@ -956,7 +958,7 @@ class TestRequestTypes(unittest.TestCase):
             for value in ("false", "true", 0, 1, None):
                 with self.subTest(name=name, value=value):
                     self.assertIn(
-                        f"{name} must be a bool", self._refused(**{name: value})
+                        bool_flag_reason(name, value), self._refused(**{name: value})
                     )
 
     def test_int_fields(self):
@@ -996,7 +998,7 @@ class TestRequestTypes(unittest.TestCase):
             with self.subTest(value=value):
                 ok, why = MLA_REGISTRY.get(_NAME).admits(_req(causal=value))
                 self.assertFalse(ok)
-                self.assertIn("causal must be a bool", why)
+                self.assertIn(bool_flag_reason("causal", value), why)
 
     def test_uncoercible_values_are_refused_not_raised(self):
         # dims() must not int() these before _request_errors names them.

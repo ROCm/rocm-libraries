@@ -16,20 +16,21 @@ if(BUILD_TESTING)
   # It re-probes the full intrinsic/architecture matrix and therefore has a
   # different timeout, resource, and skip contract from Python unit tests. The
   # installed test manifest registers the same logical gate against its staged
-  # generator and relocated package data.
+  # generator and relocated package data. Under a CI shard each shard checks
+  # the declaration keys it owns; a plain ctest run checks them all.
   if(Python3_Interpreter_FOUND)
     add_test(
       NAME rocke_arch_domain_reproducibility
       COMMAND "${Python3_EXECUTABLE}" -u
               "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_arch_domain.py"
-              --check --unvalidated-exit-code 77)
+              --check --unvalidated-exit-code 77 --rocke-shard-from-gtest-env)
     set_tests_properties(
       rocke_arch_domain_reproducibility
       PROPERTIES
         LABELS "ckc;python;host;integration;toolchain;generated-artifact;standard"
         RUN_SERIAL TRUE
         SKIP_RETURN_CODE 77
-        TIMEOUT 1800
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
     # The committed column of compiler_options.json for the loaded compiler,
@@ -43,9 +44,12 @@ if(BUILD_TESTING)
       rocke_compiler_options_reproducibility
       PROPERTIES
         LABELS "ckc;python;host;toolchain;generated-artifact;standard"
-        TIMEOUT 600
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+    # The next two entries are kept in step with the
+    # rocke-arch-table-engine-parity and rocke-gemm-spec-dict-binding-parity
+    # hooks in the root .pre-commit-config.yaml.
     # The arch-table parity test reads cpp/core/arch/data.cpp, which the
     # installed test tree does not carry, so CMakeLists.txt keeps it out of the
     # installed pytest cohort; run it here, from the source tree, instead.
@@ -57,6 +61,7 @@ if(BUILD_TESTING)
       rocke_arch_table_engine_parity
       PROPERTIES
         LABELS "ckc;python;host"
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
     # The GEMM spec-dict parity test reads cpp/bindings/rocke_engine.cpp, which
@@ -71,7 +76,92 @@ if(BUILD_TESTING)
       rocke_gemm_spec_dict_binding_parity
       PROPERTIES
         LABELS "ckc;python;host"
+        TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    # The next three entries are kept in step with the rocke-* hooks in the
+    # root .pre-commit-config.yaml.
+    # Every test file is assigned to a CI entry or is listed, with its reason, in
+    # rocke.tests.pending_lanes. The check configures this source tree and reads
+    # the provider categories, which the installed test tree does not carry.
+    # The registration it audits is the same on every platform, so it runs
+    # where the provider's install paths are POSIX paths only. The entry also
+    # runs the tests of tools/limbo_audit.py, the per-test audit of CI runs
+    # against the same registry, which lives in the source tree only, the
+    # check that no host entry runs a GPU test, which configures this tree too,
+    # and the check that the quick tier keeps to its rules (TESTING.md, section
+    # 5.0.3), which configures it and reads rocke/tools.
+    if(NOT WIN32)
+      add_test(
+        NAME rocke_pending_lanes_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pending_lanes.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_limbo_audit.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_gpu_work_placement.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_quick_tier.py" -q)
+      set_tests_properties(
+        rocke_pending_lanes_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
+
+    # Checks that the compliance patterns load, that they find each leak they
+    # name, and that no git-tracked file of rocke holds a hit, so a product name
+    # or internal link added anywhere in the tree fails here. The tests read
+    # rocke/tools and the git checkout, which the installed test tree does not
+    # carry. Guarded on the pattern module so a platform-only copy of this
+    # directory still configures.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/compliance_patterns.py")
+      add_test(
+        NAME rocke_compliance_pytest
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_compliance_patterns.py" -q)
+      set_tests_properties(
+        rocke_compliance_pytest
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
+
+    # No new use of PyTorch anywhere under rocke/: each remaining use is on the
+    # allowlist beside the test, which only shrinks. The check lists the source
+    # checkout through git, which the installed test tree is not, so it runs here.
+    # The allowlist covers the whole rocke tree, so a platform-only copy of this
+    # directory, which has no library/ beside it, does not register it.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
+      add_test(
+        NAME rocke_no_torch_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_no_torch.py" -q)
+      set_tests_properties(
+        rocke_no_torch_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
+
+    # No new toolchain pin in the test and library code under rocke/: no
+    # LLVM-flavor or ROCm-release pin, no decision on the comgr's ROCm release,
+    # no private runtime or lowering name in library code. Each remaining pin is
+    # on the allowlist beside the test, which only shrinks. Kept in step with the
+    # rocke-toolchain-pins hook in the root .pre-commit-config.yaml; like the
+    # entry above it lists the source checkout through git and reads library/.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
+      add_test(
+        NAME rocke_toolchain_pins_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_toolchain_pins.py" -q)
+      set_tests_properties(
+        rocke_toolchain_pins_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; the Python-driven build-tree "
@@ -79,6 +169,10 @@ if(BUILD_TESTING)
             "registered")
   endif()
 
+  # The rocke_optimization_barrier_hip_pair and
+  # rocke_coalesced_loader_async_refusals entries and their emitter targets are
+  # kept in step with the rocke-emitter-pair-parity hook in the root
+  # .pre-commit-config.yaml.
   # The binding consumes Python-built IR; this binary exercises the independent
   # C builder as well, including compiler-dependent argument evaluation order.
   set_source_files_properties(instances/parity/optimization_barrier_emit.c
@@ -112,9 +206,40 @@ if(BUILD_TESTING)
               "${_rocke_python_root}/rocke/tests/subprocess_launcher.py"
               --emitter
               "${_rocke_parity_dir}/optimization_barrier_emit.py"
-              --count 17)
+              --count 17 --rocke-shard-from-gtest-env)
     set_tests_properties(rocke_optimization_barrier_hip_pair
-                         PROPERTIES LABELS "ckc;python;host;quick" TIMEOUT 120)
+                         PROPERTIES LABELS "ckc;python;host;standard"
+                                    ENVIRONMENT "PYTHONPATH=${_rocke_python_root}"
+                                    TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
+  endif()
+
+  # The coalesced loader's async LDS copy refuses the same configs with the
+  # same message in both engines; the byte-identity gate compares the configs
+  # both build, not why both refuse the others.
+  set_source_files_properties(instances/parity/coalesced_loader_async_emit.c
+                              PROPERTIES LANGUAGE CXX)
+  add_executable(rocke_coalesced_loader_async_emit
+                 instances/parity/coalesced_loader_async_emit.c)
+  target_link_libraries(rocke_coalesced_loader_async_emit PRIVATE rocke_core)
+  if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(rocke_coalesced_loader_async_emit PRIVATE /TP)
+  else()
+    target_compile_options(rocke_coalesced_loader_async_emit PRIVATE -x c++)
+  endif()
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME rocke_coalesced_loader_async_refusals
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/instances/differential/compare_refusals.py"
+              --native "$<TARGET_FILE:rocke_coalesced_loader_async_emit>"
+              --launcher
+              "${CMAKE_CURRENT_SOURCE_DIR}/../python/rocke/tests/subprocess_launcher.py"
+              --emitter
+              "${CMAKE_CURRENT_SOURCE_DIR}/instances/parity/coalesced_loader_async_emit.py"
+              --expected-refusals 4)
+    set_tests_properties(rocke_coalesced_loader_async_refusals
+                         PROPERTIES LABELS "ckc;python;host"
+                                    TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
   endif()
 
   add_executable(rocke_optimization_barrier core/test_optimization_barrier.cpp)
@@ -134,7 +259,7 @@ if(BUILD_TESTING)
   add_executable(rocke_f64_mma core/test_f64_mma.cpp)
   target_link_libraries(rocke_f64_mma PRIVATE rocke_core)
   target_include_directories(rocke_f64_mma PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/gfx942")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/common")
   add_test(NAME rocke_f64_mma COMMAND rocke_f64_mma)
   set_tests_properties(rocke_f64_mma PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_mma)
@@ -194,6 +319,64 @@ if(BUILD_TESTING)
   set_target_properties(rocke_ir_types PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
   install(TARGETS rocke_ir_types RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_ir_types)
+
+  # Not a test: lowers serialized IR with the C++ engine, to LLVM IR or (--hip-batch)
+  # HIP source. The HIP source identity gate runs the C++ lowering through it,
+  # via ROCKE_IR_LOWER_CLI, where the rocke_engine binding is not built, as in
+  # the installed test tree. It is installed beside the tests but kept out of
+  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test. Not
+  # being a test, CTest cannot name its path to tests/run_all.py, so the build
+  # records it (rocke_record_program_path).
+  add_executable(rocke_ir_lower_cli core/ir_lower_cli.cpp)
+  target_link_libraries(rocke_ir_lower_cli PRIVATE rocke_core)
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
+  set_target_properties(rocke_ir_lower_cli
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_ir_lower_cli
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  rocke_record_program_path(rocke_ir_lower_cli)
+
+  # The engine entry rocke_ir_lower_cli and the binding share, called with and
+  # without its optional message buffer. Not built on Windows: the Windows CI
+  # shards, close to their time limit, take no new tests, and this one stays
+  # with the HIP lowering tests that are kept off them (platform/CMakeLists.txt).
+  if(NOT WIN32)
+    add_executable(rocke_lower_serialized_ir_hip core/test_lower_serialized_ir_hip.cpp)
+    target_link_libraries(rocke_lower_serialized_ir_hip PRIVATE rocke_core)
+    add_test(NAME rocke_lower_serialized_ir_hip COMMAND rocke_lower_serialized_ir_hip)
+    set_tests_properties(rocke_lower_serialized_ir_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_lower_serialized_ir_hip)
+    set_target_properties(rocke_lower_serialized_ir_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_lower_serialized_ir_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_lower_serialized_ir_hip)
+
+    # The char* serialized-IR entries an FFI caller (rocke.core.native_engine)
+    # uses: the LLVM one against the direct lowering, the HIP one against its
+    # buffer twin above. Off Windows for the same reason.
+    add_executable(rocke_lower_serialized_ir_text core/test_lower_serialized_ir_text.cpp)
+    target_link_libraries(rocke_lower_serialized_ir_text PRIVATE rocke_core)
+    add_test(NAME rocke_lower_serialized_ir_text COMMAND rocke_lower_serialized_ir_text)
+    set_tests_properties(rocke_lower_serialized_ir_text PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_lower_serialized_ir_text)
+    set_target_properties(rocke_lower_serialized_ir_text
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_lower_serialized_ir_text
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_lower_serialized_ir_text)
+  endif()
+
+  add_executable(rocke_float_format core/test_float_format.cpp)
+  target_link_libraries(rocke_float_format PRIVATE rocke_core)
+  add_test(NAME rocke_float_format COMMAND rocke_float_format)
+  set_tests_properties(rocke_float_format PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_float_format)
+  set_target_properties(rocke_float_format
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_float_format
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_float_format)
 
   add_executable(rocke_dtypes core/test_dtypes.cpp)
   target_link_libraries(rocke_dtypes PRIVATE rocke_core)
@@ -710,6 +893,26 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_mx_scale_decode)
+  endif()
+
+  # The builder never gives two values the same name, and refuses author-chosen
+  # names that could spell one.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_value_names.cpp")
+    add_executable(rocke_value_names core/test_value_names.cpp)
+    target_link_libraries(rocke_value_names PRIVATE rocke_core)
+    # The generated C++ keyword table, every word of which the test checks the
+    # builder refuses.
+    target_include_directories(rocke_value_names PRIVATE "${_rocke_cxx_keywords_include_dir}")
+    add_test(NAME rocke_value_names COMMAND rocke_value_names)
+    set_tests_properties(rocke_value_names
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_value_names)
+    set_target_properties(rocke_value_names
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_value_names
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_value_names)
   endif()
 
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.

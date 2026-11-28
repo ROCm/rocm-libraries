@@ -6,12 +6,13 @@
 import dataclasses
 
 import pytest
-
 from dispatch.attention import (
     AttentionRequest,
     dispatch_attention,
     dispatch_attention_all,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
+from rocke.tests.host_arrays import HostArray
 
 _ARCHES = ("gfx942", "gfx950")
 # One explicit split-KV geometry per arch (tuning candidates; gfx942's are opt-in).
@@ -78,8 +79,11 @@ def test_unpinned_lse_spec_has_its_own_identity(arch):
 def test_attention_spec_rejects_non_boolean_emit_lse(bad):
     """AttentionSpec is public: a truthy non-bool must not become an LSE identity."""
     spec = dispatch_attention(_decode_request("gfx950")).spec
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         dataclasses.replace(spec, emit_lse=bad)
+    assert str(refusal.value) == bool_flag_refusal(
+        "emit_lse", bad, what="AttentionSpec"
+    )
 
 
 @pytest.mark.parametrize("arch", _ARCHES)
@@ -264,7 +268,7 @@ def test_binding_forwards_the_lse_buffer_on_2d(arch, monkeypatch):
     problem = _tuning_problem(request)
     lse = object()
     tensors = {**_paged_tensors(problem), "lse": lse}
-    tensors["cu_seqlens_q"] = _FakeTensor((2,), "torch.int32", [0, problem.total_q])
+    tensors["cu_seqlens_q"] = _array((2,), "i32", [0, problem.total_q])
     dispatch_attention(request).bind_torch(tensors).launch()
     assert seen["lse"] is lse and seen["backend"] == "tiled"
 
@@ -284,30 +288,9 @@ def test_lse_on_gfx1250_split_kv_is_refused():
         dispatch_attention(_decode_request("gfx1250", emit_lse=True))
 
 
-class _FakeTensor:
-    """Metadata-only stand-in the real binding validator accepts (no torch)."""
-
-    def __init__(self, shape, dtype, values=None):
-        self.shape, self.dtype, self.device = tuple(shape), dtype, "cuda:0"
-        self._values = values
-
-    def is_contiguous(self):
-        return True
-
-    def stride(self, dim):
-        stride = 1
-        for extent in self.shape[dim + 1 :]:
-            stride *= extent
-        return stride
-
-    def detach(self):
-        return self
-
-    def cpu(self):
-        return self
-
-    def tolist(self):
-        return self._values
+def _array(shape, dtype, values=None):
+    """A host-only device-array stand-in the real binding validator accepts."""
+    return HostArray(shape, dtype, values=values)
 
 
 def _paged_tensors(problem):
@@ -316,15 +299,15 @@ def _paged_tensors(problem):
     act = (problem.total_q, problem.num_query_heads, problem.head_size)
     kv = (seqs * pages, problem.block_size, problem.num_kv_heads, problem.head_size)
     return {
-        "q": _FakeTensor(act, "torch.bfloat16"),
-        "out": _FakeTensor(act, "torch.bfloat16"),
-        "k": _FakeTensor(kv, "torch.bfloat16"),
-        "v": _FakeTensor(kv, "torch.bfloat16"),
-        "cu_seqlens_q": _FakeTensor((seqs + 1,), "torch.int32", list(range(seqs + 1))),
-        "seqused_k": _FakeTensor((seqs,), "torch.int32", [problem.max_seqlen_k] * seqs),
-        "block_table": _FakeTensor(
+        "q": _array(act, "bf16"),
+        "out": _array(act, "bf16"),
+        "k": _array(kv, "bf16"),
+        "v": _array(kv, "bf16"),
+        "cu_seqlens_q": _array((seqs + 1,), "i32", list(range(seqs + 1))),
+        "seqused_k": _array((seqs,), "i32", [problem.max_seqlen_k] * seqs),
+        "block_table": _array(
             (seqs, pages),
-            "torch.int32",
+            "i32",
             [list(range(s * pages, (s + 1) * pages)) for s in range(seqs)],
         ),
     }

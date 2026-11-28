@@ -36,6 +36,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdDeviceHarness.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 
 /**
  * @file TestFlydslSdpaBwdEngine.cpp
@@ -2005,9 +2006,8 @@ KernelDefinition sourcesRow(const RowSpec& row,
                             = recordedSignature(reduceSlots()))
 {
     auto kernel = makeRow(row);
-    const auto tree = std::filesystem::temp_directory_path().string();
-    kernel.originDirectory = tree;
-    kernel.treeRoot = tree;
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     KernelSource merged;
     merged.kind = KernelSourceKind::KPACK;
     merged.library = "there-is-no-archive-here.kpack";

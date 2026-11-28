@@ -23,11 +23,12 @@ import pytest
 
 from rocke.core.arch import generic_arch_from_target_id
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import skip_needing_arch
 
 _ARCH = generic_arch_from_target_id(get_device_arch() or "")
 _NEEDS_RDNA = pytest.mark.skipif(
     _ARCH not in ("gfx11-generic", "gfx12-generic"),
-    reason="needs an RDNA3/3.5 (gfx11) or RDNA4 (gfx12) GPU",
+    reason="needs an RDNA3/3.5 (gfx11, such as gfx1100) or RDNA4 (gfx12) GPU",
 )
 _BUCKETS = (64, 96, 128, 192, 256)
 _LOG2E = 1.4426950408889634
@@ -581,7 +582,9 @@ def _launch(
 def test_prefill_matches_reference(case, dtype):
     B, Hq, Hk, Hv, Sq, Sk, dq, dv, mask, br, wl, wr, opt = CASES[case]
     if opt.get("unsplit") and _ARCH != "gfx12-generic":
-        pytest.skip("the unsplit wide-Q object is gfx12-only")
+        skip_needing_arch(
+            ("gfx1200", "gfx1201"), reason="the unsplit wide-Q object is gfx12-only"
+        )
     if dtype == "bf16":
         npdt = pytest.importorskip("ml_dtypes").bfloat16
     else:

@@ -25,9 +25,9 @@
  *        grows correctly.
  *
  * The table (Gfx942AttentionUnified3dArgumentsTable.inc) is produced by
- * gen_gfx942_attention_unified_3d_arguments.py from rocKE's `_tiled_3d_signatures("gfx942",
+ * gen_gfx942_attention_unified_3d_arguments.py from rocKE's `tiled_3d_signatures("gfx942",
  * ..., strided_kv=True)` (runtime num_query_heads, num_kv_heads, sliding_window included),
- * `_runtime_kernarg_values(...)` and `StridedKvCacheLayout(...).arguments()`. The build
+ * `runtime_kernarg_values(...)` and `StridedKvCacheLayout(...).arguments()`. The build
  * generates it from the rocKE source tree (kernel_ingestor_engine/CMakeLists.txt), so a
  * change to the signature order or the stride packing fails here.
  */

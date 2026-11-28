@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * Host-only spec-validation test for the universal GEMM's gfx1250 rules: fp8/bf8
- * storage, the Tensor Data Mover and the TDM K-loop traits. It runs each rule
+ * Host-only spec-validation test for the universal GEMM's gfx1250 rules (fp8/bf8
+ * storage, the Tensor Data Mover and the TDM K-loop traits) and the aliased
+ * cshuffle LDS budget on gfx1250 and gfx950. It runs each rule
  * through rocke_gemm_universal_is_valid_spec and checks the verdict and the
  * reason string, so the C++ validator is under CI without the pybind
  * rocke_engine (which CI does not build).
@@ -83,6 +84,34 @@ void no_tdm(Spec& s)
 {
     s.trait.tdm = false;
     s.trait.tdm_depth = 1;
+}
+
+/* A 256x256x64 fp16 cshuffle GEMM on gfx950's 32x32x16 MFMA atom, as
+ * test_gemm_validity_gaps.GFX950_CSHUFFLE: the validator charges A/B 64 KiB and
+ * C 128 KiB, so it fits gfx950's 160 KiB only with C aliased onto A/B. */
+Spec gfx950_fp16_cshuffle_spec()
+{
+    Spec s = rocke_gemm_universal_spec_default();
+    s.name = "spec_guard";
+    s.tile.tile_m = 256;
+    s.tile.tile_n = 256;
+    s.tile.tile_k = 64;
+    s.tile.warp_m = 4;
+    s.tile.warp_n = 4;
+    s.tile.warp_k = 1;
+    s.tile.warp_tile_m = 32;
+    s.tile.warp_tile_n = 32;
+    s.tile.warp_tile_k = 16;
+    s.trait.pipeline = "compv4";
+    s.trait.epilogue = "cshuffle";
+    s.data.dtype_a = "fp16";
+    s.data.dtype_b = "fp16";
+    s.data.dtype_c = "fp16";
+    s.data.dtype_acc = "fp32";
+    s.data.layout = "RCR";
+    s.wave_size = 64;
+    s.block_size = 1024;
+    return s;
 }
 
 void run(const Case& c)
@@ -286,6 +315,25 @@ int main()
              s.trait.cshuffle_no_alias = true;
          },
          "LDS budget 442368 > 327680 cap (AB=311296, C=131072) on gfx1250"},
+        /* gfx950 cshuffle LDS budget: aliased fits, either opt-out pays the sum */
+        {"gfx950 cshuffle, C aliased onto A/B",
+         "gfx950",
+         [](Spec& s) { s = gfx950_fp16_cshuffle_spec(); },
+         nullptr},
+        {"gfx950 cshuffle, cshuffle_no_alias",
+         "gfx950",
+         [](Spec& s) {
+             s = gfx950_fp16_cshuffle_spec();
+             s.trait.cshuffle_no_alias = true;
+         },
+         "LDS budget 196608 > 163840 cap (AB=65536, C=131072) on gfx950"},
+        {"gfx950 cshuffle, persistent",
+         "gfx950",
+         [](Spec& s) {
+             s = gfx950_fp16_cshuffle_spec();
+             s.trait.persistent = true;
+         },
+         "LDS budget 196608 > 163840 cap (AB=65536, C=131072) on gfx950"},
     };
 
     for(const Case& c : cases)

@@ -6,7 +6,8 @@
 #
 # The C mirror of everything here is cpp/include/rocke/abi.h, which also
 # documents the second, separate contract (the BINARY ABI of the shared library,
-# `ROCKE_ABI_VERSION`) and why the two are not one number.
+# `ROCKE_ABI_VERSION`; its Python side is rocke.core.native_engine.BINARY_ABI)
+# and why the two are not one number.
 #
 # The shape of the check
 # ----------------------
@@ -75,13 +76,6 @@ from rocke.core.param_facts import FACT_WORDS
 #: engine, because a Python generator that believed it was newer than the C
 #: engine would stamp artifacts that engine then refuses.
 RECIPE_ABI = 4
-
-#: Binary ABI the ctypes bindings in online.py are written against. MUST equal
-#: ROCKE_ABI_VERSION in cpp/include/rocke/abi.h. Unlike the wire level, this one
-#: is checked at library load: ctypes argtypes are a hand-written mirror of the C
-#: signatures, and calling a mismatched library with them is memory-unsafe rather
-#: than merely wrong.
-BINARY_ABI = 20
 
 
 class AbiError(RuntimeError):

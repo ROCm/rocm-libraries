@@ -82,11 +82,12 @@ the caller must apply both. A pre-kernel that does so is a follow-up.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple
 
 from rocke.core.ir import BF16, F32, KernelDef
 from rocke.helpers.attention import safe_inv_l
+from rocke.helpers.spec import require_bool_fields
 
 from kernels.common._read_ahead import read_ahead
 from kernels.common.attention_arch import attention_lds_capacity_bytes
@@ -374,12 +375,7 @@ class MlaPrefillSpec:
             )
         # Exact types, never coerced: "false" is truthy and True == 1, so a
         # loose value would silently build a different kernel.
-        for name in ("agpr_acc", "absorbed_query"):
-            value = getattr(self, name)
-            if type(value) is not bool:
-                raise TypeError(
-                    f"{name} must be a bool, got {type(value).__name__} {value!r}"
-                )
+        require_bool_fields(self, "agpr_acc", "absorbed_query")
         for name in (
             "num_heads",
             "d_nope",
@@ -398,8 +394,8 @@ class MlaPrefillSpec:
         ):
             value = getattr(self, name)
             if type(value) is not int:
-                raise TypeError(
-                    f"{name} must be an int, got {type(value).__name__} {value!r}"
+                raise ValueError(
+                    f"{type(self).__name__} failed - {name}={value!r}, expected an int"
                 )
         positive = (
             "num_heads",
@@ -465,6 +461,16 @@ class MlaPrefillSpec:
 
     def fwd_kernel_name(self) -> str:
         return self._name("mla_prefill_fwd_gfx942")
+
+    def fwd_kernel_identity(self) -> str:
+        """The forward kernel's name without the device's XCD count.
+
+        Dispatch sets ``num_xcds`` from the device's CU count, so one layout
+        has a name per device class (``_x6``, ``_x8``, none). A record about
+        the layout rather than the device -- a test's measured resource
+        budget -- keys on this, so it applies on every device class.
+        """
+        return replace(self, num_xcds=0).fwd_kernel_name()
 
     def _name(self, stem: str) -> str:
         return (

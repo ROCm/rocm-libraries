@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -447,7 +448,7 @@ else:
 
 @pytest.mark.parametrize("arch", ARCHS)
 def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path, arch):
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BUILD_VARIANT)
     if sys.platform != "linux" or not shutil.which("cc"):
         pytest.skip("ELF loader fixture requires Linux and a C compiler")
     library = build_library(tmp_path, "void amd_comgr_get_version(void){}\n")

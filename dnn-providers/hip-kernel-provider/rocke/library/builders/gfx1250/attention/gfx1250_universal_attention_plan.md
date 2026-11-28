@@ -102,7 +102,7 @@ rocke/examples/gfx1250/
     ├── benchmark_prefill2d_live.py    # --shapes aiter_ua_2_shapes.json (Phase 2/3)
     ├── benchmark_prefill2d_traces.py  # trace cohort bench (Phase 2/3)
     └── _profile_one.py                # single-shape profiler (Phase 2/3)
-# Shape source reused from gfx950: examples/gfx950/attention/aiter_ua_2_shapes.json
+# Shape source reused from gfx950: the out-of-tree aiter_ua_2_shapes.json
 # (d64 prefill2d trace cohort). Qwen3 decode shapes inform the 3D path.
 ```
 
@@ -304,7 +304,7 @@ Gate: both exit 0 with `bad=0` / within tol on the host.
 the captured trace cohort; do not invent new shape sets or timers.
 
 - **D3.** Shape source (2D prefill): start with `seq_len = 64, 128`, then the
-  `examples/gfx950/attention/aiter_ua_2_shapes.json` cohort (JSONL dump of real
+  gfx950 `aiter_ua_2_shapes.json` cohort (an out-of-tree JSONL dump of real
   AITER `unified_attention` calls — the **d64 prefill2d trace cohort**:
   `head_size 64`, `block_size 32`, GQA-8 (64 query / 8 KV heads), attention
   sinks, sliding-window `(127,0)` or full, bf16 or bf16-Q + fp8-KV, chunked

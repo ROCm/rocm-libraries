@@ -4,6 +4,7 @@
 """Compiler selection follows loaded code and preserves its provenance."""
 
 import ctypes
+import re
 from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -21,6 +22,8 @@ ARCHS = COVERED_ARCHES
 def fresh_query(monkeypatch):
     monkeypatch.setattr(comgr, "_llvm_version_lib", None)
     monkeypatch.setattr(comgr, "_compiler_info", None)
+    monkeypatch.setattr(comgr, "_llvm_commit_lib", None)
+    monkeypatch.setattr(comgr, "_llvm_commit", None)
     monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
 
 
@@ -105,6 +108,27 @@ def test_unqueryable_loaded_library_is_unknown_not_another_install(monkeypatch):
             comgr._assert_ir_flavor_matches_lib(
                 f'target datalayout = "{lower_llvm._datalayout_for_flavor("llvm23")}"'
             )
+
+
+def test_the_loaded_compiler_names_the_llvm_project_commit_it_was_built_from():
+    if comgr.loaded_compiler_info() is None:
+        pytest.skip("no COMGR loads on this host")
+    commit = comgr.loaded_compiler_commit()
+    if commit is None:
+        pytest.skip("this host's compiler records no llvm-project commit")
+    assert re.fullmatch(r"[0-9a-f]{40}", commit), commit
+    assert comgr.loaded_compiler_commit() is commit
+
+
+def test_no_loaded_library_means_no_compiler_commit():
+    with patch.object(comgr, "_resolve_lib", side_effect=comgr.ComgrError("missing")):
+        assert comgr.loaded_compiler_commit() is None
+
+
+def test_a_compiler_that_cannot_be_preprocessed_has_no_commit(monkeypatch):
+    lib = SimpleNamespace(_name="unqueryable-comgr.so")
+    monkeypatch.setattr(comgr, "_resolve_lib", lambda: lib)
+    assert comgr.loaded_compiler_commit() is None
 
 
 def test_unavailable_library_does_not_prevent_offline_emission(monkeypatch):

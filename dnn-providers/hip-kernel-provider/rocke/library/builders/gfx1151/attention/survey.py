@@ -18,7 +18,7 @@ from .tune import Shape, _find_objdump
 from . import tune as opt_tune
 from . import sp_tune
 
-PEAK_TF = 59.0  # Radeon 8060S f16 WMMA peak: 40 CU * 512 FLOP/clk * 2.9 GHz
+PEAK_TF = 59.0  # gfx1151 f16 WMMA peak: 40 CU * 512 FLOP/clk * 2.9 GHz
 
 
 # 25 shapes: vary head_size, seqlen, batch, heads, GQA, causal.

@@ -179,13 +179,13 @@ static int wgrad_arch_num_cus(const char* arch)
         const char* gfx;
         int num_cus;
     } table[] = {
-        {"gfx942", 304}, /* MI300X: 8 XCDs * 38 CUs */
-        {"gfx950", 256}, /* MI350X: 8 XCDs * 32 CUs */
+        {"gfx942", 304}, /* the 304-CU part: 8 XCDs * 38 CUs */
+        {"gfx950", 256}, /* 8 XCDs * 32 CUs */
         {"gfx1151", 64}, /* RDNA gfx1151 (WMMA) */
-        {"gfx1201", 64}, /* RDNA4 Navi48 */
-        {"gfx1200", 32}, /* RDNA4 Navi44 */
+        {"gfx1201", 64}, /* RDNA4 */
+        {"gfx1200", 32}, /* RDNA4 */
         {"gfx12-generic", 64}, /* one binary for gfx1200/gfx1201: the larger part */
-        {"gfx1100", 96}, /* RDNA3 Navi31 */
+        {"gfx1100", 96}, /* RDNA3 */
         {"gfx11-generic", 96}, /* one binary for gfx1100-gfx1153: the largest part */
     };
     if(arch != NULL)
@@ -2691,8 +2691,9 @@ static rocke_value_t* wgrad_dw_addr(rocke_ir_builder_t* b,
     return off;
 }
 
-/* Pointwise dW addr: flat offset = k_out * wg_N + n_wg, always valid.
- * Python: def dw_addr(b_, m_val, n_val): return b_.add(b_.mul(m_val, _c_N), n_val), 1 */
+/* Pointwise dW addr: flat offset = k_out * wg_N + n_wg, with no validity
+ * predicate (NULL) beyond the store bounds.
+ * Python: def dw_addr(b_, m_val, n_val): return b_.add(b_.mul(m_val, _c_N), n_val), None */
 static rocke_value_t* wgrad_dw_addr_pointwise(rocke_ir_builder_t* b,
                                               rocke_value_t* m_global,
                                               rocke_value_t* n_global,
@@ -2702,7 +2703,7 @@ static rocke_value_t* wgrad_dw_addr_pointwise(rocke_ir_builder_t* b,
     rocke_value_t* c_N = (rocke_value_t*)user;
     rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_global, c_N), n_global);
     if(out_valid)
-        *out_valid = rocke_b_const_i32(b, 1);
+        *out_valid = NULL;
     return off;
 }
 

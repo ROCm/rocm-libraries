@@ -61,6 +61,7 @@ extern "C" {
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/rocke_build_id.h"
+#include "rocke/strbuf.h"
 #include "rocke/verify.h"
 /* ---- norm / elementwise / tensor-op families ---- */
 #include "rocke/instance_add_rmsnorm2d_bf16.h"
@@ -80,11 +81,7 @@ extern "C" {
 #include "rocke/instance_moe_smoothquant.h"
 #include "rocke/instance_moe_sorting.h"
 #include "rocke/instance_topk_softmax.h"
-/* NOTE: instance_moe_gemm_fused.h is intentionally NOT included here. It pulls
- * in helper_rocke.helpers.tensor_view.h, whose struct rocke_tensor_descriptor
- * collides (same tag, different definition) with the copy in
- * helper_rocke.helpers.transforms.h that the WMMA-FMHA / fmha attention headers
- * pull in. The moe_gemm_fused family is bound in its own translation unit
+/* The moe_gemm_fused family is bound from its own translation unit
  * (rocke_engine_moe_gemm_fused.cpp) and registered via register_moe_gemm_fused(). */
 /* ---- RDNA WMMA families ---- */
 #include "rocke/instance_gfx1151_wmma_fmha_decode.h"
@@ -111,15 +108,12 @@ void register_attention(py::module_& m);
  * dedicated translation unit (rocke_engine_fmha_extra.cpp). */
 void register_fmha_extra(py::module_& m);
 
-/* The fused-MoE end-to-end orchestrator (fused_moe_e2e). A separate TU: its
- * internal header drags in the moe_gemm_fused / tensor_view headers whose
- * rocke_tensor_descriptor tag clashes with the FMHA common header's transforms.h.
- * It is a host-launch multi-kernel orchestrator, bound as a concatenated
- * multi-stage lower (see rocke_engine_fused_moe_e2e.cpp). */
+/* The fused-MoE end-to-end orchestrator (fused_moe_e2e). It is a host-launch
+ * multi-kernel orchestrator, bound as a concatenated multi-stage lower (see
+ * rocke_engine_fused_moe_e2e.cpp). */
 void register_fused_moe_e2e(py::module_& m);
 
-/* Defined in rocke_engine_moe_gemm_fused.cpp (separate TU; see the tensor_view /
- * transforms rocke_tensor_descriptor tag clash note above). */
+/* Defined in rocke_engine_moe_gemm_fused.cpp. */
 void register_moe_gemm_fused(py::module_& m);
 
 namespace
@@ -129,6 +123,7 @@ namespace
  * shared with the library module (family_glue.hpp). */
 using rocke_bind::dict_bool;
 using rocke_bind::dict_int;
+using rocke_bind::dict_spec_flag;
 using rocke_bind::dict_str;
 using rocke_bind::serialize_kernel;
 using rocke_bind::take_lowered;
@@ -2688,8 +2683,8 @@ rocke_wmma_fmha_fwd_v2_spec_t w1151fmha_v2_build_spec(const py::dict& d,
     s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
     s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
-    s.dense_q = dict_bool(d, "dense_q", s.dense_q);
-    s.seqused_q = dict_bool(d, "seqused_q", s.seqused_q);
+    s.dense_q = dict_spec_flag(d, "WmmaFmhaFwdV2Spec", "dense_q", s.dense_q);
+    s.seqused_q = dict_spec_flag(d, "WmmaFmhaFwdV2Spec", "seqused_q", s.seqused_q);
     if(d.contains("wave_pair") && !d["wave_pair"].is_none())
         s.wave_pair = d["wave_pair"].cast<bool>() ? 1 : 0;
     {
@@ -2958,14 +2953,13 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
 /* --------------------------------------------------------------------------
  * Family-agnostic lower-from-serialized-IR.
  *
- * lower_serialized_ir(ir_text, arch) parses serialized ck.dsl.ir/v1 text back
- * into a kernel (rocke_ir_parse) and lowers it to AMDGPU LLVM IR text
- * (rocke_lower_kernel_to_llvm_ex), exactly as tests/ir_lower_cli.cpp does. This
- * is the engine-side endpoint the ROCKE_BACKEND=cpp default uses: a Python
- * front end serializes whatever KernelDef it built (any family) and this
- * reproduces the .ll the C++ engine would emit, with no per-family C builder
- * involved. Every failure (parse or lower) is converted to a Python exception;
- * the engine's extern "C" boundary never aborts/terminates.
+ * lower_serialized_ir(ir_text, arch) and lower_serialized_ir_hip(ir_text, arch)
+ * hand serialized ck.dsl.ir/v1 text to the engine's serialized-IR entries,
+ * rocke_lower_serialized_ir_to_llvm and rocke_lower_serialized_ir_to_hip_text,
+ * which parse and lower it; the ctypes transport rocke.core.native_engine calls
+ * the same two entries. These bindings add only Python's argument checks, its
+ * flavor resolution and the conversion of a refusal to a Python exception; the
+ * engine's extern "C" boundary never aborts/terminates.
  * ------------------------------------------------------------------------ */
 
 /* Canonical concrete flavor names -- built from the engine's ladder so
@@ -2983,55 +2977,65 @@ static std::string rocke_engine_flavor_list()
     return out;
 }
 
-/* Parse serialized ck.dsl.ir/v1 text into a kernel owned by `b`, which the
- * caller has zero-initialised and frees. `entry` names the binding in the
- * error messages. Throws std::runtime_error on any failure. */
-static const rocke_kernel_def_t*
-    parse_serialized_ir(const std::string& ir_text, const char* entry, rocke_ir_builder_t* b)
+/* Refuse an empty target in the binding: the engine's own refusal names no
+ * Python argument. Shared by both serialized-IR bindings. The text after the
+ * prefix is ROCKE_BINDING_NO_TARGET_MESSAGE (family_glue.hpp), the Python
+ * entries' refusal. */
+static void require_serialized_ir_arch(const std::string& arch, const char* entry)
 {
-    const std::string prefix = std::string("rocke_engine.") + entry + ": ";
-    if(ir_text.empty())
+    if(arch.empty())
     {
-        throw std::runtime_error(prefix + "empty IR input");
+        throw std::runtime_error(std::string("rocke_engine.") + entry + ": "
+                                 + ROCKE_BINDING_NO_TARGET_MESSAGE);
     }
-    if(rocke_ir_builder_init(b, entry) != ROCKE_OK)
+}
+
+using owned_text = std::unique_ptr<char, decltype(&rocke_text_free)>;
+
+/* The text a serialized-IR entry returned in `text`, or its refusal as a
+ * Python exception: ArchDomainError for an arch-domain refusal, otherwise a
+ * RuntimeError "rocke_engine.<entry>: lower failed for arch '<gfx>' (status
+ * <rocke_status_t>): <reason>". ROCKE_OK without text breaks the entry's
+ * contract and is a RuntimeError too. Takes ownership of both strings. */
+static std::string take_serialized_ir_result(
+    rocke_status_t status, char* text, char* message, const char* entry, const std::string& arch)
+{
+    owned_text owned_result(text, rocke_text_free);
+    owned_text owned_message(message, rocke_text_free);
+    if(status == ROCKE_OK)
     {
-        throw std::runtime_error(prefix + "builder init failed (OOM)");
+        if(text == nullptr)
+        {
+            throw std::runtime_error(std::string("rocke_engine.") + entry
+                                     + ": the engine reported success but returned no text");
+        }
+        return std::string(text);
     }
-    rocke_kernel_def_t* kernel = nullptr;
-    const rocke_status_t st = rocke_ir_parse(ir_text.c_str(), b, &kernel);
-    if(st != ROCKE_OK || !kernel)
-    {
-        const char* m = rocke_ir_builder_error(b);
-        throw std::runtime_error(prefix + "parse failed (status " + std::to_string((int)st)
-                                 + "): " + ((m && *m) ? m : "unknown parse error"));
-    }
-    return kernel;
+    const char* reason = message ? message : "the engine could not allocate its message";
+    throw_if_arch_domain(status, reason);
+    throw std::runtime_error(std::string("rocke_engine.") + entry + ": lower failed for arch '"
+                             + arch + "' (status " + std::to_string((int)status) + "): " + reason);
 }
 
 std::string lower_serialized_ir(const std::string& ir_text,
                                 const std::string& arch,
                                 const std::string& flavor)
 {
-    /* No empty-string fallback to gfx950: the target is required on both
-     * engines or on neither. The core resolver's NULL check does not cover
-     * this -- an empty std::string is not NULL by the time it gets there.
-     * An empty IR text is refused by parse_serialized_ir. */
-    if(arch.empty())
-    {
-        throw std::runtime_error("rocke_engine.lower_serialized_ir: lowering requires an "
-                                 "explicit gfx target; pass arch=... (there is no default)");
-    }
-    const char* a = arch.c_str();
+    require_serialized_ir_arch(arch, "lower_serialized_ir");
 
-    /* flavor: "" => Python AUTO (env override or loaded compiler); a named flavor
-     * pins the intrinsic declaration shape. An unrecognised non-empty flavor
+    /* flavor: "" => Python AUTO (env override or loaded compiler), resolved
+     * here, before the text is parsed; a named flavor pins the intrinsic
+     * declaration shape and needs no compiler. An unrecognised non-empty flavor
      * is rejected so callers get the same hard error the Python lowerer
      * raises. The accepted set is read from the engine's ladder rather than
      * restated here -- a hand-written list is what goes stale when a flavor is
      * added. */
     rocke_llvm_flavor_t fl = ROCKE_LLVM_FLAVOR_AUTO;
-    if(!flavor.empty())
+    if(flavor.empty())
+    {
+        fl = resolve_python_llvm_flavor();
+    }
+    else
     {
         fl = rocke_llvm_flavor_from_name(flavor.c_str());
         if(fl == ROCKE_LLVM_FLAVOR_AUTO)
@@ -3042,75 +3046,26 @@ std::string lower_serialized_ir(const std::string& ir_text,
         }
     }
 
-    rocke_ir_builder_t b = {};
-    std::unique_ptr<rocke_ir_builder_t, decltype(&rocke_ir_builder_free)> builder(
-        &b, rocke_ir_builder_free);
-    const rocke_kernel_def_t* kernel = parse_serialized_ir(ir_text, "lower_serialized_ir", &b);
-
-    if(fl == ROCKE_LLVM_FLAVOR_AUTO)
-        fl = resolve_python_llvm_flavor();
-
-    char* out_ll = nullptr;
-    char err[ROCKE_ERR_MSG_CAP];
-    err[0] = '\0';
-    const rocke_status_t st
-        = rocke_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
-    std::unique_ptr<char, decltype(&std::free)> text(out_ll, std::free);
-    /* The builder and `text` are owned, so the refusal can unwind without
-     * freeing by hand (a manual free here would run twice). */
-    if(st == ROCKE_ERR_ARCH_DOMAIN)
-    {
-        throw_if_arch_domain(st, err);
-    }
-    if(st != ROCKE_OK || !out_ll)
-    {
-        std::string msg = std::string("rocke_engine.lower_serialized_ir: lower failed for arch '")
-                          + a + "' (status " + std::to_string((int)st)
-                          + "): " + (err[0] ? err : "unknown lowering error");
-        throw std::runtime_error(msg);
-    }
-
-    return std::string(text.get());
+    char* text = nullptr;
+    char* message = nullptr;
+    const rocke_status_t status
+        = rocke_lower_serialized_ir_to_llvm(ir_text.c_str(), arch.c_str(), fl, &text, &message);
+    return take_serialized_ir_result(status, text, message, "lower_serialized_ir", arch);
 }
 
 /* lower_serialized_ir_hip(ir_text, arch): the HIP-source twin of
- * lower_serialized_ir -- parse, then rocke_lower_kernel_to_hip with its
- * defaults (prologue included, launch bounds from the kernel). Lets a test
- * compare the C++ HIP lowering of a Python-built kernel, and its refusals,
- * with rocke.core.lower_hip.lower_kernel_to_hip. */
+ * lower_serialized_ir, with the HIP lowering's defaults (prologue included,
+ * launch bounds from the kernel). Lets a test compare the C++ HIP lowering of a
+ * Python-built kernel, and its refusals, with
+ * rocke.core.lower_hip.lower_kernel_to_hip. */
 std::string lower_serialized_ir_hip(const std::string& ir_text, const std::string& arch)
 {
-    /* The target is required, as for lower_serialized_ir. */
-    if(arch.empty())
-    {
-        throw std::runtime_error("rocke_engine.lower_serialized_ir_hip: lowering requires an "
-                                 "explicit gfx target; pass arch=... (there is no default)");
-    }
-    const char* a = arch.c_str();
-    rocke_ir_builder_t b = {};
-    std::unique_ptr<rocke_ir_builder_t, decltype(&rocke_ir_builder_free)> builder(
-        &b, rocke_ir_builder_free);
-    const rocke_kernel_def_t* kernel = parse_serialized_ir(ir_text, "lower_serialized_ir_hip", &b);
-
-    rocke_strbuf_t text;
-    if(rocke_strbuf_init(&text, 0) != 0)
-    {
-        throw std::runtime_error("rocke_engine.lower_serialized_ir_hip: output allocation failed");
-    }
-    std::unique_ptr<rocke_strbuf_t, decltype(&rocke_strbuf_free)> owned_text(&text,
-                                                                             rocke_strbuf_free);
-    rocke_lower_hip_opts_t opts = {};
-    opts.arch = a;
-    const rocke_status_t st = rocke_lower_kernel_to_hip(&b, kernel, &opts, &text);
-    if(st != ROCKE_OK)
-    {
-        const char* m = rocke_ir_builder_error(&b);
-        throw std::runtime_error(std::string("rocke_engine.lower_serialized_ir_hip: lower failed "
-                                             "for arch '")
-                                 + a + "' (status " + std::to_string((int)st)
-                                 + "): " + ((m && *m) ? m : "unknown lowering error"));
-    }
-    return std::string(rocke_strbuf_cstr(&text));
+    require_serialized_ir_arch(arch, "lower_serialized_ir_hip");
+    char* text = nullptr;
+    char* message = nullptr;
+    const rocke_status_t status
+        = rocke_lower_serialized_ir_to_hip_text(ir_text.c_str(), arch.c_str(), &text, &message);
+    return take_serialized_ir_result(status, text, message, "lower_serialized_ir_hip", arch);
 }
 
 } // namespace
@@ -3144,9 +3099,9 @@ PYBIND11_MODULE(rocke_engine, m)
 
     m.def(
         "f64_mma_probe_serialize_ir",
-        [](int m, int k) {
+        [](int m, int k, const std::string& arch) {
             rocke_ir_builder_t b;
-            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k);
+            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k, require_arch(arch));
             char* text = nullptr;
             rocke_status_t status
                 = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
@@ -3158,8 +3113,9 @@ PYBIND11_MODULE(rocke_engine, m)
                 throw std::runtime_error(error);
             return result;
         },
-        py::arg("m") = 16,
-        py::arg("k") = 4);
+        py::arg("m"),
+        py::arg("k"),
+        py::arg("arch"));
 
     m.def(
         "tf32_mma_probe_serialize_ir",

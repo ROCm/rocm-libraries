@@ -16,7 +16,7 @@ from dataclasses import asdict
 from itertools import product
 
 import numpy as np
-
+import pytest
 from dispatch.gdn import (
     GDN_REGISTRY,
     GdnDecodeRequest,
@@ -41,6 +41,7 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
 )
 from rocke.dispatch.core import PinRefused
+from rocke.tests.bool_flags import bool_flag_reason
 
 _TILE = lambda s: (s.num_warps, s.warp_threads_k, s.blocks_per_v_dim)  # noqa: E731
 
@@ -162,6 +163,7 @@ class TestStaticSelection(unittest.TestCase):
                 self.assertEqual(f16.spec.tuning_id, bf16.spec.tuning_id)
                 self.assertEqual(f16.spec.kernel_spec.state_dtype, "f16")
 
+    @pytest.mark.rocke_shard_cost(3)
     def test_every_case_runs_its_tile_and_knobs_at_every_batch(self):
         # Sharded-head deployments see head counts other than the default
         # geometry, so cover them; fuse_conv needs Hk == Hv.
@@ -251,6 +253,7 @@ class TestStaticSelection(unittest.TestCase):
                 self.assertEqual(pinned.spec.knobs, ())
                 self.assertNotEqual(pinned.spec, dispatch_gdn_decode(req).spec)
 
+    @pytest.mark.rocke_shard_cost(7)
     def test_auto_is_the_case_stack_or_the_documented_fallback(self):
         """Over a broad request domain: where the case's tile is legal, auto
         runs it with the case's stack (the validator never refuses a stack;
@@ -425,7 +428,7 @@ class TestMalformedRequestFields(unittest.TestCase):
                 with self.subTest(value=value, gate_kind=gate_kind):
                     self._assert_rejected(
                         "use_qk_l2norm",
-                        "must be a bool",
+                        bool_flag_reason("use_qk_l2norm", value),
                         use_qk_l2norm=value,
                         gate_kind=gate_kind,
                         num_k_heads=32,
@@ -938,10 +941,7 @@ class TestRequestFieldTypes(unittest.TestCase):
                 with self.subTest(field=field, value=bad):
                     req = _fused_req(**{field: bad})
                     errors = request_errors(req)
-                    self.assertTrue(
-                        any(e.startswith(f"{field} must be a bool") for e in errors),
-                        errors,
-                    )
+                    self.assertIn(bool_flag_reason(field, bad), errors)
                     with self.assertRaises(ValueError):
                         dispatch_gdn_decode(req)
                     self.assertEqual(dispatch_gdn_decode_all(req), ())
@@ -1020,10 +1020,6 @@ class TestNumpyIntegralFields(unittest.TestCase):
             self.assertIs(type(value), int)
 
     def test_np_bool_flag_is_not_a_bool(self):
-        req = _fused_req(use_qk_l2norm=np.bool_(True))
-        self.assertTrue(
-            any(
-                e.startswith("use_qk_l2norm must be a bool")
-                for e in request_errors(req)
-            )
-        )
+        flag = np.bool_(True)
+        req = _fused_req(use_qk_l2norm=flag)
+        self.assertIn(bool_flag_reason("use_qk_l2norm", flag), request_errors(req))

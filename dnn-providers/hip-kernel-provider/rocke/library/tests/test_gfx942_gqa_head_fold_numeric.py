@@ -12,66 +12,43 @@ cannot: that the folded kernel still computes the *right numbers*.
 
 A spec/emit test cannot catch a numeric regression in the emitted kernel -- that
 is exactly what let #9198 (the D128 ring slot-reuse bug) ship. The guardrail below
-launches the production kernel at unit-variance (randn) magnitude -- NOT the
-uniform_(-0.1, 0.1) range whose near-uniform softmax hides such bugs -- and asserts
-max_abs against an fp32 windowed paged-attention oracle. If a future edit flips the
+launches the production kernel on ``rocke.runtime`` device arrays at
+unit-variance (randn) magnitude -- NOT the uniform_(-0.1, 0.1) range whose
+near-uniform softmax hides such bugs -- and asserts max_abs against an FP64 numpy
+windowed paged-attention oracle. If a future edit flips the
 (token, head) packing, gets the folded head index or grid wrong, or drops the
 window mask, this fails.
 """
 
 from __future__ import annotations
 
-import importlib.util
+import math
 import re
-import sys
-from pathlib import Path
 
+import numpy as np
 import pytest
+from rocke.core.storage import element_bytes
+from rocke.tests.gpu import current_device_arch_in, skip_without_device_memory
 
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
 
-
-def _load_windowed_harness():
-    """Load the gfx950 prefill parity harness (its ``ref_paged_attn`` supports
-    sliding windows and ``make_inputs`` builds randn paged K/V). The reference is
-    pure torch (device-agnostic); only the rocke kernel it launches is arch-
-    specific, and on a gfx942 device the production dispatcher selects the fold.
-    """
-    here = Path(__file__).resolve()
-    # rocke/library/tests -> rocke/library/builders/gfx950/attention/prefill
-    harness = (
-        here.parents[1]
-        / "builders/gfx950/attention/prefill/parity_unified_attention.py"
-    )
-    if not harness.exists():
-        return None
-    spec = importlib.util.spec_from_file_location(
-        "parity_unified_attention_win", harness
-    )
-    mod = importlib.util.module_from_spec(spec)
-    # Register before exec so dataclasses in the harness can resolve __module__.
-    sys.modules["parity_unified_attention_win"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _gpu_ready():
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    # gcnArchName exists only on ROCm builds of torch.
-    if not torch.cuda.is_available() or torch.version.hip is None:
-        return False
-    # Gate on ``gcnArchName`` (the ISA target), not the marketing name, which
-    # varies across gfx942 parts.
-    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
-
-requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
+from ._attention_tiled_launch import launch_unified
+from ._attention_unified_support import (
+    chunked_paged_reference,
+    random_half,
+    sparse_paged_cache,
 )
+
+
+@pytest.fixture
+def gfx942_device():
+    current_device_arch_in(("gfx942",), "the gfx942 head-fold numeric guardrail")
+
+
+# The production cache size the guardrail has always launched on: at block size
+# 32 it reaches 2^31 bytes, which takes the i64 K/V path.
+_NUM_BLOCKS = 32768
 
 
 def _fold_problem(dtype="bf16", sq=4096, hq=32, hk=8, d=128, bs=32, window=4096):
@@ -131,13 +108,20 @@ def test_numeric_cohort_routes_to_fold(gfx942, bs):
 # ---------------------------------------------------------------------------
 
 
-@requires_gfx942_gpu
+# Its K and V caches take 2 to 4 GiB of the device, so it runs with no other
+# test process on the device (rocke.tests.ctest_workers).
+@pytest.mark.rocke_run_alone
 @pytest.mark.parametrize("bs", [16, 32])
-@pytest.mark.parametrize("sq,window", [(2048, 512), (8192, 4096)])
+# The S=8192 cases run a long FP64 host reference: rough gfx942 CI seconds, so
+# the CI shards and their workers share them (rocke.tests.ctest_shard).
+@pytest.mark.parametrize(
+    "sq,window",
+    [(2048, 512), pytest.param(8192, 4096, marks=pytest.mark.rocke_shard_cost(10))],
+)
 @pytest.mark.parametrize("hq,hk", [(32, 8)])
-def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window, bs):
+def test_fold_numeric_vs_fp32_windowed_oracle(gfx942_device, sq, hq, hk, window, bs):
     """Launch the production fold kernel at randn magnitude and assert max_abs
-    against the fp32 windowed paged-attn oracle.
+    against the FP64 windowed paged-attn oracle.
 
     The window is deliberately < seqlen so keys older than ``window`` are
     actually clipped -- a window >= kv_len degenerates to full causal and would
@@ -152,28 +136,35 @@ def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window, bs):
     bs=16 walks two -- a different gather, and a stride/index error in the
     second entry is invisible at bs=32.
     """
-    import torch
-
     assert window < sq, "window must be < seqlen to exercise SWA masking"
 
-    H = _load_windowed_harness()
-    if H is None:
-        pytest.skip("windowed parity harness not present in this checkout")
-
-    s = H.Scenario(
-        name=f"d128swa_fold_{hq}_{hk}_S{sq}_w{window}_bs{bs}",
-        seq_lens=[(sq, sq)],
-        num_query_heads=hq,
-        num_kv_heads=hk,
-        head_size=128,
-        block_size=bs,  # fold requires block_size <= 32
-        dtype=torch.bfloat16,
-        sliding_window=window,
+    shape = (_NUM_BLOCKS, bs, hk, 128)
+    skip_without_device_memory(
+        2 * math.prod(shape) * element_bytes("bf16"),
+        "the gfx942 head-fold guardrail's K and V caches",
     )
-    data = H.make_inputs(s, seed=0)
-    ref = H.run_reference(s, data)
-    out, _ = H.run_unified("rocke", s, data)
-    m = H.compare(ref, out)
+    rng = np.random.default_rng(0)
+    pages = -(-sq // bs)
+    # The sequence's pages are scattered over the whole cache; the rest of the
+    # cache holds filler a misaddressed read would pick up.
+    page_ids = rng.choice(_NUM_BLOCKS, size=pages, replace=False).astype(np.int32)
+    used_k, used_v = (random_half(rng, (pages, *shape[1:]), "bf16") for _ in "kv")
+    query = random_half(rng, (sq, hq, 128), "bf16")
+    scale = 128**-0.5
+    out = launch_unified(
+        _fold_problem(sq=sq, hq=hq, hk=hk, bs=bs, window=window),
+        query,
+        sparse_paged_cache(rng, shape, page_ids, used_k, "bf16"),
+        sparse_paged_cache(rng, shape, page_ids, used_v, "bf16"),
+        page_ids.reshape(1, pages),
+        scale,
+        q_lens=[sq],
+        kv_lens=[sq],
+    )
+    ref = chunked_paged_reference(
+        query, used_k, used_v, sq, np.arange(pages), scale, sliding_window=window
+    )
+    max_abs = float(np.abs(ref - out).max())
     # 4e-2 is the repo-wide bf16 attention gate (ALGORITHM.md §10, the gfx942
     # attention README, parity_unified_attention.py, both dense numeric tests).
     # The fold repacks which M-tile row holds which (token, head) pair; it does
@@ -185,9 +176,9 @@ def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window, bs):
     # ulp for outputs in [2, 4), so the residual is the bf16 rounding of the
     # stored output, not accumulation drift. There is no mechanism here that
     # would need the 6e-2 this file originally asserted.
-    assert m["max_abs"] <= 4e-2, (
+    assert max_abs <= 4e-2, (
         f"fold D128 SWA {hq}/{hk} S{sq} w{window} bs{bs}: max_abs "
-        f"{m['max_abs']:.4f} > 4e-2 (fold numeric regression?)"
+        f"{max_abs:.4f} > 4e-2 (fold numeric regression?)"
     )
 
 

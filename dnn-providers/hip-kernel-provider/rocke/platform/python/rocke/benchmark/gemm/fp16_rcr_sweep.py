@@ -3,7 +3,7 @@
 
 """Dispatcher-backed FP16 RCR GEMM sweep harness.
 
-The flow follows ``dsl_docs/development/rocke_dispatcher_design.md``:
+The flow follows the dispatcher design in ``rocke/dispatch/ARCHITECTURE.md``:
 
 1. expand a bounded variant set from registered dispatcher candidates;
 2. normalize each variant into a dispatcher ``KernelId``;

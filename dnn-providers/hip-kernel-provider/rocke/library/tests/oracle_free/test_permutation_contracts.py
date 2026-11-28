@@ -1192,8 +1192,8 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
         (
             # The normalizer sums the cast weight instead of the uncast one.
             _substitute_once(
-                r"(%fadd\d+) = fadd float (%fadd\d+), (%exp2f\d+)\n"
-                r"(\s+)(%cast\d+) = fptrunc float \3 to half\n",
+                r"(%fadd_\d+) = fadd float (%fadd_\d+), (%exp2f_\d+)\n"
+                r"(\s+)(%cast_\d+) = fptrunc float \3 to half\n",
                 r"\5 = fptrunc float \3 to half\n"
                 r"\4%recast = fpext half \5 to float\n"
                 r"\4\1 = fadd float \2, %recast\n",
@@ -1203,7 +1203,7 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
         (
             # A score is masked after the scale.
             _substitute_once(
-                r"(%fsub\d+) = fsub float (%fmul\d+), (%fmax\d+)\n",
+                r"(%fsub_\d+) = fsub float (%fmul_\d+), (%fmax_\d+)\n",
                 rf"%masked = select i1 true, float \2, float {_F32_INITIAL_MAX}\n"
                 r"  \1 = fsub float %masked, \3\n",
             ),
@@ -1250,7 +1250,7 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
     loaded = re.search(r"(%[-\w.]+) = load <4 x half>, ptr addrspace\(1\)", ir)
     assert loaded, "no <4 x half> load from a global pointer in the lowered IR"
     return _substitute_once(
-        r"(<4 x half> %vp\d+, <4 x half> )%vp\d+(, <16 x float> )",
+        r"(<4 x half> %vp_\d+, <4 x half> )%vp_\d+(, <16 x float> )",
         rf"\g<1>{loaded.group(1)}\2",
     )(ir)
 
@@ -1278,8 +1278,8 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
         (
             # One probability enters an atom twice and its neighbour never.
             _substitute_once(
-                r"(insertelement <4 x half> undef, half (%cast\d+), i32 0\n"
-                r"\s+%[-\w.]+ = insertelement <4 x half> %[-\w.]+, half )%cast\d+"
+                r"(insertelement <4 x half> undef, half (%cast_\d+), i32 0\n"
+                r"\s+%[-\w.]+ = insertelement <4 x half> %[-\w.]+, half )%cast_\d+"
                 r"(, i32 1\n)",
                 r"\1\2\3",
             ),
@@ -1288,8 +1288,8 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
         (
             # A value chain skips its first atom.
             _substitute_once(
-                r"(%acc\d+)( = call <16 x float> @llvm\.amdgcn\.mfma[^\n]*"
-                r"<16 x float> (%vp\d+), i32 0, i32 0, i32 0\)\n(?:[^\n]*\n)*?"
+                r"(%acc_\d+)( = call <16 x float> @llvm\.amdgcn\.mfma[^\n]*"
+                r"<16 x float> (%vp_\d+), i32 0, i32 0, i32 0\)\n(?:[^\n]*\n)*?"
                 r"[^\n]*<16 x float> )\1(, i32 0, i32 0, i32 0\))",
                 r"\1\2\3\4",
             ),
@@ -1312,9 +1312,9 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
             # Slot 0 of a pack is written twice. The later write wins, so the
             # first probability never enters the atom.
             _substitute_once(
-                r"(%vpk\.\d+)( = insertelement <4 x half> undef, half %cast\d+, "
+                r"(%vpk\.\d+)( = insertelement <4 x half> undef, half %cast_\d+, "
                 r"i32 0\n)(\s+)(%vpk\.\d+ = insertelement <4 x half> )\1"
-                r"(, half (%cast\d+), i32 1\n)",
+                r"(, half (%cast_\d+), i32 1\n)",
                 r"\1\2\3%rewritten = insertelement <4 x half> \1, half \6, i32 0\n"
                 r"\3\4%rewritten\5",
             ),
@@ -1323,9 +1323,9 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
         (
             # A pack restarts from undef at slot 1, so slot 0 is never written.
             _substitute_once(
-                r"(insertelement <4 x half> undef, half %cast\d+, i32 0\n"
+                r"(insertelement <4 x half> undef, half %cast_\d+, i32 0\n"
                 r"\s+%vpk\.\d+ = insertelement <4 x half> )%vpk\.\d+"
-                r"(, half %cast\d+, i32 1\n)",
+                r"(, half %cast_\d+, i32 1\n)",
                 r"\1undef\2",
             ),
             "not four cast probabilities",

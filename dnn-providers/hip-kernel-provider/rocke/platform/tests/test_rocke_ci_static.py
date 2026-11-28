@@ -33,11 +33,16 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
     expand_sweep,
 )
 from rocke.core.arch import known_arches
-from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden_flavors, load_golden
+from rocke.core.golden_file import rerecord_hint
+from rocke.core.ir_golden import (
+    check_golden_flavors,
+    load_golden,
+)
 from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.fp_policy import fp_policy_violations
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
+    GOLDEN_NAME,
     cases,
-    check_golden,
     write_golden,
 )
 
@@ -134,6 +139,26 @@ class TestIrParityCoverage(unittest.TestCase):
         case_ids = [case["case_id"] for case in cases()]
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
+    def test_ir_cases_carry_no_floating_point_relaxation(self):
+        """rocKE's NaN, infinity and subnormal policy rests on the emitted IR
+        carrying no fast-math flags, no ``!fpmath`` metadata and no
+        floating-point mode attributes (``dsl_docs/numerics/README.md``,
+        "Shared rules"): with ``nnan`` or ``contract`` the compiler may drop
+        NaN checks or fuse a multiply-add, and ``denormal-fp-math`` would change
+        the subnormal mode. A golden re-bless would accept such a change
+        silently, so lower one case per (family, arch) and check it."""
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        lowered: set[tuple[str, str]] = set()
+        for case in cases():
+            family, arch = case["family"], case["arch"]
+            if (family, arch) in lowered:
+                continue
+            lowered.add((family, arch))
+            with self.subTest(family=family, arch=arch):
+                llvm = lower_kernel_to_llvm(case["build"](), arch=arch)
+                self.assertEqual(fp_policy_violations(llvm), [])
+
     def test_nvfp4_variants_are_registered_and_lowerable(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
@@ -162,15 +187,9 @@ class TestIrParityCoverage(unittest.TestCase):
                             )
 
 
-# The representative-IR byte-stability gate, split so each LLVM flavor is its own
-# test: lowering every case at every flavor in one test came close to the
-# per-test timeout. Together these check exactly what one all-flavor
-# check_golden call does -- the golden's flavor documents once, then every case
-# at every flavor in GOLDEN_FLAVORS (every lane rocke qualifies, not just the
-# one this host autodetects). A drift means emitted IR changed -- if intended
-# and reviewed, re-bless the changed families' shards with:
-#   python tests/instances/rocke_ir_parity_harness.py \
-#     --write tests/golden/rocke_representative_ir_sha256 --only <family>
+# Every case at every LLVM flavor rocke qualifies is checked against the
+# representative golden by rocke_golden_static (rocke_installed_golden_test.py).
+# This module checks only that the golden holds the right flavor documents.
 
 
 def test_golden_holds_every_llvm_flavor():
@@ -178,16 +197,12 @@ def test_golden_holds_every_llvm_flavor():
     for a flavor rocke no longer qualifies."""
     assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
     errors = check_golden_flavors(_GOLDEN)
-    assert errors == [], "golden flavor set is wrong:\n  " + "\n  ".join(errors)
-
-
-@pytest.mark.parametrize("flavor", GOLDEN_FLAVORS)
-def test_ir_cases_match_golden_sha256(flavor):
-    """Every case's lowered-IR sha256 (and the set of expected failures) at
-    ``flavor`` matches the committed golden."""
-    assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
-    drift = check_golden(_GOLDEN, flavor)
-    assert drift == [], f"IR drift vs golden at {flavor}:\n  " + "\n  ".join(drift)
+    assert errors == [], (
+        "golden flavor set is wrong:\n  "
+        + "\n  ".join(errors)
+        + "\n"
+        + rerecord_hint(GOLDEN_NAME)
+    )
 
 
 class TestGoldenShardWriter(unittest.TestCase):

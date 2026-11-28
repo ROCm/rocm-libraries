@@ -24,6 +24,7 @@ try:
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
+from _emit_common import MODES, hip_case
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
@@ -388,12 +389,12 @@ def _specs():
 def main() -> int:
     if len(sys.argv) < 2:
         sys.stderr.write(
-            "usage: batched_gemm_stress_emit.py <config_index> [ll|ir|verify]\n"
+            "usage: batched_gemm_stress_emit.py <config_index> [ll|ir|verify|hip-case]\n"
         )
         return 2
     idx = int(sys.argv[1])
     mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
+    if mode not in MODES:
         sys.stderr.write(f"unknown mode {mode}\n")
         return 2
     specs = _specs()
@@ -407,6 +408,8 @@ def main() -> int:
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))
+    elif mode == "hip-case":
+        sys.stdout.write(hip_case(kernel, "gfx950"))
     else:  # verify
         sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     return 0

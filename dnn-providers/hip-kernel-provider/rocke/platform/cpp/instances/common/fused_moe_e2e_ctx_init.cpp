@@ -118,7 +118,7 @@ rocke_status_t rocke_fmoe_build_ctx_init(rocke_fmoe_build_ctx_t* ctx,
 
     /* ---- static-offset gate (line 818) ---- *
      * Enable static-offset mode when T*K*E is small enough that the fixed
-     * slot_size = T*K over-padding is cheap. Measured MI355X cutoff is 512. */
+     * slot_size = T*K over-padding is cheap. Measured gfx950 cutoff is 512. */
     ctx->use_static_offsets = (s.tokens * s.topk * s.experts) <= 512;
 
     /* ---- static slot_size (lines 825-830) ---- *

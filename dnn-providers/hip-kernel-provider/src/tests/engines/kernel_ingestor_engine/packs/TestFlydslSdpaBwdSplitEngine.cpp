@@ -34,6 +34,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdVerdictTable.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
 
 /**
  * @file TestFlydslSdpaBwdSplitEngine.cpp
@@ -1952,9 +1953,8 @@ KernelDefinition sourcesRow(const RowSpec& row,
                             = recordedSignature(tailzeroParams()))
 {
     auto kernel = makeRow(Slot::DQ, row);
-    const auto tree = std::filesystem::temp_directory_path().string();
-    kernel.originDirectory = tree;
-    kernel.treeRoot = tree;
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     KernelSource dq;
     dq.kind = KernelSourceKind::KPACK;
     dq.library = "there-is-no-archive-here.kpack";
@@ -2582,9 +2582,8 @@ KernelDefinition dkdvSourcesRow(const RowSpec& row,
                                 = recordedSignature(dkdvU2Params()))
 {
     auto kernel = makeRow(Slot::DKDV, row);
-    const auto tree = std::filesystem::temp_directory_path().string();
-    kernel.originDirectory = tree;
-    kernel.treeRoot = tree;
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     KernelSource dk;
     dk.kind = KernelSourceKind::KPACK;
     dk.library = "there-is-no-archive-here.kpack";

@@ -97,6 +97,12 @@ char* rocke_strbuf_detach(rocke_strbuf_t* sb);
 /* Free the underlying buffer and zero the builder. */
 void rocke_strbuf_free(rocke_strbuf_t* sb);
 
+/* Free text an engine entry point handed to its caller: a detached buffer, or
+ * a char** result documented as malloc'd. The same as free() in this library,
+ * for a caller that cannot reach this library's allocator, such as one calling
+ * through an FFI or linked against another C runtime. NULL is a no-op. */
+void rocke_text_free(char* text);
+
 #ifdef __cplusplus
 }
 #endif

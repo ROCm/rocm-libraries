@@ -7,6 +7,8 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
+from rocke.tests.bool_flags import bool_flag_refusal
+
 from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     WmmaFmhaFwdV2Spec,
     build_wmma_fmha_fwd_v2,
@@ -49,16 +51,19 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
         # The flags change the argument layout, so a truthy non-bool such as
         # "false" must not switch one on.
         paged = dict(layout="paged", page_block_size=16)
-        for fields in (
-            dict(dense_q="false"),
-            dict(dense_q=1),
-            dict(seqused_q="false"),
-            dict(seqused_q=0),
+        for flag, value in (
+            ("dense_q", "false"),
+            ("dense_q", 1),
+            ("seqused_q", "false"),
+            ("seqused_q", 0),
         ):
-            with self.subTest(**fields), self.assertRaisesRegex(
-                TypeError, "must be a bool"
-            ):
-                WmmaFmhaFwdV2Spec(**paged, **fields)
+            with self.subTest(flag=flag, value=value):
+                with self.assertRaises(ValueError) as refusal:
+                    WmmaFmhaFwdV2Spec(**paged, **{flag: value})
+                self.assertEqual(
+                    str(refusal.exception),
+                    bool_flag_refusal(flag, value, what="WmmaFmhaFwdV2Spec"),
+                )
 
     def test_derived_geometry(self):
         spec = WmmaFmhaFwdV2Spec(head_dim=128)

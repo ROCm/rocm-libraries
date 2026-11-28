@@ -17,7 +17,6 @@ import inspect
 import itertools
 
 import pytest
-
 from kernels.common.attention_bwd import (
     AGPR_ALLOCS,
     ATTN_BWD_ABI,
@@ -29,9 +28,9 @@ from kernels.common.attention_bwd import (
     LOOP_SYNCS,
     NOT_YET_EFFECTIVE_KNOBS,
     STEP_ORDERS,
+    AttnBwdSpec,
     _not_built,
     agpr_copy_budget,
-    AttnBwdSpec,
     attn_bwd_arch_facts,
     attn_bwd_default_geometry,
     attn_bwd_params,
@@ -42,6 +41,7 @@ from kernels.common.attention_bwd import (
     register_estimates,
     validate_attn_bwd_spec,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 
 
 def _structural(spec, arch):
@@ -630,6 +630,22 @@ def _issue_tokens(ir: str) -> str:
     return "".join(out)
 
 
+@pytest.mark.parametrize(
+    "field", ["setprio", "edge_tiles", "head_pack", "acc_in_lds", "s_in_agpr"]
+)
+def test_optional_flags_take_a_bool_or_none(field):
+    """These flags are unset (None) until a resolver picks them; a set value is
+    a bool, never a truthy stand-in."""
+    for value in (None, True, False):
+        AttnBwdSpec(head_size=64, **{field: value})
+    for bad in (1, "yes"):
+        with pytest.raises(ValueError) as refusal:
+            AttnBwdSpec(head_size=64, **{field: bad})
+        assert str(refusal.value) == bool_flag_refusal(
+            field, bad, what="AttnBwdSpec", allow_none=True
+        )
+
+
 def test_asm_load_hoist_knob_values_and_couplings():
     base = AttnBwdSpec(**_ASM)
     assert base.asm_load_hoist is False
@@ -639,8 +655,11 @@ def test_asm_load_hoist_knob_values_and_couplings():
         base.kernel_name()
     )
     for bad in (1, "yes", None):
-        with pytest.raises(ValueError, match="asm_load_hoist must be a bool"):
+        with pytest.raises(ValueError) as refusal:
             AttnBwdSpec(**_ASM, asm_load_hoist=bad)
+        assert str(refusal.value) == bool_flag_refusal(
+            "asm_load_hoist", bad, what="AttnBwdSpec"
+        )
     for route in (None, "vgpr_form", "agpr_fence"):
         with pytest.raises(ValueError, match="asm_load_hoist is legal"):
             AttnBwdSpec(**dict(_ASM, agpr_route=route), asm_load_hoist=True)

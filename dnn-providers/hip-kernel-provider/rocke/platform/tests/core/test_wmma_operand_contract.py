@@ -26,8 +26,10 @@ from rocke.core.ir import (
     type_bits,
 )
 from rocke.core.ir_serialize import parse, serialize
+from rocke.core.isa.matrix_calls import MATRIX_CALLS
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.tests.engines import native_engine_or_skip
 
 # Explicit physical shapes: a change to the catalog must not change the oracle.
 CASES = [
@@ -140,11 +142,11 @@ def _assert_llvm_rejects(kernel, arch, flavor, error, engine):
                 error,
             )
         return
-    native = pytest.importorskip("rocke_engine")
+    native = native_engine_or_skip()
     with pytest.raises(RuntimeError) as caught:
         native.lower_serialized_ir(ir, arch=arch, flavor=flavor)
     assert str(caught.value) == (
-        f"rocke_engine.lower_serialized_ir: lower failed for arch '{arch}' "
+        f"rocke_lower_serialized_ir_to_llvm: lower failed for arch '{arch}' "
         f"(status 1): {error}"
     )
 
@@ -178,7 +180,7 @@ def _corrupt_arity(op, kind):
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
 @pytest.mark.parametrize("flavor", FLAVORS)
 def test_wmma_valid_llvm_bytes(case, flavor):
-    native = pytest.importorskip("rocke_engine")
+    native = native_engine_or_skip()
     kernel, _ = _kernel(case, use_result=True)
     ir = serialize(kernel)
     expected = _lower_kernel_to_llvm_python(kernel, arch=case[0], llvm_flavor=flavor)
@@ -194,7 +196,7 @@ def test_wmma_valid_llvm_bytes(case, flavor):
 @pytest.mark.parametrize("engine", ["python", "native"])
 def test_wmma_llvm_rejects_actual_types(case, flavor, engine, subtests):
     if engine == "native":
-        pytest.importorskip("rocke_engine")
+        native_engine_or_skip()
     # Keep subtest capture/reporting off the successful path.
     for role, kind in product(("src2", "dst"), (4, 7, 16, "scalar", "dtype")):
         try:
@@ -342,7 +344,7 @@ def test_wmma_rejects_non_integer_carrier_counts(
 @pytest.mark.parametrize("engine", ["python", "native"])
 def test_wmma_llvm_rejects_multiplicands(case, flavor, engine, subtests):
     if engine == "native":
-        pytest.importorskip("rocke_engine")
+        native_engine_or_skip()
     for role, kind in product((0, 1), ("scalar", "dtype", "short", "long")):
         try:
             kernel, op = _kernel(case)
@@ -438,13 +440,20 @@ _INTEGER_WMMA_CASES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "case", _INTEGER_WMMA_CASES, ids=[c[1] for c in _INTEGER_WMMA_CASES]
-)
-@pytest.mark.parametrize("flavor", [*FLAVORS, "llvm24"])
+# Each integer WMMA case with each flavor its call lowers at; the refusal below
+# that is pinned by tests/core/test_matrix_calls.py.
+_INTEGER_WMMA_FLAVOR_CASES = [
+    pytest.param(case, flavor, id=f"{flavor}-{case[1]}")
+    for case in _INTEGER_WMMA_CASES
+    for flavor in (*FLAVORS, "llvm24")
+    if MATRIX_CALLS[case[1]].lowers_at(flavor)
+]
+
+
+@pytest.mark.parametrize("case, flavor", _INTEGER_WMMA_FLAVOR_CASES)
 def test_integer_registry_preserves_valid_carriers_and_signedness(case, flavor):
     kernel, _ = _kernel(case, use_result=True)
-    native = pytest.importorskip("rocke_engine")
+    native = native_engine_or_skip()
     text = _lower_kernel_to_llvm_python(kernel, arch=case[0], llvm_flavor=flavor)
     assert (
         native.lower_serialized_ir(serialize(kernel), arch=case[0], flavor=flavor)
@@ -455,10 +464,7 @@ def test_integer_registry_preserves_valid_carriers_and_signedness(case, flavor):
         assert "bitcast <1 x i32>" in text
 
 
-@pytest.mark.parametrize(
-    "case", _INTEGER_WMMA_CASES, ids=[c[1] for c in _INTEGER_WMMA_CASES]
-)
-@pytest.mark.parametrize("flavor", [*FLAVORS, "llvm24"])
+@pytest.mark.parametrize("case, flavor", _INTEGER_WMMA_FLAVOR_CASES)
 @pytest.mark.parametrize("role", ["src2", "dst"])
 @pytest.mark.parametrize("engine", ["python", "native"])
 def test_integer_registry_preflights_fixed_source_and_result(

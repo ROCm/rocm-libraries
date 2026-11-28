@@ -86,7 +86,9 @@ from rocke.core.value_sources import MEMORY_READ_OPS
 from rocke.core.verify import verify
 from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
 from rocke.tests.built_programs import assert_refuses_arguments, built_program
+from rocke.tests.engines import assert_engine_rejects, available_engines
 from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason, skip_needing_arch
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 INT64_MAX = (1 << 63) - 1
@@ -449,8 +451,15 @@ NOT_BARE = "gpu_check_failed takes no operands, results or regions"
 def test_verifier_and_every_lowering_refuse_a_failure_path_that_is_not_bare():
     kernel = _failure_path_with_an_operand_kernel()
     assert NOT_BARE in [d.message for d in verify(kernel)]
-    with pytest.raises(ValueError, match=f"^{NOT_BARE}$"):
-        lower_kernel_to_llvm(kernel, arch="gfx942", llvm_flavor="llvm20")
+    for engine in available_engines():
+        assert_engine_rejects(
+            kernel,
+            "gfx942",
+            engine=engine,
+            error_type=ValueError,
+            message=NOT_BARE,
+            llvm_flavor="llvm20",
+        )
     with pytest.raises(ValueError, match=f"^{NOT_BARE}$"):
         lower_kernel_to_hip(kernel, arch="gfx942")
 
@@ -529,24 +538,24 @@ def test_a_block_id_value_is_gpu_only():
 
 def test_arithmetic_on_an_unchecked_load_comes_too_late():
     assert _refused_text("refuse_subtraction_on_a_load") == (
-        "gpu_checked_value: %ufm3 is loaded from memory and unchecked, and sub uses it "
+        "gpu_checked_value: %ufm_3 is loaded from memory and unchecked, and sub uses it "
         "before this check (the subtraction can wrap or become poison first). Fix: check "
-        "%ufm3 with gpu_checked_value first, then subtract the Values gpu_checked_value "
+        "%ufm_3 with gpu_checked_value first, then subtract the Values gpu_checked_value "
         "returned."
     )
 
 
 def test_the_taint_walk_follows_loops_and_selects():
     assert _refused_text("refuse_loop_sum_of_loads") == (
-        "gpu_checked_value: %gl6 is loaded from memory and unchecked, and add uses it "
+        "gpu_checked_value: %gl_6 is loaded from memory and unchecked, and add uses it "
         "before this check (the addition can wrap or become poison first). Fix: check "
-        "%gl6 with gpu_checked_value first, then add the Values gpu_checked_value "
+        "%gl_6 with gpu_checked_value first, then add the Values gpu_checked_value "
         "returned."
     )
     assert _refused_text("refuse_select_of_a_load") == (
-        "gpu_checked_value: %sel6 is computed from a value loaded from memory and "
+        "gpu_checked_value: %sel_6 is computed from a value loaded from memory and "
         "unchecked, and mul uses it before this check (the multiplication can wrap or "
-        "become poison first). Fix: check %sel6 with gpu_checked_value first, then "
+        "become poison first). Fix: check %sel_6 with gpu_checked_value first, then "
         "multiply the Values gpu_checked_value returned."
     )
 
@@ -598,7 +607,7 @@ def test_a_load_that_reaches_only_a_condition_is_accepted():
         ),
         (
             "refuse_param_bound_computed",
-            "param X: ge=add1 uses add1, which is computed in the kernel -- the host can "
+            "param X: ge=add_1 uses add_1, which is computed in the kernel -- the host can "
             "only evaluate kernel parameters and ints",
         ),
         (
@@ -1226,7 +1235,8 @@ _PREBUILT: dict[tuple[str, str], bytes | Exception] = {}
 
 def _gpu_case_target(route: str) -> tuple[str, int] | str:
     """``(arch, wave size)`` of the GPU the cases run on with ``route``, or why
-    they are skipped here."""
+    they are skipped here (declaring the runner hardware of a processor they have
+    not run on, when it has one)."""
     arch, absence = probe_device_arch()
     if arch is None:
         return absence
@@ -1234,7 +1244,9 @@ def _gpu_case_target(route: str) -> tuple[str, int] | str:
 
     processor = (get_device_target_id(current_device()) or arch).split(":")[0]
     if processor not in _RUN_ON:
-        return f"has not run on {processor} hardware yet; enable once it has"
+        return arch_skip_reason(
+            (processor,), f"has not run on {processor} hardware yet; enable once it has"
+        )
     if route == "hipcc" and shutil.which("hipcc") is None:
         return "hipcc not found"
     return arch, ArchTarget.from_gfx(arch).wave_size
@@ -1337,6 +1349,7 @@ def run_gpu_case(
     return run
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["7"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_a_value_meeting_its_facts_runs_to_the_store(run_gpu_case, case, route):
@@ -1344,6 +1357,7 @@ def test_gpu_a_value_meeting_its_facts_runs_to_the_store(run_gpu_case, case, rou
     assert lines == ["launch: completed", "stored: 7"]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["11,7"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_a_value_breaking_its_facts_fails_the_launch(run_gpu_case, case, route):
@@ -1357,6 +1371,7 @@ def test_gpu_a_value_breaking_its_facts_fails_the_launch(run_gpu_case, case, rou
     assert lines[1:] == ["stored: -1", "launch: completed", "stored: 7"]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["two_waves"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_one_wave_breaking_its_facts_does_not_hold_the_other(
@@ -1370,6 +1385,7 @@ def test_gpu_one_wave_breaking_its_facts_does_not_hold_the_other(
     assert lines[1:] == ["first wave stored: [-1]", "second wave stored: [7]"]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", ["per_lane"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_lanes_breaking_their_facts_stop_and_the_rest_of_the_wave_goes_on(
@@ -1383,6 +1399,7 @@ def test_gpu_lanes_breaking_their_facts_stop_and_the_rest_of_the_wave_goes_on(
     assert lines[1:] == ["even lanes stored: [-1]", "odd lanes stored: [7]"]
 
 
+@pytest.mark.gpu
 def test_gpu_two_streams_with_unread_launches_both_see_the_failure(run_gpu_case):
     """A failing launch on stream a and a passing one on stream b, both queued
     before either wait: the kernel's one word cannot say which failed, so
@@ -1399,6 +1416,7 @@ def test_gpu_two_streams_with_unread_launches_both_see_the_failure(run_gpu_case)
     assert lines[2] == "stream a again: completed", lines
 
 
+@pytest.mark.gpu
 def test_gpu_destroying_a_stream_whose_check_failed_raises_and_still_destroys_it(
     run_gpu_case,
 ):
@@ -1413,6 +1431,7 @@ def test_gpu_destroying_a_stream_whose_check_failed_raises_and_still_destroys_it
     ), lines
 
 
+@pytest.mark.gpu
 def test_gpu_a_word_set_by_a_launch_the_runtime_never_saw_is_not_blamed_on_the_next(
     run_gpu_case,
 ):
@@ -1423,6 +1442,7 @@ def test_gpu_a_word_set_by_a_launch_the_runtime_never_saw_is_not_blamed_on_the_n
     assert lines == ["launch: completed", "stored: 7"]
 
 
+@pytest.mark.gpu
 def test_gpu_after_a_wait_outside_the_runtime_the_explicit_reads_raise(run_gpu_case):
     """After a device synchronize outside the runtime, check_gpu_checks and
     release_pending_for_stream each read the word of the failing launch."""
@@ -1432,16 +1452,19 @@ def test_gpu_after_a_wait_outside_the_runtime_the_explicit_reads_raise(run_gpu_c
     assert lines[1].startswith("release_pending_for_stream: GpuCheckFailed: "), lines
 
 
+@pytest.mark.gpu
 def test_gpu_unloading_a_module_drops_its_unread_words(run_gpu_case):
     lines = run_gpu_case(_RUNTIME_ROUTE, "unload")
     assert lines == ["sync after unload: completed"]
 
 
+@pytest.mark.gpu
 def test_gpu_a_kernel_without_a_check_has_no_word_and_leaves_no_error(run_gpu_case):
     lines = run_gpu_case(_RUNTIME_ROUTE, "unchecked")
     assert lines == ["gpu_check_word: None", "hipGetLastError: 0"]
 
 
+@pytest.mark.gpu
 def test_gpu_a_checked_launch_during_stream_capture_is_refused(run_gpu_case):
     """Nothing reads the word after a graph replay, so the runtime refuses to
     queue a checked kernel on a stream being captured, and queues nothing."""
@@ -1488,7 +1511,12 @@ def test_a_check_comes_before_a_cluster_barrier():
     assert ir.index(store) < ir.index(barrier)
 
 
-@pytest.mark.skip(reason="has not run on gfx1250 hardware yet; enable once it has")
+@pytest.mark.gpu
+@pytest.mark.skip(
+    reason=arch_skip_reason(
+        ("gfx1250",), "has not run on gfx1250 hardware yet; enable once it has"
+    )
+)
 @pytest.mark.parametrize("case", ["cluster"])
 @pytest.mark.parametrize("route", _ROUTES)
 def test_gpu_one_workgroup_breaking_its_facts_does_not_hold_its_cluster(
@@ -1498,7 +1526,9 @@ def test_gpu_one_workgroup_breaking_its_facts_does_not_hold_its_cluster(
     at its check, the second passes the cluster barrier and stores 7, and the
     launch ends with GpuCheckFailed."""
     if not (probe_device_arch()[0] or "").startswith("gfx1250"):
-        pytest.skip("needs a gfx1250 GPU (workgroup clusters)")
+        skip_needing_arch(
+            ("gfx1250",), reason="needs a gfx1250 GPU (workgroup clusters)"
+        )
     lines = run_gpu_case(route, case)
     assert len(lines) == 2 and lines[0].startswith("launch: GpuCheckFailed: "), lines
     assert lines[1] == "workgroups stored: [-1, 7]"

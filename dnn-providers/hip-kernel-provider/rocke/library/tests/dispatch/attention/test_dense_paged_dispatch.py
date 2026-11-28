@@ -10,11 +10,12 @@ from unittest import mock
 
 import pytest
 
-from ..._dense_paged_stand_ins import CacheStandIn, I32DeviceTensor, pinned
+from ..._dense_paged_stand_ins import int32_table, paged_cache, pinned
 from dispatch.attention import (
     AttentionRequest,
     dispatch_attention,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 
 _PAGED_SPEC_IDS = {
     "gfx942": ("gfx942_dense",),
@@ -181,14 +182,14 @@ def test_binding_retargets_the_cache_and_forwards_the_block_table(arch, spec_id)
     result = dispatch_attention(pinned(_request(arch), spec_id))
     num_kv_blocks = 4 * (_SQ // _BS)
     q = SimpleNamespace(shape=(1, _SQ, _HQ, _D))
-    cache = CacheStandIn((num_kv_blocks, _BS, _HKV, _D))
+    cache = paged_cache((num_kv_blocks, _BS, _HKV, _D))
     tensors = {
         "q": q,
         "k": cache,
         "v": cache,
         "out": q,
-        "block_tables": I32DeviceTensor([list(range(_SQ // _BS))]),
-        "kv_lens": I32DeviceTensor([_SQ]),
+        "block_tables": int32_table([list(range(_SQ // _BS))]),
+        "kv_lens": int32_table([_SQ]),
     }
     seen = {}
     real_run = ad.run_attention_dense_torch
@@ -216,19 +217,28 @@ def test_binding_retargets_the_cache_and_forwards_the_block_table(arch, spec_id)
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_binding_and_spec_refuse_non_bool_paged_flags(arch, spec_id):
     result = dispatch_attention(pinned(_request(arch), spec_id))
-    cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
+    cache = paged_cache((_SQ // _BS, _BS, _HKV, _D))
     tensors = {"q": None, "k": cache, "v": cache, "out": None}
-    with pytest.raises(ValueError, match="must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         result.bind_torch(tensors, unsafe_skip_paged_value_validation="False")
-    with pytest.raises(ValueError, match="paged must be a bool"):
-        dataclasses.replace(result.spec.kernel_spec, paged="no")
+    assert str(refusal.value) == bool_flag_refusal(
+        "unsafe_skip_paged_value_validation",
+        "False",
+        what="bind_dense_attention_torch",
+    )
+    kernel_spec = result.spec.kernel_spec
+    with pytest.raises(ValueError) as refusal:
+        dataclasses.replace(kernel_spec, paged="no")
+    assert str(refusal.value) == bool_flag_refusal(
+        "paged", "no", what=type(kernel_spec).__name__
+    )
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_launch_refuses_unknown_keywords(arch, spec_id):
     """A bind-only option passed to launch() is refused, not dropped."""
     result = dispatch_attention(pinned(_request(arch), spec_id))
-    cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
+    cache = paged_cache((_SQ // _BS, _BS, _HKV, _D))
     launch = result.bind_torch({"q": None, "k": cache, "v": cache, "out": None}).launch
     for kw in ({"unsafe_skip_paged_value_validation": True}, {"softmax_scale": 0.5}):
         with pytest.raises(TypeError, match=next(iter(kw))):
@@ -239,7 +249,7 @@ def test_launch_refuses_unknown_keywords(arch, spec_id):
 def test_bind_refuses_unknown_keywords(arch, spec_id):
     """The unified binding's softmax_scale is refused, not run with 1/sqrt(d)."""
     result = dispatch_attention(pinned(_request(arch), spec_id))
-    cache = CacheStandIn((_SQ // _BS, _BS, _HKV, _D))
+    cache = paged_cache((_SQ // _BS, _BS, _HKV, _D))
     with pytest.raises(TypeError, match="softmax_scale"):
         result.bind_torch(
             {"q": None, "k": cache, "v": cache, "out": None}, softmax_scale=0.5

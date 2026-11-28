@@ -10,7 +10,7 @@
 
 import unittest
 
-from rocke.core.ir import F32, IRBuilder, PtrType
+from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.portable_ir.examples import export_mha, qk_block
 from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
 from rocke.portable_ir.utils.recipe_expand import (
@@ -81,9 +81,13 @@ def build_two_runs(N):
     for i in range(N):
         a1 = b.fadd(a1, b.global_load_f32(A, b.add(tid, b.const_i32(i * 4)), align=4))
     m = b.fmul(a1, a1)
+    # The second run indexes through the first run's result, as an i32.
+    m_index = b.bitcast(m, I32)
     a2 = b.const_f32(1.0)
     for j in range(N):
-        a2 = b.fmul(a2, b.global_load_f32(A, b.add(m, b.const_i32(j * 8 + 7)), align=4))
+        a2 = b.fmul(
+            a2, b.global_load_f32(A, b.add(m_index, b.const_i32(j * 8 + 7)), align=4)
+        )
     b.global_store(C, tid, b.fadd(a1, a2), align=4)
     b.ret()
     return b.kernel

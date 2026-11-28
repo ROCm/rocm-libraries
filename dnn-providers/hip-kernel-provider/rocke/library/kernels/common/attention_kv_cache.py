@@ -67,13 +67,17 @@ class KvTensorLayout:
 
     @classmethod
     def from_tensor(cls, tensor) -> KvTensorLayout:
-        if str(tensor.dtype) not in ("torch.float16", "torch.bfloat16"):
-            raise ValueError("strided KV supports fp16/bf16 tensors")
-        layout = cls(tuple(tensor.shape), tuple(tensor.stride()))
-        if int(tensor.data_ptr()) % 16:
+        """The layout of a K or V array: anything
+        :func:`rocke.runtime.device_array.array_info` describes."""
+        from rocke.runtime.device_array import array_info
+
+        info = array_info(tensor)
+        if info.dtype not in ("fp16", "bf16"):
+            raise ValueError("strided KV supports fp16/bf16 arrays")
+        layout = cls(info.shape, info.strides)
+        if info.data_ptr % 16:
             raise ValueError("strided KV base pointer must be 16-byte aligned")
-        available = tensor.untyped_storage().nbytes() - tensor.storage_offset() * 2
-        if layout.storage_span_bytes > available:
+        if layout.storage_span_bytes > info.backed_elements * info.element_size:
             raise ValueError("strided KV view exceeds its backing storage")
         return layout
 
@@ -92,6 +96,9 @@ class StridedKvCacheLayout:
 
     @classmethod
     def from_tensors(cls, key, value) -> StridedKvCacheLayout:
-        if key.dtype != value.dtype or key.device != value.device:
+        from rocke.runtime.device_array import array_info
+
+        key_info, value_info = array_info(key), array_info(value)
+        if (key_info.dtype, key_info.device) != (value_info.dtype, value_info.device):
             raise ValueError("K and V must have matching dtype and device")
         return cls(KvTensorLayout.from_tensor(key), KvTensorLayout.from_tensor(value))

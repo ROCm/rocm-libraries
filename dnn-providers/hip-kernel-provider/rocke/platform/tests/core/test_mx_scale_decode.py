@@ -18,7 +18,6 @@ tests/instances/test_mx_gemm_scale_range.py.
 """
 
 import ctypes
-import importlib.util
 import math
 import re
 import struct
@@ -32,45 +31,55 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.helpers import compile_kernel
-from rocke.helpers.mx_scale import (
+from rocke.helpers.fp8_encoding import (
     BF8_E5M2_FNUZ,
     BF8_E5M2_OCP,
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
+)
+from rocke.helpers.mx_scale import (
     add_mx_scaled_dot,
     decode_mx_scale_e8m0,
     largest_safe_mx_scale_code,
 )
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
+from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.comgr import require_comgr_target
+from rocke.tests.engines import (
+    all_engines_backend,
+    engine_modules_available,
+    native_engine_or_skip,
+)
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
+
+pytestmark = pytest.mark.filterwarnings(
+    "error::rocke.core.lower_llvm.ArchDomainWarning"
+)
 
 _CODES = 256
 
 # The decoder's lines in the kernel built by ``_decode_kernel``. The C++
 # engine's test (test_mx_scale_decode.cpp) pins the same LLVM lines.
 _EXPECTED_LLVM = (
-    "  %zx3 = zext i8 %gl2 to i32\n"
-    "  %eq5 = icmp eq i32 %zx3, 255\n"
-    "  %sitof6 = sitofp i32 %zx3 to float\n"
-    "  %fsub8 = fsub float %sitof6, 0x405FC00000000000\n"
-    "  %exp29 = call float @llvm.exp2.f32(float %fsub8)\n"
-    "  %sel11 = select i1 %eq5, float 0x7FF8000000000000, float %exp29\n"
+    "  %zx_3 = zext i8 %gl_2 to i32\n"
+    "  %eq_5 = icmp eq i32 %zx_3, 255\n"
+    "  %sitof_6 = sitofp i32 %zx_3 to float\n"
+    "  %fsub_8 = fsub float %sitof_6, 0x405FC00000000000\n"
+    "  %exp2_9 = call float @llvm.exp2.f32(float %fsub_8)\n"
+    "  %sel_11 = select i1 %eq_5, float 0x7FF8000000000000, float %exp2_9\n"
 )
 
 _EXPECTED_HIP = (
-    " int zx3 = (int)(uint8_t)gl2;\n"
-    " int c4 = 255;\n"
-    " bool eq5 = zx3 == c4;\n"
-    " float sitof6 = (float)zx3;\n"
-    " float c7 = 127.0f;\n"
-    " float fsub8 = sitof6 - c7;\n"
-    " float exp29 = exp2f(fsub8);\n"
-    " float c10 = ((float)NAN);\n"
-    " float sel11 = eq5 ? c10 : exp29;\n"
+    " int zx_3 = (int)(uint8_t)gl_2;\n"
+    " int c_4 = 255;\n"
+    " bool eq_5 = zx_3 == c_4;\n"
+    " float sitof_6 = (float)zx_3;\n"
+    " float c_7 = 127.0f;\n"
+    " float fsub_8 = sitof_6 - c_7;\n"
+    " float exp2_9 = exp2f(fsub_8);\n"
+    " float c_10 = ((float)NAN);\n"
+    " float sel_11 = eq_5 ? c_10 : exp2_9;\n"
 )
-
-
-def _has_cpp_engine():
-    return importlib.util.find_spec("rocke_engine") is not None
 
 
 def _decode_kernel():
@@ -115,15 +124,10 @@ def test_decoder_hip_reads_the_byte_unsigned():
 
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_engines_lower_the_decoder_identically(flavor):
-    if not _has_cpp_engine():
-        pytest.skip("needs the rocke_engine binding")
-    import rocke_engine
-
+    native = native_engine_or_skip()
     kernel = _decode_kernel()
     python_ll = _lower_kernel_to_llvm_python(kernel, arch="gfx90a", llvm_flavor=flavor)
-    cpp_ll = rocke_engine.lower_serialized_ir(
-        serialize(kernel), arch="gfx90a", flavor=flavor
-    )
+    cpp_ll = native.lower_serialized_ir(serialize(kernel), arch="gfx90a", flavor=flavor)
     assert cpp_ll == python_ll
 
 
@@ -135,12 +139,13 @@ def test_non_byte_input_is_rejected():
         decode_mx_scale_e8m0(b, b.const_i32(0))
 
 
-def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines(arch):
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
-    if not _has_cpp_engine():
-        pytest.skip("needs the rocke_engine binding")
-    ll = lower_mx_gemm(_mx_gemm_spec(), arch="gfx950", backend="both").llvm_text
+    if not engine_modules_available():
+        skip_until(BUILD_VARIANT, reason="needs the rocke_engine binding")
+    ll = lower_mx_gemm(_mx_gemm_spec(), arch=arch, backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
     assert "sext i8" not in ll
     assert ll.count("icmp eq i32") >= 2  # each byte checked for the NaN code
@@ -185,7 +190,8 @@ def test_scaled_dot_refuses_wrong_types(case, message):
         add_mx_scaled_dot(b, acc, dot, a_codes, b_codes)
 
 
-def test_scaled_dot_scales_with_ldexp_and_selects_nan():
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_scaled_dot_scales_with_ldexp_and_selects_nan(arch):
     """Each element is ``acc + select(nan, NaN, ldexp(dot, ca + cb - 254))``;
     a byte shared by several elements is read once."""
     b = IRBuilder("mx_scaled_dot_shape")
@@ -198,7 +204,7 @@ def test_scaled_dot_scales_with_ldexp_and_selects_nan():
     total = add_mx_scaled_dot(b, acc, dot, [a_code, a_code], [b_code, b_code])
     b.global_store(out, b.const_i32(0), b.vec_extract(total, 0), align=4)
     b.ret()
-    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950", llvm_flavor="llvm20")
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch=arch, llvm_flavor="llvm20")
     assert ll.count("zext i8") == 2  # each distinct byte read once
     assert ll.count("call float @llvm.ldexp.f32.i32(") == 2
     assert ll.count("float 0x7FF8000000000000") >= 1
@@ -244,30 +250,14 @@ def test_safe_code_refuses_a_count_that_is_not_positive():
         largest_safe_mx_scale_code(FP8_E4M3_OCP, FP8_E4M3_OCP, 0)
 
 
-def _skip_unless_comgr_targets(isa: str) -> None:
-    """Skip when COMGR cannot be loaded or cannot target ``isa``.
-
-    Only a missing or unloadable COMGR, or one that does not list ``isa``,
-    skips; a compile error after this check fails the test.
-    """
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # environment-dependent
-        pytest.skip(f"comgr unavailable: {exc}")
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:  # environment-dependent
-        pytest.skip(f"comgr unavailable: {exc}")
-    if isa not in isas:
-        pytest.skip(f"the loaded comgr cannot target {isa}")
-
-
-def test_mx_gemm_compiles_for_gfx950():
-    # Compile-checked only: MX GEMM numerics need a gfx950 GPU.
-    _skip_unless_comgr_targets("amdgcn-amd-amdhsa--gfx950")
-    backend = "both" if _has_cpp_engine() else "python"
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_mx_gemm_compiles_for_each_covered_arch(arch):
+    # Compile-checked only: MX GEMM numerics need a GPU of the matching arch.
+    require_comgr_target(arch)
     artifact = compile_kernel(
-        build_mx_gemm(_mx_gemm_spec(), arch="gfx950"), arch="gfx950", backend=backend
+        build_mx_gemm(_mx_gemm_spec(), arch=arch),
+        arch=arch,
+        backend=all_engines_backend(),
     )
     assert artifact.hsaco
 
@@ -291,8 +281,9 @@ def _decode_on_gpu(arch):
 
     # With the C++ engine present, backend="both" lowers through both engines
     # and requires identical LLVM IR.
-    backend = "both" if _has_cpp_engine() else "python"
-    artifact = compile_kernel(_decode_kernel(), arch=arch, backend=backend)
+    artifact = compile_kernel(
+        _decode_kernel(), arch=arch, backend=all_engines_backend()
+    )
     codes = np.arange(_CODES, dtype=np.uint8)
     rt = Runtime()
     module = rt.load_module(artifact.hsaco)
@@ -318,6 +309,7 @@ def _decode_on_gpu(arch):
         module.unload()
 
 
+@pytest.mark.gpu
 def test_all_codes_decode_to_the_spec_value_on_gpu(gpu_arch):
     got = _decode_on_gpu(gpu_arch)
     for code in range(_CODES):

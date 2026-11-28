@@ -41,7 +41,6 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_max_segments,
@@ -77,6 +76,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 
 MFMA_M = 16
@@ -234,12 +234,7 @@ class UnifiedAttention3DTiledSpec:
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool_fields(self, "emit_lse", "use_additive_bias")
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
@@ -578,7 +573,7 @@ def build_unified_attention_3d_tiled(
     softcap_p = b.param("softcap", F32)
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
-    qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    qq_bias_stride0_p = b.param("qq_bias_stride0", I32)
     # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
     # after every fixed param so the shared launch signature can append them.
     rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
@@ -1477,7 +1472,7 @@ class UnifiedAttentionReduceTiledSpec:
     emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1593,9 +1588,8 @@ def build_unified_attention_reduce_tiled(
     # The reduce CTA is a single wave64. The original kernel had all 64
     # lanes redundantly walk the full ``NUM_SEG`` segment list twice
     # (pass 1 max, pass 2 expsum) and a third time inside pass 3 — a
-    # 64x-redundant, serially-dependent chain of global loads that was
-    # the flat ~21 us floor on decode shapes (constant in KV length;
-    # see notes/ATTENTION_PARITY_REPORT.md split-KV analysis). Instead
+    # 64x-redundant, serially-dependent chain of global loads that set
+    # a flat, KV-length-independent floor on decode shapes. Instead
     # each lane now owns the strided segment subset ``{tid, tid+64,
     # ...}``: it loads each ``(seg_max, seg_l)`` pair exactly once, and
     # a 64-lane XOR butterfly folds the per-lane partials. This cuts the

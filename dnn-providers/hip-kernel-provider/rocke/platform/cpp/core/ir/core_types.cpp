@@ -348,15 +348,16 @@ int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
     {
         return natural;
     }
-    int64_t row_start_elems = lanes; /* gcd(lanes, innermost), as Python math.gcd */
-    int64_t remainder = innermost;
+    /* gcd(access width, row), in bytes, as Python math.gcd. */
+    const rocke_type_t* tile_elem = smem_type->elem ? smem_type->elem : elem;
+    int64_t row_bound = lanes * rocke_i_type_bytes(elem);
+    int64_t remainder = innermost * rocke_i_type_bytes(tile_elem);
     while(remainder != 0)
     {
-        const int64_t next = row_start_elems % remainder;
-        row_start_elems = remainder;
+        const int64_t next = row_bound % remainder;
+        row_bound = remainder;
         remainder = next;
     }
-    const int64_t row_bound = row_start_elems * rocke_i_type_bytes(elem);
     return natural < row_bound ? natural : row_bound;
 }
 
@@ -635,6 +636,125 @@ const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap)
     return NULL;
 }
 
+/* Python core/ir.py::_smem_store_lanes_error; the texts are the Python engine's. */
+const char* rocke_i_smem_store_lanes_error(const char* store,
+                                           const rocke_type_t* value_type,
+                                           int64_t width,
+                                           const char* width_param,
+                                           char* buf,
+                                           size_t cap)
+{
+    const int64_t lanes = rocke_i_count_of(value_type);
+    if(lanes != width)
+    {
+        snprintf(buf,
+                 cap,
+                 "%s failed - lanes=%lld, expected %s=%lld",
+                 store,
+                 (long long)lanes,
+                 width_param,
+                 (long long)width);
+        return buf;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_vec_width: the integer `vec` attribute of `op`, its
+ * width in elements, written to `width`; false when it has none. */
+static bool vec_width(const rocke_op_t* op, int64_t* width)
+{
+    return rocke_attr_get_int(&op->attrs, "vec", width);
+}
+
+/* Python core/ir.py::_smem_store_vN_op_error; the texts are the Python engine's. */
+const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    int64_t width = 0;
+    if(op->num_operands == 0 || !vec_width(op, &width))
+    {
+        return NULL;
+    }
+    return rocke_i_smem_store_lanes_error(rocke_opcode_name(op->opcode),
+                                          op->operands[op->num_operands - 1]->type,
+                                          width,
+                                          "vec",
+                                          buf,
+                                          cap);
+}
+
+/* Python core/ir.py::_type_name_message; the text is the Python engine's. */
+const char* rocke_i_type_name_message(const char* what,
+                                      const char* param,
+                                      const char* type_name,
+                                      const char* expected,
+                                      char* buf,
+                                      size_t cap)
+{
+    snprintf(buf, cap, "%s failed - %s='%s', expected %s", what, param, type_name, expected);
+    return buf;
+}
+
+/* Python core/ir.py::_value_element_error; the texts are the Python engine's. */
+const char* rocke_i_value_element_error(const char* access,
+                                        const rocke_type_t* value_type,
+                                        int value_index,
+                                        const char* expected,
+                                        char* buf,
+                                        size_t cap)
+{
+    char what[ROCKE_ERR_MSG_CAP];
+    snprintf(what, sizeof what, "%s operand", access);
+    if(rocke_i_untyped_value_message(value_type, what, value_index, "an IR type", buf, cap))
+    {
+        return buf;
+    }
+    const char* element = rocke_i_elem_of(value_type)->name;
+    if(strcmp(element, expected) == 0)
+    {
+        return NULL;
+    }
+    return rocke_i_type_name_message(access, "value element type", element, expected, buf, cap);
+}
+
+/* Python core/ir.py::_smem_store_vN_f32_error; the texts are the Python engine's. */
+rocke_status_t rocke_i_smem_store_vN_f32_error(const char* store,
+                                               const rocke_type_t* value_type,
+                                               int value_index,
+                                               const int64_t* width,
+                                               const char* width_param,
+                                               char* buf,
+                                               size_t cap)
+{
+    if(rocke_i_value_element_error(store, value_type, value_index, "f32", buf, cap))
+    {
+        return ROCKE_ERR_TYPE;
+    }
+    if(width && rocke_i_smem_store_lanes_error(store, value_type, *width, width_param, buf, cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
+}
+
+/* Python core/ir.py::_smem_store_vN_f32_op_error; the texts are the Python engine's. */
+rocke_status_t rocke_i_smem_store_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands == 0)
+    {
+        return ROCKE_OK;
+    }
+    int64_t width = 0;
+    const bool has_width = vec_width(op, &width);
+    const int value_index = op->num_operands - 1;
+    return rocke_i_smem_store_vN_f32_error(rocke_opcode_name(op->opcode),
+                                           op->operands[value_index]->type,
+                                           value_index,
+                                           has_width ? &width : NULL,
+                                           "vec",
+                                           buf,
+                                           cap);
+}
+
 const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     if(op->num_operands != 0 || op->num_results != 0 || op->num_regions != 0)
@@ -891,29 +1011,42 @@ const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key)
     return v->u.s;
 }
 
-/* ir._INT_ADD_WRAPS / ir._INT_CMP_PREDICATES. */
+/* ir._INT_ADD_WRAPS / ir._INT_CMP_PREDICATES / ir._VECTOR_CMP_PREDICATES /
+ * ir._FCMP_PREDICATES. */
 static const char* const k_int_add_wraps[] = {"nsw", "nuw", NULL};
 static const char* const k_int_cmp_predicates[] = {"lt", "le", "gt", "ge", "eq", "ne", "ult", NULL};
+static const char* const k_vector_cmp_predicates[] = {"lt", "le", "gt", "ge", "eq", "ne", NULL};
+static const char* const k_fcmp_predicates[]
+    = {"olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno", NULL};
 
-/* The shared body of rocke_i_add_wrap_error / rocke_i_cmp_pred_error: the
- * error for the string attr `key` of `op_name`, or NULL when it is absent or
- * one of `allowed`. The unsigned value `unsigned_value` takes i32 or i64
- * operands only. */
+const char*
+    rocke_i_missing_attr_message(const char* op_name, const char* key, char* buf, size_t cap)
+{
+    snprintf(buf, cap, "op '%s' missing required attr '%s'", op_name, key);
+    return buf;
+}
+
+/* ir._string_attr_error: the error for the string attr `key` of `op_name`,
+ * or NULL when it is one of `allowed`, or absent and not `required`;
+ * `not_a_string` is the error for a value of another kind. A returned error
+ * is written to `buf`. */
 static const char* string_attr_error(const rocke_attr_map_t* attrs,
                                      const char* op_name,
                                      const char* key,
                                      const char* const* allowed,
                                      const char* not_a_string,
-                                     const char* unsigned_value,
-                                     const rocke_type_t* operand_type,
+                                     bool required,
                                      char* buf,
                                      size_t cap)
 {
     const rocke_attr_value_t* v = rocke_attr_get(attrs, key);
     if(!v)
-        return NULL;
+        return required ? rocke_i_missing_attr_message(op_name, key, buf, cap) : NULL;
     if(v->kind != ROCKE_ATTR_STR)
-        return not_a_string;
+    {
+        snprintf(buf, cap, "%s", not_a_string);
+        return buf;
+    }
     bool known = false;
     for(const char* const* s = allowed; *s; ++s)
     {
@@ -925,20 +1058,35 @@ static const char* string_attr_error(const rocke_attr_map_t* attrs,
         snprintf(buf, cap, "%s: unknown %s '%s'", op_name, key, v->u.s);
         return buf;
     }
-    const char* type_name = operand_type ? operand_type->name : "?";
-    if(strcmp(v->u.s, unsigned_value) == 0 && strcmp(type_name, "i32") != 0
-       && strcmp(type_name, "i64") != 0)
-    {
-        snprintf(buf,
-                 cap,
-                 "%s: %s '%s' needs i32 or i64 operands, got %s",
-                 op_name,
-                 key,
-                 unsigned_value,
-                 type_name);
-        return buf;
-    }
     return NULL;
+}
+
+/* The unsigned form `unsigned_value` of the string attr `key` of `op_name`
+ * (add's "nuw", cmp's "ult") takes i32 or i64 operands only: the error when
+ * the attr is that form on operands of another type, else NULL. */
+static const char* unsigned_form_width_error(const rocke_attr_map_t* attrs,
+                                             const char* op_name,
+                                             const char* key,
+                                             const char* unsigned_value,
+                                             const rocke_type_t* operand_type,
+                                             char* buf,
+                                             size_t cap)
+{
+    const char* value = rocke_attr_get_str(attrs, key);
+    const char* type_name = operand_type ? operand_type->name : "?";
+    if(!value || strcmp(value, unsigned_value) != 0 || strcmp(type_name, "i32") == 0
+       || strcmp(type_name, "i64") == 0)
+    {
+        return NULL;
+    }
+    snprintf(buf,
+             cap,
+             "%s: %s '%s' needs i32 or i64 operands, got %s",
+             op_name,
+             key,
+             unsigned_value,
+             type_name);
+    return buf;
 }
 
 const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
@@ -946,15 +1094,32 @@ const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap)
 {
-    return string_attr_error(attrs,
-                             "arith.add",
-                             "wrap",
-                             k_int_add_wraps,
-                             "arith.add: wrap must be the string 'nsw' or 'nuw'",
-                             "nuw",
-                             operand_type,
-                             buf,
-                             cap);
+    const char* wrap_error = string_attr_error(attrs,
+                                               "arith.add",
+                                               "wrap",
+                                               k_int_add_wraps,
+                                               "arith.add: wrap must be the string 'nsw' or 'nuw'",
+                                               false,
+                                               buf,
+                                               cap);
+    if(wrap_error)
+    {
+        return wrap_error;
+    }
+    return unsigned_form_width_error(attrs, "arith.add", "wrap", "nuw", operand_type, buf, cap);
+}
+
+/* ir._FCMP_OPERAND_TYPES: the float types the IR computes in. */
+static const char* const k_fcmp_operand_types[] = {"f16", "bf16", "f32", "f64", NULL};
+
+bool rocke_i_is_integer_type_name(const char* type_name)
+{
+    /* ir._INTEGER_ELEMENT_TYPES: the canonical names of the integer and
+     * predicate dtypes, matched exactly as the Python membership test does. A
+     * vector or pointer type name is no dtype. */
+    const rocke_dtype_info_t* info = type_name ? rocke_dtype_info(type_name) : NULL;
+    return info && strcmp(info->name, type_name) == 0
+           && (info->category == ROCKE_DTYPE_INTEGER || info->category == ROCKE_DTYPE_PREDICATE);
 }
 
 const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
@@ -962,15 +1127,364 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap)
 {
-    return string_attr_error(attrs,
-                             "arith.cmp",
-                             "pred",
-                             k_int_cmp_predicates,
-                             "arith.cmp: pred must be a string",
-                             "ult",
-                             operand_type,
-                             buf,
-                             cap);
+    const char* pred_error = string_attr_error(attrs,
+                                               "arith.cmp",
+                                               "pred",
+                                               k_int_cmp_predicates,
+                                               "arith.cmp: pred must be a string",
+                                               true,
+                                               buf,
+                                               cap);
+    if(pred_error)
+    {
+        return pred_error;
+    }
+    return unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type, buf, cap);
+}
+
+/* ir._OPERAND_ORDINALS: the ordinal names of an op's operands. */
+static const char* const k_operand_ordinals[] = {"first", "second", "third"};
+/* How many operands the operand rule names: it refuses more before it reads a
+ * type, so its callers collect at most this many types. */
+static constexpr int k_num_operand_ordinals
+    = (int)(sizeof k_operand_ordinals / sizeof k_operand_ordinals[0]);
+
+/* The types of the first `num_operands` of `operands`, at most
+ * k_num_operand_ordinals of them, into `operand_types`. */
+static void collect_operand_types(const rocke_value_t* const* operands,
+                                  int num_operands,
+                                  const rocke_type_t* operand_types[k_num_operand_ordinals])
+{
+    for(int index = 0; index < num_operands && index < k_num_operand_ordinals; ++index)
+    {
+        operand_types[index] = operands[index]->type;
+    }
+}
+
+const char* rocke_i_operand_types_error(const char* op_name,
+                                        const rocke_type_t* const* operand_types,
+                                        int num_operands,
+                                        char* buf,
+                                        size_t cap)
+{
+    if(num_operands > k_num_operand_ordinals)
+    {
+        snprintf(buf,
+                 cap,
+                 "%s operand rule failed - operands=%d, expected at most %d",
+                 op_name,
+                 num_operands,
+                 k_num_operand_ordinals);
+        return buf;
+    }
+    char what[ROCKE_ERR_MSG_CAP];
+    snprintf(what, sizeof what, "%s operand", op_name);
+    for(int index = 0; index < num_operands; ++index)
+    {
+        if(rocke_i_untyped_value_message(operand_types[index], what, index, "an IR type", buf, cap))
+        {
+            return buf;
+        }
+    }
+    for(int index = 1; index < num_operands; ++index)
+    {
+        if(rocke_type_eq(operand_types[0], operand_types[index]))
+        {
+            continue;
+        }
+        char param[ROCKE_ERR_MSG_CAP];
+        char expected[ROCKE_ERR_MSG_CAP];
+        snprintf(param, sizeof param, "%s operand type", k_operand_ordinals[index]);
+        snprintf(
+            expected, sizeof expected, "the first operand's type '%s'", operand_types[0]->name);
+        return rocke_i_type_name_message(
+            op_name, param, operand_types[index]->name, expected, buf, cap);
+    }
+    return NULL;
+}
+
+void rocke_i_refuse_operand_types(rocke_ir_builder_t* b,
+                                  const char* op_name,
+                                  const rocke_value_t* const* operands,
+                                  int num_operands)
+{
+    const rocke_type_t* operand_types[k_num_operand_ordinals] = {};
+    collect_operand_types(operands, num_operands, operand_types);
+    char error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_operand_types_error(op_name, operand_types, num_operands, error, sizeof error))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", error);
+    }
+}
+
+const char* rocke_i_vector_operand_error(const char* op_name,
+                                         const rocke_type_t* operand_type,
+                                         char* buf,
+                                         size_t cap)
+{
+    if(rocke_i_is_vector(operand_type, NULL, -1))
+    {
+        return NULL;
+    }
+    return rocke_i_type_name_message(op_name,
+                                     "first operand type",
+                                     operand_type && operand_type->name ? operand_type->name
+                                                                        : "None",
+                                     "a vector type",
+                                     buf,
+                                     cap);
+}
+
+bool rocke_i_is_compare_op(rocke_opcode_t opcode)
+{
+    return opcode == ROCKE_OP_ARITH_CMP || opcode == ROCKE_OP_ARITH_FCMP
+           || opcode == ROCKE_OP_VECTOR_CMP;
+}
+
+const char* rocke_i_operand_arity_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    const int expected
+        = rocke_i_is_compare_op(op->opcode) ? 2 : rocke_i_same_type_operand_count(op->opcode);
+    if(expected == 0)
+    {
+        return NULL;
+    }
+    if(op->num_operands == expected && op->num_results == 1)
+    {
+        return NULL;
+    }
+    snprintf(buf,
+             cap,
+             "%s failed - operands / results=%d / %d, expected %d / 1",
+             rocke_opcode_name(op->opcode),
+             op->num_operands,
+             op->num_results,
+             expected);
+    return buf;
+}
+
+bool rocke_i_is_same_type_binary_op(rocke_opcode_t opcode)
+{
+    switch(opcode)
+    {
+    case ROCKE_OP_ARITH_ADD:
+    case ROCKE_OP_ARITH_SUB:
+    case ROCKE_OP_ARITH_MUL:
+    case ROCKE_OP_ARITH_DIV:
+    case ROCKE_OP_ARITH_MOD:
+    case ROCKE_OP_ARITH_FADD:
+    case ROCKE_OP_ARITH_FSUB:
+    case ROCKE_OP_ARITH_FMUL:
+    case ROCKE_OP_ARITH_FDIV:
+    case ROCKE_OP_ARITH_FMAX:
+    case ROCKE_OP_ARITH_FMIN:
+    case ROCKE_OP_ARITH_AND:
+    case ROCKE_OP_ARITH_OR:
+    case ROCKE_OP_ARITH_SMAX:
+    case ROCKE_OP_ARITH_SMIN:
+    case ROCKE_OP_ARITH_UMAX:
+    case ROCKE_OP_ARITH_UMIN:
+    case ROCKE_OP_ARITH_XOR:
+    case ROCKE_OP_ARITH_SHL:
+    case ROCKE_OP_ARITH_LSHR:
+    case ROCKE_OP_VECTOR_ADD:
+    case ROCKE_OP_VECTOR_SUB:
+    case ROCKE_OP_VECTOR_MUL:
+    case ROCKE_OP_VECTOR_AND:
+    case ROCKE_OP_VECTOR_OR:
+    case ROCKE_OP_VECTOR_SHL:
+    case ROCKE_OP_VECTOR_LSHR:
+    case ROCKE_OP_VECTOR_SMAX:
+    case ROCKE_OP_VECTOR_SMIN:
+    case ROCKE_OP_VECTOR_MAX:
+        return true;
+    default:
+        return false;
+    }
+}
+
+int rocke_i_same_type_operand_count(rocke_opcode_t opcode)
+{
+    if(rocke_i_is_same_type_binary_op(opcode))
+    {
+        return 2;
+    }
+    return opcode == ROCKE_OP_VECTOR_FMA ? 3 : 0;
+}
+
+const char* rocke_i_operand_types_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    const int operand_count = rocke_i_same_type_operand_count(op->opcode);
+    if(operand_count == 0 || op->num_operands != operand_count)
+    {
+        return NULL;
+    }
+    const rocke_type_t* operand_types[k_num_operand_ordinals] = {};
+    collect_operand_types(op->operands, operand_count, operand_types);
+    return rocke_i_operand_types_error(
+        rocke_opcode_name(op->opcode), operand_types, operand_count, buf, cap);
+}
+
+rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
+                                 const rocke_type_t* lhs_type,
+                                 const rocke_type_t* rhs_type,
+                                 char* buf,
+                                 size_t cap)
+{
+    if(rocke_i_cmp_pred_error(attrs, lhs_type, buf, cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    const rocke_type_t* const operand_types[2] = {lhs_type, rhs_type};
+    if(rocke_i_operand_types_error("arith.cmp", operand_types, 2, buf, cap))
+    {
+        return ROCKE_ERR_TYPE;
+    }
+    const char* type_name = lhs_type ? lhs_type->name : "?";
+    if(rocke_i_is_integer_type_name(type_name))
+    {
+        return ROCKE_OK;
+    }
+    rocke_i_type_name_message("arith.cmp",
+                              "operand type",
+                              type_name,
+                              "an integer or i1 type (compare floats with fcmp)",
+                              buf,
+                              cap);
+    return ROCKE_ERR_TYPE;
+}
+
+rocke_status_t rocke_i_vector_cmp_error(const rocke_attr_map_t* attrs,
+                                        const rocke_type_t* lhs_type,
+                                        const rocke_type_t* rhs_type,
+                                        char* buf,
+                                        size_t cap)
+{
+    if(string_attr_error(attrs,
+                         "vector.cmp",
+                         "pred",
+                         k_vector_cmp_predicates,
+                         "vector.cmp: pred must be a string",
+                         false,
+                         buf,
+                         cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    const rocke_type_t* const operand_types[2] = {lhs_type, rhs_type};
+    if(rocke_i_operand_types_error("vector.cmp", operand_types, 2, buf, cap))
+    {
+        return ROCKE_ERR_TYPE;
+    }
+    return rocke_i_integer_element_error("vector.cmp", lhs_type, buf, cap) ? ROCKE_ERR_TYPE
+                                                                           : ROCKE_OK;
+}
+
+rocke_status_t rocke_i_fcmp_error(const rocke_attr_map_t* attrs,
+                                  const rocke_type_t* lhs_type,
+                                  const rocke_type_t* rhs_type,
+                                  char* buf,
+                                  size_t cap)
+{
+    if(string_attr_error(attrs,
+                         "arith.fcmp",
+                         "pred",
+                         k_fcmp_predicates,
+                         "arith.fcmp: pred must be a string",
+                         true,
+                         buf,
+                         cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    const rocke_type_t* const operand_types[2] = {lhs_type, rhs_type};
+    if(rocke_i_operand_types_error("arith.fcmp", operand_types, 2, buf, cap))
+    {
+        return ROCKE_ERR_TYPE;
+    }
+    const char* type_name = lhs_type ? lhs_type->name : "?";
+    for(const char* const* name = k_fcmp_operand_types; *name; ++name)
+    {
+        if(strcmp(type_name, *name) == 0)
+        {
+            return ROCKE_OK;
+        }
+    }
+    /* ir._fcmp_error's prose: the types joined as "a, b, c or d". */
+    char expected[128];
+    size_t used = 0;
+    for(const char* const* name = k_fcmp_operand_types; *name; ++name)
+    {
+        const char* separator = name == k_fcmp_operand_types ? "" : name[1] ? ", " : " or ";
+        used += (size_t)snprintf(expected + used, sizeof expected - used, "%s%s", separator, *name);
+    }
+    snprintf(expected + used, sizeof expected - used, " (compare integers with cmp)");
+    rocke_i_type_name_message("arith.fcmp", "operand type", type_name, expected, buf, cap);
+    return ROCKE_ERR_TYPE;
+}
+
+bool rocke_i_is_integer_element_op(rocke_opcode_t opcode)
+{
+    switch(opcode)
+    {
+    case ROCKE_OP_ARITH_AND:
+    case ROCKE_OP_ARITH_OR:
+    case ROCKE_OP_ARITH_XOR:
+    case ROCKE_OP_ARITH_NOT:
+    case ROCKE_OP_ARITH_SHL:
+    case ROCKE_OP_ARITH_LSHR:
+    case ROCKE_OP_VECTOR_AND:
+    case ROCKE_OP_VECTOR_OR:
+    case ROCKE_OP_VECTOR_SHL:
+    case ROCKE_OP_VECTOR_LSHR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+const char* rocke_i_integer_element_error(const char* op_name,
+                                          const rocke_type_t* operand_type,
+                                          char* buf,
+                                          size_t cap)
+{
+    const rocke_type_t* element = rocke_i_elem_of(operand_type);
+    const char* element_name = element && element->name ? element->name : "?";
+    if(rocke_i_is_integer_type_name(element_name))
+        return NULL;
+    return rocke_i_type_name_message(
+        op_name, "element type", element_name, "an integer or i1 type", buf, cap);
+}
+
+const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(!rocke_i_is_integer_element_op(op->opcode) || op->num_operands == 0)
+    {
+        return NULL;
+    }
+    return rocke_i_integer_element_error(
+        rocke_opcode_name(op->opcode), op->operands[0]->type, buf, cap);
+}
+
+rocke_status_t rocke_i_operand_rules_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(rocke_i_operand_arity_op_error(op, buf, cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_i_integer_element_op_error(op, buf, cap)
+       || rocke_i_operand_types_op_error(op, buf, cap))
+    {
+        return ROCKE_ERR_TYPE;
+    }
+    return ROCKE_OK;
+}
+
+void rocke_i_refuse_non_integer(const char* op_name, const rocke_type_t* operand_type)
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_integer_element_error(op_name, operand_type, err, sizeof err))
+        throw ckc::TypeError(err);
 }
 
 bool rocke_i_is_buffer_descriptor(const rocke_value_t* value)

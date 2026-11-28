@@ -15,20 +15,23 @@ scale serves them all.
 Checks:
 
 * On the host, on the kernel's LLVM IR for gfx942 and gfx950, fp8 and bf8,
-  and A scale groups of one and two rows (with the C++ engine importable,
-  each engine's builder, ``build_block_scale_gemm`` and
+  and A scale groups of one and two rows, once on the Python builder's kernel
+  and once where each engine's builder, ``build_block_scale_gemm`` and
   ``rocke_build_block_scale_gemm``, builds the kernel from the spec, both
-  kernels are lowered, and the two texts must be the same byte for byte):
+  kernels are lowered and the two texts must be the same byte for byte (that
+  case needs the C++ engine's Python modules):
   every output gets one term per K group ``kg``, each term scaled with
   exactly one A scale, from ``AScale[row // gm, kg]``, and one B scale, from
   ``BScale[kg, col // gn]``, where ``(row, col)`` is the cell the kernel
   stores that output to.
 * On a gfx942 or gfx950 GPU, running that same LLVM IR, with A scales that
   differ per row and per K group and B scales that differ per column and per
-  K group, the output matches an f32 reference within the runbook GEMM
-  tolerance; with infinite and NaN scales in some rows and columns, the
-  infinities and NaNs land in exactly the outputs of those rows and columns,
-  as in the reference.
+  K group, every output matches an f32 reference within the f32 rounding of
+  its scaling and sums (``exact_operand_tolerance``: the operands are exact,
+  so nothing else is left); with infinite and NaN scales in some rows and
+  columns, the infinities and NaNs land in exactly the outputs of those rows
+  and columns, as in the reference. On the host, that bound rejects an output
+  with one row's scale taken from the next row in a single K group.
 """
 
 from __future__ import annotations
@@ -45,24 +48,27 @@ from rocke.instances.common.block_scale_gemm import (
     block_scale_gemm_signature,
     build_block_scale_gemm,
 )
-from rocke.tests.engines import lower_spec_with_all_engines
+from rocke.numeric.compare import assert_within_tolerance, within_tolerance
+from rocke.tests.engines import ENGINES, Engine, lower_spec_with_engine
+from rocke.tests.fp8_gemm_checks import (
+    EXACT_OPERAND_VALUES,
+    exact_operand_tolerance,
+    mfma_operand_bytes,
+)
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.tests.llvm_ir import KernelIR
 
 _GPU_ARCHS = ("gfx942", "gfx950")
 _MANTISSAS = ("fp8e4m3", "bf8e5m2")
 
-# The runbook's GEMM tolerance (optimization_runbook.md section 1.4), as an
-# error relative to the largest reference output.
-_GEMM_TOLERANCE = 7e-2
 
-
-def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
-    """The kernel's LLVM IR for ``spec`` on ``arch`` from every engine
-    (``lower_spec_with_all_engines``)."""
-    return lower_spec_with_all_engines(
+def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str, engine: Engine) -> str:
+    """The kernel's LLVM IR for ``spec`` on ``arch`` as ``engine``'s builder
+    builds it (``lower_spec_with_engine``)."""
+    return lower_spec_with_engine(
         spec,
         arch,
+        engine=engine,
         build_kernel=build_block_scale_gemm,
         lower_spec=lower_block_scale_gemm,
     )
@@ -101,69 +107,6 @@ class _KernelIR(KernelIR):
         """Every ``store``, in IR order: (stored value, address)."""
         return [m.groups() for m in map(_STORE.match, self.lines) if m]
 
-    def loads_feeding(self, name: str, element: int) -> set:
-        """The loads (global or buffer) that element ``element`` of ``name``
-        is computed from, through float and vector arithmetic; the walk stops
-        at loads, phis and MFMA results."""
-        found, stack, seen = set(), [(name, element)], set()
-        while stack:
-            current, lane = stack.pop()
-            if (current, lane) in seen or not current.startswith("%"):
-                continue
-            seen.add((current, lane))
-            op = self.opcode(current)
-            if (
-                op == "load"
-                or self.is_buffer_load(current)
-                or (op == "extractelement" and self.vector_load_element(current))
-            ):
-                found.add(current)
-            elif op == "insertelement":
-                vector, scalar, index = self.operands(current)
-                stack.append((scalar, 0) if int(index) == lane else (vector, lane))
-            elif op in ("fmul", "fadd", "llvm.fma", "llvm.fmuladd", "bitcast"):
-                stack.extend((v, lane) for v in self.operands(current))
-            elif op not in ("phi", "mfma"):
-                raise AssertionError(f"not modelled: {self.definitions[current]}")
-        return found
-
-    def vector_load_element(self, name: str):
-        """(buffer load, element index) when ``name`` extracts a constant
-        element of a vector buffer load; ``None`` otherwise."""
-        vector, index = self.operands(name)
-        vector = self.copied(vector)
-        if self.is_buffer_load(vector) and index.isdigit():
-            return vector, int(index)
-        return None
-
-    def address_offset(self, load_or_store_address: str) -> tuple:
-        """(base parameter, element offset) of a ``getelementptr`` address."""
-        assert self.opcode(load_or_store_address) == "getelementptr"
-        _, base, offset = self.operands(load_or_store_address)
-        return base, offset
-
-    def read_location(self, load: str, inputs: dict) -> tuple:
-        """(base parameter, element index) a 4-byte load reads, the index
-        evaluated for ``inputs``: from a global load's ``getelementptr``, or
-        from a buffer load's resource (its base pointer) and its per-lane and
-        scalar byte offsets, plus 4 bytes per element for an element of a
-        vector buffer load."""
-        element = 0
-        if self.opcode(load) == "extractelement":
-            load, element = self.vector_load_element(load)
-        if self.opcode(load) == "load":
-            (address,) = [v for v in self.operands(load) if v.startswith("%")]
-            param, offset = self.address_offset(address)
-            return param, self.evaluate(offset, inputs)
-        param, lane_offset, scalar_offset = self.buffer_load_access(load)
-        byte = (
-            self.evaluate(lane_offset, inputs)
-            + self.evaluate(scalar_offset, inputs)
-            + 4 * element
-        )
-        assert (np.asarray(byte) % 4 == 0).all(), byte
-        return param, byte // 4
-
 
 _HOST_TARGETS = [
     (arch, mantissa, group_m)
@@ -173,12 +116,15 @@ _HOST_TARGETS = [
 ]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     "arch, mantissa, group_m",
     _HOST_TARGETS,
     ids=[f"{a}-{d}-gm{g}" for a, d, g in _HOST_TARGETS],
 )
-def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group_m):
+def test_each_output_is_scaled_with_its_own_row_and_column(
+    arch, mantissa, group_m, engine
+):
     """Every output gets one term per K group, scaled with the A scale of its
     own row's scale group and the B scale of its own column's, for every
     lane and output tile.
@@ -202,7 +148,7 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group
         group_size_mnk=(group_m, group_n, group_k),
     )
     groups = spec.K // group_k
-    ir = _KernelIR(_lowered_llvm(spec, arch))
+    ir = _KernelIR(_lowered_llvm(spec, arch, engine))
     work_items = {
         ir.call_named("llvm.amdgcn.workitem.id.x"): np.arange(spec.block_size)[
             :, None, None, None
@@ -278,50 +224,21 @@ def gpu_arch():
     return current_device_arch_in(_GPU_ARCHS, subject="the block-scaled GEMM")
 
 
-# (exponent bias, mantissa bits) of the fp8 / bf8 format each arch's MFMA
-# reads: gfx950 reads OCP E4M3 / E5M2, gfx942 the FNUZ variants.
-_ELEMENT_FORMATS = {
-    ("gfx950", "fp8e4m3"): (7, 3),
-    ("gfx950", "bf8e5m2"): (15, 2),
-    ("gfx942", "fp8e4m3"): (8, 3),
-    ("gfx942", "bf8e5m2"): (16, 2),
-}
-
-# Element values every format above holds exactly.
-_ELEMENT_VALUES = np.array([0.0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0])
-
-
-def _element_bytes(arch: str, mantissa: str, values: np.ndarray) -> np.ndarray:
-    """The fp8 / bf8 bytes the arch's MFMA reads as ``values`` (zero or a
-    normal number with a short mantissa)."""
-    bias, mantissa_bits = _ELEMENT_FORMATS[(arch, mantissa)]
-
-    def encode(value: float) -> int:
-        if value == 0:
-            return 0
-        exponent = int(np.floor(np.log2(abs(value))))
-        fraction = abs(value) / 2.0**exponent - 1.0
-        field = fraction * 2**mantissa_bits
-        assert field == int(field) and exponent + bias >= 1, value
-        sign = 0x80 if value < 0 else 0
-        return sign | ((exponent + bias) << mantissa_bits) | int(field)
-
-    return np.vectorize(encode)(values).astype(np.uint8)
-
-
 def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
     """Run the block-scaled GEMM of ``spec`` on the GPU and return C as an
-    (M, N) f32 array. The kernel run is the one :func:`_lowered_llvm`
-    returns. ``a`` (M, K) and ``b`` (K, N) are element bytes, ``a_scale``
-    (M / gm, K / gk) and ``b_scale`` (K / gk, N / gn) f32, all row-major."""
+    (M, N) f32 array. The kernel run is the one the Python builder and engine
+    give (:func:`_lowered_llvm`). ``a`` (M, K) and ``b`` (K, N) are element
+    bytes, ``a_scale`` (M / gm, K / gk) and ``b_scale`` (K / gk, N / gn) f32,
+    all row-major."""
     artifact = compile_kernel(build_block_scale_gemm(spec, arch=arch), arch=arch)
-    assert artifact.llvm_text == _lowered_llvm(spec, arch)
+    assert artifact.llvm_text == _lowered_llvm(spec, arch, "python")
     host = {
         "A": np.ascontiguousarray(a, dtype=np.uint8),
         "B": np.ascontiguousarray(b, dtype=np.uint8),
         "AScale": np.ascontiguousarray(a_scale, dtype=np.float32),
         "BScale": np.ascontiguousarray(b_scale, dtype=np.float32),
-        "C": np.zeros((spec.M, spec.N), dtype=np.float32),
+        # NaN: an output the kernel does not write fails the NaN-position check.
+        "C": np.full((spec.M, spec.N), np.nan, dtype=np.float32),
     }
     launch_with_buffers(
         artifact,
@@ -334,34 +251,89 @@ def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
     return host["C"]
 
 
-def _reference(spec, a_values, a_scale, b_values, b_scale) -> np.ndarray:
-    """The f32 reference: ``acc += dot_g * (a_scale * b_scale)`` per K group,
-    each operation rounded to f32. The element values are small multiples of
-    1/2, so every group's dot product is exact in f32."""
+def _reference(spec, a_values, a_scale, b_values, b_scale):
+    """``(C, magnitude)``: the f32 reference ``acc += dot_g * (a_scale *
+    b_scale)`` per K group, each operation rounded to f32, and per output the
+    sum over K groups of ``|dot_g * scale_g|``, the size its rounding is
+    measured against. The element values are small multiples of 1/2, so every
+    group's dot product is exact in f32."""
     gm, gn, gk = spec.group_size_mnk
     acc = np.zeros((spec.M, spec.N), dtype=np.float32)
+    magnitude = np.zeros((spec.M, spec.N))
     rows, cols = np.arange(spec.M) // gm, np.arange(spec.N) // gn
     with np.errstate(over="ignore", invalid="ignore"):
         for group in range(spec.K // gk):
             k = slice(group * gk, (group + 1) * gk)
             dot = (a_values[:, k] @ b_values[k, :]).astype(np.float32)
             scale = a_scale[rows, group, None] * b_scale[None, group, cols]
-            acc = acc + dot * scale.astype(np.float32)
-    return acc
+            term = dot * scale.astype(np.float32)
+            acc = acc + term
+            magnitude += np.abs(term)
+    return acc, magnitude
 
 
-def _check_against_reference(got, want):
+def _check_against_reference(got, want, magnitude, groups):
     """Infinities (with their sign) and NaNs in exactly the reference's
-    places; the finite outputs within the runbook GEMM tolerance."""
+    places; every finite output within ``exact_operand_tolerance``."""
     np.testing.assert_array_equal(np.isnan(got), np.isnan(want))
     np.testing.assert_array_equal(np.isinf(got), np.isinf(want))
     infinite = np.isinf(want)
     np.testing.assert_array_equal(got[infinite], want[infinite])
     finite = np.isfinite(want)
-    error = np.abs(got[finite] - want[finite]).max()
-    assert error <= _GEMM_TOLERANCE * np.abs(want[finite]).max(), error
+    assert_within_tolerance(
+        got[finite],
+        want[finite],
+        exact_operand_tolerance(magnitude[finite], groups),
+        context="finite outputs",
+    )
 
 
+def _scales_case(mantissa):
+    """``(spec, a_values, b_values, a_scale, b_scale)`` of the GPU check:
+    seven 128-wide K groups, one A scale per row and one B scale per column in
+    every group, operands from ``EXACT_OPERAND_VALUES``."""
+    spec = BlockScaleGemmSpec(
+        M=48,
+        N=32,
+        K=7 * 128,
+        quant_mode="abquant",
+        mantissa_dtype=mantissa,
+        group_size_mnk=(1, 1, 128),
+    )
+    groups = spec.K // spec.group_size_mnk[2]
+    rng = np.random.default_rng(2888)
+    a_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.M, spec.K))
+    b_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.K, spec.N))
+    a_scale = rng.uniform(0.25, 4.0, size=(spec.M, groups)).astype(np.float32)
+    b_scale = rng.uniform(0.25, 4.0, size=(groups, spec.N)).astype(np.float32)
+    return spec, a_values, b_values, a_scale, b_scale
+
+
+def test_the_exact_bound_rejects_one_misread_scale_or_dropped_output():
+    """Host only. The bound the GPU check applies accepts the reference and
+    rejects the bug class this file targets on its smallest footprint: one
+    output whose K group 3 term takes the next row's A scale (a lane that reads
+    the wrong row's scale for one of its outputs), and, separately, the
+    smallest nonzero output left at zero. Both move their output by well under
+    7% of the largest one."""
+    spec, a_values, b_values, a_scale, b_scale = _scales_case("fp8e4m3")
+    groups = spec.K // spec.group_size_mnk[2]
+    want, magnitude = _reference(spec, a_values, a_scale, b_values, b_scale)
+    tolerance = exact_operand_tolerance(magnitude, groups)
+    assert within_tolerance(want, want, tolerance)
+    k = slice(3 * 128, 4 * 128)
+    term = float(a_values[0, k] @ b_values[k, 0]) * a_scale[0, 3] * b_scale[3, 0]
+    assert term != 0.0, "the case must give output (0, 0) a group-3 term"
+    misread = want.copy()
+    misread[0, 0] += term * (a_scale[1, 3] / a_scale[0, 3] - 1.0)
+    assert not within_tolerance(misread, want, tolerance), "misread row scale"
+    dropped = want.copy()
+    nonzero = np.flatnonzero(want)
+    dropped.flat[nonzero[np.argmin(np.abs(want.flat[nonzero]))]] = 0.0
+    assert not within_tolerance(dropped, want, tolerance), "smallest output zeroed"
+
+
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", _MANTISSAS)
 @pytest.mark.parametrize("special_values", [False, True], ids=["finite", "inf-nan"])
 def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
@@ -374,20 +346,8 @@ def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
     turn into infinities and NaNs. Seven K groups: the kernel runs the first
     six several per loop iteration and the last on its own, and the special
     values sit in groups of both."""
-    spec = BlockScaleGemmSpec(
-        M=48,
-        N=32,
-        K=7 * 128,
-        quant_mode="abquant",
-        mantissa_dtype=mantissa,
-        group_size_mnk=(1, 1, 128),
-    )
+    spec, a_values, b_values, a_scale, b_scale = _scales_case(mantissa)
     groups = spec.K // spec.group_size_mnk[2]
-    rng = np.random.default_rng(2888)
-    a_values = rng.choice(_ELEMENT_VALUES, size=(spec.M, spec.K))
-    b_values = rng.choice(_ELEMENT_VALUES, size=(spec.K, spec.N))
-    a_scale = rng.uniform(0.25, 4.0, size=(spec.M, groups)).astype(np.float32)
-    b_scale = rng.uniform(0.25, 4.0, size=(groups, spec.N)).astype(np.float32)
     if special_values:
         a_scale[5, 1] = np.inf
         a_scale[22, 6] = -np.inf
@@ -398,12 +358,12 @@ def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
     got = _run_block_scale_gemm(
         gpu_arch,
         spec,
-        a=_element_bytes(gpu_arch, mantissa, a_values),
+        a=mfma_operand_bytes(gpu_arch, mantissa, a_values),
         a_scale=a_scale,
-        b=_element_bytes(gpu_arch, mantissa, b_values),
+        b=mfma_operand_bytes(gpu_arch, mantissa, b_values),
         b_scale=b_scale,
     )
-    want = _reference(spec, a_values, a_scale, b_values, b_scale)
+    want, magnitude = _reference(spec, a_values, a_scale, b_values, b_scale)
     if special_values:
         assert np.isnan(want).any() and np.isinf(want).any()
-    _check_against_reference(got, want)
+    _check_against_reference(got, want, magnitude, groups)

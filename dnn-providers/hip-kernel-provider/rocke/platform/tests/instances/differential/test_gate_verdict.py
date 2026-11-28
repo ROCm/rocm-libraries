@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the byte-identity gate's pass/fail rule (run_diff.py).
 
-The gate prints "RESULT: GREEN - engine builds and .ll emission is
-byte-identical to Python" on a zero exit code, so every way the runner can exit
-zero is a sentence the gate asserts. These tests pin the rule to the dashboards
-it is allowed to say that about.
+The gate prints "RESULT: GREEN - ... byte-identical to Python" on a zero exit
+code, so every way the runner can exit zero is a sentence the gate asserts.
+These tests pin the rule to the dashboards it is allowed to say that about.
 
 Lives beside its subject: the differential harness needs a compiler and the
 source tree, so CMake excludes this directory from the installed test tree, and
@@ -21,7 +20,9 @@ importing ``run_diff`` does create its /tmp working dir.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -158,11 +159,33 @@ class TestGateVerdict(unittest.TestCase):
         self.assertEqual(gate_verdict(results), (0, []))
 
     def test_mode_unsupported_passes(self):
-        # Admissible only because the gating mode cannot produce it -- an
-        # emitter predating the mode arg is a coverage gap in the non-gating
-        # ir/verify lanes. TestLlModeInvariant pins that guard.
+        # A family whose output has no IR form (conv_abi) has nothing to compare
+        # in ir mode. It passes, and uncompared_families() names it so the
+        # summary does not hide it. TestLlModeInvariant pins that ll mode cannot
+        # produce the status.
         results = [{"family": "conv_fwd", "status": "MODE_UNSUPPORTED", "mode": "ir"}]
         self.assertEqual(gate_verdict(results), (0, []))
+
+    def test_uncompared_families_names_only_the_passes_that_compared_nothing(self):
+        results = [
+            {"family": "conv_abi", "status": "MODE_UNSUPPORTED", "mode": "ir"},
+            {"family": "gemm_fp16", "status": "GREEN", "n": 4, "bad": 0},
+            {"family": "gemm_bf16", "status": "CANON_ONLY", "n": 4, "bad": 0},
+            {"family": "gemm_fp8", "status": "DRIFT", "n": 4, "bad": 1},
+        ]
+        self.assertEqual(
+            run_diff.uncompared_families(results),
+            [
+                run_diff.UncomparedFamily(
+                    "conv_abi", "MODE_UNSUPPORTED", GATE_PASS["MODE_UNSUPPORTED"]
+                )
+            ],
+        )
+
+    def test_every_uncompared_status_is_a_pass(self):
+        # A failing status is already reported as a failure; listing it again
+        # as "not compared" would only blur the two blocks.
+        self.assertTrue(set(run_diff.GATE_PASS_UNCOMPARED) <= set(GATE_PASS))
 
     def test_every_failure_is_reported_not_just_the_first(self):
         results = [
@@ -317,7 +340,9 @@ class TestDifferentialConcurrency(unittest.TestCase):
         self.assertEqual(result["status"], "BATCH_INCOMPLETE")
         self.assertIn("native returned 1 records", result["error"])
 
-    def test_noncanonicalizable_equal_output_retains_raw_reference_sha(self):
+    def test_noncanonicalizable_equal_output_is_canon_error(self):
+        # Equal bytes without a canonical form give no canonical hash: the
+        # config fails and records no reference, never its raw bytes.
         raw_sha = run_diff.sh(b"identical but not canonicalizable")
         invalid = run_diff.Emission(
             0,
@@ -339,8 +364,10 @@ class TestDifferentialConcurrency(unittest.TestCase):
                     result = run_diff.run_family(
                         "gemm", Path("archive.a"), "ir", canonical=True
                     )
-        self.assertEqual(result["status"], "GREEN")
-        self.assertEqual(run_diff.collect_ref_shas([result]), {"gemm": {"0": raw_sha}})
+        self.assertEqual(result["status"], "DRIFT")
+        self.assertEqual(result["configs"][0]["verdict"], "CANON_ERROR")
+        self.assertEqual(result["configs"][0]["ref_sha"], None)
+        self.assertEqual(run_diff.collect_ref_shas([result]), {})
 
     def test_noncanonicalizable_differing_output_is_canon_error(self):
         c_invalid = run_diff.Emission(
@@ -442,7 +469,50 @@ class TestBatchAndBuildReuse(unittest.TestCase):
                 hashlib.sha256(b"1:2").hexdigest(),
             ],
         )
-        self.assertTrue(run_diff._is_end_emission(result.emissions[2]))
+        self.assertTrue(run_diff.is_end_emission(result.emissions[2]))
+
+    def test_each_family_and_flavor_pair_emits_for_its_own_flavor(self):
+        # One pool runs every (family, flavor) pair, so each emitter must get
+        # its flavor from its own environment, not from this process's.
+        flavors = list(run_diff._llvm_flavors())[:2]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("first", "second"):
+                (root / f"{name}_emit.py").write_text(
+                    "import os, sys\n"
+                    "def main():\n"
+                    "    idx = int(sys.argv[1])\n"
+                    "    if idx == 1:\n"
+                    "        raise SystemExit(f'unknown config index {idx}')\n"
+                    f"    sys.stdout.write('{name}:' + os.environ['ROCKE_LLVM_FLAVOR'])\n"
+                    "    return 0\n"
+                )
+            families = [("first", root), ("second", root)]
+            with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "not-a-flavor"}):
+                results = run_diff.python_reference_families(
+                    families, flavors, "ll", False, 4
+                )
+                self.assertEqual(os.environ["ROCKE_LLVM_FLAVOR"], "not-a-flavor")
+        self.assertEqual(sorted(results), sorted(flavors))
+        for flavor in flavors:
+            shas, errors = results[flavor]
+            self.assertEqual(errors, [])
+            self.assertEqual(
+                shas,
+                {
+                    name: {"0": hashlib.sha256(f"{name}:{flavor}".encode()).hexdigest()}
+                    for name in ("first", "second")
+                },
+            )
+
+    def test_selecting_a_flavor_leaves_this_process_environment_alone(self):
+        flavor = run_diff._llvm_flavors()[0]
+        with mock.patch.dict(os.environ):
+            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+            self.assertEqual(run_diff.selected_llvm_flavor(flavor), flavor)
+            self.assertNotIn("ROCKE_LLVM_FLAVOR", os.environ)
+            self.assertEqual(run_diff.emitter_env(flavor)["ROCKE_LLVM_FLAVOR"], flavor)
+            self.assertNotIn("ROCKE_LLVM_FLAVOR", run_diff.emitter_env(None))
 
     def test_python_timeout_is_per_config_not_per_family(self):
         with TemporaryDirectory() as directory:
@@ -552,12 +622,12 @@ class TestBatchAndBuildReuse(unittest.TestCase):
 
 
 class TestLlModeInvariant(unittest.TestCase):
-    """MODE_UNSUPPORTED passes only because ll mode cannot produce it."""
+    """The ll lane, which every family supports, cannot report MODE_UNSUPPORTED."""
 
     def test_ll_mode_never_reports_mode_unsupported(self):
-        # An emitter that fumbles argv prints a usage line. In ir/verify that is
-        # a known coverage gap; in ll -- the gating mode -- it must not be able
-        # to masquerade as one.
+        # An emitter that fumbles argv prints a usage line. In ir/verify that
+        # reads as the family refusing the mode; in ll, which every family
+        # supports, it must not be able to masquerade as one.
         usage = (2, b"", "usage: gemm_emit <idx> [mode]")
 
         def status(mode):
@@ -584,6 +654,82 @@ class TestLlModeInvariant(unittest.TestCase):
         self.assertNotEqual(ll, "MODE_UNSUPPORTED")
         # It compared nothing, so it must not pass under another name either.
         self.assertIn(ll, GATE_FAIL)
+
+
+class TestRefusalComparison(unittest.TestCase):
+    """A config both engines refuse passes only with the same message in a
+    family whose refusals are compared."""
+
+    MESSAGE = "CoalescedTileLoader: async copy needs 16-byte elements"
+
+    @staticmethod
+    def native(line):
+        return run_diff.Emission(1, False, None, f"some context\n{line}\n")
+
+    @staticmethod
+    def python(line):
+        traceback = 'Traceback (most recent call last):\n  File "x.py"\n'
+        return run_diff.Emission(1, False, None, traceback + line + "\n")
+
+    def verdict(self, native_line, python_line, compare_refusals=True):
+        verdict, _ = run_diff.classify_emissions(
+            self.native(native_line), self.python(python_line), compare_refusals
+        )
+        return verdict
+
+    def test_the_same_message_is_both_rejected(self):
+        self.assertEqual(
+            self.verdict(
+                f"builder error: {self.MESSAGE}", f"ValueError: {self.MESSAGE}"
+            ),
+            "BOTH_REJECTED",
+        )
+
+    def test_a_different_message_or_failure_is_a_refusal_mismatch(self):
+        for native_line, python_line in (
+            (f"builder error: {self.MESSAGE}", "ValueError: another reason"),
+            (f"build failed: {self.MESSAGE}", f"ValueError: {self.MESSAGE}"),
+            (f"builder error: {self.MESSAGE}", f"SystemExit: {self.MESSAGE}"),
+            (f"builder error: {self.MESSAGE}", "unknown config 3"),
+        ):
+            with self.subTest(native=native_line, python=python_line):
+                self.assertEqual(
+                    self.verdict(native_line, python_line), "REFUSAL_MISMATCH"
+                )
+                self.assertIn("REFUSAL_MISMATCH", run_diff.DRIFT_VERDICTS)
+                # A family whose refusals are not compared keeps passing them.
+                self.assertEqual(
+                    self.verdict(native_line, python_line, False), "BOTH_REJECTED"
+                )
+
+    def test_a_compared_family_drifts_on_a_reworded_refusal(self):
+        identical = run_diff.Emission(0, True, "same", "")
+        end = run_diff.Emission(1, False, None, "unknown config 2\n")
+        native = [identical, self.native(f"builder error: {self.MESSAGE}"), end]
+        python = [identical, self.python("ValueError: reworded"), end]
+        compared = min(run_diff.REFUSAL_COMPARED_FAMILIES)
+        for family, status in ((compared, "DRIFT"), ("not_compared", "GREEN")):
+            with self.subTest(family=family):
+                with mock.patch.multiple(
+                    run_diff,
+                    compile_c=mock.DEFAULT,
+                    _run_native_configs=mock.DEFAULT,
+                    _run_python_batch=mock.DEFAULT,
+                ) as m:
+                    m["compile_c"].return_value = (Path("emit_c"), "")
+                    m["_run_native_configs"].return_value = batch(*native)
+                    m["_run_python_batch"].return_value = batch(*python)
+                    result = run_diff.run_family(family, Path("archive.a"), "ll")
+                self.assertEqual(result["status"], status)
+                if status == "DRIFT":
+                    record = result["configs"][1]
+                    self.assertEqual(record["verdict"], "REFUSAL_MISMATCH")
+                    self.assertIn(self.MESSAGE, record["c_error"])
+                    self.assertIn("reworded", record["p_error"])
+
+    def test_every_compared_family_is_a_parity_family(self):
+        names = {name for name, _ in run_diff.find_families()}
+        self.assertLessEqual(run_diff.REFUSAL_COMPARED_FAMILIES, names)
 
 
 class TestModeRejection(unittest.TestCase):
@@ -648,6 +794,20 @@ class TestModeRejection(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(shas, {"0": "canon0"})
 
+    def test_an_output_without_a_canonical_form_fails_the_family(self):
+        # Its raw hash is not recorded or checked in place of a canonical one.
+        shas, error = self.reference_shas(
+            [
+                run_diff.Emission(0, True, "out0", "", canonical_sha="canon0"),
+                run_diff.Emission(
+                    0, True, "out1", "", canonical_error="ValueError: bad header"
+                ),
+                run_diff.Emission(1, False, None, "unknown config 2\n"),
+            ]
+        )
+        self.assertEqual(shas, {"0": "canon0"})
+        self.assertEqual(error, "config 1: no canonical form: ValueError: bad header")
+
     def test_a_refused_mode_records_nothing_for_the_family(self):
         shas, error = self.reference_shas(
             [run_diff.Emission(2, False, None, "unknown mode 'ir'\n")]
@@ -658,7 +818,7 @@ class TestModeRejection(unittest.TestCase):
 class TestMainReturnsTheGateVerdict(unittest.TestCase):
     """The pure rule is only a gate if main() actually returns it."""
 
-    def drive_main(self, family_record, tmp):
+    def drive_main(self, family_record, tmp, extra=()):
         archive = tmp / "librocke_core.a"
         archive.touch()
         argv = [
@@ -667,6 +827,7 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             str(archive),
             "--json",
             str(tmp / "dashboard.json"),
+            *extra,
         ]
         families = [("fake", tmp)] if family_record else []
         with mock.patch.object(run_diff, "find_families", return_value=families):
@@ -715,6 +876,43 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             self.assertEqual(
                 gate_verdict(json.loads((tmp / "dashboard.json").read_text())), (0, [])
             )
+
+    def test_a_record_refuses_output_without_a_canonical_form(self):
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            golden = tmp / "golden.json"
+            record = {
+                "family": "fake",
+                "status": "DRIFT",
+                "n": 2,
+                "bad": 1,
+                "canon": 0,
+                "range_drift": None,
+                "configs": [
+                    {"idx": 0, "verdict": "IDENTICAL", "ref_sha": "ab"},
+                    {
+                        "idx": 1,
+                        "verdict": "CANON_ERROR",
+                        "ref_sha": None,
+                        "c_rc": 0,
+                        "p_rc": 0,
+                    },
+                ],
+            }
+            extra = [
+                "--mode",
+                "ir",
+                "--canonical",
+                "--record-golden",
+                "--golden-file",
+                str(golden),
+            ]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.drive_main(record, tmp, extra)
+            self.assertEqual(code, 1)
+            self.assertIn("output with no canonical form: fake[1]", out.getvalue())
+            self.assertFalse(golden.exists())
 
     def test_discovering_no_families_exits_nonzero(self):
         with TemporaryDirectory() as d:
@@ -772,7 +970,7 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
                 with mock.patch.object(
                     run_diff,
                     "python_reference_families",
-                    return_value=({"kept": {"0": "new"}}, []),
+                    return_value={"llvm20": ({"kept": {"0": "new"}}, [])},
                 ):
                     with mock.patch.object(sys, "argv", argv):
                         with mock.patch.dict(
@@ -883,7 +1081,7 @@ class TestConfigEnumeration(unittest.TestCase):
                 mock.patch.object(
                     run_diff,
                     "_run_native_configs",
-                    side_effect=lambda binary, indices, mode, canonical: emissions(
+                    side_effect=lambda binary, indices, mode, canonical, **kw: emissions(
                         "native", indices, mode
                     ),
                 ),

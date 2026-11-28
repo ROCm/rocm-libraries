@@ -52,9 +52,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from enum import IntEnum
 from operator import index
-from typing import Any, Tuple
+from typing import Any, Tuple, get_type_hints
 
-from kernels.common._spec_checks import require_bool
+from rocke.helpers.spec import require_bool_fields
 
 # Re-exported, never redeclared: the tiled kernel specs name their band by these
 # ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
@@ -83,6 +83,8 @@ ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
 # The query-side options of a packed request: each is an ``AttentionRequest``
 # field, the feature it reports, and the RDNA WMMA prefill spec field it sets.
 QUERY_SIDE_OPTIONS = ("dense_q", "seqused_q")
+# The additive bias dtypes an ``AttentionRequest`` names: fp32, or the Q dtype.
+ATTN_BIAS_DTYPES = ("f32", "q")
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
@@ -191,8 +193,9 @@ class AttentionRequest(OperatorRequest):
     use_alibi: bool = False
     use_qq_bias: bool = False
     # Dense additive attention bias ``[B|1, H|1, Sq|1, Sk]`` (unit-stride keys)
-    # added to the scaled scores; ``attn_bias_dtype`` is "f32" or "q" (the Q
-    # dtype). A candidate must declare the "attn_bias" feature.
+    # added to the scaled scores; ``attn_bias_dtype`` is exactly one of
+    # ``ATTN_BIAS_DTYPES`` ("f32" or "q", the Q dtype). A candidate must declare
+    # the "attn_bias" feature.
     use_attn_bias: bool = False
     attn_bias_dtype: str = "f32"
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
@@ -231,6 +234,20 @@ class AttentionRequest(OperatorRequest):
         # without each site re-normalizing (and disagreeing about how).
         # ``object.__setattr__`` because the dataclass is frozen.
         object.__setattr__(self, "arch", canonical_arch(self.arch))
+        # Exact values, refused rather than coerced, and here rather than in a
+        # factory: requests key the selection caches, and ``1 == True`` with the
+        # same hash, so a later check is skipped by a cache hit; ``bool("false")``
+        # is True, so coercing where a flag is read turns it on.
+        # ``rocke.helpers.spec.require_bool`` is the shared refusal of a non-bool
+        # spec or request flag. ``_BOOL_FIELDS`` is defined below the class because
+        # ``get_type_hints`` needs the finished class.
+        require_bool_fields(self, *_BOOL_FIELDS)
+        if self.attn_bias_dtype not in ATTN_BIAS_DTYPES:
+            raise ValueError(
+                "AttentionRequest rejected - "
+                f"attn_bias_dtype={self.attn_bias_dtype!r}, "
+                f"expected one of {ATTN_BIAS_DTYPES}"
+            )
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -353,6 +370,13 @@ class AttentionRequest(OperatorRequest):
         return frozenset(active)
 
 
+# Every ``bool`` field of the request, read from its annotations so a new flag is
+# refused-if-not-bool without being listed by hand.
+_BOOL_FIELDS = tuple(
+    name for name, hint in get_type_hints(AttentionRequest).items() if hint is bool
+)
+
+
 ATTENTION_DIM_VOCABULARY = (
     "batch",
     "nhead_q",
@@ -427,20 +451,6 @@ def _request_errors(
         errors.append("kv_layout must be paged or strided")
     if req.op != "attention":
         errors.append(f"unsupported op {req.op!r}")
-    if type(req.emit_lse) is not bool:
-        errors.append(f"emit_lse must be a bool, got {type(req.emit_lse).__name__}")
-    if type(req.runtime_head_dims) is not bool:
-        errors.append(
-            "runtime_head_dims must be a bool, got "
-            f"{type(req.runtime_head_dims).__name__}"
-        )
-    # Checked before any candidate coerces them: bool("false") is True, so a
-    # string flag would select an fp8 kernel, and bool(None) is False, so a
-    # missing encoding would pass as OCP instead of being refused.
-    for field in (*QUERY_SIDE_OPTIONS, "use_fp8", "fp8_fnuz"):
-        value = getattr(req, field)
-        if type(value) is not bool:
-            errors.append(f"{field} must be a bool, got {type(value).__name__}")
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
@@ -909,7 +919,7 @@ class AttentionSpec:
     def __post_init__(self) -> None:
         # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
         # (1, "yes") would silently produce an LSE identity: refuse it instead.
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
 
     def identity(self) -> dict:
         """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,

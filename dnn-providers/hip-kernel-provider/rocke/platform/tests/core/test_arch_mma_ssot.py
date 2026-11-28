@@ -128,6 +128,9 @@ _CATALOG_ORDER = {
         "mfma_i32_16x16x16_i8",
         "mfma_i32_32x32x8_i8",
         "mfma_f64_16x16x4_f64",
+        "mfma_f64_4x4x4_f64",
+        "mfma_f32_4x4x4_f16",
+        "mfma_f32_4x4x4_bf16",
     ),
     "gfx942": (
         "mfma_f32_16x16x8_xf32",
@@ -150,6 +153,8 @@ _CATALOG_ORDER = {
         "mfma_f32_16x16x32_bf8_fp8",
         "mfma_f32_32x32x16_fp8_bf8",
         "mfma_f32_32x32x16_bf8_fp8",
+        "mfma_f32_4x4x4_f16",
+        "mfma_f32_4x4x4_bf16",
     ),
     "gfx950": (
         "mfma_f32_16x16x4_f32",
@@ -169,6 +174,7 @@ _CATALOG_ORDER = {
         "mfma_i32_16x16x32_i8",
         "mfma_i32_32x32x16_i8",
         "mfma_f64_16x16x4_f64",
+        "mfma_f64_4x4x4_f64",
         "mfma_f32_16x16x32_fp8_bf8",
         "mfma_f32_16x16x32_bf8_fp8",
         "mfma_f32_32x32x16_fp8_bf8",
@@ -252,6 +258,8 @@ _CATALOG_ORDER = {
         "mfma_gfx950_f32_32x32x64_fp4_fp4_scale_e8m0_e8m0_k32",
         "mfma_f32_16x16x32_xf32",
         "mfma_f32_32x32x16_xf32",
+        "mfma_f32_4x4x4_f16",
+        "mfma_f32_4x4x4_bf16",
     ),
     "gfx1151": (
         "wmma_f32_16x16x16_f16",
@@ -867,6 +875,26 @@ def test_partial_query_rejects_ambiguity_but_enumeration_and_existence_are_valid
     assert catalog.op_for_shape(**query, scales=("e5m3", "e5m3", 32), k=128) is None
     with pytest.raises(ValueError, match="exactly 3"):
         catalog.enumerate(**query, scales=(None,))
+
+
+def test_editing_an_enumeration_leaves_the_next_answer_unchanged():
+    """A repeated query is answered from the catalog's memo; each call still
+    returns a list of its own, so a caller that edits one cannot change what
+    the next caller gets."""
+    catalog = MmaCatalog(_contracts())
+    query = {
+        "family": "wmma_scaled",
+        "a_dtype": "fp8",
+        "b_dtype": "bf8",
+        "c_dtype": "fp32",
+        "m": 16,
+        "n": 16,
+    }
+    first = catalog.enumerate(**query)
+    expected = list(first)
+    first.clear()
+    assert catalog.enumerate(**query) == expected
+    assert len(expected) == 7
 
 
 def test_scale_alias_selects_the_same_contract():

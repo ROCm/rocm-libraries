@@ -52,7 +52,7 @@ worked inside the story.
 
 | | |
 |---|---|
-| Host | AMD Instinct MI355X node, 4 visible GPUs |
+| Host | gfx950 node, 4 visible GPUs |
 | ROCm / comgr | 7.2.0, comgr reports `(7, 2)` |
 | LLVM flavor | `llvm22`, auto-resolved from the installed comgr and pinned on every path |
 | Target | `gfx950` (parity matrix additionally covers `gfx942`) |
@@ -95,7 +95,7 @@ control that makes the other two columns meaningful. Every kernel that compiles
 produces byte-identical HSACO on both backend paths.
 
 The shortfall from 46 is not a parity failure — it is kernels that no path can
-compile, discussed in [Compilability](#ll-parity-overstates-what-is-shippable).
+compile, discussed in [Compilability](#ll-parity-overstates-what-is-shippable--p1).
 
 ### 2. The rolled path, proven at the HSACO level
 

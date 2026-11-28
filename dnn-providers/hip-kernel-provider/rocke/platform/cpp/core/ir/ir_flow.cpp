@@ -2482,6 +2482,7 @@ rocke_for_t rocke_b_scf_for(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_for: NULL bound/step");
         return out;
     }
+    rocke_i_refuse_declared_name(b, "loop induction variable", nm);
 
     snprintf(iv_full, sizeof(iv_full), "%%%s", nm);
     {
@@ -2565,6 +2566,12 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
             return out;
         }
     }
+    rocke_i_refuse_declared_name(b, "loop induction variable", nm);
+    for(i = 0; i < num_iter_args; ++i)
+    {
+        rocke_i_refuse_declared_name(
+            b, "loop-carried value", iter_args[i].name ? iter_args[i].name : "");
+    }
 
     snprintf(iv_full, sizeof(iv_full), "%%%s", nm);
     {
@@ -2622,7 +2629,7 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
     }
 
     /* result types: one per iter arg, type = init type. rocke_i_op makes the
-     * result Values, named with the "for" hint => "%for<N>" matching
+     * result Values, named with the "for" hint => "%for_<N>" matching
      * Python's self._fresh("for"). */
     rtys = NULL;
     if(num_iter_args > 0)
@@ -2943,13 +2950,48 @@ static int present_region_count(const rocke_op_t* op)
     return count;
 }
 
-const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap)
+/* Python core/ir.py::_single_region_error: the refusal for `op` when it does
+ * not hold exactly one region, its `region_role` region ("body", "then"),
+ * written into `buf`, or NULL when it does. A NULL region counts as missing
+ * (present_region_count). */
+static const char*
+    single_region_error(const rocke_op_t* op, const char* region_role, char* buf, size_t cap)
 {
     const int num_regions = present_region_count(op);
     if(op->num_regions == 1 && num_regions == 1)
         return NULL;
-    snprintf(buf, cap, "scf.for: expected 1 body region, got %d", num_regions);
+    snprintf(buf,
+             cap,
+             "%s: expected 1 %s region, got %d",
+             rocke_opcode_name(op->opcode),
+             region_role,
+             num_regions);
     return buf;
+}
+
+const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    return single_region_error(op, "body", buf, cap);
+}
+
+const char* rocke_i_scf_if_condition_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands == 1)
+        return NULL;
+    snprintf(buf, cap, "scf.if expects exactly 1 condition operand");
+    return buf;
+}
+
+const char* rocke_i_scf_if_region_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    return single_region_error(op, "then", buf, cap);
+}
+
+const char* rocke_i_scf_if_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(rocke_i_scf_if_condition_error(op, buf, cap))
+        return buf;
+    return rocke_i_scf_if_region_error(op, buf, cap);
 }
 
 /* Python core/ir.py::_scf_for_carried_count_error: the refusal for the scf.for
@@ -2999,22 +3041,14 @@ static const char* scf_for_carried_count_error(const rocke_op_t* op, char* buf, 
     return NULL;
 }
 
-/* Python core/ir.py::_untyped_value_message: whether value `index` of `what`
- * ("scf.for result", say) has a missing `type` (NULL, or with no name); when it
- * does, its refusal is written into `buf`. The builders and parsers of both
- * engines type every value, but a raw value (rocke_i_value_named given no type)
- * or the result of a raw op (rocke_i_op given no result types) has none, so the
- * loop rule and the if/else rule check each value with this before they read
- * its type's name; the loop rule reports it as a ValueError, as every loop
- * refusal is, and the if/else rule as a TypeError, as its builder refuses a
- * result type. "None" is Python's spelling of the missing type, so both engines
- * write the same text. */
-static bool untyped_value_message(const rocke_type_t* type,
-                                  const char* what,
-                                  int index,
-                                  const char* expected,
-                                  char* buf,
-                                  size_t cap)
+/* Declared in ir_internal.h. "None" is Python's spelling of the missing type,
+ * so both engines write the same text. */
+bool rocke_i_untyped_value_message(const rocke_type_t* type,
+                                   const char* what,
+                                   int index,
+                                   const char* expected,
+                                   char* buf,
+                                   size_t cap)
 {
     if(type != NULL && type->name != NULL)
         return false;
@@ -3022,16 +3056,17 @@ static bool untyped_value_message(const rocke_type_t* type,
     return true;
 }
 
-/* Python core/ir.py::_scf_for_metadata_entry_error: the refusal for the scf.for
- * `op`, whose carried-value counts agree (scf_for_carried_count_error), when an
- * iter_args metadata entry does not describe its carried value, written into
- * `buf`, or NULL when every entry does. Entry i is a map whose "name" is a
- * non-empty string and whose "type" names the type of init operand i (operand
- * 3 + i); result i has that type too. An init operand or result with no type is
- * refused (untyped_value_message) before its type is read, so
- * scf_for_yield_error can rely on every init type being named once this
- * passes. */
-static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf, size_t cap)
+/* Python core/ir.py::_scf_for_metadata_entry_error: whether the iter_args
+ * metadata entries of the scf.for `op`, whose carried-value counts agree
+ * (scf_for_carried_count_error), describe its carried values. Returns ROCKE_OK,
+ * or the status of the Python engine's exception with its refusal written into
+ * `buf`. Entry i is a map whose "name" is a non-empty string and whose "type"
+ * names the type of init operand i (operand 3 + i); result i has that type too.
+ * An init operand or result with no type is a ROCKE_ERR_TYPE refusal
+ * (rocke_i_untyped_value_message), made before its type is read, so scf_for_yield_error
+ * can rely on every init type being named once this passes; every other
+ * refusal is ROCKE_ERR_VALUE. */
+static rocke_status_t scf_for_metadata_entry_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     const rocke_attr_value_t* metadata = rocke_attr_get(&op->attrs, "iter_args");
     const int count = metadata ? metadata->u.list.count : 0;
@@ -3041,22 +3076,24 @@ static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf,
         if(!entry)
         {
             snprintf(buf, cap, "scf.for iter_arg %d metadata must be a map", i);
-            return buf;
+            return ROCKE_ERR_VALUE;
         }
         const char* name = rocke_attr_get_str(entry, "name");
         if(!name || !*name)
         {
             snprintf(buf, cap, "scf.for iter_arg %d metadata has no name", i);
-            return buf;
+            return ROCKE_ERR_VALUE;
         }
         const char* type_name = rocke_attr_get_str(entry, "type");
         if(!type_name)
         {
-            return rocke_i_untyped_loop_value_message(name, buf, cap);
+            rocke_i_untyped_loop_value_message(name, buf, cap);
+            return ROCKE_ERR_VALUE;
         }
         const rocke_type_t* init_type = op->operands[3 + i]->type;
-        if(untyped_value_message(init_type, "scf.for init operand", i, "an IR type", buf, cap))
-            return buf;
+        if(rocke_i_untyped_value_message(
+               init_type, "scf.for init operand", i, "an IR type", buf, cap))
+            return ROCKE_ERR_TYPE;
         if(strcmp(type_name, init_type->name) != 0)
         {
             snprintf(buf,
@@ -3065,11 +3102,12 @@ static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf,
                      name,
                      type_name,
                      init_type->name);
-            return buf;
+            return ROCKE_ERR_VALUE;
         }
         const rocke_type_t* result_type = op->results[i]->type;
-        if(untyped_value_message(result_type, "scf.for result", i, init_type->name, buf, cap))
-            return buf;
+        if(rocke_i_untyped_value_message(
+               result_type, "scf.for result", i, init_type->name, buf, cap))
+            return ROCKE_ERR_TYPE;
         if(!rocke_type_eq(result_type, init_type))
         {
             snprintf(buf,
@@ -3078,23 +3116,25 @@ static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf,
                      result_type->name,
                      name,
                      init_type->name);
-            return buf;
+            return ROCKE_ERR_VALUE;
         }
     }
-    return NULL;
+    return ROCKE_OK;
 }
 
-/* Python core/ir.py::_scf_for_yield_error: the refusal for the scf.yield ops
- * directly in the body of the scf.for `op`, whose carried-value counts agree
- * (scf_for_carried_count_error), written into `buf`, or NULL when they are
- * sound. The loop takes its carried values from the one scf.yield that ends
- * its body, so the body yields only at its end; it ends in a yield of one value
- * per init operand (the operands after lower, upper and step), of that
- * operand's type, whenever the loop carries any. A loop that carries none may
- * end in an empty yield or in none. A yielded value with no type is refused
- * (untyped_value_message) before its type is read. The loop holds one body
- * region (rocke_i_scf_for_region_error). */
-static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t cap)
+/* Python core/ir.py::_scf_for_yield_error: whether the scf.yield ops directly
+ * in the body of the scf.for `op`, whose carried-value counts agree
+ * (scf_for_carried_count_error), are sound. Returns ROCKE_OK, or the status of
+ * the Python engine's exception with its refusal written into `buf`. The loop
+ * takes its carried values from the one scf.yield that ends its body, so the
+ * body yields only at its end; it ends in a yield of one value per init operand
+ * (the operands after lower, upper and step), of that operand's type, whenever
+ * the loop carries any. A loop that carries none may end in an empty yield or
+ * in none. A yielded value with no type is a ROCKE_ERR_TYPE refusal
+ * (rocke_i_untyped_value_message), made before its type is read; every other refusal
+ * is ROCKE_ERR_VALUE. The loop holds one body region
+ * (rocke_i_scf_for_region_error). */
+static rocke_status_t scf_for_yield_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     const rocke_region_t* body = op->regions[0];
     const int count = op->num_operands > 3 ? op->num_operands - 3 : 0;
@@ -3103,19 +3143,19 @@ static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t c
         if(body->ops[i]->opcode == ROCKE_OP_SCF_YIELD)
         {
             snprintf(buf, cap, "%s", ROCKE_LOOP_EARLY_YIELD_ERROR);
-            return buf;
+            return ROCKE_ERR_VALUE;
         }
     }
     if(body->num_ops == 0 || body->ops[body->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
     {
         if(count == 0)
-            return NULL;
+            return ROCKE_OK;
         snprintf(buf,
                  cap,
                  "scf.for carries %d values, so its body must end in scf.yield of %d values",
                  count,
                  count);
-        return buf;
+        return ROCKE_ERR_VALUE;
     }
     const rocke_op_t* closing_yield = body->ops[body->num_ops - 1];
     if(closing_yield->num_operands != count)
@@ -3125,14 +3165,15 @@ static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t c
                  "scf.for carries %d values, but its body yields %d values",
                  count,
                  closing_yield->num_operands);
-        return buf;
+        return ROCKE_ERR_VALUE;
     }
     for(int i = 0; i < count; i++)
     {
         const rocke_type_t* init_type = op->operands[3 + i]->type;
         const rocke_type_t* value_type = closing_yield->operands[i]->type;
-        if(untyped_value_message(value_type, "scf.for body yield", i, init_type->name, buf, cap))
-            return buf;
+        if(rocke_i_untyped_value_message(
+               value_type, "scf.for body yield", i, init_type->name, buf, cap))
+            return ROCKE_ERR_TYPE;
         if(!rocke_type_eq(value_type, init_type))
         {
             snprintf(buf,
@@ -3141,34 +3182,36 @@ static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t c
                      i,
                      init_type->name,
                      value_type->name);
-            return buf;
+            return ROCKE_ERR_VALUE;
         }
     }
-    return NULL;
+    return ROCKE_OK;
 }
 
-const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap)
+rocke_status_t rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     if(rocke_i_scf_for_region_error(op, buf, cap))
-        return buf;
+        return ROCKE_ERR_VALUE;
     if(scf_for_carried_count_error(op, buf, cap))
-        return buf;
-    if(scf_for_metadata_entry_error(op, buf, cap))
-        return buf;
+        return ROCKE_ERR_VALUE;
+    rocke_status_t status = scf_for_metadata_entry_error(op, buf, cap);
+    if(status != ROCKE_OK)
+        return status;
     if(rocke_i_scf_for_carried_descriptor_error(op, buf, cap))
-        return buf;
-    if(scf_for_yield_error(op, buf, cap))
-        return buf;
+        return ROCKE_ERR_VALUE;
+    status = scf_for_yield_error(op, buf, cap);
+    if(status != ROCKE_OK)
+        return status;
     const rocke_region_t* body = op->regions[0];
     for(int i = 0; i < body->num_ops; i++)
     {
         if(nested_orphan_yield(body->ops[i]))
         {
             snprintf(buf, cap, "%s", ROCKE_ORPHAN_YIELD_ERROR);
-            return buf;
+            return ROCKE_ERR_VALUE;
         }
     }
-    return NULL;
+    return ROCKE_OK;
 }
 
 rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* err, size_t err_cap)
@@ -3180,7 +3223,13 @@ rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* er
         const rocke_op_t* op = region->ops[i];
         if(op->opcode == ROCKE_OP_SCF_FOR)
         {
-            if(rocke_i_scf_for_error(op, err, err_cap))
+            const rocke_status_t status = rocke_i_scf_for_error(op, err, err_cap);
+            if(status != ROCKE_OK)
+                return status;
+        }
+        else if(op->opcode == ROCKE_OP_SCF_IF)
+        {
+            if(rocke_i_scf_if_error(op, err, err_cap))
                 return ROCKE_ERR_VALUE;
         }
         else if(op->opcode == ROCKE_OP_SCF_IF_ELSE)
@@ -3200,9 +3249,9 @@ rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* er
     return ROCKE_OK;
 }
 
-/* Python core/ir.py::_refuse_if_else_result_type; the types and texts are the
+/* Python core/ir.py::_if_else_result_type_error; the types and texts are the
  * Python engine's. A result with no type is refused first
- * (untyped_value_message), before its name is read; a packed-only type has no
+ * (rocke_i_untyped_value_message), before its name is read; a packed-only type has no
  * value form; an LDS allocation is a name the lowerings resolve to its base,
  * not a value, so neither a phi nor a HIP variable can hold one. */
 rocke_status_t rocke_i_check_if_else_result_type(int index,
@@ -3210,7 +3259,8 @@ rocke_status_t rocke_i_check_if_else_result_type(int index,
                                                  char* err,
                                                  size_t err_cap)
 {
-    if(untyped_value_message(result_type, "scf.if_else result", index, "an IR type", err, err_cap))
+    if(rocke_i_untyped_value_message(
+           result_type, "scf.if_else result", index, "an IR type", err, err_cap))
     {
         return ROCKE_ERR_TYPE;
     }
@@ -3230,15 +3280,17 @@ rocke_status_t rocke_i_check_if_else_result_type(int index,
     return ROCKE_OK;
 }
 
-/* Python core/ir.py::_if_else_branch_yield: the scf.yield that ends branch
- * `branch` (0 then, 1 else) of the scf.if_else `op`, whose condition and branch
- * counts and result types rocke_i_if_else_yields has checked, in `*out_yield`
- * (NULL when `op` has no results). Only that closing scf.yield has its values
- * taken, so a branch holds no other, directly or in a region nested in it that
- * takes no yields (rocke_i_orphan_yield). Returns ROCKE_OK, or the status of the
- * Python engine's exception with its refusal written into `err`: a TypeError
- * for a yielded value with no type (untyped_value_message), raised before any
- * rule reads its type, and a ValueError for every other refusal. */
+/* Python core/ir.py::_if_else_branch_yield_error, which returns the refusal
+ * only, and _if_else_yields, which reads the closing yield: the scf.yield that
+ * ends branch `branch` (0 then, 1 else) of the scf.if_else `op`, whose
+ * condition and branch counts and result types rocke_i_if_else_yields has
+ * checked, in `*out_yield` (NULL when `op` has no results). Only that closing
+ * scf.yield has its values taken, so a branch holds no other, directly or in a
+ * region nested in it that takes no yields (rocke_i_orphan_yield). Returns
+ * ROCKE_OK, or the status of the Python engine's exception with its refusal
+ * written into `err`: a TypeError for a yielded value with no type
+ * (rocke_i_untyped_value_message), returned before any rule reads its type, and a
+ * ValueError for every other refusal. */
 static rocke_status_t if_else_branch_yield(
     const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap)
 {
@@ -3312,7 +3364,7 @@ static rocke_status_t if_else_branch_yield(
         }
         char what[32];
         snprintf(what, sizeof what, "scf.if_else %s branch yield", name);
-        if(untyped_value_message(value_type, what, i, result_type->name, err, err_cap))
+        if(rocke_i_untyped_value_message(value_type, what, i, result_type->name, err, err_cap))
         {
             return ROCKE_ERR_TYPE;
         }

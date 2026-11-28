@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import pytest
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
+from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 from kernels.common.attention_bwd import (
     BWD_BARRIER_FENCE,
@@ -141,11 +143,11 @@ def test_split_dq_kernel_barriers_are_fenced(arch, kw):
 @pytest.mark.parametrize("case", ["default_d64", "lds_only_d64", "select24_d128"])
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_cpp_engine_lowers_the_fenced_kernel_identically(arch, case, flavor):
-    rocke_engine = pytest.importorskip("rocke_engine")
+    native = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     k = _kernel(arch, case)
-    cpp = rocke_engine.lower_serialized_ir(serialize(k), arch=arch, flavor=flavor)
+    cpp = native.lower_serialized_ir(serialize(k), arch=arch, flavor=flavor)
     assert cpp == lower(k, arch=arch, llvm_flavor=flavor)
 
 
@@ -208,7 +210,7 @@ def _compile_isa(kernel, arch):
     from ._attention_bwd_resources import compile_or_skip
 
     if R.find_objdump() is None:
-        pytest.skip("llvm-objdump not found")
+        skip_until(BUILD_VARIANT, reason="llvm-objdump not found")
     art = compile_or_skip(kernel, arch=arch, backend="python")
     return art.llvm_text, R.parse_disassembly(R.disassemble(art.hsaco, arch=arch))
 

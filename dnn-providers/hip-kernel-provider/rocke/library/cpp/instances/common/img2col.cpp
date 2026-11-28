@@ -19,15 +19,15 @@
  *   STORE path.
  *
  *   The previously-deferred load/store helpers are now ported and used here:
- *     - conv_implicit_gemm.make_a_descriptor -> rocke_i_img2col_make_a_descriptor
- *       (naive A_nhwc + unmerge_magic/embed_bounded/pad chain),
+ *     - conv_implicit_gemm.make_a_descriptor -> rocke_conv_make_a_descriptor
+ *       (the conv family's own port, called with decompose_m=true as Python does),
  *     - the buffer resource + descriptor .offset path
  *       (rocke_b_buffer_rsrc / rocke_transforms_descriptor_offset),
  *     - the single masked V-wide vector load (load_tile single-access) lowered
  *       to rocke_b_buffer_load_f16 / rocke_b_buffer_load_vN_f16 and the matching
  *       rocke_b_buffer_store_f16 / rocke_b_buffer_store_vN_f16 store.
  *   No stubbed region remains; the differential harness reports img2col GREEN
- *   (6 configs, bad=0) in both ir --canonical and ll modes against the Python
+ *   (8 configs, bad=0) in both ir --canonical and ll modes against the Python
  *   reference rocke/instances/common/img2col.py.
  */
 #include "rocke/instance_img2col.h"
@@ -39,6 +39,7 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.helpers.spec.h" /* ceil_div_grid, SignatureBuilder */
 #include "rocke/helper_rocke.helpers.transforms.h" /* unmerge_magic + tid decode */
+#include "rocke/instance_conv_implicit_gemm.h" /* rocke_conv_make_a_descriptor */
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
@@ -91,6 +92,28 @@ bool rocke_img2col_is_valid_spec(const rocke_img2col_spec_t* spec,
                  "unsupported dtype '%s' (only f16 in v1)",
                  spec->dtype != NULL ? spec->dtype : "");
         rocke_img2col_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+
+    /* if spec.problem.groups != 1: ... */
+    if(spec->problem.groups != 1)
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "groups %d unsupported (img2col covers single-group convolution only)",
+                 spec->problem.groups);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+
+    /* if spec.problem.is_3d: ... (the flag is true on this path, so Python's
+     * rendering of it is the fixed text "True") */
+    if(rocke_conv_problem_is_3d(&spec->problem))
+    {
+        rocke_img2col_set_reason(reason,
+                                 reason_cap,
+                                 "img2col failed - is_3d=True, expected a 2-D problem "
+                                 "(img2col covers 2-D convolution only)");
         return false;
     }
 
@@ -169,9 +192,9 @@ rocke_status_t rocke_img2col_grid(const rocke_img2col_spec_t* spec, int out[3])
         return ROCKE_ERR_VALUE;
     }
     /* ceil_div_grid((K_gemm, block_tile_k), (M, block_tile_m)) */
-    totals[0] = rocke_img2col_conv_problem_k_gemm(&spec->problem);
+    totals[0] = rocke_conv_problem_k_gemm(&spec->problem);
     tiles[0] = spec->block_tile_k;
-    totals[1] = rocke_img2col_conv_problem_m(&spec->problem);
+    totals[1] = rocke_conv_problem_m(&spec->problem);
     tiles[1] = spec->block_tile_m;
     return rocke_ceil_div_grid(totals, tiles, 2, out);
 }
@@ -259,116 +282,8 @@ rocke_status_t rocke_img2col_signature(rocke_arena_t* arena,
     return ROCKE_OK;
 }
 
-/* ===================================================================== *
- *  make_a_descriptor(p) -- conv (m, k) -> NHWC offset descriptor.
- *
- *  Byte-identical port of conv_implicit_gemm.make_a_descriptor(p) with
- *  decompose_m=True (the img2col call site). The transform chain (and so the
- *  IR emitted by .offset) is:
- *
- *    naive("A_nhwc", [N, Hi, Wi, C], coord_names=[n, hi, wi, c])
- *      .transform(
- *         unmerge_magic("m"  -> [n, ho, wo], dims=[N, Ho, Wo]),
- *         embed([ho, y] -> hi, strides=[sH, dH], offset=-pH, lo=0, hi=Hi),
- *         embed([wo, x] -> wi, strides=[sW, dW], offset=-pW, lo=0, hi=Wi),
- *         unmerge_magic("k"  -> [y, x, c], dims=[Y, X, C]),
- *         pad("y", lo=0, hi=Y),
- *         pad("x", lo=0, hi=X))
- * ===================================================================== */
-
-static rocke_tensor_descriptor_t* rocke_i_img2col_make_a_descriptor(rocke_ir_builder_t* b,
-                                                                    const rocke_conv_problem_t* p)
-{
-    int Ho = rocke_img2col_conv_problem_ho(p);
-    int Wo = rocke_img2col_conv_problem_wo(p);
-
-    int base_lengths[4];
-    const char* base_names[4];
-    rocke_tensor_descriptor_t* naive_desc;
-
-    rocke_transform_t* t_m;
-    rocke_transform_t* t_hi;
-    rocke_transform_t* t_wi;
-    rocke_transform_t* t_k;
-    rocke_transform_t* t_pad_y;
-    rocke_transform_t* t_pad_x;
-    const rocke_transform_t* chain[6];
-
-    base_lengths[0] = p->N;
-    base_lengths[1] = p->Hi;
-    base_lengths[2] = p->Wi;
-    base_lengths[3] = p->C;
-    base_names[0] = "n";
-    base_names[1] = "hi";
-    base_names[2] = "wi";
-    base_names[3] = "c";
-
-    naive_desc = rocke_tensor_descriptor_naive(b, "A_nhwc", base_lengths, 4, NULL, base_names, 4);
-    if(naive_desc == NULL)
-    {
-        return NULL;
-    }
-
-    {
-        const char* into_m[3];
-        int dims_m[3];
-        into_m[0] = "n";
-        into_m[1] = "ho";
-        into_m[2] = "wo";
-        dims_m[0] = p->N;
-        dims_m[1] = Ho;
-        dims_m[2] = Wo;
-        t_m = rocke_unmerge_magic(b, "m", into_m, 3, dims_m);
-    }
-    {
-        const char* up_hi[2];
-        int str_hi[2];
-        up_hi[0] = "ho";
-        up_hi[1] = "y";
-        str_hi[0] = p->sH;
-        str_hi[1] = p->dH;
-        t_hi = rocke_embed_bounded(b, up_hi, 2, "hi", str_hi, -p->pH, 0, p->Hi);
-    }
-    {
-        const char* up_wi[2];
-        int str_wi[2];
-        up_wi[0] = "wo";
-        up_wi[1] = "x";
-        str_wi[0] = p->sW;
-        str_wi[1] = p->dW;
-        t_wi = rocke_embed_bounded(b, up_wi, 2, "wi", str_wi, -p->pW, 0, p->Wi);
-    }
-    {
-        const char* into_k[3];
-        int dims_k[3];
-        into_k[0] = "y";
-        into_k[1] = "x";
-        into_k[2] = "c";
-        dims_k[0] = p->Y;
-        dims_k[1] = p->X;
-        dims_k[2] = p->C;
-        t_k = rocke_unmerge_magic(b, "k", into_k, 3, dims_k);
-    }
-    t_pad_y = rocke_pad(b, "y", 0, p->Y);
-    t_pad_x = rocke_pad(b, "x", 0, p->X);
-
-    if(t_m == NULL || t_hi == NULL || t_wi == NULL || t_k == NULL || t_pad_y == NULL
-       || t_pad_x == NULL)
-    {
-        return NULL;
-    }
-
-    chain[0] = t_m;
-    chain[1] = t_hi;
-    chain[2] = t_wi;
-    chain[3] = t_k;
-    chain[4] = t_pad_y;
-    chain[5] = t_pad_x;
-    return rocke_tensor_descriptor_transform(b, naive_desc, chain, 6);
-}
-
 /* A_desc.offset(b, m=..., k=...) -> (offset, valid). Helper that packs the
- * two named upper coords for rocke_tensor_descriptor_offset. */
+ * two named upper coords for rocke_transforms_descriptor_offset. */
 static bool rocke_i_img2col_a_offset(rocke_ir_builder_t* b,
                                      const rocke_tensor_descriptor_t* a_desc,
                                      rocke_value_t* m_v,
@@ -484,8 +399,8 @@ rocke_kernel_def_t*
     /* The const_i32 sequence, byte-identical to the Python order. */
     c0 = rocke_b_const_i32(b, 0);
     c_half_bytes = rocke_b_const_i32(b, 2);
-    c_M = rocke_b_const_i32(b, rocke_img2col_conv_problem_m(p));
-    c_K = rocke_b_const_i32(b, rocke_img2col_conv_problem_k_gemm(p));
+    c_M = rocke_b_const_i32(b, rocke_conv_problem_m(p));
+    c_K = rocke_b_const_i32(b, rocke_conv_problem_k_gemm(p));
     c_block_m = rocke_b_const_i32(b, spec->block_tile_m);
     c_block_k = rocke_b_const_i32(b, spec->block_tile_k);
     /* oob_sentinel = b.const_i32((1 << 31) - 1) */
@@ -592,7 +507,7 @@ rocke_kernel_def_t*
     /* A_desc = make_a_descriptor(p) -- built here (emits no IR; .offset does). */
     {
         const rocke_type_t* F16t = rocke_f16();
-        rocke_tensor_descriptor_t* a_desc = rocke_i_img2col_make_a_descriptor(b, p);
+        rocke_tensor_descriptor_t* a_desc = rocke_conv_make_a_descriptor(b, p, true);
         rocke_value_t* loaded;
 
         if(a_desc == NULL)

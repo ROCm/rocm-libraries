@@ -21,8 +21,8 @@ Authoring style:
     (no hipcc / MLIR / clang). Codegen time for one kernel is
     typically <150 ms wall.
 
-Reference: CK Tile's `cktile_fixed_lean` for this shape reaches
-~250 TFLOPS in CUDA-graph mode; we aim to beat that.
+Reference: CK Tile's `cktile_fixed_lean` on this shape, in CUDA-graph
+mode, is the baseline we aim to beat.
 """
 
 from __future__ import annotations
@@ -199,10 +199,8 @@ def main() -> int:
     #   pipeline=mem (single-buffer LDS — for K_gemm=576 the compv4
     #                double-buffer doesn't beat the LDS bandwidth)
     #   epilogue=cshuffle  (wide-vector global stores, runbook §9.3)
-    # On MI300X for this conv shape:
-    #   per-launch:   248 TFLOPS
-    #   graph 5x200:  280 TFLOPS  (vs ~250 TFLOPS for CK Tile's own
-    #                              `cktile_fixed_lean` on the same shape)
+    # Measured on gfx942 for this conv shape, per launch and in graph mode
+    # (5x200), against CK Tile's own `cktile_fixed_lean` on the same shape.
     spec = ImplicitGemmConvSpec(
         problem=problem,
         name="rocke_ex08_bake_off_implicit_gemm",

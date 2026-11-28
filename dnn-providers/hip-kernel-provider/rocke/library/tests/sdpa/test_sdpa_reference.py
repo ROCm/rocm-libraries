@@ -1,17 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""``sdpa_reference_from_request`` against independent oracles.
+"""``sdpa_reference_from_request`` against an independent oracle.
 
-Two oracles, neither sharing the vectorised attention math it delegates to:
-
-- a scalar fp64 loop that transliterates hipDNN's ``CpuFpReferenceSdpa::forward``
-  (bias indexed the way its ``computeMaskIndex`` does, band from its
-  ``isMasked``, transliterated below as :func:`hipdnn_keep` rather than shared
-  with the oracle's ``keep``),
-  extended per batch the way hipDNN's golden generator runs GROUP mode;
-- PyTorch's math SDPA backend, which is what hipDNN's golden generator uses,
-  run per batch with an additive mask (skipped without torch).
+The oracle shares none of the vectorised attention math the reference
+delegates to: a scalar fp64 loop that transliterates hipDNN's
+``CpuFpReferenceSdpa::forward`` (bias indexed the way its ``computeMaskIndex``
+does, band from its ``isMasked``, transliterated below as :func:`hipdnn_keep`
+rather than shared with the oracle's ``keep``), extended per batch the way
+hipDNN's golden generator runs GROUP mode.
 """
 
 from __future__ import annotations
@@ -28,7 +25,6 @@ from tests.sdpa.helpers import strided_view
 from tests.sdpa.request_reference import sdpa_reference_from_request
 from tests.sdpa.request_cases import (
     CASES,
-    bhsd,
     bshd,
     make_request,
     make_tensors,
@@ -504,65 +500,3 @@ def test_negative_strides_are_rejected():
     so a duck-typed request reaches this check."""
     with pytest.raises(ValueError, match="negative strides \\(-1,\\)"):
         strided_view("q", np.zeros(8, np.float32), 0, (2,), (-1,))
-
-
-# --- PyTorch math SDPA, the hipDNN golden generator's backend --------------------
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"right_bound": 0},
-        {"s_q": 5, "s_kv": 9, "right_bound": 0, "diagonal": "bottom_right"},
-        {
-            "s_q": 9,
-            "s_kv": 5,
-            "left_bound": 2,
-            "right_bound": 0,
-            "diagonal": "bottom_right",
-        },
-        {"h_q": 8, "h_k": 2, "left_bound": 3},
-    ],
-)
-def test_matches_torch_math_sdpa_per_batch(overrides):
-    torch = pytest.importorskip("torch")
-    seq = packed((2, 1, 1, 1), "int32")
-    req = make_request(
-        layout=bhsd,
-        bias=SdpaBias(packed((1, 1, 1, overrides.get("s_kv", 8)))),
-        seq_len_q=seq,
-        seq_len_kv=seq,
-        stats=packed((2, overrides.get("h_q", 4), overrides.get("s_q", 8), 1)),
-        **overrides,
-    )
-    tensors = make_tensors(req, seed=7)
-    got = sdpa_reference_from_request(req, tensors)
-    q, k, v = (torch.from_numpy(tensors[n]) for n in ("q", "k", "v"))
-    bias = torch.from_numpy(tensors["bias"]).reshape(1, 1, 1, -1)
-    group = req.h_q // req.h_k
-    for b in range(req.batch):
-        sq, skv = int(tensors["seq_len_q"][b]), int(tensors["seq_len_kv"][b])
-        keep_mask = torch.tensor(
-            [
-                [
-                    hipdnn_keep(
-                        i, j, sq, skv, req.diagonal, req.left_bound, req.right_bound
-                    )
-                    for j in range(skv)
-                ]
-                for i in range(sq)
-            ]
-        )
-        mask = bias[..., :skv] + torch.where(keep_mask, 0.0, float("-inf"))
-        qb, kb, vb = q[b : b + 1, :, :sq], k[b : b + 1, :, :skv], v[b : b + 1, :, :skv]
-        kb, vb = kb.repeat_interleave(group, 1), vb.repeat_interleave(group, 1)
-        live = keep_mask.any(dim=1)
-        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
-            o = torch.nn.functional.scaled_dot_product_attention(
-                qb, kb, vb, attn_mask=mask, scale=req.scale
-            )
-        lse = torch.logsumexp(qb @ kb.transpose(-2, -1) * req.scale + mask, dim=-1)
-        np.testing.assert_allclose(
-            got["o"][b, :, :sq][:, live], o[0][:, live], atol=2e-5
-        )
-        np.testing.assert_allclose(got["stats"][b, :, :sq, 0], lse[0], atol=2e-5)

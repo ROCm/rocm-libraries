@@ -11,7 +11,11 @@ One wave issues a single ``mfma_f32_4x4x4_{f16,bf16}``. The test pins the
 * result slot ``m`` of lane ``l`` is ``D_blk[m][i]``.
 
 The IR / lowering checks run everywhere; the on-device numeric check runs only
-where a gfx942 / gfx950 GPU is visible (numpy only, torch is not required).
+where a gfx90a, gfx942 or gfx950 GPU is visible (numpy only, torch is not
+required).
+
+It also pins, for these atoms and the f64 4x4x4 atom, that the MMA catalog
+lists each atom exactly on the targets whose compiler selects its intrinsic.
 """
 
 from __future__ import annotations
@@ -20,13 +24,91 @@ import ctypes
 
 import numpy as np
 import pytest
+from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import domain as arch_domain
 from rocke.core.ir import BF16, F16, F32, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.engines import (
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
+    available_engines,
+    lower_with_engine,
+)
 
 _INTRIN = {
     "f16": "@llvm.amdgcn.mfma.f32.4x4x4f16(",
     "bf16": "@llvm.amdgcn.mfma.f32.4x4x4bf16.1k(",
 }
+
+_BUILTIN = {
+    "f16": "__builtin_amdgcn_mfma_f32_4x4x4f16(",
+    "bf16": "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k(",
+}
+
+# The targets whose MMA catalog lists each batched 4x4x4 atom: gfx908 has the
+# f16 atom but neither the bf16 _1k nor the f64 form, and no RDNA target has an
+# MFMA.
+_LISTED_ON = {
+    "mfma_f32_4x4x4_f16": ["gfx908", "gfx90a", "gfx942", "gfx950"],
+    "mfma_f32_4x4x4_bf16": ["gfx90a", "gfx942", "gfx950"],
+    "mfma_f64_4x4x4_f64": ["gfx90a", "gfx942", "gfx950"],
+}
+
+# The targets the on-device check has passed on; a target the catalog lists
+# but the check has not run on (gfx908) stays skipped until it does.
+_DEVICE_CHECKED_ON = ("gfx90a", "gfx942", "gfx950")
+
+# Each atom's intrinsic, as the declaration table and the arch domain key it.
+_INTRINSIC_KEY = {
+    "mfma_f32_4x4x4_f16": "mfma.f32.4x4x4f16",
+    "mfma_f32_4x4x4_bf16": "mfma.f32.4x4x4bf16.1k",
+    "mfma_f64_4x4x4_f64": "mfma.f64.4x4x4f64",
+}
+
+
+def _op_id(dtype: str) -> str:
+    """The op_id of the f32-accumulating 4x4x4 atom of ``dtype``."""
+    return f"mfma_f32_4x4x4_{dtype}"
+
+
+def _listing_targets(op_id: str) -> list[str]:
+    """The targets whose MMA catalog lists the atom ``op_id``."""
+    return [
+        arch for arch in known_arches() if ArchTarget.from_gfx(arch).mma.by_op_id(op_id)
+    ]
+
+
+def _selecting_targets(op_id: str) -> list[str]:
+    """The targets on which the compiler of every committed LLVM flavor links and
+    selects the intrinsic of the atom ``op_id``, as the measured arch domain
+    records it."""
+    columns = [arch_domain.load(flavor) for flavor in arch_domain.committed_flavors()]
+    return [
+        arch
+        for arch in known_arches()
+        if all(
+            (cell := column.lookup(_INTRINSIC_KEY[op_id], arch)) is not None
+            and cell.status == "ok"
+            for column in columns
+        )
+    ]
+
+
+def _named_for_its_atom(kernel):
+    """``kernel`` with its ``tile.mma`` op renamed ``tile.<op_id>``, the other
+    name the Python lowerers lower an MMA op under. The C++ engine's IR has no
+    such op: its parser refuses the name."""
+    for op in kernel.body.ops:
+        if op.name == "tile.mma":
+            op.name = f"tile.{op.attrs.pop('op_id')}"
+    return kernel
+
+
+def _catalog_refusal(dtype: str, arch: str) -> str:
+    return (
+        f"tile.{_op_id(dtype)} is not available on {arch}: "
+        "its MMA catalog does not list it"
+    )
 
 
 def _build(dtype: str):
@@ -77,6 +159,11 @@ def _reference(a_lanes: np.ndarray, b_lanes: np.ndarray) -> np.ndarray:
     return out
 
 
+@pytest.mark.parametrize("op_id", sorted(_LISTED_ON))
+def test_catalog_lists_the_atom_exactly_where_the_compiler_selects_it(op_id):
+    assert _listing_targets(op_id) == _LISTED_ON[op_id] == _selecting_targets(op_id)
+
+
 @pytest.mark.parametrize("dtype", ["f16", "bf16"])
 def test_lowering_emits_expected_intrinsic(dtype):
     ll = lower_kernel_to_llvm(_build(dtype), arch="gfx950")
@@ -84,19 +171,66 @@ def test_lowering_emits_expected_intrinsic(dtype):
     if dtype == "bf16":
         assert "bitcast <4 x bfloat>" in ll
         assert "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16>" in ll
+    # Each engine lowers the atom where the catalog lists it, and refuses it
+    # with the catalog gate's text on every other target, under either name.
+    listed_on = _LISTED_ON[_op_id(dtype)]
+    for arch in known_arches():
+        for engine in available_engines():
+            if arch in listed_on:
+                text = lower_with_engine(
+                    _build(dtype), arch, engine=engine, llvm_flavor="llvm22"
+                )
+                assert _INTRIN[dtype] in text, (arch, engine)
+            else:
+                assert_engine_rejects(
+                    _build(dtype),
+                    arch,
+                    engine=engine,
+                    error_type=NotImplementedError,
+                    message=_catalog_refusal(dtype, arch),
+                    llvm_flavor="llvm22",
+                )
+        if arch not in listed_on:
+            assert_engine_rejects(
+                _named_for_its_atom(_build(dtype)),
+                arch,
+                engine="python",
+                error_type=NotImplementedError,
+                message=_catalog_refusal(dtype, arch),
+                llvm_flavor="llvm22",
+            )
 
 
 @pytest.mark.parametrize("dtype", ["f16", "bf16"])
 def test_hip_lowering_emits_expected_builtin(dtype):
     from rocke.core.lower_hip import lower_kernel_to_hip
 
-    builtin = {
-        "f16": "__builtin_amdgcn_mfma_f32_4x4x4f16(",
-        "bf16": "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k(",
-    }[dtype]
-    assert builtin in lower_kernel_to_hip(_build(dtype))
+    assert _BUILTIN[dtype] in lower_kernel_to_hip(_build(dtype))
+    # The HIP lowering of each engine applies the same catalog gate. Both
+    # engines' HIP text for the listing targets is pinned by
+    # test_mma_operand_register_type.py (test_hip_16_bit_mfma_lowers_in_both_engines).
+    for arch in known_arches():
+        if arch in _LISTED_ON[_op_id(dtype)]:
+            assert _BUILTIN[dtype] in lower_kernel_to_hip(_build(dtype), arch=arch)
+            continue
+        for engine in available_engines():
+            assert_engine_rejects_hip(
+                _build(dtype),
+                arch,
+                engine=engine,
+                error_type=NotImplementedError,
+                message=_catalog_refusal(dtype, arch),
+            )
+        assert_engine_rejects_hip(
+            _named_for_its_atom(_build(dtype)),
+            arch,
+            engine="python",
+            error_type=NotImplementedError,
+            message=_catalog_refusal(dtype, arch),
+        )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["f16", "bf16"])
 def test_numerics_on_device(dtype):
     try:
@@ -112,8 +246,11 @@ def test_numerics_on_device(dtype):
         arch = get_device_info().base_arch
     except (ImportError, OSError, RuntimeError) as e:  # pragma: no cover
         pytest.skip(f"no visible GPU: {e}")
-    if arch not in ("gfx942", "gfx950"):
-        pytest.skip(f"4x4x4 MFMA check needs gfx942/gfx950 (got {arch})")
+    if arch not in _DEVICE_CHECKED_ON:
+        pytest.skip(
+            f"4x4x4 MFMA device check has run on {', '.join(_DEVICE_CHECKED_ON)} "
+            f"only (got {arch}); enable {arch} once it passes there"
+        )
     art = compile_kernel(_build(dtype), arch=arch, capture_ir_text=False)
 
     rng = np.random.default_rng(1234)

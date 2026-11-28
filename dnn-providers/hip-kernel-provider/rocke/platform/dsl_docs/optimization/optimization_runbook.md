@@ -218,7 +218,7 @@ Decide what the kernel computes before deciding how it should run.
 - For non-trivial mappings (paged KV, im2col), the coordinate
   transform DAG lives in `transforms.py`. Operators are
   `pass_through`, `pad`, `pad_dynamic`, `embed`, `unmerge`, `merge`,
-  `indirect`. Walkthrough: `architecture/TRANSFORM_DAG.md`.
+  `indirect`. Walkthrough: `architecture/transform_dag.md`.
 - State alignment and contiguity at the descriptor: `TensorDescriptor`
   in `transforms.py` and the legacy `TensorView` / `TileWindow` in
   `helpers/tensor_view.py`.
@@ -239,8 +239,7 @@ Decide what the kernel computes before deciding how it should run.
 - Always set a tolerance policy. The `examples/common/ck_tile_parity.py`
   harness encodes the per-op tolerances we currently believe in
   (elementwise linear ops bit-exact, silu/gelu `<= 2e-4`, layer/rms
-  norm `<= 5e-3` (was 2.5e-3 before noise widening, see
-  `notes/PROPOSALS_IMPLEMENTATION_REPORT.md::F2`), reduce `<= 1.5e-3`,
+  norm `<= 5e-3` (was 2.5e-3 before noise widening), reduce `<= 1.5e-3`,
   gemm `<= 7e-2`).
 - fp64 kernels compute natively in f64 and are checked against a float64
   reference (`tests/instances/differential/numeric.py`: elementwise
@@ -317,7 +316,6 @@ Use the best available vendor / library baseline:
 - Triton: AITER ships the production `unified_attention` kernel that
   vLLM and AITER use. Path comes in via `AITER_PATH` env var.
 - AITER FA / FA2 for the FMHA shapes.
-- Torch eager: `examples/common/ck_tile_parity.py::_bench_torch`.
 - A naive scalar `_fmha_warp_body.py` (`fmha_warp_fwd_inner_body`) is
   the **correctness oracle** for the FMHA family. Several FMHA specs
   still ship with the warp-scalar body (paged_prefill, splitkv_decode,
@@ -819,9 +817,9 @@ Consider:
   (e.g. `gemm_universal.gemm_universal_grid`).
 - Avoid putting too much work only in grid-z if it reduces scheduler
   interleaving.
-- Balance blocks across CUs. The MI350X chiplet swizzle in
+- Balance blocks across CUs. The gfx942 / gfx950 chiplet swizzle in
   `helpers/grid.py::chiplet_transform_chunked` (with
-  `NUM_XCDS_MI300X/MI325X/MI350X == 8`) can help.
+  `NUM_XCDS_GFX942` / `NUM_XCDS_GFX950`, both 8) can help.
 - Ensure enough CTAs for occupancy.
 - Avoid too many tiny CTAs with high launch overhead.
 - Avoid too few huge CTAs that underfill the GPU.
@@ -1713,11 +1711,12 @@ optimization possible anyway:
   the achievable WG/CU exactly. This is also how a backend artifact gets
   caught: an early llvm20 reading of the d128 attention prefill body showed
   256 VGPR + spills / 1 WG/CU and pointed at an LDS-cut occupancy story; the
-  production llvm22 reading of the same body is 213 VGPR / 0 spill / 2 WG/CU,
+  llvm22 reading of the same body is 213 VGPR / 0 spill / 2 WG/CU,
   so occupancy was never the wall and the lever is a schedule hint
   (`iglp_opt`), not a register/LDS redesign — see arch reference §21.4a.
-  (Register/occupancy counts are backend-sensitive; always read them on the
-  production backend — llvm22 + comgr 7.2, torch imported first.)
+  (Register/occupancy counts are compiler-sensitive; read them on the
+  compiler rocKE's discovery loads and record which one it was, see
+  [Compiler detection and provenance](../reference/env_flags.md#compiler-detection-and-provenance).)
 - **Perf only via same-session ratios + large effects.** Benchmark the
   candidate and its reference (flash, CK Tile, or the prior config)
   **back-to-back in one process**, and only trust the *ratio*; the throttle
@@ -2179,10 +2178,10 @@ measures the whole series at once.
 |---|---|---|---|
 | `chiplet_swizzle` | GEMM / conv | False | Remap WGIDs so contiguous stripes land on the same XCD (L2 reuse). Rejected by `is_valid_dgrad_spec`: the dgrad builder does not implement it (dgrad has `xcd_tile_order`) |
 | `chiplet_wgm` | GEMM / conv | 8 | Super-tile WGM grouping |
-| `chiplet_num_xcds` | GEMM / conv / dense attention | 8 | MI300X / MI325X / MI350X have 8 XCDs; dense attention's XCD-aware block orders read it |
+| `chiplet_num_xcds` | GEMM / conv / dense attention | 8 | gfx950 and the 304-CU gfx942 part have 8 XCDs (the 228-CU gfx942 part has 6); dense attention's XCD-aware block orders read it |
 | `chiplet_chunk_size` | GEMM / conv | 64 | XCD round-robin chunk size |
 | `helpers/grid.py::chiplet_transform_chunked` | helper | — | Pure helper if you author your own kernel |
-| Constants `NUM_XCDS_MI300X / MI325X / MI350X` | `helpers/grid.py` | — | All 8 today |
+| Constants `NUM_XCDS_GFX942` / `NUM_XCDS_GFX950` | `helpers/grid.py` | — | Both 8 |
 
 #### 12.1.M Compiler flags
 
@@ -2392,9 +2391,8 @@ sweep CSVs.
 - Coalesced V/O stores.
 - LSE output.
 - 2D vs 3D selection heuristic (`select_2d_config`, `use_2d_kernel`).
-- ALiBi / QQ-bias paths exercised (per
-  `notes/ATTENTION_PARITY_REPORT.md` 2D path was failing C9/C10/C11
-  until the score-block fix landed).
+- ALiBi / QQ-bias paths exercised (an out-of-tree attention parity report
+  found the 2D path failing C9/C10/C11 until the score-block fix landed).
 
 ### 13.4 Reduction Checklist
 
@@ -3017,7 +3015,7 @@ Round 11 ports the idea into the DSL kernels.
    HSACO for any combination of `(preshuffle_b, active_tile_skip)`
    on demand, so the four binary variants per kernel family share
    one cache.
-6. `examples/gfx950/moe/test_active_tile_skip.py`: standalone parity +
+6. `examples/gfx950/moe/active_tile_skip_check.py`: standalone parity +
    perf harness. Confirms bitwise-equal output to baseline when
    all tiles active, zero output for inactive tiles, ~14× speedup
    when every tile is inactive.
@@ -3056,8 +3054,8 @@ decode_T1_E8_K2_H4096_I7168 :
 Closed roughly 30 % of the gap to CK Tile on the canonical
 decode_T1, and ~50 % on `decode_T1_E16`. Bitwise parity
 (`rel=0.00e+00`) across every standalone and e2e variant in
-`test_active_tile_skip.py`, `test_fused_moe_preshuffle.py`,
-`test_preshuffle_b.py`.
+`active_tile_skip_check.py`, `fused_moe_preshuffle_check.py`,
+`preshuffle_b_check.py`.
 
 **Lessons reinforced.**
 
@@ -3134,11 +3132,11 @@ pattern is unchanged.
    the preshuffled tensors inside `capture_graph` *before* the
    warmup loop so the one-time `torch.cat / permute / contiguous`
    cost stays out of the captured / replayed region.
-5. `examples/gfx950/moe/test_preshuffle_b.py`: standalone batched-GEMM
+5. `examples/gfx950/moe/preshuffle_b_check.py`: standalone batched-GEMM
    parity + perf harness that flips `preshuffle_b` and confirms
    bitwise-equal kernel outputs (`max|delta|=0.0` between the
    two paths) plus per-shape timing.
-6. `examples/gfx950/moe/test_fused_moe_preshuffle.py`: end-to-end harness
+6. `examples/gfx950/moe/fused_moe_preshuffle_check.py`: end-to-end harness
    that runs five FusedMoeForward configurations
    (`baseline_interleaved`, `baseline_packed`, `preshuf_down_only`,
    `preshuf_packed_full`, `preshuf_intl_full`) per scenario with
@@ -3219,7 +3217,7 @@ CTA), so the in-tile B-load is a smaller fraction of kernel time.
 ### 17.7 Skinny-M Decode GEMM (o_proj M=2)
 
 Case study from `examples/dsl_o_proj_decode/`. The matmul is Qwen3-8B's
-`o_proj` decode: `bf16`, `M=2`, `N=4096`, `K=4096`, MI355X / gfx950, 8 TB/s
+`o_proj` decode: `bf16`, `M=2`, `N=4096`, `K=4096`, gfx950, 8 TB/s
 HBM peak. rocBLAS sits at 10.10 µs (best) / 42 % HBM efficiency. The
 exercise: do whatever it takes to match or exceed rocBLAS, end-to-end
 through the runbook loop.
@@ -3270,7 +3268,7 @@ of N=10 attempts × 500 iters with the §2.3 hygiene rules.
   help.
 * **HBM efficiency is the cap on skinny-M.** With `M=2, N=4096, K=4096,
   bf16`, B alone is 32 MB and each CTA sees a unique N-stripe — there is
-  no cross-CTA B-reuse. Total HBM ≈ 33.5 MB; sustained HBM on MI355X for
+  no cross-CTA B-reuse. Total HBM ≈ 33.5 MB; sustained HBM on gfx950 for
   streaming bf16 reads tops out near 3.5 TB/s ≈ 44 % of the 8 TB/s
   marketed peak. Both our kernel (44 %) and rocBLAS (42 %) live at this
   ceiling. Beating rocBLAS at this HBM efficiency means reducing total
@@ -3582,9 +3580,9 @@ points at the arch files directly.**
 
 Pick your target:
 
-- **[arch/gfx950.md](arch/gfx950.md)** — CDNA4 / MI350X / MI355X (the
+- **[arch/gfx950.md](arch/gfx950.md)** — CDNA4 (the
   DSL's default target).
-- **[arch/gfx942.md](arch/gfx942.md)** — CDNA3 / MI300X / MI325X.
+- **[arch/gfx942.md](arch/gfx942.md)** — CDNA3.
 
 See [arch/README.md](arch/README.md) for the index and how to add a new
 architecture. Every arch reference uses the same `21.x` layout, so a

@@ -46,8 +46,13 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
+    _fcmp_error,
     _int_add_wrap_error,
+    _int_cmp_error,
+    _operand_rules_error,
     _scf_for_error,
+    _scf_if_error,
+    _vector_cmp_error,
     BF16,
     F32,
     F16,
@@ -69,9 +74,11 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_yields,
+    _if_else_error,
     _is_unsigned,
     _ldexp_op_error,
+    _smem_store_vN_op_error,
+    _smem_store_vN_f32_op_error,
     _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -85,11 +92,11 @@ from .ir import (
     element_type,
     gpu_check_word_symbol,
     lane_count,
+    named_mma_op_id,
     require_streaming_arch,
     smem_vector_access_align,
     split_loc,
     type_bytes,
-    vector_access_align,
 )
 from .mma_operand import (
     MmaOperandRole,
@@ -99,6 +106,7 @@ from .mma_operand import (
 from .tf32 import tf32_mma_target_error, tf32_op_error
 
 from .mfma import validate_mfma
+from .native_engine import NO_TARGET_MESSAGE
 from .llvm_profile import (
     LLVM_EMISSION_ALIASES,
     LLVM_EMISSION_FLAVORS,
@@ -123,7 +131,7 @@ from .llvm_profile import (
     _flavor_at_least,
     _flavor_for_llvm,
     _is_modern_flavor,
-    _supports_llvm23_target_ops,
+    supports_llvm23_target_ops,
 )
 
 
@@ -655,9 +663,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     # 2-byte buffer load. Returns i16 (vs the i32 4-byte load), so the
     # AMDGPU OOB clamp fires per-element instead of clamping a 4-byte
-    # window. Required by P10 to bit-fix the trailing-element corruption
-    # in ``img2col vec_k=1`` and ``pooling vec=1 avg`` (see
-    # ``PROPOSALS_PLAN.md::P10`` for the LLVM bug pattern).
+    # window. Required to bit-fix the trailing-element corruption
+    # in ``img2col vec_k=1`` and ``pooling vec=1 avg``.
     "raw.ptr.buffer.load.i16": (
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
@@ -798,6 +805,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "i32 immarg, i32, i32 immarg, i32)"
     ),
     # --- LLVM 23 async markers (gfx12+ async global/LDS pipelines) ---
+    # Operand-less on purpose: valid on llvm23; llvm24 adds a trailing i32 stages immarg and
+    # auto-upgrades this form to 0 (all stages).
     "asyncmark": "declare void @llvm.amdgcn.asyncmark()",
     "wait.asyncmark": "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)",
     "raw.ptr.buffer.load.async.lds": (
@@ -1411,9 +1420,9 @@ def _lds_natural_align(op: Op) -> int | None:
     """The natural alignment of ``op``'s LDS access, before the pool cap."""
     name = op.name
     if name == "tile.smem_store":
-        # One store of the whole value, which may be a vector: smem_store_vN
-        # routes n=1 here whatever the value's type. n=1 is the scalar store
-        # and records no align, so a vector stored whole promises nothing about
+        # One store of the whole value: a scalar or a one-lane vector from
+        # smem_store_vN(n=1), or any vector in serialized IR.
+        # It records no align, so a vector stored whole promises nothing about
         # its index beyond element alignment, which is all it claims.
         return type_bytes(element_type(op.operands[-1].type))
     if name == "tile.smem_store_vN":
@@ -1427,8 +1436,8 @@ def _lds_natural_align(op: Op) -> int | None:
         return smem_vector_access_align(
             op.operands[0].type, int(op.attrs["vec"]), element_type(op.result.type)
         )
-    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32"):
-        return vector_access_align(int(op.attrs["vec"]), F32)
+    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32") and op.operands:
+        return smem_vector_access_align(op.operands[0].type, int(op.attrs["vec"]), F32)
     if name == "tile.smem_load_v4":
         # One scalar load per element.
         return type_bytes(element_type(op.result.type))
@@ -1789,10 +1798,7 @@ class _Lowerer:
         from .isa.backend import backend_for
 
         if arch is None:
-            raise ValueError(
-                "lowering requires an explicit gfx target; "
-                "pass arch=... (there is no default)"
-            )
+            raise ValueError(NO_TARGET_MESSAGE)
         self._backend = backend_for(arch)
         flavor = llvm_flavor if llvm_flavor is not None else _resolve_llvm_flavor()
         if flavor not in LLVM_FLAVORS:
@@ -1884,7 +1890,7 @@ class _Lowerer:
             if ity == "f64":
                 return _fp64_hex(val)
             if ity == "f32":
-                return _fp32_hex(val)
+                return llvm_f32_literal(val)
             if ity == "f16":
                 return _fp16_hex(val)
             return str(int(val))
@@ -2150,7 +2156,7 @@ class _Lowerer:
             raise ValueError(
                 f"{op} requires a target with {fact.value}, got {arch.gfx}"
             )
-        if not _supports_llvm23_target_ops(self._flavor):
+        if not supports_llvm23_target_ops(self._flavor):
             raise ValueError(f"{op} requires LLVM flavor llvm23, got {self._flavor}")
 
     # ----- constant folding helpers -----
@@ -2561,6 +2567,12 @@ class _Lowerer:
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
+        named_op_id = named_mma_op_id(op.name)
+        if named_op_id is not None:
+            self._backend.require_mma_available(named_op_id)
+        operand_error = _operand_rules_error(op)
+        if operand_error is not None:
+            raise operand_error
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no LLVM lowering for op {op.name!r}")
@@ -2618,7 +2630,7 @@ class _Lowerer:
         self._binop(op, llvm_op + flag)
 
     def _op_arith_add(self, op: Op) -> None:
-        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        wrap_error = _int_add_wrap_error(op.attrs, op.operands[0].type.name)
         if wrap_error:
             raise ValueError(wrap_error)
         # An explicit no-unsigned-wrap add; otherwise the type's default
@@ -2775,15 +2787,21 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
+        refusal = _int_cmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
+        pred = _icmp_predicate(op.attrs["pred"], a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
     def _op_arith_fcmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "olt")
         a, b = op.operands
+        refusal = _fcmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
+        pred = op.attrs["pred"]
         self._current().emit(
             f"  {op.result.name} = fcmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
@@ -3403,7 +3421,7 @@ class _Lowerer:
 
     def _op_math_rcp(self, op: Op) -> None:
         (v,) = op.operands
-        one = _fp32_hex(1.0) if v.type.name == "f32" else "1.000000e+00"
+        one = llvm_f32_literal(1.0) if v.type.name == "f32" else "1.000000e+00"
         self._current().emit(
             f"  {op.result.name} = fdiv {_llvm_type(v.type)} {one}, {self._operand(v)}"
         )
@@ -3886,6 +3904,9 @@ class _Lowerer:
         The AMDGPU backend turns naturally-aligned payloads into
         ds_write_b{16,32,64,128} based on total byte width.
         """
+        lanes_error = _smem_store_vN_op_error(op)
+        if lanes_error:
+            raise ValueError(lanes_error)
         smem = op.operands[0]
         indices = op.operands[1:-1]
         value = op.operands[-1]
@@ -4014,9 +4035,7 @@ class _Lowerer:
         self._backend.emit_wmma(self, op)
 
     def _op_tile_mma(self, op: Op) -> None:
-        error = tf32_mma_target_error(op.attrs.get("op_id"), self._backend.arch)
-        if error:
-            raise ValueError(error)
+        self._backend.require_mma_available(op.attrs["op_id"])
         # Target-neutral MMA: the ISA backend maps ``op.attrs["op_id"]`` to the
         # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
         # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
@@ -4416,8 +4435,6 @@ class _Lowerer:
         )
 
         atom = gfx950_scaled_mfma(op.attrs["op_id"])
-        if self._backend.arch.gfx != "gfx950":
-            raise NotImplementedError("scaled MFMA requires gfx950")
         error = scaled_mfma_error(atom.op_id, op.operands, op.results)
         if error:
             raise ValueError(error)
@@ -6255,8 +6272,7 @@ class _Lowerer:
         intrinsic makes the OOB clamp fire per-element so trailing
         loads return the correct value.
 
-        Bit-fixes ``img2col vec_k=1`` and ``pooling vec=1 avg`` (the
-        P10 patch in PROPOSALS_PLAN).
+        Bit-fixes ``img2col vec_k=1`` and ``pooling vec=1 avg``.
         """
         rsrc, voffset, soffset = op.operands
         self._need("raw.ptr.buffer.load.i16")
@@ -6667,6 +6683,9 @@ class _Lowerer:
     # ----- f32 LDS ops (cshuffle epilogue) -----
 
     def _op_tile_smem_store_vN_f32(self, op: Op) -> None:
+        refusal = _smem_store_vN_f32_op_error(op)
+        if refusal:
+            raise refusal
         smem = op.operands[0]
         indices = op.operands[1:-1]
         value = op.operands[-1]
@@ -6910,6 +6929,9 @@ class _Lowerer:
 
     def _op_vector_cmp(self, op: Op) -> None:
         a, b = op.operands
+        refusal = _vector_cmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
@@ -7094,9 +7116,9 @@ class _Lowerer:
         unrolled (straight-line) or normal (loop) lowering. Both first refuse
         a loop the loop rule (:func:`_scf_for_error`) refuses.
         """
-        error = _scf_for_error(op)
-        if error is not None:
-            raise ValueError(error)
+        refusal = _scf_for_error(op)
+        if refusal is not None:
+            raise refusal
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 
@@ -7369,6 +7391,9 @@ class _Lowerer:
             )
 
     def _op_scf_if(self, op: Op) -> None:
+        error = _scf_if_error(op)
+        if error is not None:
+            raise ValueError(error)
         (cond,) = op.operands
         then_region = op.regions[0]
         cur = self._current()
@@ -7419,7 +7444,9 @@ class _Lowerer:
         """
         # Refuse a malformed if/else, or a branch that does not yield the
         # results, before reading the op or emitting.
-        _if_else_yields(op)
+        refusal = _if_else_error(op)
+        if refusal is not None:
+            raise refusal
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7694,7 +7721,7 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
 
     The gfx11 ``s_waitcnt`` field layout is *different* from the gfx9/gfx10
     split that :func:`_encode_waitcnt_gfx9_10` produces. It was determined
-    empirically on a gfx1151 (Strix Halo) node by assembling each counter
+    empirically on a gfx1151 node by assembling each counter
     in isolation with the ROCm 7.0.2 ``llvm-mc --show-encoding`` (LLVM's
     own AMDGPU ``encodeWaitcnt``); the encoded 16-bit immediates were:
 
@@ -7758,7 +7785,9 @@ def _fp64_hex(x: float) -> str:
     return f"0x{bits:016X}"
 
 
-def _fp32_hex(x: float) -> str:
+def llvm_f32_literal(x: float) -> str:
+    """How this lowering spells an f32 constant operand ``x`` in LLVM IR text:
+    the hex bits of ``x`` rounded to f32 and widened to a double."""
     import struct
 
     # LLVM textual IR spells `float` hex constants as a 64-bit hex encoding of
@@ -7843,10 +7872,7 @@ def lower_kernel_to_llvm(
     # silently guessed a target otherwise. A requirement enforced on one of two
     # backends is not a requirement.
     if arch is None:
-        raise ValueError(
-            "lowering requires an explicit gfx target; "
-            "pass arch=... (there is no default)"
-        )
+        raise ValueError(NO_TARGET_MESSAGE)
     return lower_kernel_via_backend(
         kernel,
         llvm_flavor=llvm_flavor,

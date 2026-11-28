@@ -4,19 +4,35 @@
 """Archive consumers carry the loader and thread dependencies of the lowerer."""
 
 import importlib.util
-import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from rocke.core import native_engine
 from rocke.portable_ir.src import online
+from rocke.tests import item_time_limit, require_gpu
+from rocke.tests.ci_shard import ACTIVATION_FLAG
+from rocke.tests.ctest_listing import (
+    GPU_LABEL,
+    GPU_RESOURCE_LOCK,
+    PROVIDER_CTEST_SUBDIR,
+    configure_installed_ctest,
+    list_ctest_entries,
+    list_installed_ctest_entries,
+    python_on_path_environment,
+)
+from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
+from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.platform_build import cmake_cache_entries
 from rocke.tests.provider_categories import provider_category_labels
+from rocke.tests.source_modules import load_entry_time_check
 
 PLATFORM = Path(__file__).resolve().parents[1]
 
@@ -24,6 +40,7 @@ PLATFORM = Path(__file__).resolve().parents[1]
 def load_driver(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # a dataclass of the module resolves its module
     spec.loader.exec_module(module)
     return module
 
@@ -116,47 +133,6 @@ requires_cmake = pytest.mark.skipif(
 )
 
 
-def configure_installed_ctest(tmp_path, *cmake_arguments):
-    """Configure the platform with BUILD_TESTING and return the build directory
-    and a directory holding its installed CTestTestfile, as an install lays it
-    out. A -D in cmake_arguments overrides the default
-    ROCKE_INSTALL_TEST_GPU_REFERENCES=OFF, because CMake keeps the last value."""
-    build = tmp_path / "build"
-    subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(PLATFORM),
-            "-B",
-            str(build),
-            "-DBUILD_TESTING=ON",
-            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
-            *cmake_arguments,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    ctest_dir = tmp_path / "installed-ctest"
-    ctest_dir.mkdir()
-    shutil.copy2(
-        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
-    )
-    return build, ctest_dir
-
-
-def list_installed_ctests(ctest_dir, env=None):
-    """The tests CTest lists for ``ctest_dir``, in its json-v1 form."""
-    listed = subprocess.run(
-        ["ctest", "--show-only=json-v1", "--test-dir", str(ctest_dir)],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return json.loads(listed.stdout)["tests"]
-
-
 # How every installed pytest entry other than an explicit gate starts its
 # command, after the interpreter.
 PYTEST_WITH_SHARD_PLUGIN = [
@@ -166,6 +142,12 @@ PYTEST_WITH_SHARD_PLUGIN = [
     "rocke.tests.ctest_shard",
     "--rocke-shard-from-gtest-env",
 ]
+# What an entry that runs its share in worker processes puts right after the
+# plugin (platform/CMakeLists.txt, _ROCKE_INSTALLED_PYTEST_WORKERS).
+PYTEST_WORKERS = ["-p", "rocke.tests.ctest_workers", "--rocke-workers", "4"]
+# What the installed pytest entries of a provider build without the shared
+# engine load right after the shard plugin (platform/CMakeLists.txt).
+PYTHON_ENGINE_ONLY_PLUGIN = ["-p", "rocke.tests.python_engine_only"]
 EXPLICIT_GATES = {
     "rocke_library_counted_structural_gate",
     "rocke_library_counted_compiler_gate",
@@ -193,9 +175,9 @@ def reference_archives_missing():
     ("provider_subdir", "gpu_references"),
     [
         ("", False),
-        ("hip_kernel_provider", False),
+        (PROVIDER_CTEST_SUBDIR, False),
         pytest.param(
-            "hip_kernel_provider",
+            PROVIDER_CTEST_SUBDIR,
             True,
             marks=pytest.mark.skipif(
                 reference_archives_missing(),
@@ -221,7 +203,7 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
     has_library = (
         PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake"
     ).is_file()
-    tests = list_installed_ctests(ctest_dir)
+    tests = list_installed_ctest_entries(ctest_dir, tmp_path)
     pytest_entries = {test["name"]: test for test in tests if runs_pytest(test)}
 
     expected_names = {
@@ -231,6 +213,8 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
     }
     if has_library:
         expected_names.add("rocke_library_sdpa_pytest")
+    if os.name != "nt":
+        expected_names |= {"rocke_hip_source_identity", "rocke_hip_lowering_parity"}
     assert expected_names <= pytest_entries.keys(), sorted(pytest_entries)
     gpu_reference_names = {
         name
@@ -255,41 +239,17 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
         assert command[1:5] == ["-m", "pytest", "-p", "pytest_timeout"], name
 
 
-@requires_cmake
-@pytest.mark.skipif(
+requires_library_lists = pytest.mark.skipif(
     not (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file(),
     reason="needs the rocKE library test lists",
 )
-@pytest.mark.parametrize(
-    ("before", "after", "reported"),
-    [
-        pytest.param(
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest ",
-            "rocke_library_conv_fwd_aot_packaging_pytest",
-            id="python-m-pytest",
-        ),
-        pytest.param(
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
-            "add_test(rocke_library_conv_fwd_aot_packaging_pytest pytest ",
-            "rocke_library_conv_fwd_aot_packaging_pytest",
-            id="pytest-program",
-        ),
-        pytest.param(
-            "add_test(rocke_library_counted_structural_gate python -m pytest ",
-            "add_test(rocke_library_counted_structural_gate ${_ROCKE_INSTALLED_PYTEST} ",
-            "rocke_library_counted_structural_gate (an explicit gate must not load",
-            id="gate-with-plugin",
-        ),
-    ],
-)
-def test_configure_stops_on_an_installed_pytest_entry_that_breaks_the_shard_rule(
-    tmp_path, before, after, reported
-):
-    """platform/CMakeLists.txt stops the configure when an installed pytest entry
-    does not start with ${_ROCKE_INSTALLED_PYTEST}, so that the entry would run
-    whole on every CI shard, or when an explicit gate loads the shard plugin.
-    The check runs in the build job's configure; CI does not run this file."""
+
+
+def configure_error_after_library_lists_edit(tmp_path, before, after):
+    """Configure a copy of the platform and library trees whose
+    library/tests/ctest_lists.cmake has its one ``before`` replaced by
+    ``after``. Assert that the configure fails; return its error output with
+    the line wrapping removed."""
     rocke = tmp_path / "rocke"
     skip = shutil.ignore_patterns("__pycache__", ".pytest_cache")
     shutil.copytree(PLATFORM, rocke / "platform", ignore=skip)
@@ -311,18 +271,398 @@ def test_configure_stops_on_an_installed_pytest_entry_that_breaks_the_shard_rule
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert configured.returncode != 0, configured.stdout
-    message = " ".join(configured.stderr.split())
+    return " ".join(configured.stderr.split())
+
+
+# The start of the explicit gates' list in library/tests/ctest_lists.cmake: the
+# place the cases below plant an entry registered by hand, as the gates are, not
+# through rocke_library_pytest_entry.
+_EXPLICIT_GATES_LIST = "set(_ROCKE_EXPLICIT_PYTEST_GATES"
+
+
+def _hand_written_entry(launcher: str) -> str:
+    """CMake that appends an installed pytest entry run by ``launcher``, written
+    by hand rather than through rocke_library_pytest_entry, then a newline."""
+    return (
+        "string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "
+        f'"add_test(rocke_library_hand_written_pytest {launcher} x.py)\\n"\n'
+        '       "set_tests_properties(rocke_library_hand_written_pytest '
+        'PROPERTIES TIMEOUT 9)\\n")\n'
+    )
+
+
+@requires_cmake
+@requires_library_lists
+@pytest.mark.parametrize(
+    ("before", "after", "reported"),
+    [
+        pytest.param(
+            _EXPLICIT_GATES_LIST,
+            _hand_written_entry("python -m pytest") + _EXPLICIT_GATES_LIST,
+            "rocke_library_hand_written_pytest",
+            id="python-m-pytest",
+        ),
+        pytest.param(
+            _EXPLICIT_GATES_LIST,
+            _hand_written_entry("pytest") + _EXPLICIT_GATES_LIST,
+            "rocke_library_hand_written_pytest",
+            id="pytest-program",
+        ),
+        pytest.param(
+            "add_test(rocke_library_counted_structural_gate python -m pytest ",
+            "add_test(rocke_library_counted_structural_gate ${_ROCKE_INSTALLED_PYTEST} ",
+            "rocke_library_counted_structural_gate (an explicit gate must not load",
+            id="gate-with-plugin",
+        ),
+    ],
+)
+def test_configure_stops_on_an_installed_pytest_entry_that_breaks_the_shard_rule(
+    tmp_path, before, after, reported
+):
+    """platform/CMakeLists.txt stops the configure when an installed pytest entry
+    does not start with ${_ROCKE_INSTALLED_PYTEST}, so that the entry would run
+    whole on every CI shard, or when an explicit gate loads the shard plugin.
+    The check runs in the build job's configure; CI does not run this file."""
+    message = configure_error_after_library_lists_edit(tmp_path, before, after)
     assert "must start its command with ${_ROCKE_INSTALLED_PYTEST}" in message
     assert reported in message
+
+
+def resource_class_timeouts():
+    """The CTest limits that tests/cmake/TestTimeouts.cmake sets, in seconds, by
+    the name after ROCKE_TEST_TIMEOUT_ (CPU, TOOLCHAIN, GPU and the named
+    exceptions)."""
+    text = (PLATFORM / "tests" / "cmake" / "TestTimeouts.cmake").read_text()
+    limits = {
+        name: float(seconds)
+        for name, seconds in re.findall(
+            r"^set\(ROCKE_TEST_TIMEOUT_(\w+) (\d+)\)$", text, re.MULTILINE
+        )
+    }
+    assert {"CPU", "TOOLCHAIN", "GPU"} <= limits.keys(), limits
+    return limits
 
 
 @requires_cmake
 @pytest.mark.parametrize(
     "provider_subdir",
-    ["", "hip_kernel_provider"],
+    ["", PROVIDER_CTEST_SUBDIR],
+    ids=["standalone", "provider"],
+)
+def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
+    """CI runs ctest with a default timeout above its step limit, so an entry
+    without a TIMEOUT that hangs ends the whole CI step. Every rocKE entry, in
+    the build tree and in the installed CTestTestfile, sets a TIMEOUT, and each
+    TIMEOUT is one of the limits of TestTimeouts.cmake rather than a number
+    tuned for one entry."""
+    build, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}"
+    )
+    limits = set(resource_class_timeouts().values())
+    environment = python_on_path_environment(tmp_path)
+    for tree in (ctest_dir, build):
+        tests = list_ctest_entries(tree, env=environment)
+        assert tests, tree
+        timeouts = {
+            test["name"]: next(
+                (
+                    prop["value"]
+                    for prop in test.get("properties", [])
+                    if prop["name"] == "TIMEOUT"
+                ),
+                None,
+            )
+            for test in tests
+        }
+        untimed = sorted(name for name, seconds in timeouts.items() if seconds is None)
+        assert not untimed, (tree.name, untimed)
+        off_limit = {
+            name: seconds for name, seconds in timeouts.items() if seconds not in limits
+        }
+        assert not off_limit, (tree.name, off_limit)
+
+
+@requires_cmake
+def test_no_installed_entry_argument_quotes_a_value_inside_it(tmp_path):
+    """CMake keeps a quote that follows ``=`` inside a generated argument, so
+    ``--ignore=\"<path>\"`` reaches pytest as a path that starts with a quote
+    and ignores nothing. Every installed entry passes such a value as its own
+    token (``--ignore \"<path>\"``)."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
+    )
+    quoted = [
+        (test["name"], argument)
+        for test in list_installed_ctest_entries(ctest_dir, tmp_path)
+        for argument in test.get("command", [])
+        if '="' in argument
+    ]
+    assert not quoted, quoted
+
+
+def gpu_test_limit() -> float:
+    """The per-test limit of the GPU pytest entries that
+    tests/cmake/TestTimeouts.cmake sets (ROCKE_TEST_ITEM_TIMEOUT_GPU), in
+    seconds."""
+    text = (PLATFORM / "tests" / "cmake" / "TestTimeouts.cmake").read_text()
+    [seconds] = re.findall(
+        r"^set\(ROCKE_TEST_ITEM_TIMEOUT_GPU (\d+)\)$", text, re.MULTILINE
+    )
+    return float(seconds)
+
+
+def test_the_gpu_per_test_limit_is_at_most_half_the_smallest_shard_budget():
+    """A stalled GPU test runs to its per-test limit before it fails. The limit
+    is at most half the smallest rocKE share of a CI shard of a tier that runs
+    GPU entries (tools/check_entry_times.py, CI_TIERS), so one stall leaves the
+    shard time for the rest of its tests; a slower test raises only its own
+    limit, with the rocke_measured_seconds mark. A tier that runs no GPU entry
+    (quick) bounds it only once its GPU allowlist names an entry."""
+    entry_times = load_entry_time_check(PLATFORM / "tests" / "tools")
+    if entry_times is None:
+        skip_until(SOURCE_TREE, reason="tools/check_entry_times.py is absent here")
+    smallest_budget = min(
+        tier.budget_seconds
+        for tier in entry_times.CI_TIERS
+        if tier.runs_gpu_entries or entry_times.GPU_ENTRY_ALLOWLIST
+    )
+    assert gpu_test_limit() <= smallest_budget / 2
+
+
+def entry_property(test: dict, name: str):
+    """The value of the CTest property ``name`` of the listed entry ``test``,
+    or None."""
+    return next(
+        (prop["value"] for prop in test.get("properties", []) if prop["name"] == name),
+        None,
+    )
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    ("provider_subdir", "gpu_references"),
+    [
+        ("", False),
+        (PROVIDER_CTEST_SUBDIR, False),
+        pytest.param(
+            PROVIDER_CTEST_SUBDIR,
+            True,
+            marks=pytest.mark.skipif(
+                reference_archives_missing(),
+                reason="GPU reference archives need dvc pull",
+            ),
+        ),
+    ],
+    ids=["standalone", "provider", "provider-gpu-references"],
+)
+def test_every_gpu_pytest_entry_limits_each_test(
+    tmp_path, provider_subdir, gpu_references
+):
+    """A GPU pytest entry without a per-test limit runs a stalled test into its
+    CTest limit, and the CI log never names the test. Each one passes a
+    --timeout (pytest keeps the last) of at most ROCKE_TEST_ITEM_TIMEOUT_GPU,
+    itself at most half the entry's CTest TIMEOUT, pytest-timeout's thread
+    method, the one that interrupts a stall inside a HIP or COMGR call, and the
+    rocke.tests.item_time_limit plugin, so only a measured time raises one
+    test's limit. Each loads rocke.tests.require_gpu, so an entry that finds
+    no GPU fails rather than skipping every test. Each takes the
+    rocke_gpu resource lock, so a parallel ctest never runs two of them on the
+    one GPU at once."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path,
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+        f"-DROCKE_INSTALL_TEST_GPU_REFERENCES={'ON' if gpu_references else 'OFF'}",
+    )
+    limit = gpu_test_limit()
+    gpu_entries = {
+        test["name"]: test
+        for test in list_installed_ctest_entries(ctest_dir, tmp_path)
+        if runs_pytest(test) and GPU_LABEL in (entry_property(test, "LABELS") or [])
+    }
+    assert "rocke_tiling_gpu_pytest" in gpu_entries, sorted(gpu_entries)
+    if (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file():
+        assert "rocke_library_gpu_pytest" in gpu_entries, sorted(gpu_entries)
+    for name, test in gpu_entries.items():
+        command = test["command"]
+        timeouts = [
+            float(argument.removeprefix("--timeout="))
+            for argument in command
+            if argument.startswith("--timeout=")
+        ]
+        assert timeouts and timeouts[-1] <= limit, (name, timeouts)
+        assert "--timeout-method=thread" in command, name
+        plugins = [
+            command[index + 1]
+            for index, argument in enumerate(command[:-1])
+            if argument == "-p"
+        ]
+        assert item_time_limit.PLUGIN_NAME in plugins, (name, plugins)
+        assert require_gpu.PLUGIN_NAME in plugins, (name, plugins)
+        assert limit <= float(entry_property(test, "TIMEOUT")) / 2, name
+        assert entry_property(test, "RESOURCE_LOCK") == [GPU_RESOURCE_LOCK], name
+
+
+_NO_SHARED_ENGINE = "the build had ROCKE_BUILD_SHARED_ENGINE off"
+_PROVIDER = f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
+_SHARED_ENGINE = "-DROCKE_BUILD_SHARED_ENGINE=ON"
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "cmake_arguments, marker",
+    [
+        (
+            (),
+            EngineModulesMarker(
+                (), "the build had ROCKE_BUILD_PYBIND off", "", _NO_SHARED_ENGINE
+            ),
+        ),
+        (
+            ('-DROCKE_ENGINE_MODULES_ABSENT_REASON=no "pybind11" in C:\\py',),
+            EngineModulesMarker((), 'no "pybind11" in C:\\py', "", _NO_SHARED_ENGINE),
+        ),
+        (
+            (f"-DPython3_EXECUTABLE={sys.executable}", "-DROCKE_BUILD_PYBIND=ON"),
+            EngineModulesMarker(
+                ("rocke_engine", "rocke_library_engine"), "", "", _NO_SHARED_ENGINE
+            ),
+        ),
+        (
+            (_PROVIDER, _SHARED_ENGINE),
+            EngineModulesMarker(
+                (),
+                "the build had ROCKE_BUILD_PYBIND off",
+                native_engine.shared_library_name(),
+                "",
+            ),
+        ),
+        (
+            (_SHARED_ENGINE,),
+            EngineModulesMarker(
+                (),
+                "the build had ROCKE_BUILD_PYBIND off",
+                "",
+                "a standalone install puts it in the library directory, not beside "
+                "the rocke package",
+            ),
+        ),
+    ],
+    ids=[
+        "pybind-off",
+        "reason-given",
+        "pybind-on",
+        "shared-provider",
+        "shared-standalone",
+    ],
+)
+def test_the_configure_records_the_engine_modules_it_builds(
+    tmp_path, cmake_arguments, marker
+):
+    """The installed guard rocke_engine_modules_check reads this marker: the
+    modules the build makes, or why it makes none (any text, escaped as JSON),
+    and the shared engine it installs beside the rocke package, or why none is
+    there. The library module is recorded only beside the library tree."""
+    if "-DROCKE_BUILD_PYBIND=ON" in cmake_arguments:
+        pytest.importorskip("pybind11", reason="the binding's configure needs it")
+        if not (PLATFORM.parent / "library" / "cpp").is_dir():
+            marker = EngineModulesMarker(("rocke_engine",), "", "", _NO_SHARED_ENGINE)
+    build, _ = configure_installed_ctest(tmp_path, *cmake_arguments)
+    assert read_engine_modules_marker(build / "rocke_engine_modules.json") == marker
+
+
+@requires_cmake
+@requires_library_lists
+@pytest.mark.skipif(os.name == "nt", reason="the parity entries are not on Windows")
+@pytest.mark.parametrize("pybind", [False, True], ids=["pybind-off", "pybind-on"])
+def test_the_selector_grid_parity_entry_exists_only_with_the_engine_module(
+    tmp_path, pybind
+):
+    """rocke_library_engine_parity_exhaustive_pytest runs only the selector
+    parity file, whose every case needs rocke_engine, so a build without the
+    module does not register it; the standard parity entry, whose IR checks
+    use the shared engine, is registered either way."""
+    arguments = [f"-DROCKE_BUILD_PYBIND={'ON' if pybind else 'OFF'}"]
+    if pybind:
+        pytest.importorskip("pybind11", reason="the binding's configure needs it")
+        arguments.append(f"-DPython3_EXECUTABLE={sys.executable}")
+    _, ctest_dir = configure_installed_ctest(tmp_path, *arguments)
+    names = {test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)}
+    assert "rocke_library_engine_parity_pytest" in names
+    assert ("rocke_library_engine_parity_exhaustive_pytest" in names) == pybind
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "cmake_arguments, engine_plugin",
+    [
+        ((_PROVIDER, _SHARED_ENGINE), "rocke.tests.require_cpp_engine"),
+        ((_PROVIDER,), "rocke.tests.python_engine_only"),
+        ((_SHARED_ENGINE,), None),
+    ],
+    ids=["shared-provider", "no-shared-engine", "shared-standalone"],
+)
+def test_pytest_entries_declare_the_engine_their_build_installs(
+    tmp_path, cmake_arguments, engine_plugin
+):
+    """Where the build installs the shared engine beside the package, every
+    installed pytest entry but the explicit gates loads
+    rocke.tests.require_cpp_engine right after the shard plugin, so a missing
+    engine fails it, and every GPU entry loads
+    rocke.tests.differential_engines, so it runs the Python engine's kernels
+    and compares the C++ engine's with them. A provider build that installs
+    none there loads rocke.tests.python_engine_only instead, so its entries run
+    the Python engine as a declared lane; a standalone install loads
+    neither."""
+    _, ctest_dir = configure_installed_ctest(tmp_path, *cmake_arguments)
+    pytest_entries = {
+        test["name"]: test
+        for test in list_installed_ctest_entries(ctest_dir, tmp_path)
+        if runs_pytest(test)
+    }
+    assert pytest_entries
+    strict = engine_plugin == "rocke.tests.require_cpp_engine"
+    engine_plugins = {
+        "rocke.tests.require_cpp_engine",
+        "rocke.tests.python_engine_only",
+    }
+    for name, test in pytest_entries.items():
+        command = test["command"]
+        gpu = "gpu" in (entry_property(test, "LABELS") or [])
+        assert ("rocke.tests.differential_engines" in command) == (strict and gpu), name
+        if name in EXPLICIT_GATES:
+            assert not engine_plugins & set(command), name
+            continue
+        assert command[1:6] == PYTEST_WITH_SHARD_PLUGIN, name
+        if engine_plugin is None:
+            assert not engine_plugins & set(command), name
+        else:
+            assert command[6:8] == ["-p", engine_plugin], name
+            assert engine_plugins & set(command) == {engine_plugin}, name
+
+
+@requires_cmake
+@requires_library_lists
+def test_configure_stops_on_an_installed_entry_without_a_timeout(tmp_path):
+    """platform/CMakeLists.txt stops the configure when an installed entry sets
+    no TIMEOUT, and names the entry. The check runs in the build job's
+    configure; CI does not run this file."""
+    message = configure_error_after_library_lists_edit(
+        tmp_path,
+        '"  TIMEOUT ${ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE})\\n")',
+        '")\\n")',
+    )
+    assert "must set a CTest TIMEOUT" in message
+    assert "rocke_library_counted_compiler_gate" in message
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "provider_subdir",
+    ["", PROVIDER_CTEST_SUBDIR],
     ids=["standalone", "provider"],
 )
 @pytest.mark.parametrize(
@@ -359,16 +699,33 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             target = f"{provider_subdir}_{target}_test"
         return f"../{target}{executable_suffix}"
 
+    # tests/run_all.py runs the both-engine HIP checks with the rocke_ir_lower_cli
+    # the configure recorded (rocke_record_program_path), under the name this
+    # mode gives it, inside the build tree.
+    recorded_cli = Path((build / "rocke_ir_lower_cli.path").read_text().strip())
+    expected_name = native_artifact("rocke_ir_lower_cli").removeprefix("../")
+    assert recorded_cli.name == expected_name
+    assert build.resolve() in recorded_cli.resolve().parents
+
+    # The replay CLI and the provenance manifest install in
+    # <tests>/portable_ir and are named beside the installed rocke package
+    # (rocke.assets.beside_package): the package's directory is the
+    # CTestTestfile's in provider mode, site-packages in a standalone install.
+    cache = cmake_cache_entries(build)
+    test_dir = PurePosixPath(cache["CMAKE_INSTALL_BINDIR"])
+    if provider_subdir:
+        test_dir /= provider_subdir
+    package_dir = test_dir if provider_subdir else cache["ROCKE_PYTHON_INSTALL_DIR"]
+    portable_ir = test_dir / "tests" / "portable_ir"
+    beside_package = posixpath.relpath(portable_ir, package_dir)
+    replay_cli = f"rocke_portable_ir_replay_cli{executable_suffix}"
+    manifest = "rocke_portable_ir_provenance.txt"
     expected_artifacts = {
-        "ROCKE_REPLAY_CLI": (
-            f"{test_ctest_rel}tests/portable_ir/"
-            f"rocke_portable_ir_replay_cli{executable_suffix}"
-        ),
-        "ROCKE_PROVENANCE_MANIFEST": (
-            f"{test_ctest_rel}tests/portable_ir/rocke_portable_ir_provenance.txt"
-        ),
+        "ROCKE_REPLAY_CLI": f"{beside_package}/{replay_cli}",
+        "ROCKE_PROVENANCE_MANIFEST": f"{beside_package}/{manifest}",
         "ROCKE_STORAGE_TEST": native_artifact("rocke_storage"),
         "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
+        "ROCKE_FLOAT_FORMAT_TEST": native_artifact("rocke_float_format"),
         "ROCKE_NONTEMPORAL_HIP_TEST": native_artifact("rocke_nontemporal_hip"),
         "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),
         "ROCKE_INTEXPR_CLI": native_artifact("rocke_intexpr"),
@@ -393,12 +750,12 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
     ).is_file()
 
     for rocm_path in (None, tmp_path / "synthetic-rocm"):
-        ctest_env = dict(os.environ)
+        ctest_env = python_on_path_environment(tmp_path)
         if rocm_path is None:
             ctest_env.pop("ROCM_PATH", None)
         else:
             ctest_env["ROCM_PATH"] = str(rocm_path)
-        tests = list_installed_ctests(ctest_dir, env=ctest_env)
+        tests = list_ctest_entries(ctest_dir, env=ctest_env)
         pair = next(
             test
             for test in tests
@@ -426,6 +783,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert native == native_artifact("rocke_optimization_barrier_emit")
         assert Path(native).name == emitter_filename
         assert command[command.index("--count") + 1] == "17"
+        # Each CI shard compares only the configurations it owns.
+        assert ACTIVATION_FLAG in command
         expected_platform_environment = {
             "PYTHONPATH": ".",
             **expected_artifacts,
@@ -440,7 +799,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         visualization = f"{tiling_tree}/visualization"
         tiling_entries = {
             "rocke_tiling_pytest": (
-                [tiling_tree, "--ignore", visualization],
+                [*PYTEST_WORKERS, tiling_tree, "--ignore", visualization],
                 "not gpu",
             ),
             "rocke_tiling_visualization_pytest": ([visualization], "not gpu"),
@@ -451,8 +810,26 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             configuration = command.index("-c") + 1
             assert command[configuration] == f"{test_ctest_rel}tests/pytest.ini"
             assert command[configuration + 1 : command.index("-v")] == paths, name
-            assert command[-2:] == ["-m", marker_expression], name
+            options = command[command.index("-v") :]
+            assert options[options.index("-m") + 1] == marker_expression, name
+        # The backend width check is outside ordinary discovery, so its entry
+        # names its one file and the tiling entries above never collect it.
+        width_check = next(
+            test
+            for test in tests
+            if test["name"] == "rocke_tiling_backend_width_pytest"
+        )["command"]
+        configuration = width_check.index("-c") + 1
+        assert width_check[configuration] == f"{test_ctest_rel}tests/pytest.ini"
+        assert width_check[configuration + 1 : width_check.index("-v")] == [
+            f"{tiling_tree}/check_backend_access_width.py"
+        ]
+        # tests/run_all.py runs the same file as a stage of its own, under the
+        # same per-test bound.
+        run_all = load_driver("rocke_run_all", PLATFORM / "tests" / "run_all.py")
+        assert width_check[-1] == f"--timeout={run_all.BACKEND_WIDTH_TEST_TIMEOUT_S}"
         expected_tiling_environment = {"PYTHONPATH": package_root}
+        expected_backend_width_environment: dict[str, str] = {}
         library_pythonpath = os.pathsep.join(
             (f"{test_ctest_rel}tests/library", package_root)
         )
@@ -497,6 +874,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_platform_environment.update(compiler_environment)
             expected_tiling_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
+            expected_backend_width_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
             expected_counted_isa_environment.update(compiler_environment)
 
@@ -508,11 +886,26 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, part) == expected_platform_environment
         for name in tiling_entries:
             assert environment_for(tests, name) == expected_tiling_environment
+        # The width check takes the tiling environment plus the compiler
+        # requirement policy, so it fails rather than skips where the tools
+        # should be.
+        assert environment_for(tests, "rocke_tiling_backend_width_pytest") == {
+            **expected_tiling_environment,
+            **expected_backend_width_environment,
+        }
         if has_library:
             assert (
                 environment_for(tests, "rocke_library_mla_pytest")
                 == expected_mla_environment
             )
+            # The GDN/KDA host entry compiles and reads code objects as the MLA
+            # one does, so it takes the same environment; it is not registered
+            # on Windows.
+            if os.name != "nt":
+                assert (
+                    environment_for(tests, "rocke_library_gdn_pytest")
+                    == expected_mla_environment
+                )
             assert (
                 environment_for(tests, "rocke_library_runner_contract_pytest")
                 == expected_runner_environment
@@ -539,6 +932,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             }
             assert counted_properties["PROCESSORS"] == 4
             assert counted_properties["RESOURCE_LOCK"] == ["rocke_counted_sync_gate"]
+            # Off its reference toolchain the gate ends with 77, a skip.
+            assert counted_properties["SKIP_RETURN_CODE"] == 77
         # COMGR-only gates get the package and nothing compiler-specific.
         comgr_only_environment = environment_for(
             tests, "rocke_arch_domain_reproducibility"
@@ -548,6 +943,52 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             environment_for(tests, "rocke_compiler_options_reproducibility")
             == comgr_only_environment
         )
+
+        # The C++ HIP lowering entries are not registered on Windows. Where an
+        # entry is registered, the platform pytest part that holds each of its
+        # files leaves it out; on Windows the part keeps it, so its
+        # Python-engine checks still run. Elsewhere each entry names the installed
+        # rocke_ir_lower_cli, and the parity entry also gets the compiler tools
+        # for its hipcc checks.
+        files_by_entry = {
+            "rocke_hip_lowering_parity": (
+                ("core", "tests/core/test_hip_lowering_parity.py"),
+                ("core", "tests/core/test_mma_operand_register_type.py"),
+                ("core", "tests/core/test_serialized_ir_name_scopes.py"),
+            ),
+            "rocke_hip_source_identity": (
+                (
+                    "instances_dispatch",
+                    "tests/instances/differential/test_hip_source_identity.py",
+                ),
+            ),
+        }
+        for entry_name, files in files_by_entry.items():
+            entry = next((test for test in tests if test["name"] == entry_name), None)
+            assert (entry is None) == (os.name == "nt"), entry_name
+            for part, test_file in files:
+                path = f"{test_ctest_rel}{test_file}"
+                if entry is not None:
+                    assert path in entry["command"]
+                part_command = next(
+                    test for test in tests if test["name"] == f"rocke_pytest_{part}"
+                )["command"]
+                assert (path in part_command) == (entry is not None), test_file
+                if entry is not None:
+                    assert part_command[part_command.index(path) - 1] == "--ignore"
+        if os.name != "nt":
+            ir_lower_cli = native_artifact("rocke_ir_lower_cli")
+            identity_environment = environment_for(tests, "rocke_hip_source_identity")
+            assert identity_environment["ROCKE_IR_LOWER_CLI"] == ir_lower_cli
+            parity_environment = environment_for(tests, "rocke_hip_lowering_parity")
+            assert (
+                parity_environment.pop("PYTHONPATH")
+                == identity_environment["PYTHONPATH"]
+            )
+            expected_parity_environment = {"ROCKE_IR_LOWER_CLI": ir_lower_cli}
+            if sys.platform == "linux" and rocm_path is not None:
+                expected_parity_environment.update(compiler_environment)
+            assert parity_environment == expected_parity_environment
 
 
 def split_ignored_files(selection):
@@ -570,7 +1011,7 @@ _IGNORED_FILES = {"core": "core/test_intexpr.py", "other": "test_rocke.py"}
 @requires_cmake
 @pytest.mark.parametrize(
     ("provider_subdir", "ignored_files"),
-    [("", {}), ("hip_kernel_provider", {}), ("hip_kernel_provider", _IGNORED_FILES)],
+    [("", {}), (PROVIDER_CTEST_SUBDIR, {}), (PROVIDER_CTEST_SUBDIR, _IGNORED_FILES)],
     ids=["standalone", "provider", "provider-ignored-files"],
 )
 def test_installed_platform_pytest_parts_partition_the_suite(
@@ -585,7 +1026,9 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     when directories are regrouped. Every part keeps the suite's options, labels
     and time limit. rocke_pytest_other ignores tests/test_ctest_shard.py, which
     rocke_ctest_shard_pytest runs with the suite's options and time limit and the
-    standard label."""
+    standard label. The suite's marker filter leaves out the gpu tests, and
+    rocke_platform_gpu_pytest, which is not a part, runs exactly those over the
+    same tree."""
     _, ctest_dir = configure_installed_ctest(
         tmp_path,
         f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
@@ -594,7 +1037,14 @@ def test_installed_platform_pytest_parts_partition_the_suite(
             for part, path in ignored_files.items()
         ),
     )
-    tests = list_installed_ctests(ctest_dir)
+    tests = list_installed_ctest_entries(ctest_dir, tmp_path)
+    # A provider build without the shared engine (this configure's) runs its
+    # pytest entries on the Python engine alone.
+    pytest_prefix = [
+        *PYTEST_WITH_SHARD_PLUGIN,
+        *(PYTHON_ENGINE_ONLY_PLUGIN if provider_subdir else []),
+    ]
+    options_start = 1 + len(pytest_prefix) + len(PYTEST_WORKERS)
     parts = [test for test in tests if test["name"].startswith("rocke_pytest_")]
     plugin_tests = [
         test for test in tests if test["name"] == "rocke_ctest_shard_pytest"
@@ -602,20 +1052,25 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     assert len(plugin_tests) == 1, [test["name"] for test in tests]
     plugin_tests = plugin_tests[0]
     tests_root = ("./" if provider_subdir else "../") + "tests"
-    suite_options = ["-m", "not integration", "-v", "-rs", "--timeout=60"]
+    suite_options = [
+        "-m",
+        "not integration and not gpu",
+        "-v",
+        "-rs",
+        "--timeout=60",
+    ]
     selection_by_part = {}
     for part in parts:
         name, command = part["name"], part["command"]
-        assert command[1:6] == PYTEST_WITH_SHARD_PLUGIN, name
+        assert command[1:options_start] == [*pytest_prefix, *PYTEST_WORKERS], name
         assert command[-len(suite_options) :] == suite_options, name
         selection_by_part[name.removeprefix("rocke_pytest_")] = command[
-            6 : -len(suite_options)
+            options_start : -len(suite_options)
         ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
-        # One label string, as the single entry had: the generated CTest text
-        # escapes the semicolons.
-        assert properties["LABELS"] == ["ckc;python;quick"], name
-        assert properties["TIMEOUT"] == 300, name
+        # Three labels, as the single entry had.
+        assert properties["LABELS"] == ["ckc", "python", "standard"], name
+        assert properties["TIMEOUT"] == resource_class_timeouts()["TOOLCHAIN"], name
 
     other_paths, other_ignored = split_ignored_files(selection_by_part.pop("other"))
     assert other_paths == [tests_root]
@@ -662,13 +1117,14 @@ def test_installed_platform_pytest_parts_partition_the_suite(
 
     plugin_tests_file = f"{tests_root}/test_ctest_shard.py"
     assert plugin_tests["command"][1:] == [
-        *PYTEST_WITH_SHARD_PLUGIN,
+        *pytest_prefix,
+        *PYTEST_WORKERS,
         plugin_tests_file,
         *suite_options,
     ]
     properties = {prop["name"]: prop["value"] for prop in plugin_tests["properties"]}
-    assert properties["LABELS"] == ["ckc;python;standard"]
-    assert properties["TIMEOUT"] == 300
+    assert properties["LABELS"] == ["ckc", "python", "standard"]
+    assert properties["TIMEOUT"] == resource_class_timeouts()["TOOLCHAIN"]
     assert plugin_tests_file in ignored_by_part["other"]
 
     # A file is ignored by the part that would collect it: a named part, for a
@@ -685,25 +1141,43 @@ def test_installed_platform_pytest_parts_partition_the_suite(
     for part, path in ignored_files.items():
         assert f"{tests_root}/{path}" in ignored_by_part[part], (part, path)
 
+    [gpu_tests] = [
+        test for test in tests if test["name"] == "rocke_platform_gpu_pytest"
+    ]
+    gpu_selection = [
+        *pytest_prefix,
+        *PYTEST_WORKERS,
+        tests_root,
+        "--ignore",
+        f"{tests_root}/library",
+        "-m",
+        "gpu and not integration",
+        "-v",
+        "-rs",
+        "--timeout=60",
+    ]
+    assert gpu_tests["command"][1 : 1 + len(gpu_selection)] == gpu_selection
+
 
 @requires_cmake
 def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     """TheRock CI selects provider tests by tier label. The provider categories
     tier the parts by their name prefix, so every part, and a part a new CMake
-    group would add, gets the same labels, among them the quick, standard and
-    ffm-quick tiers that the single entry ran in. The tiling package's entries
-    run tests outside tests/, so they are not parts and do not take their
-    prefix; the categories tier each by its own name: rocke_tiling_pytest like
-    the parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
+    group would add, gets the same labels, among them the standard tier that
+    the single entry ran in. They are not in the quick tier, which holds only
+    unit tests and basic enablement checks (TESTING.md section 5.0.3), nor in
+    ffm-quick, which mirrors it. The tiling package's entries run
+    tests outside tests/, so they are not parts and do not take their prefix;
+    the categories tier each by its own name: rocke_tiling_pytest like the
+    parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
     rocke_tiling_visualization_pytest in the comprehensive tier only, which
     pull-request and push CI (quick and standard) do not select.
-    rocke_ctest_shard_pytest, rocke_library_gdn_pytest and
-    rocke_library_conv_fwd_aot_packaging_pytest run in the standard,
-    comprehensive and full tiers and not in the quick tier. Another category
-    keeps rocke_library_gdn_pytest and
-    rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
+    rocke_ctest_shard_pytest, rocke_tiling_backend_width_pytest,
+    rocke_library_gdn_pytest, rocke_library_conv_fwd_aot_packaging_pytest and
+    the GPU entries run in the standard, comprehensive and full tiers and not in
+    the quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
-    names = [test["name"] for test in list_installed_ctests(ctest_dir)]
+    names = [test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
     assert parts, "no rocke_pytest_ parts are registered"
     tiling_entries = [
@@ -713,6 +1187,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     ]
     assert set(tiling_entries) <= set(names)
     assert "rocke_ctest_shard_pytest" in names
+    assert "rocke_tiling_backend_width_pytest" in names
     future_part = "rocke_pytest_fp8_group2"
     labels = provider_category_labels(
         [
@@ -721,13 +1196,15 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             *tiling_entries,
             "rocke_library_gpu_pytest",
             "rocke_ctest_shard_pytest",
+            "rocke_tiling_backend_width_pytest",
             "rocke_library_gdn_pytest",
             "rocke_library_conv_fwd_aot_packaging_pytest",
         ],
         tmp_path,
     )
     expected = labels.get(parts[0], set())
-    assert {"quick", "standard", "ffm-quick"} <= expected, expected
+    assert "standard" in expected, expected
+    assert not {"quick", "ffm-quick"} & expected, expected
     for name in [*parts, future_part, "rocke_tiling_pytest"]:
         assert labels.get(name) == expected, name
     library_gpu_labels = labels.get("rocke_library_gpu_pytest")
@@ -736,8 +1213,11 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
     standard_entries = [
         "rocke_ctest_shard_pytest",
+        "rocke_tiling_backend_width_pytest",
         "rocke_library_gdn_pytest",
         "rocke_library_conv_fwd_aot_packaging_pytest",
+        "rocke_library_gpu_pytest",
+        "rocke_tiling_gpu_pytest",
     ]
     for name in standard_entries:
         standard_labels = labels.get(name, set())
@@ -745,13 +1225,54 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             name,
             standard_labels,
         )
-        assert "quick" not in standard_labels, (name, standard_labels)
-    assert "ffm-quick" not in labels.get("rocke_ctest_shard_pytest", set())
-    for name in [
-        "rocke_library_gdn_pytest",
-        "rocke_library_conv_fwd_aot_packaging_pytest",
-    ]:
-        assert "ffm-quick" in labels.get(name, set()), name
+        assert not {"quick", "ffm-quick"} & standard_labels, (name, standard_labels)
+
+
+@requires_cmake
+def test_the_ffm_quick_tier_runs_exactly_the_quick_entries(tmp_path):
+    """The provider categories give ffm-quick, the fast-feedback tier, the quick
+    list itself, so an installed entry is in one exactly when it is in the
+    other, and quick's rules (unit tests and enablement checks, its time
+    budget) hold for ffm-quick too."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
+    )
+    names = [test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)]
+    labels = provider_category_labels(names, tmp_path)
+    quick = {name for name in names if "quick" in labels.get(name, set())}
+    ffm_quick = {name for name in names if "ffm-quick" in labels.get(name, set())}
+    assert quick, "no installed entry runs in quick"
+    assert ffm_quick == quick, {
+        "ffm-quick only": sorted(ffm_quick - quick),
+        "quick only": sorted(quick - ffm_quick),
+    }
+
+
+@requires_cmake
+def test_every_installed_entry_runs_in_a_ci_tier(tmp_path):
+    """TheRock CI selects provider tests with an anchored tier label, so an
+    installed entry that no provider category labels never runs in CI: the
+    labels its own registration bakes in are one escaped string, which no
+    anchored label matches. Every installed entry gets the comprehensive and
+    full tiers from a category, and every quick entry also the standard tier,
+    so moving an entry out of quick keeps it in standard CI."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
+    )
+    names = [test["name"] for test in list_installed_ctest_entries(ctest_dir, tmp_path)]
+    labels = provider_category_labels(names, tmp_path)
+    untiered = sorted(
+        name
+        for name in names
+        if not {"comprehensive", "full"} <= labels.get(name, set())
+    )
+    assert not untiered, untiered
+    quick_only = sorted(
+        name
+        for name in names
+        if "quick" in labels[name] and "standard" not in labels[name]
+    )
+    assert not quick_only, quick_only
 
 
 # (exported target, installed header, extern "C" symbol it declares). The

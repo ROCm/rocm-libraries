@@ -5,7 +5,7 @@ single-token decode emitter. The device-code emitter lives at
 [`library/kernels/gfx950/gdn_decode.py`](../../../kernels/gfx950/gdn_decode.py).
 
 **GDN prefill** is driven from
-[`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) and runs
+[`library/builders/gfx950/kda/gdn_prefill.py`](../kda/gdn_prefill.py) and runs
 the shared KDA chunkwise kernels in `gate_kind="gdn"` mode, so its tools live in
 the `kda/` directory rather than here. Its commands are in [Prefill](#prefill)
 below.
@@ -31,7 +31,7 @@ retune either decode mode or the GDN prefill path.
 
 | File | Purpose |
 |---|---|
-| [`gdn_decode.py`](gdn_decode.py) | Compile a spec, build inputs, launch the shared decode emitter, and compare with the independent fp32 reference |
+| [`gdn_decode.py`](gdn_decode.py) | Compile a spec, build inputs, launch the shared decode emitter, and compare with the independent float64 reference |
 | [`library/benchmarks/gfx950/gdn/decode_table_sweep.py`](../../../benchmarks/gfx950/gdn/decode_table_sweep.py) | Time every registered (tile x knob) configuration of each decode shape at the chosen `--sweep-level` (default `production`: `waves_per_eu` 0 and 4 only; `full`: the dispatcher lists every legal configuration, tens of thousands per shape, so the tool requires `--tuning-sample N` and times a random sample of `N` per tile) in cold memory, fp32-gated, in two stages, against `auto`; JSON rows, sharding, summary. It regenerates the `AUTO_DEFAULTS` evidence from rocKE's own registry only |
 | [`library/benchmarks/gfx950/gdn/decode_defaults_report.py`](../../../benchmarks/gfx950/gdn/decode_defaults_report.py) | From those rows, `auto` against the best per shape and per case, and an advisory proposal per case by the `AUTO_DEFAULTS` rule |
 | [`library/benchmarks/gfx950/gdn/decode_shapes.json`](../../../benchmarks/gfx950/gdn/decode_shapes.json) | The shape grid [`ALGORITHM.md` §4.6](ALGORITHM.md#46-registry-and-tile-selection) documents for each `AUTO_DEFAULTS` case (3 head geometries x 7 batches, 8 cases) |
@@ -47,7 +47,7 @@ retune either decode mode or the GDN prefill path.
 | [`library/tests/dispatch/gdn/test_gfx950_wiring.py`](../../../tests/dispatch/gdn/test_gfx950_wiring.py) | CPU dispatch wiring: the literal `AUTO_DEFAULTS` table and `auto` selection per case |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
 | [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, devices, pointer alignment, pool-index range, fused-mode inputs |
-| [`library/tests/test_gdn_decode_fused.py`](../../../tests/test_gdn_decode_fused.py) | CPU contract of the fused conv1d / gated-RMSNorm modes: spec rules, ABI, IR alignment claims, tap-shift barrier, fp32 reference |
+| [`library/tests/test_gdn_decode_fused.py`](../../../tests/test_gdn_decode_fused.py) | CPU contract of the fused conv1d / gated-RMSNorm modes: spec rules, ABI, IR alignment claims, tap-shift barrier, reference |
 | [`library/tests/test_gdn_decode_fused_gfx950_numeric.py`](../../../tests/test_gdn_decode_fused_gfx950_numeric.py) | On-device fused-mode output, state and conv-state correctness |
 | [`library/tests/test_gdn_decode_gfx950_numeric.py`](../../../tests/test_gdn_decode_gfx950_numeric.py) | On-device GDN output and state correctness |
 | [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness and dispatch-to-launch coverage |
@@ -56,11 +56,11 @@ retune either decode mode or the GDN prefill path.
 | [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds (Python lowering) |
 | [`library/tests/test_gdn_decode_ir_cpp_parity.py`](../../../tests/test_gdn_decode_ir_cpp_parity.py) | The C++ engine lowers every golden case to byte-identical LLVM IR |
 | [`library/tests/dispatch/gdn/test_gate_rules.py`](../../../tests/dispatch/gdn/test_gate_rules.py) | CPU contract of `gate_rules.py`, with no torch: what passes the gate (finite, within `TOL`, no spill; a NaN never passes), the rotation sizing, and that the driver keeps no copy of either |
-| [`library/tests/test_gdn_decode_timing.py`](../../../tests/test_gdn_decode_timing.py) | The driver's tensor code on CPU tensors (needs torch): cold copy sets, timing labels, batch and index validation, and that the gate rejects a perturbed output, state or untouched slot |
+| [`library/tests/test_gdn_decode_timing.py`](../../../tests/test_gdn_decode_timing.py) | The driver's host array code (no GPU; the cold copy-set upload needs any HIP device): cold copy sets, timing labels, batch and index validation, and that the gate rejects a perturbed output, state or untouched slot |
 | [`library/tests/test_gdn_decode_table_sweep.py`](../../../tests/test_gdn_decode_table_sweep.py) | CPU contract of `decode_table_sweep.py`: walks, shards, stage 1 / stage 2 files, summaries, exit codes and refused flags, and that a configuration whose verdict fails is never timed or ranked |
 | [`library/tests/test_gdn_decode_defaults_report.py`](../../../tests/test_gdn_decode_defaults_report.py) | CPU contract of `decode_defaults_report.py`: the selection rule, the tie band, withheld proposals, exit codes |
 | [`library/tests/test_kda_decode_benchmark.py`](../../../tests/test_kda_decode_benchmark.py) | CPU contract of `benchmark_kda_decode.py`: variant parsing, `--batches` validation (also of `benchmark_gdn_decode.py`), failure collection, exit code, and that both benchmarks never time a launch whose verdict fails (no torch needed) |
-| [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
+| [`library/builders/gfx950/kda/gdn_prefill.py`](../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
 | [`library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py`](../../../benchmarks/gfx950/gdn/sweep_prefill_value_splits.py) | Sweep `value_splits` for prefill at a given `batch_heads` |
 | [`library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py`](../../../tests/dispatch/gdn/test_gfx950_prefill_wiring.py) | Prefill dispatch: candidate selection, the two-launch guard, launch geometry |
 | [`library/tests/test_kda_chunkwise_spec.py`](../../../tests/test_kda_chunkwise_spec.py) | CPU chunkwise KDA spec coverage: the prep, fused and scan specs' admission and rejection rules, kernel naming, and each builder's code object against the resource budget (no GPU) |
@@ -78,7 +78,8 @@ export PYTHONPATH="$PWD/library:$PWD/platform/python${PYTHONPATH:+:$PYTHONPATH}"
 
 The driver, benchmarks, sweep, and numeric tests require:
 
-- ROCm torch with a visible gfx950 GPU;
+- a visible gfx950 GPU (cold HIP-graph timing in the benchmarks and the sweep also needs
+  ROCm torch, which captures the graphs);
 - a working ROCm comgr library for compiling the emitted LLVM IR;
 - the rocKE Python package from `platform/python`.
 
@@ -132,13 +133,13 @@ python3 library/builders/gfx950/gdn/gdn_decode.py \
   --batches 1,16 --bench
 ```
 
-`--no-check` skips the fp32 reference and should be used only for focused
+`--no-check` skips the reference check and should be used only for focused
 measurement after correctness has already been established.
 
 ### f32 state and fused modes
 
 The recurrent state may be `f32` (`GdnDecodeSpec(state_dtype="f32")`); only the
-state widens, and the inputs, output and fp32 reference are unchanged. Two
+state widens, and the inputs, output and reference are unchanged. Two
 optional flags fuse a hybrid layer's neighbours into the kernel: `fuse_conv`
 (causal conv1d + SiLU on the packed q/k/v row) and `fuse_out_norm` (gated
 RMSNorm on the output; SiLU gate for GDN, sigmoid for KDA). What they compute,
@@ -146,7 +147,7 @@ the tensors they add and the spec rules they need are in
 [`ALGORITHM.md` §4.9](ALGORITHM.md#49-optional-fusions-conv1d-and-gated-rmsnorm).
 
 `make_inputs()` draws the extra tensors for a fused spec (`mixed_qkv` replaces
-`query`/`key`/`value`), `ref_fp32()` applies the conv first and the norm last,
+`query`/`key`/`value`), `ref_decode_step()` applies the conv first and the norm last,
 and `check()` also compares the written conv state and the untouched conv-state
 slots. For a `fuse_out_norm` spec `out_err` is **relative to `max(1, |ref|)`**,
 not absolute: the normalised output reaches a few units, where one bf16
@@ -282,7 +283,7 @@ batch). `--mode fused` means both `fuse_conv` and `fuse_out_norm` (and
 `DV`. The walk is every registered tile x knob configuration at `--sweep-level`
 (`production`: every knob set at `waves_per_eu` 0 and 4; `full` with
 `--tuning-sample N`: N random configurations per tile). It checks each
-configuration once against the fp32 reference on disjoint read and write slots
+configuration once against the reference on disjoint read and write slots
 (output, written state and conv-state slots, untouched slots bit-exact), then
 times the ones that pass, on in-place slots as a serving engine updates them:
 
@@ -470,14 +471,10 @@ from `platform/cpp/bindings`) on `PYTHONPATH`. Without it the test skips,
 unless `ROCKE_BACKEND` is `cpp` or `both`: there the engine is expected, so
 its absence fails the test.
 
-Without torch (as in CI) `test_gdn_decode_timing.py` and
-the two tensor-driven cases of the sweep and KDA benchmark tests skip; the
-gate's pass test, the rotation sizing, and what the sweep and both benchmarks
-do with a failing verdict run anyway (`test_gate_rules.py` and the verdict
-tests in the sweep and benchmark files). The tensor reductions inside `gate()`
-(the error values and the untouched-slot comparison) run only where torch is
-installed: `test_gdn_decode_timing.py` on CPU tensors, and the on-device
-numeric files below. Install CPU torch to run all of them.
+None of these needs torch: the driver's inputs, reference and `gate()` are host
+numpy arrays, so `test_gdn_decode_timing.py` and the sweep and benchmark
+verdict tests run the gate's reductions (the error values and the
+untouched-slot comparison) on a machine without a GPU.
 
 On-device numeric coverage:
 
@@ -556,7 +553,7 @@ grid = batch * num_v_heads
 width) whenever the tile is legal; batch and `batch * num_v_heads` change the
 grid but not the configuration.
 
-`out_err` and `state_err` are maximum absolute errors against the fp32 reference
+`out_err` and `state_err` are maximum absolute errors against the reference
 (except `out_err` of a `fuse_out_norm` spec, relative to `max(1, |ref|)`; see
 [f32 state and fused modes](#f32-state-and-fused-modes)).
 In the current coverage, state error is larger than output error. Both remain
@@ -571,7 +568,7 @@ Exit codes differ slightly by command:
 |---|---|---|---|
 | `gdn_decode.py` | all requested checks passed, or checks were disabled | at least one checked batch exceeded tolerance | no GPU visible, the fixed spec was rejected, or a refused flag (a negative `--rotate-mb`, a `--variant` that is not `tiled` or `simple`, a malformed or non-positive `--batches`) |
 | `benchmark_gdn_decode.py` | every batch passed correctness (timing may print `n/a` when graph capture is unavailable, and always with `--no-device`) | at least one batch exceeded tolerance, or the registry yielded other than 54 candidates | no GPU visible, or a refused flag (a negative `--rotate-mb`, a malformed or non-positive `--batches`) |
-| `benchmark_kda_decode.py` | every requested variant/sweep passed correctness and timing | any requested variant/sweep failed or was incomplete | no ROCm torch or no visible HIP device, the visible device is not gfx950, or a refused flag (a negative `--rotate-mb`, a malformed or non-positive `--batches`, an unknown `--variants` name) |
+| `benchmark_kda_decode.py` | every requested variant/sweep passed correctness and timing | any requested variant/sweep failed or was incomplete | no visible HIP device, the visible device is not gfx950, or a refused flag (a negative `--rotate-mb`, a malformed or non-positive `--batches`, an unknown `--variants` name) |
 | `decode_table_sweep.py` | every row passed the gate and was timed, and every shape timed `auto` (also `--list-only`; `--stage1-json F --shard I/N` with `I` past the last recorded shape) | some configuration failed the gate, raised or could not be timed, a shape has no timed `auto` (not checked in a `--shard` / `--offset` / `--limit` stage-1 run, which times `auto` in one window), the run timed nothing (`--offset` / `--limit` leave no configuration of any shape), `--summarize` found no rows or withheld its ranking (the rows it ranks mix builds or `--rotate-mb`), or (`--list-only`) a shape was refused | a refused flag or flag combination (`--bases-only` with `--sweep-level full` included), an unreadable, non-sweep or malformed input file (a `--shapes` entry or a saved row with a missing key or a bad value), stage-1 rows from different walks, of more than one build, warm or of mixed `--rotate-mb`, or ranked by another build than this run (`--stage1-json`), no gfx950 device visible, or no torch |
 | `decode_defaults_report.py` | a proposal and an `auto` score for every case | some case has no configuration timed at every shape, or `auto` untimed at a shape; rows from mixed walks, mixed `--rotate-mb` or mixed builds; or warm rows (below the cold target), where the proposal is withheld | a refused flag value, a missing file argument, or an unreadable, non-sweep or malformed (a row lacks a key or holds a bad value) input file (argparse) |
 

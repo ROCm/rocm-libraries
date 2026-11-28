@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rocke.core import ir_golden
+from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir_golden import (
     GOLDEN_ALIASES,
     GOLDEN_FLAVORS,
@@ -26,6 +27,7 @@ from rocke.core.ir_golden import (
     check_golden,
     check_golden_flavors,
     compare,
+    golden_case_ids,
     golden_document,
     golden_main,
     golden_shard,
@@ -224,6 +226,63 @@ class TestGoldenShards(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("no *.json shards", errors[0])
 
+    def test_case_predicates_that_split_the_ids_split_the_drift(self):
+        # x/2 drifted, y/1 is gone from the run and z/1 is new: each is
+        # reported by exactly the check whose predicate owns its id.
+        self._shard("x", ["x/1", "x/2"])
+        self._shard("y", ["y/1"])
+
+        def run(fl):
+            return {
+                "cases": {
+                    "x/1": {"sha256": "a"},
+                    "x/2": {"sha256": "b"},
+                    "z/1": {"sha256": "a"},
+                }
+            }
+
+        flavor = GOLDEN_FLAVORS[0]
+        whole = check_golden(self.dir, run, flavor)
+        self.assertEqual(
+            sorted(whole),
+            ["cases: missing current y/1", "cases: new current z/1", "x/2: a -> b"],
+        )
+        owners = ({"x/1", "y/1"}, {"x/2"}, {"z/1"})
+        split = [
+            check_golden(self.dir, run, flavor, ids.__contains__) for ids in owners
+        ]
+        self.assertEqual(
+            split,
+            [
+                ["cases: missing current y/1"],
+                ["x/2: a -> b"],
+                ["cases: new current z/1"],
+            ],
+        )
+
+    def test_golden_case_ids_lists_every_section_and_flavor(self):
+        self._shard("x", ["x/1"])
+        doc = load_golden(self.dir)
+        doc["flavors"][GOLDEN_PROFILE_FLAVORS[0]]["expected_failures"] = {
+            "x/9": {"type": "ValueError", "message": "m"}
+        }
+        self.assertEqual(golden_case_ids(doc), {"x/1", "x/9"})
+
+    def test_run_golden_cases_lowers_only_the_owned_cases(self):
+        corpus = [
+            {"case_id": "x/1", "family": "x", "arch": "a", "build": None},
+            {"case_id": "x/2", "family": "x", "arch": "a", "build": None},
+        ]
+        lowered = []
+
+        def lower(case, flavor):
+            lowered.append(case["case_id"])
+            return {"sha256": "a"}, ""
+
+        sub = run_golden_cases(corpus, "f", lower=lower, owns_case="x/2".__eq__)
+        self.assertEqual(lowered, ["x/2"])
+        self.assertEqual(set(sub["cases"]), {"x/2"})
+
     def test_golden_shard_is_first_segment(self):
         self.assertEqual(golden_shard("attention/gfx942/2d_bf16"), "attention")
 
@@ -344,6 +403,7 @@ class TestGoldenMain(unittest.TestCase):
         out = io.StringIO() if out is None else out
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             golden_main(
+                golden_name="sample",
                 cases=lambda: [{"case_id": c} for c in cases],
                 write_golden=self._write(cases),
                 check_golden=self._check,
@@ -368,7 +428,10 @@ class TestGoldenMain(unittest.TestCase):
     def test_needs_a_default_or_a_dump(self):
         with self.assertRaises(TypeError):
             golden_main(
-                cases=list, write_golden=self._write(()), check_golden=self._check
+                golden_name="sample",
+                cases=list,
+                write_golden=self._write(()),
+                check_golden=self._check,
             )
 
     def test_write_refuses_a_json_file_path(self):
@@ -449,6 +512,7 @@ class TestGoldenMain(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
             golden_main(
+                golden_name="sample",
                 cases=list,
                 write_golden=self._write(()),
                 check_golden=self._check,
@@ -457,7 +521,11 @@ class TestGoldenMain(unittest.TestCase):
             )
         self.assertEqual(
             out.getvalue().splitlines(),
-            ["IR DRIFT: x/1 changed", "IR DRIFT: y/1 missing"],
+            [
+                "IR DRIFT: x/1 changed",
+                "IR DRIFT: y/1 missing",
+                *rerecord_hint("sample").splitlines(),
+            ],
         )
 
     def test_a_clean_check_returns(self):

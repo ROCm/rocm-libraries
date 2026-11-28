@@ -154,10 +154,8 @@ static bool enable_combo_2d(const rocke_unified_attn_problem_t* p)
         /* bf16 admits the whole combo cohort; every other dtype is rejected. */
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias || p->softcap > 0)
-    {
-        return false;
-    }
+    /* ALiBi, QQ bias and softcap ride the combo: the transposed softmax body
+       applies them per score. */
     if(p->head_size != 64 || p->block_size != 32)
     {
         return false;
@@ -192,10 +190,8 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias)
-    {
-        return false;
-    }
+    /* ALiBi and QQ bias are admitted: the transposed softmax body applies them
+       per score. */
     if(p->softcap > 0)
     {
         return false;
@@ -277,6 +273,43 @@ static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
     return cache_bytes > 0x7FFF0000ULL; /* Python _I32_KV_BUFFER_BYTES */
 }
 
+/* Python: _fp8_qk_loader_fits(problem, tile_size=, num_warps=). The async fp8 K
+ * loader (raw.ptr.buffer.load.lds) moves 4, 12 or 16 bytes per lane per call
+ * (8 is rejected by the hardware), so one of those payloads across the CTA's
+ * lanes must evenly tile the T * HD bytes of a K tile. */
+static bool fp8_qk_loader_fits(int head_size, int tile_size, int num_warps)
+{
+    static const int bytes_per_lane[] = {16, 12, 4};
+    const int tile_bytes = tile_size * head_size;
+    const int threads = num_warps * 64;
+    for(int bpl : bytes_per_lane)
+    {
+        const int payload = threads * bpl;
+        if(tile_bytes >= payload && tile_bytes % payload == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Python: _enable_fp8_mfma_qk(problem, tile_size=, num_warps=). The fp8 K-in-LDS
+ * path wins on decode and short prefill (short KV loop or a sliding window); the
+ * 32x32 combo reads K from LDS at the working dtype, so it never takes it.
+ * tile_size / num_warps are the selector outputs the caller already holds. */
+static bool enable_fp8_mfma_qk(const rocke_unified_attn_problem_t* p, int tile_size, int num_warps)
+{
+    if(!p->use_fp8 || enable_combo_2d(p) || p->max_seqlen_q > 256)
+    {
+        return false;
+    }
+    if(!fp8_qk_loader_fits(p->head_size, tile_size, num_warps))
+    {
+        return false;
+    }
+    return p->sliding_window > 0 || p->max_seqlen_k <= 16 * tile_size;
+}
+
 /* Python: _d256_gfx950_cohort(problem). */
 static bool d256_gfx950_cohort(const rocke_unified_attn_problem_t* p)
 {
@@ -332,10 +365,8 @@ static bool enable_transposed_qk_32x32(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias)
-    {
-        return false;
-    }
+    /* Only softcap and sinks are gated here: the transposed softmax body applies
+       ALiBi and QQ bias per score. */
     if(p->softcap > 0 || p->use_sinks)
     {
         return false;
@@ -412,6 +443,12 @@ static bool enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
 static bool enable_transposed_subflags(const rocke_unified_attn_problem_t* p)
 {
     if(p->sliding_window > 0)
+    {
+        return false;
+    }
+    /* The VALU sub-flags (mask-limit among them) do not support softcap, ALiBi or
+       QQ bias; the spec validator enforces this. */
+    if(p->softcap > 0 || p->use_alibi || p->use_qq_bias)
     {
         return false;
     }
@@ -1064,12 +1101,7 @@ rocke_attention_tiled_2d_spec_t
         s.use_k_single_buffer = enable_d128_small_tile(p) && (block_m_ks <= t_eff_ks);
     }
 
-    /* fp8_mfma_qk: mirrors Python _enable_fp8_mfma_qk; requires _fp8_qk_loader_fits
-     * which is not yet ported here. The field stays at its spec_default() value (false)
-     * when use_fp8 is false; for fp8 problems the parity harness excludes this field
-     * from the comparison until the predicate is fully ported.
-     * NOTE: this is the only field not fully implemented; all non-fp8 problems in the
-     * problem matrix will have correct selector parity. */
+    s.use_fp8_mfma_qk = enable_fp8_mfma_qk(p, s.tile_size, s.num_warps);
     return s;
 }
 

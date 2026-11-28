@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: MIT
 /* Host packing fixtures and native authoring emission for test_mma_io.py.
  *
+ * It also pins the quantization helpers' facts and refusals (the fp8 / bf8
+ * encoding of each target, quant_max_abs and quantize_scalar_f32), with the
+ * texts the Python tests in tests/numeric/test_fp8_codec.py and
+ * tests/core/test_dtypes.py pin.
+ *
  * It also answers register-packing questions for test_storage.py, which
  * compares each answer with core/storage.py (found through ROCKE_STORAGE_TEST):
  *
@@ -20,8 +25,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 
 #include "rocke/error.hpp"
+#include "rocke/helper_rocke.helpers.fp8_encoding.h"
 #include "rocke/helper_rocke.helpers.mma_io.h"
 #include "rocke/helper_rocke.helpers.quant.h"
 #include "rocke/ir_serialize.h"
@@ -357,6 +364,86 @@ static int test_fragment_offset_bounds()
     return 0;
 }
 
+/* The text a builder call refused with, or "" when it did not throw. */
+template <typename Call>
+static std::string refusal_of(Call call)
+{
+    try
+    {
+        call();
+    }
+    catch(const ckc::Error& error)
+    {
+        return error.code() == ROCKE_ERR_VALUE ? error.what() : "wrong status";
+    }
+    return "";
+}
+
+static int test_quant_bounds()
+{
+    static const char* const no_gfx90a_encoding
+        = "fp8_element_format failed - arch='gfx90a', expected one of "
+          "('gfx942', 'gfx950', 'gfx1250')";
+    char err[ROCKE_ERR_MSG_CAP];
+    double bound = 0.0;
+
+    /* fp8_element_format: FNUZ on gfx942, OCP on gfx950 and gfx1250. */
+    CHECK(rocke_fp8_element_format("fp8e4m3", "gfx942", NULL, 0) == &ROCKE_FP8_E4M3_FNUZ);
+    CHECK(rocke_fp8_element_format("bf8e5m2", "gfx942", NULL, 0) == &ROCKE_BF8_E5M2_FNUZ);
+    CHECK(rocke_fp8_element_format("fp8e4m3", "gfx950", NULL, 0) == &ROCKE_FP8_E4M3_OCP);
+    CHECK(rocke_fp8_element_format("bf8e5m2", "gfx950", NULL, 0) == &ROCKE_BF8_E5M2_OCP);
+    CHECK(rocke_fp8_element_format("fp8e4m3", "gfx1250", NULL, 0) == &ROCKE_FP8_E4M3_OCP);
+    CHECK(rocke_fp8_element_format("bf8e5m2", "gfx1250", NULL, 0) == &ROCKE_BF8_E5M2_OCP);
+    CHECK(rocke_fp8_element_format("fp8e4m3", "gfx90a", err, sizeof(err)) == NULL);
+    CHECK(strcmp(err, no_gfx90a_encoding) == 0);
+    CHECK(rocke_fp8_element_format("i8", "gfx950", err, sizeof(err)) == NULL);
+    CHECK(strcmp(err,
+                 "fp8_element_format failed - dtype='i8', expected one of "
+                 "('bf8e5m2', 'fp8e4m3')")
+          == 0);
+
+    /* _canon: the scalar-quantization aliases only. */
+    CHECK(strcmp(rocke_quant_canon("e4m3"), "fp8e4m3") == 0);
+    CHECK(strcmp(rocke_quant_canon("fp8_e5m2"), "bf8e5m2") == 0);
+    CHECK(strcmp(rocke_quant_canon("int8"), "i8") == 0);
+    CHECK(rocke_quant_canon("fp4") == NULL);
+
+    /* quant_max_abs: the bound of the target's encoding; 127 for i8. */
+    CHECK(rocke_quant_max_abs("fp8", "gfx942", &bound, err, sizeof(err)) == ROCKE_OK
+          && bound == 240.0);
+    CHECK(rocke_quant_max_abs("fp8e4m3", "gfx950", &bound, err, sizeof(err)) == ROCKE_OK
+          && bound == 448.0);
+    CHECK(rocke_quant_max_abs("bf8e5m2", "gfx942", &bound, err, sizeof(err)) == ROCKE_OK
+          && bound == 57344.0);
+    CHECK(rocke_quant_max_abs("i8", "gfx90a", &bound, err, sizeof(err)) == ROCKE_OK
+          && bound == 127.0);
+    CHECK(rocke_quant_max_abs("fp8e4m3", "gfx90a", &bound, err, sizeof(err)) == ROCKE_ERR_VALUE);
+    CHECK(strcmp(err, no_gfx90a_encoding) == 0);
+    CHECK(rocke_quant_max_abs("fp4", "gfx950", &bound, err, sizeof(err)) == ROCKE_ERR_VALUE);
+    CHECK(strcmp(err,
+                 "unsupported quant dtype 'fp4'; expected one of ['bf8', 'bf8e5m2', "
+                 "'e4m3', 'fp8', 'fp8_e4m3', 'fp8_e5m2', 'fp8e4m3', 'i8', 'int8']")
+          == 0);
+    CHECK(rocke_quant_max_abs("i8", "gfx950", NULL, err, sizeof(err)) == ROCKE_ERR_VALUE);
+
+    /* quantize_scalar_f32 refuses a non-f32 input and an fp8 dtype on a target
+     * with no encoding, emitting nothing. */
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "quantize_refusals") == ROCKE_OK);
+        rocke_value_t* one = rocke_b_const_f32(&b, 1.0);
+        rocke_value_t* index = rocke_b_const_i32(&b, 0);
+        CHECK(refusal_of([&] { rocke_b_quantize_scalar_f32(&b, index, one, "fp8e4m3", "gfx942"); })
+              == "quantize_scalar_f32 expects f32 input, got i32");
+        CHECK(refusal_of([&] { rocke_b_quantize_scalar_f32(&b, one, index, "fp8e4m3", "gfx942"); })
+              == "quantize_scalar_f32 expects f32 inv_scale, got i32");
+        CHECK(refusal_of([&] { rocke_b_quantize_scalar_f32(&b, one, one, "fp8e4m3", "gfx90a"); })
+              == no_gfx90a_encoding);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--emit") == 0)
@@ -416,6 +503,7 @@ int main(int argc, char** argv)
     CHECK(test_fragment_inputs() == 0);
     CHECK(test_fragment_offset_bounds() == 0);
     CHECK(test_register_packing() == 0);
+    CHECK(test_quant_bounds() == 0);
     for(int count : {1, 2, 4, 8})
     {
         const rocke_scale_packing_t scales = {count, 32};

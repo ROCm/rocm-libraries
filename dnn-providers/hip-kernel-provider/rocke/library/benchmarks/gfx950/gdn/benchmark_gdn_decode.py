@@ -17,6 +17,9 @@ import argparse
 import sys
 from typing import Iterable
 
+from rocke.runtime.hip_module import get_device_count
+
+from builders.gfx950.gdn.gdn_decode import import_graph_torch
 from dispatch.gdn import (
     GdnDecodeRequest,
     dispatch_gdn_decode,
@@ -55,6 +58,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
     check_rotate_mb(args.rotate_mb, ap)
+    if not args.no_device:
+        import_graph_torch()  # graph timing: before the first HIP call
 
     failures = 0
     rotate_mb = None
@@ -69,9 +74,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             failures += 1
             continue
 
-        import torch
-
-        if not torch.cuda.is_available():
+        if not get_device_count():
             print("no HIP device visible", file=sys.stderr)
             return 2
         from builders.gfx950.gdn.gdn_decode import (

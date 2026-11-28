@@ -1,4 +1,4 @@
-# TRANSFORM_DAG.md — Coordinate-Transform DAG over SSA Values
+# Coordinate-Transform DAG over SSA Values
 
 > The tiling layer's coordinate graph is documented in [`tensor_transforms_api.md`](../../python/rocke/helpers/tiling/docs/tensor_transforms_api.md); this doc
 > covers `helpers/transforms.py`.
@@ -11,7 +11,7 @@ simple bijective linear permutation of the underlying memory layout.
 
 This doc walks through every transform with worked examples, ending
 with the full implicit-GEMM convolution descriptor used in
-[`rocke/examples/common/bake_off_implicit_gemm.py`](../../python/rocke/examples/common/bake_off_implicit_gemm.py).
+[`library/builders/common/bake_off_implicit_gemm.py`](../../../library/builders/common/bake_off_implicit_gemm.py).
 
 ## The core idea
 

@@ -1,15 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# CI wiring for the test directories that live inside the ``rocke`` package.
-#
-# The ``rocke_pytest_*`` entries collect ``platform/tests`` only. The
-# directories below sit next to the code they test, so no other lane runs them.
-# Each directory runs in its own pytest process: the directories use
-# ``unittest`` and plain pytest styles and share module names, and a process per
-# directory keeps them apart.
-# ``portable_ir/tests`` is not listed: ``portable_ir/test_portable_ir.py::test_unit``
-# runs it.
+# CI wiring for the test directories that live inside the ``rocke`` package
+# (``rocke.tests.in_tree_suites`` lists them). Each directory runs in its own
+# pytest process: the directories use ``unittest`` and plain pytest styles and
+# share module names, and a process per directory keeps them apart.
 
 import importlib.util
 import os
@@ -18,17 +13,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from rocke.tests.in_tree_suites import EXCLUDED_FILES, SUITES
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 _PLATFORM = Path(__file__).resolve().parents[2]
-
-# Importable package name -> optional modules that the directory needs.
-_SUITES = {
-    "rocke.benchmark.perf.tests": (),
-}
-# ``rocke.heuristics.tests`` and ``test_wavescope_pmc.py`` run in no lane.
-# ``TESTING.md`` gap G7 gives the reasons and the step that enrolls them.
-_EXCLUDED_FILES = ("test_wavescope_pmc.py",)
 
 
 def _package_dir(package: str) -> Path:
@@ -42,9 +30,9 @@ def _package_dir(package: str) -> Path:
 # One item per test file keeps each item under the per-test CTest timeout.
 _CASES = sorted(
     (package, path.relative_to(_package_dir(package)).as_posix())
-    for package in _SUITES
+    for package in SUITES
     for path in _package_dir(package).rglob("test_*.py")
-    if path.name not in _EXCLUDED_FILES
+    if path.name not in EXCLUDED_FILES
 )
 if not _CASES:
     raise RuntimeError("in-tree test directories contain no test files")
@@ -63,7 +51,7 @@ def _report(returncode: int, stdout: str, stderr: str) -> None:
 )
 def test_in_tree_file(package, relpath):
     """Run one in-package test file in a child pytest process."""
-    for module in _SUITES[package]:
+    for module in SUITES[package]:
         pytest.importorskip(module)
     env = rocke_subprocess_env()
     target = _package_dir(package) / relpath

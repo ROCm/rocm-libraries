@@ -13,7 +13,18 @@ from __future__ import annotations
 
 import pytest
 from rocke.core.arch import known_arches
-from rocke.tests.gpu import current_device_arch, current_device_arch_in
+from rocke.tests.gpu import (
+    DEVICE_MEMORY_HEADROOM_BYTES,
+    current_device_arch,
+    current_device_arch_in,
+    skip_without_device_memory,
+)
+from rocke.tests.lanes import (
+    lanes_waited_for,
+    runner_lanes_for,
+    skip_needing_gpus,
+    skip_until_reason,
+)
 
 hip = pytest.importorskip("rocke.runtime.hip_module")
 
@@ -37,7 +48,7 @@ def test_reports_the_only_devices_arch():
 
 def test_follows_a_change_of_current_device():
     if hip.get_device_count() < 2:
-        pytest.skip("needs two GPUs")
+        skip_needing_gpus(2, reason="needs two GPUs")
     previous = hip.current_device()
     try:
         _select_device(1)
@@ -48,10 +59,15 @@ def test_follows_a_change_of_current_device():
         _select_device(previous)
 
 
-def _another_arch() -> str:
-    """A known arch that is not the current GPU's."""
+def _another_arch_with(runner_lane: bool) -> str:
+    """A known arch that is not the current GPU's, whose GPU no CI runner has
+    (``rocke.tests.lanes.runner_lanes_for``) or without one."""
     arch = current_device_arch()
-    return next(other for other in known_arches() if other != arch)
+    return next(
+        other
+        for other in known_arches()
+        if other != arch and bool(runner_lanes_for((other,))) == runner_lane
+    )
 
 
 def test_returns_the_current_arch_when_listed():
@@ -60,7 +76,7 @@ def test_returns_the_current_arch_when_listed():
 
 
 def test_skips_when_the_current_arch_is_not_listed(monkeypatch):
-    other = _another_arch()
+    other = _another_arch_with(runner_lane=False)
     monkeypatch.delenv(f"ROCKE_REQUIRE_{other.upper()}", raising=False)
     arch = current_device_arch()
     with pytest.raises(pytest.skip.Exception) as skip:
@@ -69,7 +85,7 @@ def test_skips_when_the_current_arch_is_not_listed(monkeypatch):
 
 
 def test_the_skip_names_the_subject(monkeypatch):
-    other = _another_arch()
+    other = _another_arch_with(runner_lane=False)
     monkeypatch.delenv(f"ROCKE_REQUIRE_{other.upper()}", raising=False)
     arch = current_device_arch()
     with pytest.raises(pytest.skip.Exception) as skip:
@@ -77,9 +93,34 @@ def test_the_skip_names_the_subject(monkeypatch):
     assert str(skip.value) == f"kernel_x needs one of ['{other}']; found {arch}"
 
 
+def test_the_skip_declares_the_runner_lane_of_the_listed_arch(monkeypatch):
+    other = _another_arch_with(runner_lane=True)
+    monkeypatch.delenv(f"ROCKE_REQUIRE_{other.upper()}", raising=False)
+    arch = current_device_arch()
+    with pytest.raises(pytest.skip.Exception) as skip:
+        current_device_arch_in((other,))
+    lanes = runner_lanes_for((other,))
+    assert str(skip.value) == skip_until_reason(
+        *lanes, reason=f"this test needs one of ['{other}']; found {arch}"
+    )
+    assert lanes_waited_for(str(skip.value)) == lanes
+
+
+def test_the_skip_declares_no_lane_when_a_listed_arch_has_no_runner_lane(
+    monkeypatch,
+):
+    without_lane = _another_arch_with(runner_lane=False)
+    with_lane = _another_arch_with(runner_lane=True)
+    for other in (without_lane, with_lane):
+        monkeypatch.delenv(f"ROCKE_REQUIRE_{other.upper()}", raising=False)
+    with pytest.raises(pytest.skip.Exception) as skip:
+        current_device_arch_in((without_lane, with_lane))
+    assert lanes_waited_for(str(skip.value)) == ()
+
+
 def test_fails_when_a_required_arch_is_not_the_current_gpu(monkeypatch):
     arch = current_device_arch()
-    other = _another_arch()
+    other = _another_arch_with(runner_lane=False)
     variable = f"ROCKE_REQUIRE_{other.upper()}"
     monkeypatch.setenv(variable, "1")
     with pytest.raises(pytest.fail.Exception) as failure:
@@ -91,3 +132,18 @@ def test_a_required_arch_that_is_the_current_gpu_passes(monkeypatch):
     arch = current_device_arch()
     monkeypatch.setenv(f"ROCKE_REQUIRE_{arch.upper()}", "1")
     assert current_device_arch_in((arch,)) == arch
+
+
+@pytest.mark.gpu
+def test_the_memory_skip_holds_room_for_the_allocation_and_its_headroom():
+    """A device whose total is exactly the allocation plus the headroom runs
+    the test; one byte more skips it, naming the subject and what it needs."""
+    total = hip.get_device_total_memory()
+    fits = total - DEVICE_MEMORY_HEADROOM_BYTES
+    skip_without_device_memory(fits, "the probe")
+    needed = (fits + 1 + DEVICE_MEMORY_HEADROOM_BYTES) / 2**30
+    with pytest.raises(
+        pytest.skip.Exception,
+        match=rf"^the probe needs a device with {needed:.1f} GiB of memory; found ",
+    ):
+        skip_without_device_memory(fits + 1, "the probe")

@@ -27,6 +27,8 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/EmptyDescriptorTree.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RockeKernelSignatures.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/UnifiedAttentionTestGraphs.hpp"
 
 /**
@@ -217,36 +219,11 @@ inline double scoreOf(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     return scorer(graph.context(), bound.value_or(BoundTokens{}), makeKernel(kernelSpec));
 }
 
-/// The 21-argument ABI the rocKE builder declares, under the names it gives them.
+/// The ABI the rocKE builder declares, under the names it gives them (generated from rocKE:
+/// RockeKernelSignatures.hpp).
 inline std::vector<KernelArgument> pythonAbi()
 {
-    constexpr uint32_t POINTER_BYTES = 8;
-    constexpr uint32_t SCALAR_BYTES = 4;
-    const auto buffer
-        = [](const char* name) { return KernelArgument{"global_buffer", POINTER_BYTES, 0, name}; };
-    const auto scalar
-        = [](const char* name) { return KernelArgument{"by_value", SCALAR_BYTES, 0, name}; };
-    return {buffer("output_ptr"),
-            buffer("query_ptr"),
-            buffer("key_cache_ptr"),
-            buffer("value_cache_ptr"),
-            buffer("sink_ptr"),
-            buffer("block_tables_ptr"),
-            buffer("seq_lens_ptr"),
-            buffer("alibi_slopes_ptr"),
-            buffer("qq_bias_ptr"),
-            buffer("query_start_len_ptr"),
-            scalar("scale"),
-            scalar("k_scale"),
-            scalar("v_scale"),
-            scalar("out_scale"),
-            scalar("softcap"),
-            scalar("num_seqs"),
-            scalar("block_table_stride"),
-            scalar("qq_bias_stride_0"),
-            scalar("num_query_heads"),
-            scalar("num_kv_heads"),
-            scalar("sliding_window")};
+    return rockeKernelSignature("gfx942.unified_2d");
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, recording
@@ -262,8 +239,8 @@ inline KernelDefinition makeKpackKernel(const KernelSpec& spec,
     kernel.source.tocKey = "toc#0";
     kernel.source.symbol = "attention_unified_2d";
     kernel.source.signature = recorded;
-    kernel.originDirectory = "/tmp/hkp-gfx942-unified-2d-no-such-tree";
-    kernel.treeRoot = "/tmp/hkp-gfx942-unified-2d-no-such-tree";
+    kernel.originDirectory = emptyDescriptorTree();
+    kernel.treeRoot = emptyDescriptorTree();
     return kernel;
 }
 

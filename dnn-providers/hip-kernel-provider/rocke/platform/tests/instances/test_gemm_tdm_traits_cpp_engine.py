@@ -21,6 +21,8 @@ import sys
 import unittest
 from dataclasses import replace
 
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
+
 # pytest.ini uses --import-mode=importlib, which does not put this directory on
 # sys.path: without the insert the sibling import below only resolves when an
 # earlier-collected module happened to add it.
@@ -147,8 +149,10 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
     def setUpClass(cls):
         try:
             import rocke_engine  # noqa: F401
-        except ImportError as e:
-            raise unittest.SkipTest(f"rocke_engine C++ binding not importable: {e}")
+        except ModuleNotFoundError as e:
+            skip_until(
+                BUILD_VARIANT, reason=f"rocke_engine C++ binding not importable: {e}"
+            )
 
     def test_both_engines_emit_identical_kernels(self):
         from rocke.core.backend import lower_universal_gemm
@@ -328,22 +332,44 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
         self.assertEqual(tuple(cpp), tuple(py))
 
     def test_both_engines_agree_on_target_scope(self):
-        """The summed cshuffle budget on CDNA and the lds_swizzle reject on RDNA
+        """The cshuffle LDS budget (summed on gfx942; aliased on gfx950 unless
+        cshuffle_no_alias or persistent) and the lds_swizzle reject on RDNA
         WMMA: both engines agree, verdict and reason."""
         import rocke_engine
 
-        from test_gemm_validity_gaps import CDNA_CSHUFFLE, RDNA_WMMA, _bf16_spec
+        from test_gemm_validity_gaps import (
+            CDNA_CSHUFFLE,
+            GFX950_CSHUFFLE,
+            RDNA_WMMA,
+            _geometry_spec,
+        )
 
         from rocke.core.backend import universal_gemm_spec_to_dict
         from rocke.instances.common.gemm_universal import is_valid_spec
 
+        def gfx950_cshuffle(**trait_kw):
+            return _geometry_spec(
+                GFX950_CSHUFFLE, dtype="fp16", epilogue="cshuffle", **trait_kw
+            )
+
         for label, spec, arch in (
             (
-                "gfx950 cshuffle",
-                _bf16_spec(CDNA_CSHUFFLE, epilogue="cshuffle"),
+                "gfx942 cshuffle",
+                _geometry_spec(CDNA_CSHUFFLE, epilogue="cshuffle"),
+                "gfx942",
+            ),
+            ("gfx950 cshuffle", gfx950_cshuffle(), "gfx950"),
+            (
+                "gfx950 cshuffle_no_alias",
+                gfx950_cshuffle(cshuffle_no_alias=True),
                 "gfx950",
             ),
-            ("gfx1151 lds_swizzle", _bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151"),
+            ("gfx950 persistent", gfx950_cshuffle(persistent=True), "gfx950"),
+            (
+                "gfx1151 lds_swizzle",
+                _geometry_spec(RDNA_WMMA, lds_swizzle=True),
+                "gfx1151",
+            ),
         ):
             with self.subTest(label):
                 py = is_valid_spec(spec, arch=arch)

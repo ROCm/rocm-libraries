@@ -2826,11 +2826,9 @@ static rocke_kernel_def_t*
     memset(&d_opts, 0, sizeof(d_opts));
     d_opts.noalias = true;
     d_opts.noalias_set = true;
-    if(!uses_atomic_store)
-    {
-        d_opts.writeonly = true;
-        d_opts.writeonly_set = true;
-    }
+    // Python passes writeonly=<flag> either way, so the attr is always set.
+    d_opts.writeonly = !uses_atomic_store;
+    d_opts.writeonly_set = true;
     d_opts.align = 16;
     d_opts.align_set = true;
 

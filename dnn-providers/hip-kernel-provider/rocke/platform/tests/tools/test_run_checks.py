@@ -5,8 +5,12 @@
 import importlib.util
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 import pytest
+
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 
 def _runner_path() -> Path:
@@ -19,7 +23,10 @@ def _runner_path() -> Path:
     for candidate in candidates:
         if candidate.is_file():
             return candidate
-    pytest.skip("top-level run_checks.py is absent from this platform-only tree")
+    skip_until(
+        SOURCE_TREE,
+        reason="top-level run_checks.py is absent from this platform-only tree",
+    )
 
 
 def _assert_guarded_runner_install(text: str) -> None:
@@ -42,7 +49,10 @@ def test_platform_only_install_does_not_require_the_top_level_runner():
     platform = Path(__file__).resolve().parents[2]
     cmake = platform / "CMakeLists.txt"
     if not cmake.is_file():
-        pytest.skip("source CMake project is absent from the installed test artifact")
+        skip_until(
+            SOURCE_TREE,
+            reason="source CMake project is absent from the installed test artifact",
+        )
     _assert_guarded_runner_install(cmake.read_text())
 
 
@@ -151,6 +161,33 @@ def test_default_runs_every_host_validation_gate_once(runner, monkeypatch):
         "^rocke_arch_domain_reproducibility$"
     )
     assert "--no-tests=error" in ctest_command
+
+
+def test_the_guard_step_turns_off_every_other_run_all_stage(runner, monkeypatch):
+    """The guard step runs platform/tests/run_all.py for its relative-path guard
+    alone. Every stage run_all can turn off, read from its own --help, is turned
+    off there, so a stage added later cannot slip into this fast step. The
+    run_all.py beside these tests is the one the step runs in a source checkout,
+    and its installed copy in the relocated suite."""
+    run_all = Path(__file__).resolve().parents[1] / "run_all.py"
+    usage = subprocess.run(
+        [sys.executable, str(run_all), "--help"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    stage_switches = set(re.findall(r"--no-[a-z-]+", usage)) - {"--no-guard"}
+    assert stage_switches, usage
+
+    _rc, calls = _run_default(runner, monkeypatch)
+    [(command, _cwd)] = [
+        (command, cwd)
+        for label, command, cwd in calls
+        if label == "relative-path guard"
+    ]
+    assert Path(command[1]).parts[-2:] == ("tests", "run_all.py")
+    assert stage_switches <= set(command), sorted(stage_switches - set(command))
 
 
 @pytest.mark.parametrize(

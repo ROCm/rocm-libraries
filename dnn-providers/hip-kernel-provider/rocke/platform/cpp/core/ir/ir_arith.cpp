@@ -147,45 +147,25 @@ rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
     return rocke_i_binop(b, ROCKE_OP_ARITH_ADD, a, c, "add");
 }
 
-/* Python _check_unsigned_int_operands: both lowerings read the operands as
- * uint32_t / uint64_t by width, so they are two i32 or two i64 values. Returns
- * false (with the builder error set) when they are not. */
-static bool check_unsigned_int_operands(rocke_ir_builder_t* b,
-                                        const char* op_name,
-                                        const rocke_value_t* a,
-                                        const rocke_value_t* c)
-{
-    if(!a || !c)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s NULL operand", op_name);
-        return false;
-    }
-    if(!rocke_type_eq(a->type, c->type)
-       || (!rocke_i_type_is(a->type, "i32") && !rocke_i_type_is(a->type, "i64")))
-    {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "%s expects two i32 or two i64 operands, got %s / %s",
-                        op_name,
-                        a->type->name,
-                        c->type->name);
-        return false;
-    }
-    return true;
-}
-
+/* IRBuilder.add_nuw: the nuw rule (rocke_i_add_wrap_error, ROCKE_ERR_VALUE:
+ * i32 or i64 operands), then the operand rule (ROCKE_ERR_TYPE), in Python
+ * IRBuilder._binary_op's order. */
 rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
     rocke_value_t* operands[2];
     rocke_attr_map_t at;
     if(!rocke_i_live(b))
         return NULL;
-    if(!check_unsigned_int_operands(b, "add_nuw", a, c))
-        return NULL;
-    operands[0] = a;
-    operands[1] = c;
+    if(!a || !c)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "add_nuw NULL operand");
     at = rocke_i_attrs(b);
     rocke_attr_set_str(b, &at, "wrap", "nuw");
+    char wrap_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_add_wrap_error(&at, a->type, wrap_error, sizeof wrap_error))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", wrap_error);
+    operands[0] = a;
+    operands[1] = c;
+    rocke_i_refuse_operand_types(b, "arith.add", operands, 2);
     return rocke_i_op1(b, ROCKE_OP_ARITH_ADD, operands, 2, a->type, &at, "add");
 }
 
@@ -219,8 +199,12 @@ rocke_value_t* rocke_b_lor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
     return rocke_i_binop(b, ROCKE_OP_ARITH_OR, a, c, "or");
 }
 
+/* IRBuilder.lnot: arith.not lowers to an xor with all ones, so a value that is
+ * not an integer or i1 is refused as a TypeError. */
 rocke_value_t* rocke_b_lnot(rocke_ir_builder_t* b, rocke_value_t* a)
 {
+    if(rocke_i_live(b) && a)
+        rocke_i_refuse_non_integer("arith.not", a->type);
     return rocke_i_unop(b, ROCKE_OP_ARITH_NOT, a, "not");
 }
 
@@ -244,27 +228,37 @@ rocke_value_t* rocke_b_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value
     return rocke_i_binop(b, ROCKE_OP_ARITH_SMIN, a, c, "smin");
 }
 
-/* umax / umin take two scalar operands of one unsigned type (u8). */
+/* Python IRBuilder._unsigned_min_max: umax / umin take two operands of one
+ * type (rocke_i_refuse_operand_types), an unsigned integer scalar (u8); both
+ * refusals are ROCKE_ERR_TYPE. `result_name_hint` names the result. */
 static rocke_value_t* unsigned_min_max(rocke_ir_builder_t* b,
                                        rocke_opcode_t opcode,
-                                       const char* op_name,
+                                       const char* result_name_hint,
                                        rocke_value_t* a,
                                        rocke_value_t* c)
 {
+    const char* op_name = rocke_opcode_name(opcode);
     if(!rocke_i_live(b))
         return NULL;
     if(!a || !c)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s NULL operand", op_name);
-    if(a->type->kind == ROCKE_TYPE_VECTOR || !rocke_type_is_unsigned(a->type)
-       || !rocke_type_eq(a->type, c->type))
+    rocke_value_t* operands[2] = {a, c};
+    rocke_i_refuse_operand_types(b, op_name, operands, 2);
+    if(a->type->kind == ROCKE_TYPE_VECTOR || !rocke_type_is_unsigned(a->type))
+    {
+        char error[ROCKE_ERR_MSG_CAP];
         return (rocke_value_t*)rocke_i_set_err(
             b,
-            ROCKE_ERR_VALUE,
-            "%s expects two operands of one unsigned integer type, got %s and %s",
-            op_name,
-            a->type->name,
-            c->type->name);
-    return rocke_i_binop(b, opcode, a, c, op_name);
+            ROCKE_ERR_TYPE,
+            "%s",
+            rocke_i_type_name_message(op_name,
+                                      "operand type",
+                                      a->type->name,
+                                      "an unsigned integer scalar",
+                                      error,
+                                      sizeof error));
+    }
+    return rocke_i_op1(b, opcode, operands, 2, a->type, NULL, result_name_hint);
 }
 
 rocke_value_t* rocke_b_umax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
@@ -475,6 +469,12 @@ static rocke_value_t* cmp_impl(
     operands[1] = c;
     at = rocke_i_attrs(b);
     rocke_attr_set_str(b, &at, "pred", pred);
+    /* Python IRBuilder._int_cmp: refuse what ir._int_cmp_error refuses. */
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status
+        = rocke_i_cmp_error(&at, a->type, c->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+        return (rocke_value_t*)rocke_i_set_err(b, cmp_status, "%s", cmp_buf);
     return rocke_i_op1(b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &at, hint);
 }
 
@@ -508,12 +508,10 @@ rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
     return cmp_impl(b, a, c, "ne", "ne");
 }
 
+/* IRBuilder.cmp_ult: the arith.cmp rule takes i32 or i64 operands for "ult"
+ * (ROCKE_ERR_VALUE) and refuses two types (ROCKE_ERR_TYPE). */
 rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
-    if(!rocke_i_live(b))
-        return NULL;
-    if(!check_unsigned_int_operands(b, "cmp_ult", a, c))
-        return NULL;
     return cmp_impl(b, a, c, "ult", "ult");
 }
 
@@ -522,36 +520,22 @@ rocke_value_t*
 {
     rocke_value_t* operands[2];
     rocke_attr_map_t at;
-    static const char* const valid[] = {"olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno"};
-    int i;
-    bool ok = false;
     if(!rocke_i_live(b))
         return NULL;
     if(!pred)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp predicate is NULL");
-    for(i = 0; i < (int)(sizeof(valid) / sizeof(valid[0])); ++i)
-    {
-        const char *p = pred, *q = valid[i];
-        while(*p && *q && *p == *q)
-        {
-            ++p;
-            ++q;
-        }
-        if(*p == '\0' && *q == '\0')
-        {
-            ok = true;
-            break;
-        }
-    }
-    if(!ok)
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "unsupported fcmp predicate '%s'", pred);
-    if(!a || !c)
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp NULL operand");
-    operands[0] = a;
-    operands[1] = c;
     at = rocke_i_attrs(b);
     rocke_attr_set_str(b, &at, "pred", pred);
+    if(!a || !c)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp NULL operand");
+    /* Python IRBuilder.fcmp: refuse what ir._fcmp_error refuses. */
+    char fcmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t fcmp_status
+        = rocke_i_fcmp_error(&at, a->type, c->type, fcmp_buf, sizeof fcmp_buf);
+    if(fcmp_status != ROCKE_OK)
+        return (rocke_value_t*)rocke_i_set_err(b, fcmp_status, "%s", fcmp_buf);
+    operands[0] = a;
+    operands[1] = c;
     return rocke_i_op1(b, ROCKE_OP_ARITH_FCMP, operands, 2, rocke_i1(), &at, "fcmp");
 }
 

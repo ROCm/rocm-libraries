@@ -7,7 +7,7 @@ A helper's skip hides every check built on it, so a helper that skipped a presen
 tree would turn those checks off silently. These tests point each helper at a tree
 through its documented override (``ROCKE_DSL_DOCS``, ``ROCKE_LIBRARY_ROOT``): a
 present tree must come back (a skip there fails the test), and an absent tree must
-skip, naming the tree and the path.
+skip, naming the tree and the path. Listing a checkout's files needs git.
 """
 
 from __future__ import annotations
@@ -16,7 +16,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from rocke.tests.source_tree import require_dsl_docs, require_library_tree
+from rocke.tests.source_tree import (
+    require_dsl_docs,
+    require_library_tree,
+    source_files,
+)
 
 # (helper, the environment variable that relocates its tree, the tree's name)
 _HELPERS = [
@@ -50,6 +54,14 @@ def test_skips_an_absent_tree_and_names_it(
     with pytest.raises(pytest.skip.Exception) as skip:
         helper()
     assert str(skip.value) == (
-        f"source-tree check: no {name} tree at {tree}; the installed test "
-        "payload does not ship it"
+        f"waits for source-tree: source-tree check: no {name} tree at "
+        f"{tree}; the installed test payload does not ship it"
     )
+
+
+def test_listing_a_tree_without_git_on_the_path_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(
+        RuntimeError, match=r"source_files failed - root=.*, expected git on PATH"
+    ):
+        source_files(tmp_path)

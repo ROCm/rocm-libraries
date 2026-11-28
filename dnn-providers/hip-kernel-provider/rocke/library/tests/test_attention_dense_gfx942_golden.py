@@ -54,6 +54,8 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "attention_dense_gfx942_ir_sha256.json"
 )
+# This golden's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "attention_dense_gfx942"
 _ARCH = "gfx942"
 
 # Pin the ``library/`` root ahead of everything on sys.path. When this file is run
@@ -456,13 +458,17 @@ def _build_doc():
 
 def test_attention_dense_gfx942_ir_matches_golden():
     import pytest
+    from rocke.core.golden_file import rerecord_hint
     from rocke.core.ir_golden import check_golden
 
     if not _GOLDEN.exists():
         pytest.skip("gfx942 golden fixture missing; generate with --write")
     drift = check_golden(_GOLDEN, _run)
-    assert not drift, "gfx942 attention_dense IR drift vs golden:\n  " + "\n  ".join(
-        drift
+    assert not drift, (
+        "gfx942 attention_dense IR drift vs golden:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
     )
 
 
@@ -575,8 +581,9 @@ def test_independent_pipeline_diag_split_changes_lowered_ir():
 
 if __name__ == "__main__":
     if "--write" in sys.argv:
-        _GOLDEN.parent.mkdir(parents=True, exist_ok=True)
-        _GOLDEN.write_text(json.dumps(_build_doc(), indent=2, sort_keys=True) + "\n")
+        from rocke.core.golden_file import write_golden_json
+
+        write_golden_json(_GOLDEN, _build_doc())
         print(f"wrote {_GOLDEN}")
     else:
         test_attention_dense_gfx942_ir_matches_golden()

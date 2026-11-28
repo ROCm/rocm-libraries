@@ -41,7 +41,9 @@
 # added later without a default makes that call raise `TypeError: missing
 # required argument` for every descriptor already in the wild. `REQUIRED_FIELDS`
 # freezes the set that is allowed to be mandatory -- the problem shape -- so a
-# new tuning knob has to arrive defaulted.
+# new tuning knob has to arrive defaulted. Python's own "non-default argument
+# follows default argument" error is no substitute: it catches a non-defaulted
+# field appended after the defaulted ones, not one inserted before them.
 
 from __future__ import annotations
 
@@ -53,6 +55,12 @@ import typing
 
 import kernels
 import pytest
+
+from .contracts.builder_surface import (
+    UPDATE_COMMAND,
+    load_snapshot,
+    required_spec_fields,
+)
 
 ALLOWED_PARAMS = {"spec", "arch"}
 
@@ -67,6 +75,10 @@ ALLOWED_PARAMS = {"spec", "arch"}
 # default of `None` meaning "resolve through the shipping policy" is the strongest
 # form: a descriptor that omits the field then auto-tracks whatever ships, rather
 # than freezing the value that happened to be the default the day it was written.
+#
+# The specs of the builders pinned in contracts/builder_surface.json are not
+# listed here: that snapshot already records which of their fields are required,
+# and `_snapshot_required_fields` reads the frozen set from it.
 REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common._fmha_common.FmhaCommonSpec": ("shape",),
     "kernels.common._fmha_common.FmhaShape": (
@@ -156,8 +168,6 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "seqlen_q",
     ),
     "kernels.common.lightning_indexer.IndexerTileSpec": (),
-    "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec": ("head_size",),
-    "kernels.gfx1151.wmma_fmha_fwd_v2.WmmaFmhaFwdV2Spec": (),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",
         "dtype",
@@ -190,15 +200,6 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "head_size",
         "num_query_heads",
     ),
-    # Both dense specs inherit the architecture-neutral required shape fields.
-    "kernels.gfx942.attention_dense.Gfx942AttentionDenseSpec": (
-        "batch",
-        "head_size",
-        "num_kv_heads",
-        "num_query_heads",
-        "seqlen_kv",
-        "seqlen_q",
-    ),
     # Dense attention backward: the problem shape (batch is a runtime kernarg).
     "kernels.gfx942.attention_dense_bwd.Gfx942AttentionDenseBwdSpec": (
         "head_size",
@@ -206,27 +207,6 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "seqlen_kv",
         "seqlen_q",
-    ),
-    "kernels.gfx942.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
-        "block_size",
-        "dtype",
-        "has_softcap",
-        "head_size",
-        "num_kv_heads",
-        "num_query_heads",
-        "sliding_window",
-        "use_sinks",
-    ),
-    "kernels.gfx942.attention_tiled_3d.UnifiedAttention3DTiledSpec": (
-        "block_size",
-        "dtype",
-        "has_softcap",
-        "head_size",
-        "num_kv_heads",
-        "num_query_heads",
-        "num_segments",
-        "sliding_window",
-        "use_sinks",
     ),
     "kernels.gfx942.attention_tiled_3d.UnifiedAttentionReduceTiledSpec": (
         "dtype",
@@ -242,42 +222,12 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.gfx942.kda_chunkwise.KdaChunkPrepSpec": (),
     "kernels.gfx942.kda_chunkwise.KdaChunkScanSpec": (),
     "kernels.gfx942.kda_chunkwise.KdaTileSpec": (),
-    # Every gfx950-only codegen knob is defaulted.
-    "kernels.gfx950.attention_dense.Gfx950AttentionDenseSpec": (
-        "batch",
-        "head_size",
-        "num_kv_heads",
-        "num_query_heads",
-        "seqlen_kv",
-        "seqlen_q",
-    ),
     "kernels.gfx950.attention_dense_bwd.Gfx950AttentionDenseBwdSpec": (
         "head_size",
         "num_kv_heads",
         "num_query_heads",
         "seqlen_kv",
         "seqlen_q",
-    ),
-    "kernels.gfx950.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
-        "block_size",
-        "dtype",
-        "has_softcap",
-        "head_size",
-        "num_kv_heads",
-        "num_query_heads",
-        "sliding_window",
-        "use_sinks",
-    ),
-    "kernels.gfx950.attention_tiled_3d.UnifiedAttention3DTiledSpec": (
-        "block_size",
-        "dtype",
-        "has_softcap",
-        "head_size",
-        "num_kv_heads",
-        "num_query_heads",
-        "num_segments",
-        "sliding_window",
-        "use_sinks",
     ),
     "kernels.gfx950.attention_tiled_3d.UnifiedAttentionReduceTiledSpec": (
         "dtype",
@@ -455,6 +405,23 @@ def _discover_specs():
     return found
 
 
+def _snapshot_required_fields() -> dict[str, tuple[str, ...]]:
+    """The required-field set of every spec the builder-surface snapshot pins."""
+    return required_spec_fields(load_snapshot())
+
+
+def _frozen_required_fields(found_specs) -> dict[str, tuple[str, ...]]:
+    """The frozen required-field set of each spec: from the snapshot for the
+    specs it pins among ``found_specs``, from :data:`REQUIRED_FIELDS` for the rest.
+    """
+    pinned = {
+        spec: required
+        for spec, required in _snapshot_required_fields().items()
+        if spec in found_specs
+    }
+    return {**REQUIRED_FIELDS, **pinned}
+
+
 def _required_fields(cls) -> tuple[str, ...]:
     return tuple(
         sorted(
@@ -554,10 +521,19 @@ def test_specs_were_discovered() -> None:
     assert specs, "no spec classes reached from builder annotations -- walk is broken"
 
 
+def test_required_fields_leave_snapshot_specs_to_the_snapshot() -> None:
+    """A spec the builder-surface snapshot pins has one frozen required set."""
+    duplicated = sorted(set(REQUIRED_FIELDS) & set(_snapshot_required_fields()))
+    assert not duplicated, (
+        "REQUIRED_FIELDS lists spec(s) whose required fields the builder-surface "
+        f"snapshot already pins; remove them from REQUIRED_FIELDS: {duplicated}"
+    )
+
+
 def test_every_spec_class_is_listed() -> None:
     """A new spec class has to declare its required set, not inherit silence."""
     found = set(_discover_specs())
-    listed = set(REQUIRED_FIELDS)
+    listed = set(_frozen_required_fields(found))
     assert found == listed, (
         "REQUIRED_FIELDS is out of sync with the specs reachable from builders.\n"
         f"  not listed: {sorted(found - listed)}\n"
@@ -581,9 +557,11 @@ def test_spec_required_fields_are_frozen() -> None:
     the defaulted block is perfectly legal Python -- and breaks every descriptor
     in the wild. This test does not depend on field order.
     """
+    specs = _discover_specs()
+    frozen = _frozen_required_fields(specs)
     drift = []
-    for qualname, cls in sorted(_discover_specs().items()):
-        expected = REQUIRED_FIELDS.get(qualname)
+    for qualname, cls in sorted(specs.items()):
+        expected = frozen.get(qualname)
         if expected is None:
             continue  # reported by test_every_spec_class_is_listed
         actual = _required_fields(cls)
@@ -605,6 +583,7 @@ def test_spec_required_fields_are_frozen() -> None:
         "field a default -- the currently-shipped value, or `None` where a policy\n"
         "function resolves it, which lets an old descriptor auto-track what ships.\n"
         "If the field genuinely belongs to the problem shape, update REQUIRED_FIELDS\n"
-        "in this file and say in the PR that existing descriptors are invalidated.\n"
-        + "\n".join(drift)
+        "in this file (for a spec the builder-surface snapshot pins, refresh it with\n"
+        f"`{UPDATE_COMMAND}`) and say in the PR that existing descriptors are\n"
+        "invalidated.\n" + "\n".join(drift)
     )

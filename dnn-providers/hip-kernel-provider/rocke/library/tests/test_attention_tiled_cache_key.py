@@ -224,8 +224,33 @@ _ENV_STATES = {
 }
 
 
-@pytest.mark.parametrize("arch", ARCHES)
-@pytest.mark.parametrize("path", ("2d", "3d"))
+# Rough single-core seconds of the sweep's heavy cases, so the CI shards share
+# them (rocke.tests.ctest_shard); the gfx1250 cases are light.
+_SWEEP_SHARD_COSTS = {
+    ("2d", "gfx950"): 12,
+    ("2d", "gfx942"): 10,
+    ("3d", "gfx950"): 7,
+    ("3d", "gfx942"): 7,
+}
+
+
+@pytest.mark.parametrize(
+    ("path", "arch"),
+    [
+        pytest.param(
+            path,
+            arch,
+            id=f"{path}-{arch}",
+            marks=(
+                [pytest.mark.rocke_shard_cost(_SWEEP_SHARD_COSTS[path, arch])]
+                if (path, arch) in _SWEEP_SHARD_COSTS
+                else []
+            ),
+        )
+        for path in ("2d", "3d")
+        for arch in ARCHES
+    ],
+)
 def test_key_matches_build_identity(routing_env, monkeypatch, arch, path):
     """Key equality and build equality must coincide across the sweep.
 

@@ -669,12 +669,64 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
 
-    # The pinned TheRock supplies NumPy and ml_dtypes and installs the staged
-    # rocKE wheels before invoking CTest, so the platform GPU tests can run.
-    set(ROCKE_INSTALL_PYTHON_TESTS ON)
-    set(ROCKE_INSTALL_PLATFORM_PYTEST ON)
+    # In provider mode everything rocKE installs besides the plugin is test
+    # content under bin/hip_kernel_provider/, so every test gate follows
+    # HIPKERNELPROVIDER_ENABLE_TESTS: a build with tests OFF stages no rocKE
+    # test payload and does not build the rocKE C++ test targets. The pinned
+    # TheRock supplies NumPy and ml_dtypes and installs the staged rocKE wheels
+    # before invoking CTest, so the platform GPU tests can run.
+    set(ROCKE_INSTALL_TESTS ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    set(ROCKE_INSTALL_PYTHON_TESTS ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    set(ROCKE_INSTALL_PLATFORM_PYTEST ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    # In provider mode the rocke package and its wheels install beside the tests.
+    set(ROCKE_INSTALL_PYTHON_PACKAGE ${HIPKERNELPROVIDER_ENABLE_TESTS})
+    if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
+        set(ROCKE_INSTALL_TEST_GPU_REFERENCES OFF)
+    endif()
+    # The headers, the ckc CMake package and the static archives belong to no
+    # component of the hipkernelprovider artifact and nothing in the provider
+    # consumes them, so a provider build does not install them.
+    set(ROCKE_INSTALL_DEVELOPMENT OFF)
+    # The C++ engine's Python modules (rocke_engine, rocke_library_engine) let
+    # the installed pytest entries run the C++ engine and compare it with the
+    # Python one; without them those tests skip. They are pybind11 modules and
+    # build only when the configure sets ROCKE_BUILD_PYBIND=ON (a cache option,
+    # OFF unless set), which a provider build does not: the provider build uses
+    # no pybind11, and a pybind11 that happens to be on the build host is not
+    # picked up (the binding direction: rocke/platform/dsl_docs/hipdnn_provider/
+    # plan.md). Not on Windows:
+    # TheRock's test artifact does not capture .pyd modules, and the modules
+    # have not been built or run there. When it builds none,
+    # ROCKE_ENGINE_MODULES_ABSENT_REASON says why: the installed guard
+    # rocke_engine_modules_check reports it as its skip reason.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS AND WIN32 AND NOT ROCKE_BUILD_PYBIND)
+        set(ROCKE_ENGINE_MODULES_ABSENT_REASON
+            "Windows provider builds do not build them (TheRock's test artifact does not capture .pyd modules)")
+    endif()
 
-    add_subdirectory(rocke)
+    # The shared engine (librocke) lets the installed pytest entries run the C++
+    # engine's family-agnostic lowering through its C ABI
+    # (rocke.core.native_engine), with no Python module and so no pybind11. It
+    # installs beside the rocke package (test content: it carries no public
+    # API of the provider) and builds with the tests unless
+    # ROCKE_BUILD_SHARED_ENGINE is set explicitly. Not on Windows: it has not
+    # been built or run there. When it is not built,
+    # ROCKE_SHARED_ENGINE_ABSENT_REASON says why for rocke_engine_modules_check.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS AND NOT DEFINED ROCKE_BUILD_SHARED_ENGINE)
+        if(WIN32)
+            set(ROCKE_SHARED_ENGINE_ABSENT_REASON
+                "Windows provider builds do not build it (it has not been built or run there)")
+        else()
+            set(ROCKE_BUILD_SHARED_ENGINE ON)
+        endif()
+    endif()
+
+    # Scope BUILD_TESTING to rocke/ so the rocKE C++ test targets follow the
+    # provider's own test switch without changing the rest of this project.
+    block()
+        set(BUILD_TESTING ${HIPKERNELPROVIDER_ENABLE_TESTS})
+        add_subdirectory(rocke)
+    endblock()
 else()
     message(STATUS "rocKE features disabled")
 endif()

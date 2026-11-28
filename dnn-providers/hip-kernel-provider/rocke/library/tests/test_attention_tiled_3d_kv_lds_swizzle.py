@@ -1,20 +1,34 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Swizzled K/V LDS tiles (``use_kv_lds_swizzle``) of the gfx950 and gfx942 3D
-segment kernels."""
+segment kernels.
+
+The numeric checks launch on ``rocke.runtime`` device arrays and compare with an
+FP64 numpy decode reference; they need a gfx942 or gfx950 GPU.
+"""
 
 from __future__ import annotations
 
 import math
 from dataclasses import asdict, replace
 
+import numpy as np
 import pytest
-
 from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
 )
+from rocke.numeric.compare import Tolerance, assert_within_tolerance
+from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
+from ._attention_tiled_launch import launch_unified
+from ._attention_unified_support import (
+    decode_reference,
+    paged_cache,
+    random_half,
+    strided_bshd,
+)
 from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
@@ -49,7 +63,7 @@ def test_needs_power_of_two_chunks_per_row(arch, kv_layout):
     with pytest.raises(ValueError, match="head_size / 8 a power of two"):
         make(head_size=192, kv_layout=kv_layout, **extra)
     make(head_size=192, kv_layout=kv_layout, use_kv_lds_swizzle=False, **extra)
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     fields = asdict(
         make(head_size=192, kv_layout=kv_layout, use_kv_lds_swizzle=False, **extra)
     )
@@ -77,7 +91,7 @@ def test_kernel_name_token():
     ],
 )
 def test_native_builder_matches_python(head_size, tile, kv_layout):
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     spec = _spec(
         head_size=head_size,
         num_query_heads=32,
@@ -135,7 +149,7 @@ def test_gfx942_spec_contract(wide):
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
-    engine = pytest.importorskip("rocke_engine")
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     spec = _gfx942_spec(num_seqs=3, **kw)
     expected = lower_like_tiled_3d_binding(spec, "gfx942")
     assert engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942") == (
@@ -175,55 +189,38 @@ def test_gfx942_dispatch_scope(kw, arch, expected):
     assert au._kv_lds_swizzle_3d(problem, arch) is expected
 
 
-def _reference(torch, q, k, v, lengths):
-    output = torch.zeros_like(q, dtype=torch.float32)
-    ratio = q.shape[1] // k.shape[1]
-    for batch, length in enumerate(lengths):
-        if length == 0:
-            continue
-        for head in range(q.shape[1]):
-            keys = k[batch, head // ratio, :length].float()
-            values = v[batch, head // ratio, :length].float()
-            scores = (keys @ q[batch, head].float()) / math.sqrt(q.shape[2])
-            output[batch, head] = scores.softmax(0) @ values
-    return output
+def _decode_case(seed, dtype, head_size):
+    """Q, logical K/V and ragged lengths: a partial last tile, a sequence
+    shorter than one tile, and an empty one."""
+    batch, q_heads, kv_heads, capacity = 3, 16, 4, 203
+    rng = np.random.default_rng(seed)
+    q = random_half(rng, (batch, q_heads, head_size), dtype)
+    k = random_half(rng, (batch, kv_heads, capacity, head_size), dtype)
+    v = random_half(rng, (batch, kv_heads, capacity, head_size), dtype)
+    return q, k, v, [capacity, 5, 0]
 
 
-def _paged_cache(torch, logical, block_size):
-    # Pages in reverse order, so neighbouring table entries are not
-    # neighbouring pages.
-    batch, heads, capacity, dim = logical.shape
-    blocks = (capacity + block_size - 1) // block_size
-    backing = torch.zeros(batch, blocks * block_size, heads, dim, dtype=logical.dtype)
-    backing[:, :capacity].copy_(logical.permute(0, 2, 1, 3))
-    pages = backing.reshape(batch * blocks, block_size, heads, dim).flip(0).contiguous()
-    table = torch.arange(batch * blocks - 1, -1, -1, dtype=torch.int32).view(
-        batch, blocks
-    )
-    return pages.cuda(), table.cuda()
+def _assert_matches_reference(out, q, k, v, lengths, dtype):
+    expected = decode_reference(q, k, v, lengths, 1 / math.sqrt(q.shape[2]))
+    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
+    assert_within_tolerance(out, expected, Tolerance(atol=atol, rtol=rtol))
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("head_size, tile", [(64, 32), (128, 16), (128, 64), (256, 16)])
 def test_swizzled_decode_matches_reference(dtype, head_size, tile):
-    torch = pytest.importorskip("torch")
     from dispatch.attention.common import AttentionTuningSpec
     from kernels.common import attention_unified as au
-    from rocke.runtime.hip_module import get_device_arch
 
-    if not torch.cuda.is_available() or get_device_arch() != "gfx950":
-        pytest.skip("requires a gfx950 GPU")
-    batch, q_heads, kv_heads, capacity, block_size = 3, 16, 4, 203, 16
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(29 + head_size + tile)
-    q_host = torch.randn(batch, q_heads, head_size, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng).to(tdtype)
-    v_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng).to(tdtype)
-    k, table = _paged_cache(torch, k_host, block_size)
-    v, _ = _paged_cache(torch, v_host, block_size)
-    # Ragged: a partial last tile, a sequence shorter than one tile, and an
-    # empty one.
-    lengths_host = [capacity, 5, 0]
+    current_device_arch_in(("gfx950",), "the gfx950 swizzled decode")
+    block_size = 16
+    q, k_logical, v_logical, lengths = _decode_case(
+        29 + head_size + tile, dtype, head_size
+    )
+    batch, q_heads, _ = q.shape
+    kv_heads, capacity = k_logical.shape[1:3]
+    k, table = paged_cache(k_logical, block_size, dtype)
+    v, _ = paged_cache(v_logical, block_size, dtype)
     problem = au.UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -261,24 +258,18 @@ def test_swizzled_decode_matches_reference(dtype, head_size, tile):
         reduce_spec=reduce,
         num_kv_blocks=k.shape[0],
     )
-    out = torch.empty_like(q_host).cuda()
-    au.run_unified_attention_torch(
-        problem=problem,
-        q=q_host.cuda(),
-        k=k,
-        v=v,
-        out=out,
-        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
-        seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
-        softmax_scale=1 / math.sqrt(head_size),
-        block_table=table,
-        softcap=0.0,
+    out = launch_unified(
+        problem,
+        q,
+        k,
+        v,
+        table,
+        1 / math.sqrt(head_size),
+        q_lens=[1] * batch,
+        kv_lens=lengths,
         tuning_spec=spec,
     )
-    torch.cuda.synchronize()
-    expected = _reference(torch, q_host, k_host, v_host, lengths_host)
-    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-    torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
+    _assert_matches_reference(out, q, k_logical, v_logical, lengths, dtype)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -287,27 +278,19 @@ def test_swizzled_decode_matches_reference(dtype, head_size, tile):
     [(64, True), (128, True), (64, False), (128, False), (256, False)],
 )
 def test_gfx942_swizzled_decode_matches_reference(dtype, head_size, wide):
-    torch = pytest.importorskip("torch")
     from dispatch.attention.common import AttentionTuningSpec
     from kernels.common import attention_unified as au
     from kernels.gfx942.attention_tiled_3d import (
         UnifiedAttentionReduceTiledSpec as Gfx942Reduce,
     )
-    from rocke.runtime.hip_module import get_device_arch
 
-    if not torch.cuda.is_available() or get_device_arch() != "gfx942":
-        pytest.skip("requires a gfx942 GPU")
-    batch, q_heads, kv_heads, capacity, block_size = 3, 16, 4, 203, 16
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(31 + head_size)
-    q_host = torch.randn(batch, q_heads, head_size, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng).to(tdtype)
-    v_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng).to(tdtype)
-    k, table = _paged_cache(torch, k_host, block_size)
-    v, _ = _paged_cache(torch, v_host, block_size)
-    # Ragged: a partial last tile, a sequence shorter than one tile, and an
-    # empty one.
-    lengths_host = [capacity, 5, 0]
+    current_device_arch_in(("gfx942",), "the gfx942 swizzled decode")
+    block_size = 16
+    q, k_logical, v_logical, lengths = _decode_case(31 + head_size, dtype, head_size)
+    batch, q_heads, _ = q.shape
+    kv_heads, capacity = k_logical.shape[1:3]
+    k, table = paged_cache(k_logical, block_size, dtype)
+    v, _ = paged_cache(v_logical, block_size, dtype)
     problem = au.UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -346,50 +329,30 @@ def test_gfx942_swizzled_decode_matches_reference(dtype, head_size, wide):
         reduce_spec=reduce,
         num_kv_blocks=k.shape[0],
     )
-    out = torch.empty_like(q_host).cuda()
-    au.run_unified_attention_torch(
-        problem=problem,
-        q=q_host.cuda(),
-        k=k,
-        v=v,
-        out=out,
-        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
-        seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
-        softmax_scale=1 / math.sqrt(head_size),
-        block_table=table,
-        softcap=0.0,
+    out = launch_unified(
+        problem,
+        q,
+        k,
+        v,
+        table,
+        1 / math.sqrt(head_size),
+        q_lens=[1] * batch,
+        kv_lens=lengths,
         tuning_spec=spec,
     )
-    torch.cuda.synchronize()
-    expected = _reference(torch, q_host, k_host, v_host, lengths_host)
-    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-    torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
+    _assert_matches_reference(out, q, k_logical, v_logical, lengths, dtype)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("head_size", [64, 128, 256])
 def test_strided_swizzled_decode_matches_reference(dtype, head_size):
-    torch = pytest.importorskip("torch")
     from dispatch.attention.common import AttentionTuningSpec
     from kernels.common import attention_unified as au
-    from rocke.runtime.hip_module import get_device_arch
 
-    if not torch.cuda.is_available() or get_device_arch() not in ("gfx942", "gfx950"):
-        pytest.skip("requires a gfx942 or gfx950 GPU")
-    arch = get_device_arch()
-    batch, q_heads, kv_heads, capacity = 3, 16, 4, 203
-    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(53 + head_size)
-    q_host = torch.randn(batch, q_heads, head_size, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
-    v_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
-    k_host, v_host = k_host.to(tdtype), v_host.to(tdtype)
-    # [batch, token, head, dim] storage seen as [batch, head, token, dim].
-    k = k_host.permute(0, 2, 1, 3).contiguous().cuda().permute(0, 2, 1, 3)
-    v = v_host.permute(0, 2, 1, 3).contiguous().cuda().permute(0, 2, 1, 3)
-    # Ragged: a partial last tile, a sequence shorter than one tile, and an
-    # empty one.
-    lengths_host = [capacity, 5, 0]
+    arch = current_device_arch_in(("gfx942", "gfx950"), "strided swizzled decode")
+    q, k_logical, v_logical, lengths = _decode_case(53 + head_size, dtype, head_size)
+    batch, q_heads, _ = q.shape
+    kv_heads, capacity = k_logical.shape[1:3]
     problem = au.UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -412,22 +375,17 @@ def test_strided_swizzled_decode_matches_reference(dtype, head_size):
         kernel_spec=replace(segment, use_kv_lds_swizzle=True),
         reduce_spec=reduce,
     )
-    out = torch.empty_like(q_host).cuda()
-    au.run_unified_attention_torch(
-        problem=problem,
-        q=q_host.cuda(),
-        k=k,
-        v=v,
-        out=out,
-        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
-        seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
-        softmax_scale=1 / math.sqrt(head_size),
-        block_table=None,
-        softcap=0.0,
-        kv_layout="strided",
+    out = launch_unified(
+        problem,
+        q,
+        # [batch, token, head, dim] storage seen as [batch, head, token, dim].
+        strided_bshd(k_logical, dtype),
+        strided_bshd(v_logical, dtype),
+        None,
+        1 / math.sqrt(head_size),
+        q_lens=[1] * batch,
+        kv_lens=lengths,
         tuning_spec=spec,
+        kv_layout="strided",
     )
-    torch.cuda.synchronize()
-    expected = _reference(torch, q_host, k_host, v_host, lengths_host)
-    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-    torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
+    _assert_matches_reference(out, q, k_logical, v_logical, lengths, dtype)

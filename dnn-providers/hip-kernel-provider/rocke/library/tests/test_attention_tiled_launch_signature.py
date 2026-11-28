@@ -7,7 +7,7 @@
 whose params drift from its launch signature reads the wrong argument without
 faulting. Every builder route the production path takes is built here and its
 params are compared, by name and type in order, with the signature its launcher
-uses (``_tiled_2d_signature`` / ``_tiled_3d_signatures``). That includes the
+uses (``tiled_2d_signature`` / ``tiled_3d_signatures``). That includes the
 runtime shape kernargs a spec class declares (``RUNTIME_KERNARG_FIELDS``).
 
 No GPU required.
@@ -123,7 +123,7 @@ def test_2d_kernel_params_match_launch_signature(arch, problem, suffix):
     kernel = au._tiled_2d_kernel(problem, arch)
     if suffix is not None:
         assert kernel.name.endswith(suffix), kernel.name
-    signature = au._tiled_2d_signature(
+    signature = au.tiled_2d_signature(
         arch,
         problem.dtype,
         kv_dtype=au._kv_storage_dtype(problem),
@@ -155,7 +155,7 @@ def test_3d_kernel_params_match_launch_signatures(arch, problem, strided_kv):
     segment, reduce = au._tiled_3d_kernels(
         problem, arch, num_segments, strided_kv=strided_kv
     )
-    seg_sig, red_sig = au._tiled_3d_signatures(
+    seg_sig, red_sig = au.tiled_3d_signatures(
         arch,
         problem.dtype,
         kv_dtype=au._kv_storage_dtype(problem),
@@ -208,7 +208,7 @@ def test_tuning_candidate_signature_matches_its_kernel(codepath):
             # reduce with the production 3D pair.
             kernel, reduce = kernel
             assert "dg" not in kernel.name.split("_"), kernel.name
-            _, red_sig = au._tiled_3d_signatures(
+            _, red_sig = au.tiled_3d_signatures(
                 "gfx942",
                 spec.kernel_spec.dtype,
                 kv_dtype=spec.kernel_spec.kv_storage_dtype,
@@ -226,7 +226,7 @@ def test_runtime_values_cover_every_declared_field(arch):
     so a launcher never raises on a runtime kernarg."""
     segment_cls, reduce_cls, _, _, _ = au._tiled_3d_impl(arch)
     spec_2d_cls, _, _ = au._tiled_2d_impl(arch)
-    values = au._runtime_kernarg_values(_prefill())
+    values = au.runtime_kernarg_values(_prefill())
     for cls in (spec_2d_cls, segment_cls, reduce_cls):
         missing = set(au._runtime_kernarg_fields(cls)) - set(values)
         assert not missing, (cls.__name__, missing)

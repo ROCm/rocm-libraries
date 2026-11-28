@@ -43,6 +43,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 VECS = (8, 4, 2, 1)
@@ -310,38 +312,35 @@ class Case:
     """Device buffers of one case: x / y (all chunks) and w are shared by the tiles."""
 
     def __init__(self, rt, problem, io: str, seed: int, verify: bool):
-        from benchmarks.common.benchmark_winograd_conv import make_inputs, reference
+        from rocke.numeric import storage
+
+        from benchmarks.common.benchmark_winograd_conv import (
+            make_inputs,
+            reference,
+            upload_drained,
+        )
 
         self.rt = rt
         self.problem = problem
         self.io = io
-        self.x_t, self.w_t, self.y_t = make_inputs(problem, io, seed=seed)
-        self.ref = reference(self.x_t, self.w_t, problem, io) if verify else None
-        self.xb = self.x_t.numel() * 2
-        self.wb = self.w_t.numel() * 2
-        self.yb = self.y_t.numel() * 2
+        x, w = make_inputs(problem, io, seed=seed)
+        self.ref = reference(x, w, problem, io) if verify else None
+        self.y_shape = (problem.N, problem.Ho, problem.Wo, problem.K)
+        self.xb = x.nbytes
+        self.wb = w.nbytes
+        self.yb = int(np.prod(self.y_shape)) * storage.host_dtype(io).itemsize
         self.x = int(rt.alloc(max(self.xb, 4)))
         self.w = int(rt.alloc(max(self.wb, 4)))
         self.y = int(rt.alloc(max(self.yb, 4)))
-        from benchmarks.common.benchmark_winograd_conv import _u8
 
-        rt.sync()
-        for ptr, t in ((self.x, self.x_t), (self.w, self.w_t)):
-            h = t.contiguous().pin_memory()
-            rt.memcpy_h2d(ptr, _u8(h), h.nbytes)
-            rt.sync()
-            del h
+        upload_drained(rt, self.x, x)
+        upload_drained(rt, self.w, w)
 
-    def read_y(self):
-        import torch
+    def read_y(self) -> np.ndarray:
+        """y as float32 values of what the pipeline stored."""
+        from benchmarks.common.benchmark_winograd_conv import read_back_drained
 
-        from benchmarks.common.benchmark_winograd_conv import _u8
-
-        self.rt.sync()
-        h = torch.empty_like(self.y_t, device="cpu").pin_memory()
-        self.rt.memcpy_d2h(_u8(h), self.y, h.nbytes)
-        self.rt.sync()
-        return h.clone()
+        return read_back_drained(self.rt, self.y, self.y_shape, self.io)
 
     def free(self):
         from rocke.runtime import synchronize_and_release
@@ -745,8 +744,6 @@ def run_from_cache(args) -> int:
         return 0
     # Read before the writer opens --results: the two may name one file.
     done = measured_keys(args.skip_measured, "winograd", args.timing)
-
-    import torch  # noqa: F401 -- claim the HIP context first
 
     from rocke.runtime.hip_module import Runtime
 

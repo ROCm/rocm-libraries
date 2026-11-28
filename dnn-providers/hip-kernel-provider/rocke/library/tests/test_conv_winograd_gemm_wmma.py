@@ -4,30 +4,26 @@
 
 CPU: the spec / problem validators, launch geometry, split resolution, the
 launch plans of ``benchmarks.common.winograd_k3_wmma`` and IR builds of every
-knob. GPU (gfx1250): numeric checks against a float32 torch matmul, with M
+knob. GPU (gfx1250): numeric checks against a float64 numpy matmul, with M
 poisoned (0x7F bytes) first so an unwritten element fails -- tails in T, Kg
 and Cg, bf16, both epilogues and LDS pads, a 3-deep ring, one k-step per
 chunk, split-K with the reduce kernel, and a two-step batch-range plan.
 
 Run:
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_conv_winograd_gemm_wmma.py -v
 """
 
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 
+import numpy as np
+import pytest
+from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
-
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it.
-    import torch
-
-    torch.cuda.is_available()
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, skip_until
 
 from kernels.common.conv_winograd_gemm_wmma import (  # noqa: E402
     WinogradGemmProblem,
@@ -88,8 +84,8 @@ class TestSpec(unittest.TestCase):
         ValueError text, word for word (it wrote only the first clause)."""
         try:
             import rocke_library_engine as eng
-        except ImportError:
-            self.skipTest("rocke_library_engine not built")
+        except ModuleNotFoundError:
+            skip_until(BUILD_VARIANT, reason="rocke_library_engine not built")
         from kernels.conv.engine_bridge import conv_winograd_gemm_wmma_spec_to_dict
 
         spec = _spec(sched="bogus")
@@ -203,9 +199,7 @@ class TestPlans(unittest.TestCase):
 
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
-        return f"needs gfx1250 (got {GPU_ARCH!r})"
-    if not _HAS_TORCH:
-        return "torch not importable"
+        return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
     return ""
 
 
@@ -245,12 +239,18 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestGemmGpu(unittest.TestCase):
     def _check(self, dims, dtype, steps):
-        from benchmarks.common import winograd_k3_wmma as K3W
         from rocke import compile_kernel
         from rocke.runtime.hip_module import Runtime
+
+        from benchmarks.common import winograd_k3_wmma as K3W
+        from benchmarks.common.benchmark_winograd_conv import (
+            read_back_drained,
+            upload_drained,
+        )
 
         T, G, Cg, Kg = dims
         prob = WinogradGemmProblem(T=T, G=G, Cg=Cg, Kg=Kg)
@@ -266,25 +266,18 @@ class TestGemmGpu(unittest.TestCase):
         reduce_art = None
         if any(s.spec.split_k for s in plan.steps):
             reduce_art = K3W.build_reduce(dtype, GPU_ARCH)
-        td = torch.bfloat16 if dtype == "bf16" else torch.float16
-        torch.manual_seed(0)
-        V = torch.empty(T, G, Cg).uniform_(-1, 1).to(td)
-        U = torch.empty(G, Kg, Cg).uniform_(-1, 1).to(td)
-        M = torch.empty(T, G, Kg, dtype=td)
-        # Pinned host buffers: pageable copies near in-flight kernels hang gfx1250.
-        V, U, M = (t.pin_memory() for t in (V, U, M))
+        rng = np.random.default_rng(0)
+        V = storage.encode(rng.uniform(-1, 1, (T, G, Cg)), dtype)
+        U = storage.encode(rng.uniform(-1, 1, (G, Kg, Cg)), dtype)
+        M_bytes = T * G * Kg * storage.host_dtype(dtype).itemsize
         rt = Runtime()
-
-        def u8(t):
-            return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
         ws_bytes = plan.workspace_bytes(prob)
-        bufs = [rt.alloc(t.nbytes) for t in (V, U, M)] + [rt.alloc(max(ws_bytes, 4))]
+        bufs = [rt.alloc(nbytes) for nbytes in (V.nbytes, U.nbytes, M_bytes)]
+        bufs.append(rt.alloc(max(ws_bytes, 4)))
         try:
-            rt.sync()
-            rt.memcpy_h2d(bufs[0], u8(V), V.nbytes)
-            rt.memcpy_h2d(bufs[1], u8(U), U.nbytes)
-            rt.memset(bufs[2], 0x7F, M.nbytes)
+            upload_drained(rt, bufs[0], V)
+            upload_drained(rt, bufs[1], U)
+            rt.memset(bufs[2], 0x7F, M_bytes)
             rt.memset(bufs[3], 0x7F, max(ws_bytes, 4))
             run = plan.bind(
                 prob,
@@ -295,16 +288,19 @@ class TestGemmGpu(unittest.TestCase):
                 reduce_art=reduce_art,
             )
             run()
-            rt.sync()
-            rt.memcpy_d2h(u8(M), bufs[2], M.nbytes)
+            M = read_back_drained(rt, bufs[2], (T, G, Kg), dtype)
         finally:
             from rocke.runtime import synchronize_and_release
 
             synchronize_and_release(0)
             for b in bufs:
                 rt.free(b)
-        ref = torch.einsum("tgc,gkc->tgk", V.float(), U.float())
-        err = float((M.float() - ref).abs().max() / ref.abs().max())
+        ref = np.einsum(
+            "tgc,gkc->tgk",
+            storage.decode(V, dtype).astype(np.float64),
+            storage.decode(U, dtype).astype(np.float64),
+        )
+        err = peak_relative_error(M, ref)
         self.assertLess(err, 1e-2, f"{dims} {dtype} {plan.label()}: rel err {err:.3g}")
 
     def test_cases(self):

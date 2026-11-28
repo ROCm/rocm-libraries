@@ -58,7 +58,7 @@ import json
 import math
 import statistics
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
@@ -99,7 +99,7 @@ from kernels.common.attention_bwd import (
     lds_plan,
     register_estimates,
 )
-from kernels.common.attention_bwd_dq import validate_attn_bwd_dq_spec
+from kernels.common.attention_bwd_dq import AttnBwdDqSpec, validate_attn_bwd_dq_spec
 from kernels.common.attention_bwd_plan import AUX_KNOBS, DQ_KNOBS
 from kernels.common.attention_bwd_plan import RUNTIME_KNOBS as PLAN_RUNTIME_KNOBS
 
@@ -594,10 +594,41 @@ def rule_token(message: str) -> str:
     return "coupling"
 
 
-@cache
-def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
+def legality(c: Candidate) -> Legality:
     """The registry's legality (the family validator, then the emission
-    check), plus the register estimates and the LDS footprint."""
+    check), plus the register estimates and the LDS footprint.
+
+    Composed from two memos so a structure search holds one entry per kernel,
+    not one per candidate: the main kernel's legality (:func:`_main_legality`,
+    shared by every dQ variant of one main structure; the register estimates
+    and the LDS footprint are the main kernel's) and, on a split point, the dQ
+    kernel's validation (:func:`_validated_dq`, shared by every main structure
+    that builds the same dQ kernel)."""
+    main_knobs = tuple(kv for kv in c.knobs if kv[0] not in DQ_KNOBS)
+    main = _main_legality(c.slice, main_knobs, c.runtime)
+    if not main.ok:
+        return main
+    s = main.resolved
+    dq_knobs = c.dq_knobs()
+    if s.dq_mode == "split":
+        # the dQ kernel the plan builds for this main spec, validated alike
+        try:
+            dq_spec = s.dq_spec(**dq_knobs)
+        except ValueError as ex:
+            return Legality(False, "dq_" + rule_token(str(ex)), str(ex)[:300], s)
+        dq, error = _validated_dq(dq_spec, c.slice.arch)
+        if dq is None:
+            return Legality(False, "dq_" + rule_token(error), error[:300], s)
+        return replace(main, dq=dq)
+    if dq_knobs:
+        return Legality(False, "coupling", "dQ kernel knobs need dq_mode='split'", s)
+    return main
+
+
+@cache
+def _main_legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
+    """:func:`legality` of the main kernel alone (``knobs`` without the dQ
+    kernel's, :data:`DQ_KNOBS`, which are not main spec fields)."""
     c = Candidate(sl, knobs, runtime)
     try:
         spec = c.spec()
@@ -613,16 +644,6 @@ def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
         bad = _dense_problem(c, s)
         if bad is not None:
             return Legality(False, bad[0], bad[1][:300], s)
-    dq = None
-    dq_knobs = c.dq_knobs()
-    if s.dq_mode == "split":
-        # the dQ kernel the plan builds for this main spec, validated alike
-        try:
-            dq = validate_attn_bwd_dq_spec(s.dq_spec(**dq_knobs), sl.arch)
-        except ValueError as ex:
-            return Legality(False, "dq_" + rule_token(str(ex)), str(ex)[:300], s)
-    elif dq_knobs:
-        return Legality(False, "coupling", "dQ kernel knobs need dq_mode='split'", s)
     est = register_estimates(s, sl.arch)
     return Legality(
         True,
@@ -632,12 +653,17 @@ def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
         est["arch_vgpr"],
         est["agpr"],
         lds_footprint_bytes(s, sl.arch),
-        dq,
     )
 
 
-def legality(c: Candidate) -> Legality:
-    return _legality(c.slice, c.knobs, c.runtime)
+@cache
+def _validated_dq(spec: AttnBwdDqSpec, arch: str) -> tuple[AttnBwdDqSpec | None, str]:
+    """``(resolved split dQ spec, "")``, or ``(None, the validator's
+    message)``."""
+    try:
+        return validate_attn_bwd_dq_spec(spec, arch), ""
+    except ValueError as ex:
+        return None, str(ex)
 
 
 def effective_key(c: Candidate) -> str:
@@ -735,6 +761,82 @@ def _extra_values(
     ]
 
 
+class _Unassigned(Exception):
+    """A coupling test read a stage knob :func:`_crossed_extras` has not
+    assigned yet."""
+
+
+class _PartialContext(Mapping):
+    """``ctx`` with the stage knobs assigned so far on top; reading a stage
+    knob that is still unassigned raises :class:`_Unassigned`."""
+
+    def __init__(self, ctx: Mapping, assigned: Mapping, unassigned: frozenset):
+        self._ctx, self._assigned, self._unassigned = ctx, assigned, unassigned
+
+    def __getitem__(self, key):
+        if key in self._assigned:
+            return self._assigned[key]
+        if key in self._unassigned:
+            raise _Unassigned(key)
+        return self._ctx[key]
+
+    def __iter__(self):
+        if self._unassigned:
+            raise _Unassigned(next(iter(self._unassigned)))
+        return iter({**self._ctx, **self._assigned})
+
+    def __len__(self):
+        return len({**self._ctx, **self._assigned})
+
+
+def _crossed_extras(
+    c: Candidate, rel: Release, point: Mapping, names: Sequence[str]
+) -> Iterator[dict]:
+    """``point`` crossed with every combination of the stage's registry knobs
+    ``names`` whose couplings all hold (:func:`with_extras` at ``full``), in
+    the order of ``itertools.product`` over ``names``, lazily.
+
+    The product can run to 10^5 combinations per point (stage H), most of
+    them ruled out by a coupling, so the combinations are built knob by knob:
+    a knob's coupling test runs as soon as every knob it reads is assigned (a
+    test that reads an unassigned knob waits for it), and a failed test drops
+    every combination under that prefix. The couplings are pure functions of the
+    values they read, so this yields exactly the combinations a test of each
+    whole combination keeps.
+    """
+    ctx = _knob_context(c, point)
+    axes = [
+        (n, _extra_values(c, rel, n, ctx, coupled=False)) for n in names if rel.has(n)
+    ]
+    later = [frozenset(n for n, _ in axes[i + 1 :]) for i in range(len(axes))]
+
+    def holds(assigned: dict, i: int, waiting: list) -> list | None:
+        """The knobs whose couplings still wait on a later knob, or ``None``
+        when a coupling fails on ``assigned`` (knobs ``0 .. i`` set)."""
+        view = _PartialContext(ctx, assigned, later[i])
+        still = []
+        for n in waiting:
+            try:
+                if not backward_axis(n).applies(assigned[n], view):
+                    return None
+            except _Unassigned:
+                still.append(n)
+        return still
+
+    def walk(i: int, assigned: dict, waiting: list) -> Iterator[dict]:
+        if i == len(axes):
+            yield {**point, **assigned}
+            return
+        name, vals = axes[i]
+        for v in vals:
+            nxt = {**assigned, name: v}
+            still = holds(nxt, i, [*waiting, name])
+            if still is not None:
+                yield from walk(i + 1, nxt, still)
+
+    yield from walk(0, {}, [])
+
+
 def with_extras(
     c: Candidate, rel: Release, points: Sequence[Mapping], names: Sequence[str]
 ) -> list[dict]:
@@ -743,28 +845,18 @@ def with_extras(
     ``production``: every point, then every point with one knob moved to
     each of its other values (the knobs are varied one at a time around every
     point). ``full``: every point crossed with every combination of the knobs
-    (combinations whose couplings fail are dropped). A point that already
-    sets one of the knobs keeps it as its current value.
+    (combinations whose couplings fail are dropped; :func:`_crossed_extras`).
+    A point that already sets one of the knobs keeps it as its current value.
     """
+    if rel.level == "full":
+        # the couplings are tested per combination (a knob coupled to another
+        # knob of the same stage, such as counted_issue to loop_sync, is
+        # reachable only through such a combination)
+        return [q for p in points for q in _crossed_extras(c, rel, p, names)]
     out: list[dict] = []
-    full = rel.level == "full"
     for p in points:
         ctx = _knob_context(c, p)
-        # full: the couplings are tested per combination (a knob coupled to
-        # another knob of the same stage, such as counted_issue to loop_sync,
-        # is reachable only through such a combination)
-        axes = [
-            (n, _extra_values(c, rel, n, ctx, coupled=not full))
-            for n in names
-            if rel.has(n)
-        ]
-        if full:
-            for combo in itertools.product(*(vals for _, vals in axes)):
-                q = {**p, **dict(zip((n for n, _ in axes), combo))}
-                qctx = {**ctx, **q}
-                if all(backward_axis(n).applies(q[n], qctx) for n, _ in axes):
-                    out.append(q)
-            continue
+        axes = [(n, _extra_values(c, rel, n, ctx)) for n in names if rel.has(n)]
         out.append(dict(p))
         for n, vals in axes:
             cur = ctx.get(n, backward_axis(n).default)

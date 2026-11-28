@@ -38,7 +38,15 @@ import os
 import struct
 import sys
 from dataclasses import dataclass
-from typing import List
+from typing import TYPE_CHECKING, List
+
+import numpy as np
+from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
+from rocke.runtime.host_buffers import as_u8_buffer
+
+if TYPE_CHECKING:
+    from rocke.runtime.hip_module import Runtime
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
@@ -54,9 +62,13 @@ from benchmarks.common.case_results import (
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
 from benchmarks.common.module_cache import add_module_cache_arg
 from benchmarks.common.tf32_verify import rank_verified, tf32_implies_verify
-from builders.common.conv_reference import conv_reference as _conv_reference
-from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
-from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
+from builders.common.conv_reference import (
+    conv_dgrad_reference,
+    conv_fwd_reference,
+    conv_wgrad_reference,
+)
+from kernels.common.conv_abi import conv_direct_output_dtype
+from kernels.common.conv_args import ConvGeometry
 
 # ---------------------------------------------------------------------------
 # Swept parameter grids -- one source for this JIT sweep and the AOT cache
@@ -138,16 +150,30 @@ class DepthwiseResult:
 # ---------------------------------------------------------------------------
 
 
-def _torch_dtype_of(torch, dtype: str):
-    """Host tensor dtype of a direct problem's tensors: fp32 for fp32 and tf32
-    (TF32 is fp32 storage with a math mode). ``torch`` is the caller's module:
-    every caller already imports it for the host reference tensors, so this
-    helper adds no import of its own."""
-    return {
-        "fp16": torch.float16,
-        "bf16": torch.bfloat16,
-        "fp32": torch.float32,
-    }[direct_storage_dtype(dtype)]
+def _uniform(
+    rng: np.random.Generator, shape: tuple[int, ...], dtype: str
+) -> np.ndarray:
+    """U(-1, 1) draws of ``shape`` stored in the direct problem dtype ``dtype``'s
+    storage (fp32 for tf32)."""
+    return storage.encode(rng.uniform(-1.0, 1.0, shape), direct_storage_dtype(dtype))
+
+
+def _host_like(shape: tuple[int, ...], dtype: str) -> np.ndarray:
+    """A zeroed host array of ``shape`` in ``dtype``'s storage (fp32 for tf32,
+    or for ``"fp32"`` itself: wgrad's dW)."""
+    return np.zeros(shape, storage.host_dtype(direct_storage_dtype(dtype)))
+
+
+def _values(stored: np.ndarray, dtype: str) -> np.ndarray:
+    """The values a ``dtype``-stored host array holds."""
+    return storage.decode(stored, direct_storage_dtype(dtype))
+
+
+def _read_back(rt: Runtime, host_like: np.ndarray, dev: int, dtype: str) -> np.ndarray:
+    """The values of device buffer ``dev``, laid out like ``host_like``."""
+    out = np.empty_like(host_like)
+    rt.memcpy_d2h(as_u8_buffer(out), dev, out.nbytes)
+    return _values(out, dtype)
 
 
 def _abi_dtype(dtype: str) -> str:
@@ -431,106 +457,58 @@ def _verify_kernel(
     grid: tuple,
     block: tuple,
     out_dev,
-    out_t,
-    ref_out,
+    out_like: np.ndarray,
+    out_dtype: str,
+    ref_out: np.ndarray,
     kernel_name: str,
     dump_fail: "str | None",
-    u8,
     ref_floor: float = 1.0,
     tol: float = 5e-2,
 ) -> "tuple[bool, bool]":
     """Launch once and compare against ``ref_out``: max|out - ref| over
     max|ref| floored at ``ref_floor`` (:func:`conv_fill.ref_floor`), against
     the problem dtype's bound ``tol`` (:func:`direct_kernel_sweep.direct_verify_tol`).
+    ``out_like`` is a host array of the output's shape stored as ``out_dtype``.
     """
-    import torch
-
     from rocke.runtime.launcher import LaunchConfig
 
-    rt.memset(out_dev, 0, out_t.nbytes)
+    rt.memset(out_dev, 0, out_like.nbytes)
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
-    out_cpu = torch.empty_like(out_t)
-    rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
-
-    out_f32 = out_cpu.float().cuda()
-    abs_diff = out_f32.sub(ref_out).abs()
-    ref_scale = ref_out.abs().max().clamp(min=ref_floor)
-    rel_err = float(abs_diff.max() / ref_scale)
+    out = _read_back(rt, out_like, out_dev, out_dtype)
+    rel_err = peak_relative_error(out, ref_out, floor=ref_floor)
     status = "PASS" if rel_err < tol else f"FAIL(rel_err={rel_err:.2e})"
     print(f"  verify {kernel_name}: {status}", flush=True)
 
     if rel_err >= tol and dump_fail:
         import pathlib
 
-        import numpy as np
-
         dump_dir = pathlib.Path(dump_fail)
         dump_dir.mkdir(parents=True, exist_ok=True)
-        diff = out_f32.sub(ref_out)
+        diff = out - ref_out
 
-        def _save(name, t):
+        def _save(name, array):
             np.savetxt(
                 dump_dir / f"{kernel_name}_{name}.txt",
-                t.cpu().numpy().flatten(),
+                np.asarray(array).flatten(),
                 fmt="%.6f",
             )
 
-        _save("out", out_f32)
+        _save("out", out)
         _save("ref", ref_out)
         _save("diff", diff)
-        max_idx = int(diff.abs().argmax())
+        max_idx = int(np.abs(diff).argmax())
         unravel = np.unravel_index(max_idx, diff.shape)
         print(
             f"  [dump] saved to {dump_dir}/  "
             f"max_diff={rel_err:.4e} at index {unravel} (flat {max_idx})\n"
-            f"  [dump] out={float(out_f32.flatten()[max_idx]):.6f}  "
+            f"  [dump] out={float(out.flatten()[max_idx]):.6f}  "
             f"ref={float(ref_out.flatten()[max_idx]):.6f}",
             flush=True,
         )
         return True, False
 
     return False, rel_err < tol
-
-
-def _conv_reference_grouped(A_t, B_t, p):
-    """Grouped conv reference via torch.nn.functional.conv2d.
-
-    Returns a ``torch.Tensor`` on the device. Unannotated on purpose: torch is
-    an optional dependency here, so naming it in a signature would either need
-    an import this module must not make at all, or a ``TYPE_CHECKING`` one that
-    does not resolve in an environment without torch.
-    """
-    import torch.nn.functional as F
-
-
-class _DirectConvProblemAdapter:
-    """Thin adapter so ``conv_reference.{conv_reference,dgrad_reference}`` can
-    consume a ``DirectConvProblem`` without modification.
-
-    ``DirectConvProblem`` uses different attribute names from ``ConvProblem``
-    (e.g. ``H``/``W`` vs ``Hi``/``Wi``, ``PAD`` vs ``pH``/``pW``, ``stride``
-    vs ``sH``/``sW``).  This class exposes the interface that ``conv_reference``
-    expects.
-    """
-
-    is_3d = False
-
-    def __init__(self, p):
-        self.N = p.N
-        self.C = p.total_c
-        self.K = p.total_k
-        self.Hi = p.H
-        self.Wi = p.W
-        self.Y = p.KH
-        self.X = p.KW
-        self.sH = p.stride
-        self.sW = p.stride
-        self.pH = p.PAD
-        self.pW = p.PAD_W
-        self.dH = p.dil_h
-        self.dW = p.dil_w
-        self.groups = p.groups
 
 
 def _print_results(
@@ -626,10 +604,7 @@ def _run_depthwise_sweep(
     Runtime,
     KernelLauncher,
     LaunchConfig,
-    u8,
 ) -> "tuple[int, List[DepthwiseResult]]":
-    import torch
-
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -664,15 +639,18 @@ def _run_depthwise_sweep(
     # All three variants take fp16 and bf16 -- preload and spatial off
     # problem.dtype, col off DirectDepthwiseColSpec.dtype -- so every dtype
     # sweeps the full bake-off rather than a subset of the variants.
-    _torch_dtype = _torch_dtype_of(torch, dtype)
-
-    torch.manual_seed(42)
-    A_t, B_t = conv_fill.fwd_operands(
-        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, 1), dtype, _torch_dtype
+    A_host, B_host = (
+        storage.encode(operand, direct_storage_dtype(dtype))
+        for operand in conv_fill.fwd_operands(
+            (p.N, p.H, p.W, p.total_c),
+            (p.total_k, p.KH, p.KW, 1),
+            dtype,
+            np.random.default_rng(42),
+        )
     )
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
+    D_host = _host_like((p.N, p.Ho, p.Wo, p.total_k), dtype)
 
-    bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
+    bytes_xfer = float(A_host.nbytes + B_host.nbytes + D_host.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
     sig = conv_direct_args_signature(_abi_dtype(dtype))
@@ -795,20 +773,21 @@ def _run_depthwise_sweep(
     rt = Runtime()
     results: "List[DepthwiseResult]" = []
 
-    A_dev = rt.alloc(A_t.nbytes)
-    B_dev = rt.alloc(B_t.nbytes)
-    D_dev = rt.alloc(D_t.nbytes)
-    rt.memcpy_h2d(A_dev, u8(A_t), A_t.nbytes)
-    rt.memcpy_h2d(B_dev, u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
+    A_dev = rt.alloc(A_host.nbytes)
+    B_dev = rt.alloc(B_host.nbytes)
+    D_dev = rt.alloc(D_host.nbytes)
+    rt.memcpy_h2d(A_dev, as_u8_buffer(A_host), A_host.nbytes)
+    rt.memcpy_h2d(B_dev, as_u8_buffer(B_host), B_host.nbytes)
+    rt.memset(D_dev, 0, D_host.nbytes)
 
     ref_out = None
     if args.verify or args.dump_fail:
-        ref_out = _conv_reference(A_t, B_t, _DirectConvProblemAdapter(p))
-        print(
-            f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
+        ref_out = conv_fwd_reference(
+            _values(A_host, dtype),
+            _values(B_host, dtype),
+            ConvGeometry.from_direct_problem(p),
         )
+        print(f"Reference computed in float64 {tuple(ref_out.shape)}.", flush=True)
 
     _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
@@ -840,15 +819,15 @@ def _run_depthwise_sweep(
             int(A_dev),
             int(B_dev),
             int(D_dev),
-            A_t.nbytes,
-            B_t.nbytes,
-            D_t.nbytes,
+            A_host.nbytes,
+            B_host.nbytes,
+            D_host.nbytes,
         )
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         kernel_passed = None
         if args.verify or args.dump_fail:
-            rt.memset(D_dev, 0, D_t.nbytes)
+            rt.memset(D_dev, 0, D_host.nbytes)
             stopped, kernel_passed = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
@@ -856,11 +835,11 @@ def _run_depthwise_sweep(
                 grid=grid,
                 block=block,
                 out_dev=D_dev,
-                out_t=D_t,
+                out_like=D_host,
+                out_dtype=dtype,
                 ref_out=ref_out,
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
-                u8=u8,
                 ref_floor=conv_fill.ref_floor(),
                 tol=direct_verify_tol(dtype, arch),
             )
@@ -869,7 +848,7 @@ def _run_depthwise_sweep(
                 rt.free(B_dev)
                 rt.free(D_dev)
                 return 1, []
-            rt.memset(D_dev, 0, D_t.nbytes)
+            rt.memset(D_dev, 0, D_host.nbytes)
 
         ms = _stop.measure(
             launcher.bind(values, config=cfg),
@@ -945,10 +924,7 @@ def _run_sweep(
     Runtime,
     KernelLauncher,
     LaunchConfig,
-    u8,
 ) -> "tuple[int, List[Result]]":
-    import torch
-
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -961,14 +937,18 @@ def _run_sweep(
 
     p = problem
 
-    torch.manual_seed(42)
-    _torch_dtype = _torch_dtype_of(torch, dtype)
-    A_t, B_t = conv_fill.fwd_operands(
-        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
+    A_host, B_host = (
+        storage.encode(operand, direct_storage_dtype(dtype))
+        for operand in conv_fill.fwd_operands(
+            (p.N, p.H, p.W, p.total_c),
+            (p.total_k, p.KH, p.KW, p.cpg),
+            dtype,
+            np.random.default_rng(42),
+        )
     )
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
+    D_host = _host_like((p.N, p.Ho, p.Wo, p.total_k), dtype)
 
-    bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
+    bytes_xfer = float(A_host.nbytes + B_host.nbytes + D_host.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
     sig = conv_direct_args_signature(_abi_dtype(dtype))
@@ -1028,20 +1008,21 @@ def _run_sweep(
     rt = Runtime()
     results: List[Result] = []
 
-    A_dev = rt.alloc(A_t.nbytes)
-    B_dev = rt.alloc(B_t.nbytes)
-    D_dev = rt.alloc(D_t.nbytes)
-    rt.memcpy_h2d(A_dev, u8(A_t), A_t.nbytes)
-    rt.memcpy_h2d(B_dev, u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
+    A_dev = rt.alloc(A_host.nbytes)
+    B_dev = rt.alloc(B_host.nbytes)
+    D_dev = rt.alloc(D_host.nbytes)
+    rt.memcpy_h2d(A_dev, as_u8_buffer(A_host), A_host.nbytes)
+    rt.memcpy_h2d(B_dev, as_u8_buffer(B_host), B_host.nbytes)
+    rt.memset(D_dev, 0, D_host.nbytes)
 
     ref_out = None
     if args.verify or args.dump_fail:
-        ref_out = _conv_reference(A_t, B_t, _DirectConvProblemAdapter(p))
-        print(
-            f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
+        ref_out = conv_fwd_reference(
+            _values(A_host, dtype),
+            _values(B_host, dtype),
+            ConvGeometry.from_direct_problem(p),
         )
+        print(f"Reference computed in float64 {tuple(ref_out.shape)}.", flush=True)
 
     _stop = EarlyStop.for_case(args, problem, dtype, "fwd")
     n_run = 0
@@ -1070,15 +1051,15 @@ def _run_sweep(
             int(A_dev),
             int(B_dev),
             int(D_dev),
-            A_t.nbytes,
-            B_t.nbytes,
-            D_t.nbytes,
+            A_host.nbytes,
+            B_host.nbytes,
+            D_host.nbytes,
         )
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         kernel_passed = None
         if args.verify or args.dump_fail:
-            rt.memset(D_dev, 0, D_t.nbytes)
+            rt.memset(D_dev, 0, D_host.nbytes)
             stopped, kernel_passed = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
@@ -1086,11 +1067,11 @@ def _run_sweep(
                 grid=grid,
                 block=block,
                 out_dev=D_dev,
-                out_t=D_t,
+                out_like=D_host,
+                out_dtype=dtype,
                 ref_out=ref_out,
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
-                u8=u8,
                 ref_floor=conv_fill.ref_floor(),
                 tol=direct_verify_tol(dtype, arch),
             )
@@ -1099,7 +1080,7 @@ def _run_sweep(
                 rt.free(B_dev)
                 rt.free(D_dev)
                 return 1, []
-            rt.memset(D_dev, 0, D_t.nbytes)
+            rt.memset(D_dev, 0, D_host.nbytes)
 
         ms = _stop.measure(
             launcher.bind(values, config=cfg),
@@ -1174,7 +1155,6 @@ def _run_nongrouped_sweep(
     Runtime,
     KernelLauncher,
     LaunchConfig,
-    u8,
 ) -> "tuple[int, List[NonGroupedResult]]":
     """Sweep :class:`DirectNongroupedConvSpec` over tile / wave / swizzle geometry.
 
@@ -1182,8 +1162,6 @@ def _run_nongrouped_sweep(
     axis and collapses to a single wave per output row when ``groups == 1``,
     so it is not a usable fallback here.
     """
-    import torch
-
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_nongrouped import (
@@ -1194,14 +1172,18 @@ def _run_nongrouped_sweep(
 
     p = problem
 
-    torch.manual_seed(42)
-    _torch_dtype = _torch_dtype_of(torch, dtype)
-    A_t, B_t = conv_fill.fwd_operands(
-        (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
+    A_host, B_host = (
+        storage.encode(operand, direct_storage_dtype(dtype))
+        for operand in conv_fill.fwd_operands(
+            (p.N, p.H, p.W, p.total_c),
+            (p.total_k, p.KH, p.KW, p.cpg),
+            dtype,
+            np.random.default_rng(42),
+        )
     )
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
+    D_host = _host_like((p.N, p.Ho, p.Wo, p.total_k), dtype)
 
-    bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
+    bytes_xfer = float(A_host.nbytes + B_host.nbytes + D_host.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
     sig = conv_direct_args_signature(_abi_dtype(dtype))
@@ -1248,28 +1230,29 @@ def _run_nongrouped_sweep(
     n_built = len(artifact_map)
 
     rt = Runtime()
-    A_dev = rt.alloc(A_t.nbytes)
-    B_dev = rt.alloc(B_t.nbytes)
-    D_dev = rt.alloc(D_t.nbytes)
-    rt.memcpy_h2d(A_dev, u8(A_t), A_t.nbytes)
-    rt.memcpy_h2d(B_dev, u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
+    A_dev = rt.alloc(A_host.nbytes)
+    B_dev = rt.alloc(B_host.nbytes)
+    D_dev = rt.alloc(D_host.nbytes)
+    rt.memcpy_h2d(A_dev, as_u8_buffer(A_host), A_host.nbytes)
+    rt.memcpy_h2d(B_dev, as_u8_buffer(B_host), B_host.nbytes)
+    rt.memset(D_dev, 0, D_host.nbytes)
 
     ref_out = None
     if args.verify or args.dump_fail:
-        ref_out = _conv_reference(A_t, B_t, _DirectConvProblemAdapter(p))
-        print(
-            f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
+        ref_out = conv_fwd_reference(
+            _values(A_host, dtype),
+            _values(B_host, dtype),
+            ConvGeometry.from_direct_problem(p),
         )
+        print(f"Reference computed in float64 {tuple(ref_out.shape)}.", flush=True)
 
     values = ConvArgs.from_problem(p).to_launch_values(
         int(A_dev),
         int(B_dev),
         int(D_dev),
-        A_t.nbytes,
-        B_t.nbytes,
-        D_t.nbytes,
+        A_host.nbytes,
+        B_host.nbytes,
+        D_host.nbytes,
     )
 
     results: List[NonGroupedResult] = []
@@ -1302,7 +1285,7 @@ def _run_nongrouped_sweep(
 
         kernel_passed = None
         if args.verify or args.dump_fail:
-            rt.memset(D_dev, 0, D_t.nbytes)
+            rt.memset(D_dev, 0, D_host.nbytes)
             stopped, kernel_passed = _verify_kernel(
                 rt=rt,
                 launcher=launcher,
@@ -1310,11 +1293,11 @@ def _run_nongrouped_sweep(
                 grid=grid,
                 block=block,
                 out_dev=D_dev,
-                out_t=D_t,
+                out_like=D_host,
+                out_dtype=dtype,
                 ref_out=ref_out,
                 kernel_name=artifact.kernel_name,
                 dump_fail=args.dump_fail,
-                u8=u8,
                 ref_floor=conv_fill.ref_floor(),
                 tol=direct_verify_tol(dtype, arch),
             )
@@ -1323,7 +1306,7 @@ def _run_nongrouped_sweep(
                 rt.free(B_dev)
                 rt.free(D_dev)
                 return 1, []
-            rt.memset(D_dev, 0, D_t.nbytes)
+            rt.memset(D_dev, 0, D_host.nbytes)
 
         ms = _stop.measure(
             lambda: launcher(values, config=cfg),
@@ -1409,11 +1392,8 @@ def _run_wgrad_sweep(
     Runtime,
     KernelLauncher,
     LaunchConfig,
-    u8,
 ) -> "tuple[int, list]":
     """Benchmark the direct wgrad kernel."""
-    import torch
-
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
@@ -1428,16 +1408,13 @@ def _run_wgrad_sweep(
     p = problem
     # dY and X carry the problem dtype; dW is fp32 either way -- the
     # split-K reduction lands through fp32 global atomics.
-    _torch_dtype = _torch_dtype_of(torch, dtype)
+    rng = np.random.default_rng(42)
+    X_host = _uniform(rng, (p.N, p.H, p.W, p.total_c), dtype)
+    dY_host = _uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype)
+    dW_dtype = conv_direct_output_dtype(dtype, "wgrad")
+    dW_host = _host_like((p.total_k, p.KH, p.KW, p.cpg), dW_dtype)
 
-    torch.manual_seed(42)
-    X_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
-    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype).uniform_(
-        -1.0, 1.0
-    )
-    dW_t = torch.zeros(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float32)
-
-    bytes_xfer = float(X_t.nbytes + dY_t.nbytes + dW_t.nbytes)
+    bytes_xfer = float(X_host.nbytes + dY_host.nbytes + dW_host.nbytes)
     flop = float(p.flops)
 
     # Direct conv is AOT: the whole shape travels as kernargs; D is fp32 dW.
@@ -1517,22 +1494,22 @@ def _run_wgrad_sweep(
     rt = Runtime()
     results = []
 
-    X_dev = rt.alloc(X_t.nbytes)
-    dY_dev = rt.alloc(dY_t.nbytes)
-    dW_dev = rt.alloc(dW_t.nbytes)
-    rt.memcpy_h2d(X_dev, u8(X_t), X_t.nbytes)
-    rt.memcpy_h2d(dY_dev, u8(dY_t), dY_t.nbytes)
-    rt.memset(dW_dev, 0, dW_t.nbytes)
+    X_dev = rt.alloc(X_host.nbytes)
+    dY_dev = rt.alloc(dY_host.nbytes)
+    dW_dev = rt.alloc(dW_host.nbytes)
+    rt.memcpy_h2d(X_dev, as_u8_buffer(X_host), X_host.nbytes)
+    rt.memcpy_h2d(dY_dev, as_u8_buffer(dY_host), dY_host.nbytes)
+    rt.memset(dW_dev, 0, dW_host.nbytes)
 
-    # After the Runtime, as in every other sweep here: torch and rocke each
-    # bring up their own HIP runtime, and whichever initialises second loses --
-    # torch first leaves rocke's hipModuleGetFunction reporting "named symbol
-    # not found" for every kernel.
     ref_out_wg = None
     if args.verify or args.dump_fail:
-        ref_out_wg = _wgrad_reference_shared(X_t, dY_t, _DirectConvProblemAdapter(p))
+        ref_out_wg = conv_wgrad_reference(
+            _values(X_host, dtype),
+            _values(dY_host, dtype),
+            ConvGeometry.from_direct_problem(p),
+        )
         print(
-            f"Reference wgrad computed via torch ({tuple(ref_out_wg.shape)}, {ref_out_wg.dtype}).",
+            f"Reference wgrad computed in float64 {tuple(ref_out_wg.shape)}.",
             flush=True,
         )
 
@@ -1560,32 +1537,25 @@ def _run_wgrad_sweep(
             int(dY_dev),
             int(X_dev),
             int(dW_dev),
-            dY_t.nbytes,
-            X_t.nbytes,
-            dW_t.nbytes,
+            dY_host.nbytes,
+            X_host.nbytes,
+            dW_host.nbytes,
         )
 
         kernel_passed = None
         if (args.verify or args.dump_fail) and ref_out_wg is not None:
-            # Wgrad outputs fp32 — convert ref to a float16-shaped tensor for _verify_kernel.
-            # We keep everything in fp32 and just reuse the verify infrastructure.
-            import torch
-
-            dW_ref_t = ref_out_wg.cpu()
-            rt.memset(dW_dev, 0, dW_t.nbytes)
+            # dW is fp32, accumulated into a zeroed buffer.
+            rt.memset(dW_dev, 0, dW_host.nbytes)
             launcher(
                 values, config=LaunchConfig(grid=grid, block=block_dim, fence=True)
             )
-            dW_cpu = torch.empty_like(dW_t)
-            rt.memcpy_d2h(u8(dW_cpu), dW_dev, dW_t.nbytes)
-            abs_diff = (dW_cpu.float() - dW_ref_t.float()).abs()
-            ref_scale = dW_ref_t.float().abs().max().clamp(min=1.0)
-            rel_err = float(abs_diff.max() / ref_scale)
+            dW_out = _read_back(rt, dW_host, dW_dev, dW_dtype)
+            rel_err = peak_relative_error(dW_out, ref_out_wg, floor=1.0)
             tol = direct_verify_tol(dtype, arch)
             kernel_passed = rel_err < tol
             status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
             print(f"  verify {artifact.kernel_name}: {status}", flush=True)
-            rt.memset(dW_dev, 0, dW_t.nbytes)
+            rt.memset(dW_dev, 0, dW_host.nbytes)
 
         cfg_wg = LaunchConfig(grid=grid, block=block_dim)
         ms = _stop.measure(
@@ -1700,15 +1670,12 @@ def _run_dgrad_sweep(
     Runtime,
     KernelLauncher,
     LaunchConfig,
-    u8,
 ) -> "tuple[int, list]":
     """Benchmark the direct dgrad kernel.
 
     Dispatches to the depthwise dgrad kernel for cpg=1 (any stride) and to
     the MFMA grouped dgrad kernel for cpg>=4 (stride=1 only).
     """
-    import torch
-
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -1723,17 +1690,12 @@ def _run_dgrad_sweep(
 
     p = problem
 
-    torch.manual_seed(42)
-    _torch_dtype = _torch_dtype_of(torch, dtype)
-    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype).uniform_(
-        -1.0, 1.0
-    )
-    W_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
-        -1.0, 1.0
-    )
-    dX_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype)
+    rng = np.random.default_rng(42)
+    dY_host = _uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype)
+    W_host = _uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype)
+    dX_host = _host_like((p.N, p.H, p.W, p.total_c), dtype)
 
-    bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
+    bytes_xfer = float(dY_host.nbytes + W_host.nbytes + dX_host.nbytes)
     flop = float(p.flops)
     # Direct conv is AOT: the whole shape travels as kernargs.
     sig = conv_direct_args_signature(_abi_dtype(dtype), direction="dgrad")
@@ -1935,17 +1897,21 @@ def _run_dgrad_sweep(
     rt = Runtime()
     results = []
 
-    dY_dev = rt.alloc(dY_t.nbytes)
-    W_dev = rt.alloc(W_t.nbytes)
-    dX_dev = rt.alloc(dX_t.nbytes)
-    rt.memcpy_h2d(dY_dev, u8(dY_t), dY_t.nbytes)
-    rt.memcpy_h2d(W_dev, u8(W_t), W_t.nbytes)
-    rt.memset(dX_dev, 0, dX_t.nbytes)
+    dY_dev = rt.alloc(dY_host.nbytes)
+    W_dev = rt.alloc(W_host.nbytes)
+    dX_dev = rt.alloc(dX_host.nbytes)
+    rt.memcpy_h2d(dY_dev, as_u8_buffer(dY_host), dY_host.nbytes)
+    rt.memcpy_h2d(W_dev, as_u8_buffer(W_host), W_host.nbytes)
+    rt.memset(dX_dev, 0, dX_host.nbytes)
 
     _I32_MAX = (1 << 31) - 1
     _too_large = [
         (name, nb)
-        for name, nb in [("dY", dY_t.nbytes), ("W", W_t.nbytes), ("dX", dX_t.nbytes)]
+        for name, nb in [
+            ("dY", dY_host.nbytes),
+            ("W", W_host.nbytes),
+            ("dX", dX_host.nbytes),
+        ]
         if nb > _I32_MAX
     ]
     if _too_large:
@@ -1980,10 +1946,13 @@ def _run_dgrad_sweep(
 
     ref_out = None
     if args.verify or args.dump_fail:
-        ref_out = _dgrad_reference_shared(dY_t, W_t, _DirectConvProblemAdapter(p))
+        ref_out = conv_dgrad_reference(
+            _values(dY_host, dtype),
+            _values(W_host, dtype),
+            ConvGeometry.from_direct_problem(p),
+        )
         print(
-            f"Reference dgrad computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
-            flush=True,
+            f"Reference dgrad computed in float64 {tuple(ref_out.shape)}.", flush=True
         )
 
     _stop = EarlyStop.for_case(args, problem, dtype, "dgrad")
@@ -2087,7 +2056,7 @@ def _run_dgrad_sweep(
             t1_values = {
                 "A": W_dev,
                 "D": wt_dev,
-                "A_bytes": W_t.nbytes,
+                "A_bytes": W_host.nbytes,
                 "D_bytes": wt1_nbytes,
             }
             t2_values = {
@@ -2103,9 +2072,9 @@ def _run_dgrad_sweep(
                     int(dY_dev),
                     int(wt_coa),
                     int(dX_dev),
-                    dY_t.nbytes,
+                    dY_host.nbytes,
                     wt2_nbytes,
-                    dX_t.nbytes,
+                    dX_host.nbytes,
                 )
 
                 def run_mfma_dgrad():
@@ -2124,9 +2093,9 @@ def _run_dgrad_sweep(
                     int(dY_dev),
                     int(wt_dev),
                     int(dX_dev),
-                    dY_t.nbytes,
+                    dY_host.nbytes,
                     wt1_nbytes,
-                    dX_t.nbytes,
+                    dX_host.nbytes,
                 )
 
                 def run_mfma_dgrad():
@@ -2143,32 +2112,26 @@ def _run_dgrad_sweep(
                 int(dY_dev),
                 int(W_dev),
                 int(dX_dev),
-                dY_t.nbytes,
-                W_t.nbytes,
-                dX_t.nbytes,
+                dY_host.nbytes,
+                W_host.nbytes,
+                dX_host.nbytes,
             )
 
         kernel_passed = None
         if args.verify or args.dump_fail:
             if is_mfma_pair:
                 # Verify: run both kernels then compare dX to reference.
-                import torch
-
-                rt.memset(dX_dev, 0, dX_t.nbytes)
+                rt.memset(dX_dev, 0, dX_host.nbytes)
                 run_mfma_dgrad()
                 synchronize_and_release(0)
-                dX_cpu = torch.empty_like(dX_t)
-                rt.memcpy_d2h(u8(dX_cpu), dX_dev, dX_t.nbytes)
+                dX_out = _read_back(rt, dX_host, dX_dev, dtype)
                 if ref_out is not None:
-                    out_f32 = dX_cpu.float()
-                    ref_f32 = ref_out.float().cpu()
-                    abs_diff = (out_f32 - ref_f32).abs()
-                    rel_err = float(abs_diff.max() / ref_f32.abs().max().clamp(min=1.0))
+                    rel_err = peak_relative_error(dX_out, ref_out, floor=1.0)
                     tol = direct_verify_tol(dtype, arch)
                     kernel_passed = rel_err < tol
                     status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
                     print(f"  verify {artifact.kernel_name}: {status}", flush=True)
-                rt.memset(dX_dev, 0, dX_t.nbytes)
+                rt.memset(dX_dev, 0, dX_host.nbytes)
             else:
                 stopped, kernel_passed = _verify_kernel(
                     rt=rt,
@@ -2177,11 +2140,11 @@ def _run_dgrad_sweep(
                     grid=grid,
                     block=block_dim,
                     out_dev=dX_dev,
-                    out_t=dX_t,
+                    out_like=dX_host,
+                    out_dtype=dtype,
                     ref_out=ref_out,
                     kernel_name=artifact.kernel_name,
                     dump_fail=args.dump_fail,
-                    u8=u8,
                     tol=direct_verify_tol(dtype, arch),
                 )
                 if stopped:
@@ -2191,7 +2154,7 @@ def _run_dgrad_sweep(
                     if wt_dev:
                         rt.free(wt_dev)
                     return 1, []
-                rt.memset(dX_dev, 0, dX_t.nbytes)
+                rt.memset(dX_dev, 0, dX_host.nbytes)
 
         if is_mfma_pair:
             ms = _stop.measure(
@@ -2340,12 +2303,12 @@ def _measure_plans(
     sizes,
     inputs,
     out_name,
-    Out_t,
+    out_like,
+    out_dtype,
     ref_out,
     flop,
     bytes_xfer,
     stop,
-    u8,
     chunks,
     per_chunk,
     ref_floor: float = 1.0,
@@ -2368,9 +2331,9 @@ def _measure_plans(
     it and every later case binds against the same one.
 
     ``ref_floor`` floors the reference peak of the verify error
-    (:func:`conv_fill.ref_floor` of the case's direction).
+    (:func:`conv_fill.ref_floor` of the case's direction). ``out_like`` is a
+    host array shaped like the output, stored as ``out_dtype``.
     """
-    import torch
     from benchmarks.common.direct_kernel_sweep import launch_values
     from rocke.runtime import synchronize_and_release
     from rocke.runtime.hip_module import HipError
@@ -2424,20 +2387,15 @@ def _measure_plans(
         """Peak-normalised rel-err of one plan against the case's reference."""
         nonlocal rc
 
-        rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+        rt.memset(ptrs[out_name], 0, out_like.nbytes)
         # Two-stage wgrad scratch accumulates too: zeroed again for the
         # verified launch, as the target is.
         for name in plan.zeroed:
             rt.memset(ptrs[name], 0, sizes[name])
         run()
         synchronize_and_release(0)
-        out_cpu = torch.empty_like(Out_t)
-        rt.memcpy_d2h(u8(out_cpu), ptrs[out_name], Out_t.nbytes)
-        ref_f32 = ref_out.float().cpu()
-        rel_err = float(
-            (out_cpu.float() - ref_f32).abs().max()
-            / ref_f32.abs().max().clamp(min=ref_floor)
-        )
+        out = _read_back(rt, out_like, ptrs[out_name], out_dtype)
+        rel_err = peak_relative_error(out, ref_out, floor=ref_floor)
         passed = rel_err < tol
         if not passed:
             rc = 1
@@ -2733,16 +2691,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
     Each case runs in its own direction (``--direction`` or the MIOpen ``-F``
     flag) unless ``--directions`` names the directions explicitly.
     """
-    import ctypes
-
-    import torch
-
     from benchmarks.common.direct_kernel_sweep import direct_plans
     from benchmarks.common.module_cache import ModuleCache
     from rocke.runtime.hip_module import Runtime
-
-    def _u8(t):
-        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
     # The binaries are shape-generic, so their modules outlive a case.
     modules = ModuleCache(args.module_cache_bytes)
@@ -2775,7 +2726,6 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 f"{'/'.join(DIRECT_DTYPES)} (got {dtype})"
             )
             continue
-        torch_dt = _torch_dtype_of(torch, dtype)
         for direction in directions or (case_direction,):
             if case_key(p, dtype, direction) in done:
                 # Counted, not printed: resuming a few thousand cases would
@@ -2811,53 +2761,65 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 flush=True,
             )
 
-            torch.manual_seed(42)
+            rng = np.random.default_rng(42)
             x_shape = (p.N, p.H, p.W, p.total_c)
             y_shape = (p.N, p.Ho, p.Wo, p.total_k)
             w_shape = (p.total_k, p.KH, p.KW, p.cpg)
-            # inputs: buffer name -> host tensor; Out_t is what the plan writes.
+            geometry = ConvGeometry.from_direct_problem(p)
+            # inputs: buffer name -> stored host array; out_like is shaped and
+            # stored like what the plan writes.
             if direction == "wgrad":
                 # dW is fp32: the kernel accumulates it through fp32 atomics.
-                X_t = torch.empty(*x_shape, dtype=torch_dt).uniform_(-1, 1)
-                dY_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
-                inputs = {"dy": dY_t, "x": X_t}
+                X_host = _uniform(rng, x_shape, dtype)
+                dY_host = _uniform(rng, y_shape, dtype)
+                inputs = {"dy": dY_host, "x": X_host}
                 out_name = "dw"
-                Out_t = torch.zeros(*w_shape, dtype=torch.float32)
+                out_dtype = conv_direct_output_dtype(dtype, direction)
+                out_like = _host_like(w_shape, out_dtype)
             else:
-                W_t = torch.empty(*w_shape, dtype=torch_dt)
+                out_dtype = dtype
                 if direction == "fwd":
                     in_name, out_name = "x", "y"
-                    conv_fill.fill_w(W_t, dtype)
-                    In_t = conv_fill.fill_x(torch.empty(*x_shape, dtype=torch_dt))
-                    Out_t = torch.empty(*y_shape, dtype=torch_dt)
+                    In_host, W_host = (
+                        storage.encode(operand, direct_storage_dtype(dtype))
+                        for operand in conv_fill.fwd_operands(
+                            x_shape, w_shape, dtype, rng
+                        )
+                    )
+                    out_like = _host_like(y_shape, dtype)
                 else:
                     in_name, out_name = "dy", "dx"
-                    W_t.uniform_(-1, 1)
-                    In_t = torch.empty(*y_shape, dtype=torch_dt).uniform_(-1, 1)
-                    Out_t = torch.empty(*x_shape, dtype=torch_dt)
-                inputs = {in_name: In_t, "w": W_t}
+                    W_host = _uniform(rng, w_shape, dtype)
+                    In_host = _uniform(rng, y_shape, dtype)
+                    out_like = _host_like(x_shape, dtype)
+                inputs = {in_name: In_host, "w": W_host}
 
             ref_out = None
             if args.verify:
-                adapter = _DirectConvProblemAdapter(p)
                 if direction == "wgrad":
-                    ref_out = _wgrad_reference_shared(X_t, dY_t, adapter)
+                    ref_out = conv_wgrad_reference(
+                        _values(X_host, dtype), _values(dY_host, dtype), geometry
+                    )
                 elif direction == "fwd":
-                    ref_out = _conv_reference(In_t, W_t, adapter)
+                    ref_out = conv_fwd_reference(
+                        _values(In_host, dtype), _values(W_host, dtype), geometry
+                    )
                 else:
-                    ref_out = _dgrad_reference_shared(In_t, W_t, adapter)
+                    ref_out = conv_dgrad_reference(
+                        _values(In_host, dtype), _values(W_host, dtype), geometry
+                    )
 
             rt = Runtime()
-            ptrs = {name: rt.alloc(t.nbytes) for name, t in inputs.items()}
-            ptrs[out_name] = rt.alloc(Out_t.nbytes)
-            sizes = {name: t.nbytes for name, t in inputs.items()}
-            sizes[out_name] = Out_t.nbytes
-            for name, t in inputs.items():
-                rt.memcpy_h2d(ptrs[name], _u8(t), t.nbytes)
+            ptrs = {name: rt.alloc(host.nbytes) for name, host in inputs.items()}
+            ptrs[out_name] = rt.alloc(out_like.nbytes)
+            sizes = {name: host.nbytes for name, host in inputs.items()}
+            sizes[out_name] = out_like.nbytes
+            for name, host in inputs.items():
+                rt.memcpy_h2d(ptrs[name], as_u8_buffer(host), host.nbytes)
             if direction == "wgrad":
                 # Zeroed once, as the JIT sweep does: the timed launches keep
                 # accumulating into it, which costs the same as a zeroed target.
-                rt.memset(ptrs[out_name], 0, Out_t.nbytes)
+                rt.memset(ptrs[out_name], 0, out_like.nbytes)
             # Scratch buffers are sized for the largest plan and shared.
             for plan in plans:
                 for chunk_plan in per_chunk[plan.label]:
@@ -2871,7 +2833,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 rt.memset(ptrs[name], 0, sizes[name])
 
             flop = float(p.flops)
-            bytes_xfer = float(sum(t.nbytes for t in inputs.values()) + Out_t.nbytes)
+            bytes_xfer = float(
+                sum(host.nbytes for host in inputs.values()) + out_like.nbytes
+            )
             _stop = EarlyStop.for_case(args, p, dtype, direction)
             results, case_rc = _measure_plans(
                 args=args,
@@ -2882,12 +2846,12 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 sizes=sizes,
                 inputs=inputs,
                 out_name=out_name,
-                Out_t=Out_t,
+                out_like=out_like,
+                out_dtype=out_dtype,
                 ref_out=ref_out,
                 flop=flop,
                 bytes_xfer=bytes_xfer,
                 stop=_stop,
-                u8=_u8,
                 chunks=chunks,
                 per_chunk=per_chunk,
                 ref_floor=conv_fill.ref_floor(direction),
@@ -3024,7 +2988,7 @@ def main() -> int:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="verify each kernel against torch reference before timing",
+        help="verify each kernel against a float64 numpy reference before timing",
     )
     parser.add_argument(
         "--dump-fail",
@@ -3427,15 +3391,10 @@ def main() -> int:
         print("error: no case left to sweep", file=sys.stderr)
         return 2
 
-    import ctypes
-
     from rocke import compile_kernel
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
-
-    def _u8(t):
-        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
     _common = dict(
         args=args,
@@ -3447,7 +3406,6 @@ def main() -> int:
         Runtime=Runtime,
         KernelLauncher=KernelLauncher,
         LaunchConfig=LaunchConfig,
-        u8=_u8,
     )
 
     all_rc = 0

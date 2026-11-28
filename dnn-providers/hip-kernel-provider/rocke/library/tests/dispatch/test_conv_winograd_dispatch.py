@@ -26,6 +26,7 @@ from kernels.common.conv_winograd_fused_1d_wmma import FusedWino1DSpec
 from kernels.common.conv_winograd_gemm_wmma import WinogradGemmProblem
 from kernels.common.conv_winograd_select import WinogradPlan
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.engines import assert_engine_rejects, available_engines
 
 _ARCH = "gfx1250"
 _PTRS = {
@@ -249,8 +250,15 @@ def test_unfused_plans_need_llvm23(flavor):
         if st.kernel.name == "K3"
     )
     assert k3.kernel.llvm_flavors == ("llvm23",)
-    with pytest.raises(ValueError, match="requires LLVM flavor llvm23"):
-        lower_kernel_to_llvm(k3.kernel.build(_ARCH), llvm_flavor=flavor, arch=_ARCH)
+    for engine in available_engines():
+        assert_engine_rejects(
+            k3.kernel.build(_ARCH),
+            _ARCH,
+            engine=engine,
+            error_type=ValueError,
+            message=f"tensor_load_to_lds requires LLVM flavor llvm23, got {flavor}",
+            llvm_flavor=flavor,
+        )
 
 
 @pytest.mark.parametrize(

@@ -3,12 +3,14 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/matmul_nbits_emit.py -- Python reference emitter for the
-# MatMulNBits parity harness. Selects one of 6 configs by argv[1] (index 0..5),
+# MatMulNBits parity harness. Selects one of 7 configs by argv[1] (index 0..6),
 # builds the MatMulNBitsSpec, builds the kernel via build_matmul_nbits(arch=
-# 'gfx1201') and prints lower_kernel_to_llvm(kernel, arch='gfx1201') to stdout so
+# 'gfx1201', or gfx1151 for config 6) and prints its LLVM IR to stdout so
 # it can be byte-compared with the C emitter matmul_nbits_emit.c. gfx1201 is one
 # of the matmul_nbits SUPPORTED_ARCHES (gfx1151/gfx1201); gfx950 is rejected by
 # the validator on both sides, so it must NOT be used here.
+from dataclasses import replace
+
 from rocke.instances.common.matmul_nbits import build_matmul_nbits
 from rocke.instances.common._matmul_nbits_common import MatMulNBitsSpec
 from rocke.instances.common.gemm_universal import TileSpec
@@ -142,6 +144,10 @@ def _spec(idx: int) -> MatMulNBitsSpec:
             family="large_n",
             optimized=False,
         )
+    if idx == 6:
+        # cfg4 on gfx1151: both engines refuse the optimized body there.
+        spec = _spec(4)
+        return replace(spec, name="matmul_nbits_gfx1151_opt"), "gfx1151"
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -149,7 +155,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_matmul_nbits,
-        usage="usage: matmul_nbits_emit.py <config_index 0..5> [ll|ir|verify]\n",
+        usage="usage: matmul_nbits_emit.py <config_index 0..6> [ll|ir|verify]\n",
         arch="gfx1201",
     )
 

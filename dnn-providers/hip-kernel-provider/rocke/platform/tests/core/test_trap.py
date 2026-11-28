@@ -41,6 +41,7 @@ from rocke.tests.engines import (
     lower_with_engine,
 )
 from rocke.tests.gpu import current_device_arch
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -193,7 +194,10 @@ def test_code_object_holds_s_trap_2_and_halts_only_where_the_trap_is_simulated()
 
     objdump = _objdump()
     if objdump is None:
-        pytest.skip("llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)")
+        skip_until(
+            BUILD_VARIANT,
+            reason="llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)",
+        )
     try:
         comgr._resolve_lib()
     except comgr.ComgrError as error:
@@ -255,6 +259,7 @@ _CHILD = textwrap.dedent(
 )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_kernel_runs_to_its_store_when_the_trap_is_not_taken(route):
     arch = current_device_arch()

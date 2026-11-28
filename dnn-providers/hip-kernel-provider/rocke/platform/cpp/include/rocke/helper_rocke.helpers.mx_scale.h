@@ -3,11 +3,12 @@
  *
  * rocke/helper_rocke.helpers.mx_scale.h -- C99 port of rocke.helpers.mx_scale.
  *
- * Scope of THIS file: `decode_mx_scale_e8m0`, `add_mx_scaled_dot`, the
- * element formats (`MxElementFormat` and the four fp8 / bf8 encodings) and
+ * Scope of THIS file: `decode_mx_scale_e8m0`, `add_mx_scaled_dot` and
  * `largest_safe_mx_scale_code` are ported here (the other MX helpers in
  * helpers/mx_scale.py -- apply_mx_scale, load_and_decode_mx_scale_byte,
- * load_and_decode_mx_scales_wave -- are out of scope for this phase).
+ * load_and_decode_mx_scales_wave -- are out of scope for this phase). The
+ * element formats largest_safe_mx_scale_code takes live in
+ * helper_rocke.helpers.fp8_encoding.h, which this header includes.
  *
  * MX (microscaling) shared-exponent helper. Decodes an 8-bit E8M0 scale code
  * (one byte per 32-element mantissa block) into its f32 multiplier, per the OCP
@@ -37,26 +38,12 @@
 
 #include <stddef.h>
 
+#include "rocke/helper_rocke.helpers.fp8_encoding.h"
 #include "rocke/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Python MxElementFormat: an element format's largest finite magnitude, which
- * bounds the products of an MX group; name names the format in messages. */
-typedef struct rocke_mx_element_format
-{
-    const char* name;
-    double largest_value;
-} rocke_mx_element_format_t;
-
-/* The fp8 and bf8 encodings matrix cores read (Python FP8_E4M3_OCP,
- * BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ). */
-extern const rocke_mx_element_format_t ROCKE_FP8_E4M3_OCP;
-extern const rocke_mx_element_format_t ROCKE_BF8_E5M2_OCP;
-extern const rocke_mx_element_format_t ROCKE_FP8_E4M3_FNUZ;
-extern const rocke_mx_element_format_t ROCKE_BF8_E5M2_FNUZ;
 
 /* Python largest_safe_mx_scale_code(a_format, b_format, products): the largest
  * E8M0 code an A and a B scale may both have so that a sum of `products`

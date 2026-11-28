@@ -52,7 +52,13 @@ bool rocke_i_live(const rocke_ir_builder_t* b);
 
 /* ------------------------------------------------------ value / op plumbing */
 
-/* Allocate a fresh SSA Value (arena-owned) named "%<prefix><counter>" with the
+/* Throw ckc::ValueError when an author-chosen value name is not an identifier,
+ * is a C++ keyword, or ends in '_' and digits (the form builder-made names
+ * take). `what` names the kind of name ("kernel parameter", ...). The twin of
+ * core/ir.py::_refuse_declared_name, with the same messages. */
+void rocke_i_refuse_declared_name(rocke_ir_builder_t* b, const char* what, const char* name);
+
+/* Allocate a fresh SSA Value (arena-owned) named "%<prefix>_<counter>" with the
  * given type. Bumps builder->counter. Mirrors Python IRBuilder._fresh + Value
  * construction. Returns NULL on OOM (and sets the sticky error). */
 rocke_value_t*
@@ -110,8 +116,13 @@ rocke_op_t* rocke_i_op0(rocke_ir_builder_t* b,
                         int num_operands,
                         const rocke_attr_map_t* attrs);
 
-/* Convenience: build a same-result-type binary op `(a, b) -> a->type`, the
- * dominant arith/vector pattern. Validates a/b non-NULL on a live builder. */
+/* Build one same-type binary op (rocke_i_is_same_type_binary_op) `(a, b) ->
+ * a->type`, the dominant arith pattern (Python IRBuilder._binary_op). Validates
+ * a/b non-NULL on a live builder, then refuses as ROCKE_ERR_TYPE a bitwise op
+ * or shift whose operands are not integers or i1
+ * (rocke_i_integer_element_error) and operands of different types
+ * (rocke_i_refuse_operand_types), checked in that order. rocke_b_add_nuw,
+ * which carries a wrap attr, applies the same rules and the wrap rule itself. */
 rocke_value_t* rocke_i_binop(rocke_ir_builder_t* b,
                              rocke_opcode_t opcode,
                              rocke_value_t* a,
@@ -143,17 +154,17 @@ const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
 bool rocke_i_is_packed_only(const rocke_type_t* t);
 
 /* The refusal of an `op_name` value of type `t` whose elements are packed-only
- * (rocke_i_is_packed_only), written to `buf`, or NULL when `t` is not; the text
- * of core/ir.py::_refuse_packed_only_value. NULL-safe. */
+ * (rocke_i_is_packed_only), written to `buf`, or NULL when `t` is not; the twin
+ * of core/ir.py::_packed_only_value_error. NULL-safe. */
 const char* rocke_i_packed_only_value_error(const char* op_name,
                                             const rocke_type_t* t,
                                             char* buf,
                                             size_t cap);
 
 /* Throw ckc::TypeError with rocke_i_packed_only_value_error's text when
- * rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
- * which states the rule. rocke_i_op calls it for every result and rocke_b_param
- * for every parameter, so no builder makes such a value. NULL-safe. */
+ * rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value.
+ * rocke_i_op calls it for every result and rocke_b_param for every parameter,
+ * so no builder makes such a value. NULL-safe. */
 void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t);
 
 /* Throw ckc::TypeError when `t` is unsigned (rocke_type_is_unsigned) and
@@ -193,6 +204,17 @@ const rocke_type_t*
  * IR type. */
 const rocke_type_t* rocke_require_ir_type(const char* dtype);
 
+/* The result type the arch catalog gives the MMA atom `op_id` (Python
+ * core/ir.py mma_result_type), as its element and count: `*count` is the
+ * dst fragment length and `*element` the IR type of the dst dtype, fp32 when
+ * the catalog's dtype table (rocke_arch_mma_op_id_dst_dtype) has no entry for
+ * `op_id`. The builder gives a bare op_id's tile.mma result this type, and a
+ * fixed-signature MFMA instruction takes it as its accumulator and result.
+ * Throws ckc::ValueError for an op_id with no fragment length, and as
+ * rocke_require_ir_type does for a dtype the IR cannot represent; on a throw
+ * neither output is written. */
+void rocke_i_mma_result_type(const char* op_id, const rocke_type_t** element, int* count);
+
 /* The number of bits a value of type `t` occupies (Python core/ir.py::type_bits):
  * a scalar's format width, a vector's element width times its count, a
  * pointer's address-space width. Throws ckc::TypeError for an LDS allocation
@@ -215,10 +237,11 @@ int64_t rocke_i_vector_access_align(int64_t lanes, const rocke_type_t* elem);
 /* The alignment, in bytes, of one access of `lanes` `elem` values into LDS
  * tile type `smem_type` (Python core/ir.py::smem_vector_access_align):
  * rocke_i_vector_access_align, bounded by what every row start of the tile
- * guarantees: gcd(lanes, innermost dimension) elements, since a pad such as
- * lds_k_pad that leaves the innermost dimension a non-multiple of `lanes`
- * starts alternate rows off the natural boundary. A type with no shape gives
- * no row bound. */
+ * guarantees: the gcd of the access width and one row of the tile's own
+ * elements, in bytes (gcd(lanes, innermost dimension) elements when the tile
+ * holds `elem`), since a pad such as lds_k_pad that leaves the row a
+ * non-multiple of the access width starts alternate rows off the natural
+ * boundary. A type with no shape gives no row bound. */
 int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
                                          int64_t lanes,
                                          const rocke_type_t* elem);
@@ -325,6 +348,74 @@ const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap);
  * written to `buf`. The verifier and both lowerings use it. */
 const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
+/* The error for an LDS `store` of `width` elements whose value has another lane
+ * count (a scalar has one), or NULL when they match (Python
+ * core/ir.py::_smem_store_lanes_error, same texts): the lowerings store the
+ * value as a `width`-element vector. `width_param` names the width as the
+ * caller spells it ("n" in the builder, "vec" in serialized IR). A returned
+ * error is written to `buf`. */
+const char* rocke_i_smem_store_lanes_error(const char* store,
+                                           const rocke_type_t* value_type,
+                                           int64_t width,
+                                           const char* width_param,
+                                           char* buf,
+                                           size_t cap);
+
+/* rocke_i_smem_store_lanes_error for a built tile.smem_store_vN op, whose last
+ * operand is the stored value and whose `vec` attribute is its width (Python
+ * core/ir.py::_smem_store_vN_op_error). An op without operands or without an
+ * integer `vec` has no width to compare here. The verifier and both lowerings
+ * use it. */
+const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The text of every refusal of an operand by its type that the IR rules make,
+ * written into `buf`, which the result then points to: `what` failed because
+ * its `param` is `type_name` where `expected` (prose) is required (Python
+ * core/ir.py::_type_name_message, same text). Each such refusal is
+ * ROCKE_ERR_TYPE. */
+const char* rocke_i_type_name_message(const char* what,
+                                      const char* param,
+                                      const char* type_name,
+                                      const char* expected,
+                                      char* buf,
+                                      size_t cap);
+
+/* The error for an LDS store `access` whose value (operand `value_index`, of
+ * type `value_type`) is not a scalar or vector of `expected` elements, or NULL
+ * when it is (Python core/ir.py::_value_element_error, same
+ * texts). The store records, and its lowerings emit, an access of `expected`
+ * elements, so the callers refuse it as ROCKE_ERR_TYPE. A value with no type is
+ * refused first, with the operand rule's text (rocke_i_untyped_value_message),
+ * before its element type is read. A returned error is written to `buf`. */
+const char* rocke_i_value_element_error(const char* access,
+                                        const rocke_type_t* value_type,
+                                        int value_index,
+                                        const char* expected,
+                                        char* buf,
+                                        size_t cap);
+
+/* Whether an f32 epilogue LDS `store` (smem_store_vN_f32) of its operand
+ * `value_index`, a value of type `value_type` and `*width` lanes, is sound
+ * (Python core/ir.py::_smem_store_vN_f32_error, which returns the exception
+ * whose status this returns, same text): ROCKE_OK, or the refusal's status with
+ * its text written into `buf`. A value with no type or that does not hold f32
+ * (rocke_i_value_element_error) is ROCKE_ERR_TYPE; one without `*width` lanes
+ * (rocke_i_smem_store_lanes_error, not checked when `width` is NULL) is
+ * ROCKE_ERR_VALUE. `width_param` names the width as the caller spells it. */
+rocke_status_t rocke_i_smem_store_vN_f32_error(const char* store,
+                                               const rocke_type_t* value_type,
+                                               int value_index,
+                                               const int64_t* width,
+                                               const char* width_param,
+                                               char* buf,
+                                               size_t cap);
+
+/* rocke_i_smem_store_vN_f32_error for a built tile.smem_store_vN_f32 op, whose
+ * last operand is the stored value and whose `vec` attribute is its width
+ * (Python core/ir.py::_smem_store_vN_f32_op_error). The verifier and both
+ * lowerings use it. */
+rocke_status_t rocke_i_smem_store_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* The code-object symbol of `kernel_name`'s GPU-check word, allocated in
  * `arena` (Python core/ir.py::gpu_check_word_symbol, same spelling). A wave
  * whose gpu_checked_value fact is false stores 1 to it and returns; the host reads
@@ -352,14 +443,22 @@ bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
     "parameters carry facts, which a launch from a code object or from a launch " \
     "plan does not check"
 
+/* Why the engine's C entries refuse a NULL or empty arch: there is no default
+ * target. The LLVM lowering gives it for any caller; the serialized-IR HIP
+ * entry gives it too, although rocke_lower_kernel_to_hip keeps its gfx950
+ * default. The Python-facing entries add a "pass arch=..." hint instead
+ * (ROCKE_BINDING_NO_TARGET_MESSAGE in bindings/family_glue.hpp, and
+ * rocke.core.native_engine.NO_TARGET_MESSAGE). */
+#define ROCKE_NO_TARGET_REASON "lowering requires an explicit gfx target (there is no default)"
+
 /* What a refused launch plan tells its caller to do instead (Python
  * core/ir.py::LAUNCH_THROUGH_FROM_ARTIFACT, same words). */
 #define ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT "launch it through KernelLauncher.from_artifact"
 
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
- * (Python core/ir.py::_refuse_if_else_result_type, which raises where this
- * returns): ROCKE_OK, or the status of the Python exception with its text
- * written to `err`. A missing type (NULL or unnamed) is refused first, then a
+ * (Python core/ir.py::_if_else_result_type_error, which returns the exception
+ * whose status this returns): ROCKE_OK, or that status with its text written
+ * to `err`. A missing type (NULL or unnamed) is refused first, then a
  * packed-only type (both ROCKE_ERR_TYPE), then an LDS allocation
  * (ROCKE_ERR_VALUE). The builder and rocke_i_if_else_yields use it. */
 rocke_status_t rocke_i_check_if_else_result_type(int index,
@@ -407,10 +506,33 @@ const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops
  * reads the body; rocke_i_scf_for_error checks it first. */
 const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap);
 
-/* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
- * is sound (Python core/ir.py::_scf_for_error, same text): it holds exactly
- * one region, its body (rocke_i_scf_for_region_error); its num_iter_args,
- * init operands, iter_args metadata list and results agree in count; each
+/* The refusal for the scf.if `op` when it does not have exactly one condition
+ * operand, written into `buf`, or NULL when it does (Python
+ * core/ir.py::_scf_if_condition_error, same text). The verifier reports it
+ * beside the region rule; rocke_i_scf_if_error checks it first. */
+const char* rocke_i_scf_if_condition_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The refusal for the scf.if `op` when it does not hold exactly one region,
+ * its then region, written into `buf`, or NULL when it does (Python
+ * core/ir.py::_scf_if_region_error, same text). A NULL region counts as
+ * missing. */
+const char* rocke_i_scf_if_region_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The refusal for the scf.if `op`, written into `buf`, or NULL when it has
+ * exactly one condition (rocke_i_scf_if_condition_error) and one then region
+ * (rocke_i_scf_if_region_error), checked in that order (Python
+ * core/ir.py::_scf_if_error, same text). Both lowerings check it before they
+ * read the condition or the region, so a second region is not dropped
+ * unchecked and a missing condition or region is not read. */
+const char* rocke_i_scf_if_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Whether the scf.for `op` is sound (Python core/ir.py::_scf_for_error, which
+ * returns the exception whose status this returns, same text): ROCKE_OK, or
+ * the refusal's status with its text written into `buf`. A value with no type
+ * is ROCKE_ERR_TYPE, as in an if/else; every other refusal is ROCKE_ERR_VALUE.
+ * A sound loop holds exactly one region, its body
+ * (rocke_i_scf_for_region_error); its num_iter_args, init operands, iter_args
+ * metadata list and results agree in count; each
  * metadata entry names its carried value and that value's type, which its
  * result shares; it carries no buffer descriptor
  * (rocke_i_scf_for_carried_descriptor_error); its body yields only at its end,
@@ -419,9 +541,10 @@ const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t
  * in its body, so the body nests none in a region that takes no yields
  * (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand count. The verifier and
  * both lowerings use it. */
-const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
+rocke_status_t rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
 
-/* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else
+/* Apply the rule of every scf.for (rocke_i_scf_for_error), every scf.if
+ * (rocke_i_scf_if_error) and every scf.if_else
  * (rocke_i_if_else_yields) in `region` and nested in it (Python
  * core/ir.py::_refuse_malformed_control_flow). Returns ROCKE_OK, or the status
  * of the Python engine's exception with its refusal written to `err`. The LLVM
@@ -524,12 +647,166 @@ const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap);
 
-/* Mirrors ir._int_cmp_pred_error: the same for arith.cmp's "pred" attr
- * (absent means lt; "ult" takes i32 or i64 operands). */
+/* Mirrors ir._missing_attr_message: the refusal of an `op_name` op without its
+ * required attr `key`, written into `buf`, which the result then points to.
+ * The verifier's required-attr check and the compare rules report it. */
+const char*
+    rocke_i_missing_attr_message(const char* op_name, const char* key, char* buf, size_t cap);
+
+/* Mirrors ir._INTEGER_ELEMENT_TYPES: whether `type_name` is an integer or i1
+ * type (a dtype of the integer or predicate category, by its canonical name). */
+bool rocke_i_is_integer_type_name(const char* type_name);
+
+/* Mirrors ir._int_cmp_pred_error: the error for arith.cmp's "pred" attr on
+ * operands of type `operand_type`, or NULL when it is valid: one of the
+ * arith.cmp predicates (required), and "ult" only on i32 or i64 operands.
+ * Writes into `buf` as above. */
 const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                                    const rocke_type_t* operand_type,
                                    char* buf,
                                    size_t cap);
+
+/* Python core/ir.py::_untyped_value_message: whether value `index` of `what`
+ * ("scf.for result", say) has a missing `type` (NULL, or with no name); when it
+ * does, its refusal is written into `buf`. The builders and parsers of both
+ * engines type every value, but a raw value (rocke_i_value_named given no type)
+ * or the result of a raw op (rocke_i_op given no result types) has none, so the
+ * loop rule, the if/else rule and the operand rule check each value with this
+ * before they read its type's name, and report it as ROCKE_ERR_TYPE (Python's
+ * TypeError). */
+bool rocke_i_untyped_value_message(const rocke_type_t* type,
+                                   const char* what,
+                                   int index,
+                                   const char* expected,
+                                   char* buf,
+                                   size_t cap);
+
+/* Mirrors ir._operand_types_error: the error for an `op_name` op whose
+ * `num_operands` (at most 3) operands, of `operand_types`, do not all have the
+ * first one's type, naming the first that differs, or NULL when they agree; an
+ * operand with no type is refused first (rocke_i_untyped_value_message). The
+ * binary ops, the compares and the lane-wise FMA lower every operand at the
+ * first one's type, so the callers refuse it as ROCKE_ERR_TYPE. A returned
+ * error is written to `buf`. */
+const char* rocke_i_operand_types_error(const char* op_name,
+                                        const rocke_type_t* const* operand_types,
+                                        int num_operands,
+                                        char* buf,
+                                        size_t cap);
+
+/* Mirrors ir._refuse_operand_types: refuse on `b` (ROCKE_ERR_TYPE, through
+ * rocke_i_set_err, which throws) the `num_operands` (at most 3) `operands` of
+ * an `op_name` op when rocke_i_operand_types_error refuses their types. */
+void rocke_i_refuse_operand_types(rocke_ir_builder_t* b,
+                                  const char* op_name,
+                                  const rocke_value_t* const* operands,
+                                  int num_operands);
+
+/* Mirrors ir._vector_operand_error: the error for a lane-wise `op_name` op
+ * whose first operand, of `operand_type`, is not a vector, or NULL. The
+ * builders refuse it as ROCKE_ERR_TYPE. A returned error is written to `buf`. */
+const char* rocke_i_vector_operand_error(const char* op_name,
+                                         const rocke_type_t* operand_type,
+                                         char* buf,
+                                         size_t cap);
+
+/* Mirrors ir._SAME_TYPE_BINARY_OPS: whether `opcode` is a binary op whose two
+ * operands and result have one type. */
+bool rocke_i_is_same_type_binary_op(rocke_opcode_t opcode);
+
+/* Mirrors ir._same_type_operand_count: how many operands, all of one type, an
+ * `opcode` op takes: 2 for an op rocke_i_is_same_type_binary_op admits, 3 for
+ * the lane-wise FMA (vector.fma), or 0 for any other op. */
+int rocke_i_same_type_operand_count(rocke_opcode_t opcode);
+
+/* Mirrors ir._operand_types_op_error: rocke_i_operand_types_error for a built
+ * op that takes operands of one type (rocke_i_same_type_operand_count), with
+ * that many operands, or NULL. The verifier reports it and every lowering
+ * refuses it as ROCKE_ERR_TYPE before it lowers an op, for IR that did not
+ * come through the builders. */
+const char* rocke_i_operand_types_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Mirrors ir._COMPARE_OPS: whether `opcode` is arith.cmp, arith.fcmp or
+ * vector.cmp. */
+bool rocke_i_is_compare_op(rocke_opcode_t opcode);
+
+/* Mirrors ir._operand_arity_error: the error for a built op that takes
+ * operands of one type (rocke_i_same_type_operand_count), or that
+ * rocke_i_is_compare_op admits (two operands), without that many operands and
+ * one result, or NULL. The verifier reports it, and every lowering
+ * (ROCKE_ERR_VALUE) and the constant folder check it before they read an
+ * operand it counts. A returned error is written to `buf`. */
+const char* rocke_i_operand_arity_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Mirrors ir._int_cmp_error, which returns the exception whose status this
+ * returns: ROCKE_OK, or the refusal's status with its text written into `buf`.
+ * rocke_i_cmp_pred_error's refusal is ROCKE_ERR_VALUE; operands of different
+ * types (rocke_i_operand_types_error), or that are not integers or i1, are
+ * ROCKE_ERR_TYPE. */
+rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
+                                 const rocke_type_t* lhs_type,
+                                 const rocke_type_t* rhs_type,
+                                 char* buf,
+                                 size_t cap);
+
+/* Mirrors ir._vector_cmp_error, as rocke_i_cmp_error: a "pred" attr that is
+ * present but not one of lt, le, gt, ge, eq, ne is ROCKE_ERR_VALUE; operands
+ * of different types (rocke_i_operand_types_error), or whose lanes are not
+ * integers or i1 (rocke_i_integer_element_error), are ROCKE_ERR_TYPE. */
+rocke_status_t rocke_i_vector_cmp_error(const rocke_attr_map_t* attrs,
+                                        const rocke_type_t* lhs_type,
+                                        const rocke_type_t* rhs_type,
+                                        char* buf,
+                                        size_t cap);
+
+/* Mirrors ir._fcmp_error, as rocke_i_cmp_error: a "pred" attr that is absent or
+ * not one of ir._FCMP_PREDICATES is ROCKE_ERR_VALUE; operands of different
+ * types (rocke_i_operand_types_error), or that are not f16, bf16, f32 or f64,
+ * are ROCKE_ERR_TYPE. */
+rocke_status_t rocke_i_fcmp_error(const rocke_attr_map_t* attrs,
+                                  const rocke_type_t* lhs_type,
+                                  const rocke_type_t* rhs_type,
+                                  char* buf,
+                                  size_t cap);
+
+/* Mirrors ir._INTEGER_ELEMENT_OPS: whether `opcode` is a bitwise op or shift
+ * (arith.and / or / xor / not / shl / lshr, vector.and / or / shl / lshr),
+ * which LLVM defines on integers only (arith.not lowers to an xor with all
+ * ones). */
+bool rocke_i_is_integer_element_op(rocke_opcode_t opcode);
+
+/* Mirrors ir._integer_element_error: the error for `op_name`, one of the ops
+ * rocke_i_is_integer_element_op admits, on operands of type `operand_type`, or
+ * NULL when its element type is an integer or i1. A formatted message is
+ * written into `buf`, which the result then points to. The verifier reports
+ * it; the builders throw it through rocke_i_refuse_non_integer. */
+const char* rocke_i_integer_element_error(const char* op_name,
+                                          const rocke_type_t* operand_type,
+                                          char* buf,
+                                          size_t cap);
+
+/* Mirrors ir._integer_element_op_error: rocke_i_integer_element_error for a
+ * built op that is one of the ops rocke_i_is_integer_element_op admits, on its
+ * first operand, or NULL. The verifier reports it and every lowering refuses
+ * it as ROCKE_ERR_TYPE before it lowers an op, for IR that did not come
+ * through the builders. */
+const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Mirrors ir._operand_rules_error, which returns the exception whose status
+ * this returns: ROCKE_OK, or the refusal's status with its text written into
+ * `buf`, with the shared operand rules (arity, integer element, operand types)
+ * applied in one order. The arity rule (rocke_i_operand_arity_op_error,
+ * ROCKE_ERR_VALUE) comes first, as the other rules read the operands it
+ * counts; then the integer-element rule (rocke_i_integer_element_op_error) and
+ * the operand rule (rocke_i_operand_types_op_error), each ROCKE_ERR_TYPE, as
+ * the builders check them. Every lowering refuses it before it lowers an op,
+ * and the constant folder does not fold an op it refuses. */
+rocke_status_t rocke_i_operand_rules_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Mirrors ir._refuse_non_integer: throw ckc::TypeError with
+ * rocke_i_integer_element_error's text when `operand_type`'s element is not an
+ * integer or i1. */
+void rocke_i_refuse_non_integer(const char* op_name, const rocke_type_t* operand_type);
 
 /* ------------------------------------------------------- parameter facts */
 

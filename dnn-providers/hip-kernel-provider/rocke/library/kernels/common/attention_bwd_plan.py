@@ -34,8 +34,9 @@ Every decline code has a kind (:data:`DECLINE_KINDS`, ``Verdict.kind``):
 or format limits) or ``policy`` (the shipping policy declines).
 
 The request is checked for types at construction: every flag must be a
-``bool`` and every extent, bound and count an integer (``TypeError``
-otherwise), so a truthy non-bool never selects a code path by accident.
+``bool`` and every extent, bound and count an integer (``ValueError``
+otherwise, the type every malformed spec or request field raises), so a truthy
+non-bool never selects a code path by accident.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Iterator, Mapping, Optional
 
 from rocke.helpers.attention_band import I32_FAR
-from rocke.helpers.spec import align_up, ceil_div
+from rocke.helpers.spec import align_up, ceil_div, require_bool, require_bool_fields
 
 from kernels.common._attention_bwd_worklist import worklist_words
 from kernels.common.attention_bwd_aux import (
@@ -441,22 +442,20 @@ def _freeze_strides(mapping):
 
 
 def check_field_types(obj, bools, ints, opt_ints) -> None:
-    """``TypeError`` unless every field in ``bools`` is a ``bool`` (exactly:
+    """``ValueError`` unless every field in ``bools`` is a ``bool`` (exactly:
     ``type(x) is bool``, so ``0`` / ``1`` / ``numpy.bool_`` are refused), every
     field in ``ints`` an integer that is not a bool, and every field in
     ``opt_ints`` ``None`` or such an integer."""
-    for name in bools:
-        v = getattr(obj, name)
-        if type(v) is not bool:
-            raise TypeError(f"{name} must be a bool, got {v!r}")
+    require_bool_fields(obj, *bools)
+    what = type(obj).__name__
     for name in ints:
         v = getattr(obj, name)
         if not _is_int(v):
-            raise TypeError(f"{name} must be an int, got {v!r}")
+            raise ValueError(f"{what} failed - {name}={v!r}, expected an int")
     for name in opt_ints:
         v = getattr(obj, name)
         if v is not None and not _is_int(v):
-            raise TypeError(f"{name} must be None or an int, got {v!r}")
+            raise ValueError(f"{what} failed - {name}={v!r}, expected None or an int")
 
 
 _REQ_BOOLS = (
@@ -2030,8 +2029,7 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
         # only a kernel built with the remap reads xcd_n / xcd_chunk
         spec = validate_attn_bwd_spec(dataclasses.replace(spec, xcd_remap=True), arch)
     use_worklist = runtime_in.get("use_worklist", False)
-    if type(use_worklist) is not bool:
-        raise ValueError(f"use_worklist={use_worklist!r} must be a bool")
+    require_bool("use_worklist", use_worklist, what="attention backward runtime knobs")
     if use_worklist:
         _check_worklist(req, lb_name, n_kv_tiles)
         if not spec.worklist:

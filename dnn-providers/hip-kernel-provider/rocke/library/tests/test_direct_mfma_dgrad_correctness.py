@@ -28,24 +28,15 @@ numpy is the only hard dependency; no torch.
 from __future__ import annotations
 
 import ctypes
-import importlib.util
-import os
 import re
 import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
-
-if importlib.util.find_spec("torch") is not None:
-    # This file does not use torch, but other test files in the same pytest
-    # process do: torch's HIP runtime has to claim the process context before
-    # rocke's does (see test_direct_conv_correctness.py).
-    import torch
-
-    torch.cuda.is_available()
-
+import pytest
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.host_cpus import available_cpus
 
 GPU_ARCH = get_device_arch(0)
 _FUSED = "direct_grouped_dgrad_fused"
@@ -302,7 +293,7 @@ def _fill_cache(cache, caps_list, dtype, select=None):
         arch=GPU_ARCH,
         dtype=dtype,
         directions=["direct_dgrad"],
-        jobs=os.cpu_count() or 1,
+        jobs=available_cpus(),
         log=lambda *_: None,
     )
     return len(jobs)
@@ -398,6 +389,9 @@ class TestDirectMfmaDgradCachedNumeric(unittest.TestCase):
                         bad, 0, f"{label}: {bad}/{out.size} elements outside tolerance"
                     )
 
+    # Fills a kernel cache and runs every fused plan of each shape: about half
+    # a minute on gfx942, so CI places it as a weighed shard key.
+    @pytest.mark.rocke_shard_cost(25)
     def test_cached_binaries_on_adversarial_shapes(self):
         for label, shape in _SHAPES:
             self._check_shape(label, shape)

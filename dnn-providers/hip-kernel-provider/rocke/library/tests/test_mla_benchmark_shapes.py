@@ -302,10 +302,6 @@ class TestDriver(unittest.TestCase):
         # The rocke arm is held to out abs + out max_abs/peak + lse; the aiter
         # arm (no lse) to out abs + rel. Each failure below passes the 4e-2
         # absolute bar on its own.
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("torch required")
         import numpy as np
 
         from benchmarks.gfx942.attention.prefill import (
@@ -318,8 +314,8 @@ class TestDriver(unittest.TestCase):
         refs = [(rows, ref_out, ref_lse)]
 
         def gate(out_err, lse_err, with_lse=True):
-            out = torch.from_numpy(ref_out + out_err)
-            lse = torch.from_numpy(ref_lse + lse_err) if with_lse else None
+            out = ref_out + out_err
+            lse = ref_lse + lse_err if with_lse else None
             return drv._gate(out, lse, refs)
 
         self.assertTrue(gate(1e-3, 1e-3)["ok"])

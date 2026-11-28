@@ -1709,6 +1709,9 @@ class LogicalTileComponent(CellFieldMixin):
     dtype_bits: int | None = (
         None  # element width; drives vectorization-shade byte scaling (b/c modes)
     )
+    memory_space: str | None = (
+        None  # "global" | "lds": the alignment rule of the vectorization shade (b/c modes)
+    )
     cell_w: float = 0.42
     cell_h: float = 0.42
     font_size: float = 7.0
@@ -1801,17 +1804,21 @@ class LogicalTileComponent(CellFieldMixin):
     def _vector_shade(self):
         """SHADE = transaction TIME order (§9.6): ONE shade per vectorized access, width from the descriptor
         STRIDES (``addr_fn``), CAPPED at b128 via ``vector_transactions`` -- ✗ never uncapped ``transactions``
-        or an assumed memory order. REQUIRES ``addr_fn`` (memory order) AND ``dtype_bits`` (the b128 cap);
-        a caller that has neither must pass an explicit ``shade_map`` instead of asking for a memory shade.
+        or an assumed memory order. REQUIRES ``addr_fn`` (memory order), ``dtype_bits`` (the b128 cap) AND
+        ``memory_space`` (an LDS access is aligned to its width, a global one need not be); a caller that has
+        none of them must pass an explicit ``shade_map`` instead of asking for a memory shade.
         """
-        if self.addr_fn is None or self.dtype_bits is None:
+        if self.addr_fn is None or self.dtype_bits is None or self.memory_space is None:
             raise ValueError(
                 "a memory-transaction shade (mode thread_tile) needs addr_fn (memory order from the descriptor "
-                "strides) AND dtype_bits (for the b128 cap) -- refuse to assume a memory order / uncapped. "
-                "Pass both, or supply an explicit shade_map."
+                "strides), dtype_bits (for the b128 cap) AND memory_space ('global' or 'lds', the alignment "
+                "rule) -- refuse to assume a memory order / uncapped / a space. Pass all three, or supply an "
+                "explicit shade_map."
             )
         mp = {(lane, reg): coord for coord, (lane, reg) in self._owner.items()}
-        ts, _ = vector_transactions(mp, self.addr_fn, self.dtype_bits)
+        ts, _ = vector_transactions(
+            mp, self.addr_fn, self.dtype_bits, space=self.memory_space
+        )
         return {coord: ts[(lane, reg)] for coord, (lane, reg) in self._owner.items()}
 
     def _col_coord(self):
@@ -1982,7 +1989,11 @@ class LdsBankView(CellFieldMixin):
                 "LdsBankView requires explicit nbanks AND elem_bytes -- no silent dtype/bank assumption (that is exactly what mislabels f16 as one-element-per-bank). State them: gfx90a/CDNA -> nbanks=32; f16 inputs -> elem_bytes=2; f32 C -> elem_bytes=4."
             )
         ts, maxt = vector_transactions(
-            self.mp, self.addr_fn, self.elem_bytes * 8, order_by=self.order_by
+            self.mp,
+            self.addr_fn,
+            self.elem_bytes * 8,
+            order_by=self.order_by,
+            space="lds",
         )
         self._owner = {}
         self._flow = {}
@@ -2636,8 +2647,14 @@ class WaveStrip:
         font_size=7.0,
         gap=1.0,
         shade_addr=None,
+        shade_space=None,
     ):
-        "Split a full ``{(tid,reg)->coord}`` map into one lane-local 64-lane ``RegisterFileComponent`` per\n        wave (``tid // wave_size``), each drawn in the NORMAL orientation (tid rows / reg cols). ``shade_addr``\n        (a ``(c0,c1)->addr`` memory order) shades each panel by vectorization TIME (one contiguous run = one\n        shade), computed per wave via :func:`transactions`; without it the shade falls back to the group."
+        "Split a full ``{(tid,reg)->coord}`` map into one lane-local 64-lane ``RegisterFileComponent`` per\n        wave (``tid // wave_size``), each drawn in the NORMAL orientation (tid rows / reg cols). ``shade_addr``\n        (a ``(c0,c1)->addr`` memory order) shades each panel by vectorization TIME (one contiguous run = one\n        shade), computed per wave via :func:`vector_transactions` with ``shade_space`` (``'global'`` or\n        ``'lds'``, required with ``shade_addr``); without it the shade falls back to the group."
+        if shade_addr is not None and shade_space is None:
+            raise ValueError(
+                "from_fwd_map failed - shade_addr given without shade_space; pass shade_space='global' "
+                "or 'lds' (the alignment rule of the vectorization shade)"
+            )
         waves = sorted({tid // wave_size for tid, _ in fwd_map})
         panels = []
         for w in waves:
@@ -2647,7 +2664,7 @@ class WaveStrip:
                 if tid // wave_size == w
             }
             shade = (
-                vector_transactions(local, shade_addr, dtype_bits)[0]
+                vector_transactions(local, shade_addr, dtype_bits, space=shade_space)[0]
                 if shade_addr is not None
                 else None
             )
@@ -4141,9 +4158,12 @@ def render_coalescing(
             show_xlabel=(g == nsimd - 1),
         )
         col = _FUSED_GREEN if fg["fused"] else _SCATTER_RED
+        verdict = (
+            "FUSED" if fg["fused"] else f"SCATTERED {fg['lines']}/{fg['min_lines']}x"
+        )
         ax.set_title(
             f"SIMD {g}  (lanes {g * grp}-{g * grp + grp - 1}):  {fg['lines']} cache line(s), "
-            f"{'FUSED' if fg['fused'] else f'SCATTERED {fg['lines']}/{fg['min_lines']}x'}",
+            f"{verdict}",
             fontsize=8.5,
             weight="bold",
             color=col,

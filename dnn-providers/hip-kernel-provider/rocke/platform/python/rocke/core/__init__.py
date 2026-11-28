@@ -39,6 +39,9 @@ Modules:
   - ``backend``    : python/cpp/both lowering selection
                      (`lower_universal_gemm`, `lower_family`, `import_engine`,
                      `name_of`, `GemmLowerResult`, `Backend*` errors).
+  - ``native_engine``: the C++ engine's shared library over its C ABI
+                     (`lower_serialized_ir`, `lower_serialized_ir_to_hip`,
+                     `native_lowering_available`), through ctypes.
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
                      that mirrors the SSA IR one-to-one (compiles via
                      hipcc; useful for IR inspection and ISA diffs).

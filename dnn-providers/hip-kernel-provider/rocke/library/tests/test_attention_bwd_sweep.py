@@ -11,6 +11,7 @@ CPU only; nothing is compiled or timed.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from pathlib import Path
@@ -269,6 +270,69 @@ def test_g4_slicing_is_enumerated_with_block_k4_in_stage_h():
     assert c.with_knobs(g4_slicing="step").key() == c.key()
 
 
+def test_full_crossing_keeps_exactly_the_combinations_whose_couplings_hold():
+    """The full level crosses a point with the stage's registry knobs knob by
+    knob, dropping a prefix as soon as a coupling fails; it keeps exactly the
+    combinations, in product order, that testing every whole combination
+    keeps (stage H: a default start point and one with the merged barrier,
+    which gates ``ring_issue``)."""
+    full = sw.Release(sw.ALL_RELEASED, "full")
+    for arch in ("gfx942", "gfx950"):
+        sl = _sl(arch, 64)
+        start = sw.Candidate.make(sl, sw.default_knobs(sl))
+        for c in (start, start.with_knobs(barrier_merge="on")):
+            pts = sw.schedule_values(c, full, extras=False)
+            for p in pts[:: len(pts) // 2]:
+                kept = sw.with_extras(c, full, [p], sw.SCHEDULE_EXTRA)
+                assert kept
+                assert kept == _every_combination(c, full, p, sw.SCHEDULE_EXTRA)
+
+
+def test_full_crossing_retests_a_coupling_that_waits_on_a_later_knob():
+    """``loop_sync``'s coupling reads ``barrier_merge``, which the stage
+    assigns later, so the crossing defers that test until ``barrier_merge`` is
+    set. On a sliced G4 point the deferred test fails for some combinations;
+    the crossing must still drop exactly those."""
+    full = sw.Release(sw.ALL_RELEASED, "full")
+    names = sw.SCHEDULE_EXTRA
+    assert names.index("loop_sync") < names.index("barrier_merge")
+    slice_config = _sl("gfx942", 64)
+    candidate = sw.Candidate.make(slice_config, sw.default_knobs(slice_config))
+    point = next(
+        p
+        for p in sw.schedule_values(candidate, full, extras=False)
+        if p["g4_slicing"] == "slice"
+    )
+    failed = [knobs for _, knobs in _combinations(candidate, full, point, names)]
+    assert frozenset({"loop_sync"}) in failed
+    assert sw.with_extras(candidate, full, [point], names) == _every_combination(
+        candidate, full, point, names
+    )
+
+
+def _combinations(c, rel, point, names):
+    """``point`` crossed with every whole combination of ``names``, each with
+    the knobs whose couplings fail on it, testing each combination on its own."""
+    ctx = sw._knob_context(c, point)
+    axes = [
+        (n, sw._extra_values(c, rel, n, ctx, coupled=False))
+        for n in names
+        if rel.has(n)
+    ]
+    for combo in itertools.product(*(vals for _, vals in axes)):
+        q = {**point, **dict(zip((n for n, _ in axes), combo))}
+        qctx = {**ctx, **q}
+        yield q, frozenset(
+            n for n, _ in axes if not sw.backward_axis(n).applies(q[n], qctx)
+        )
+
+
+def _every_combination(c, rel, point, names):
+    """``point`` crossed with every whole combination of ``names`` whose
+    couplings all hold, each combination tested on its own."""
+    return [q for q, failed in _combinations(c, rel, point, names) if not failed]
+
+
 def test_backend_alloc_dedupes_with_a_policy_none_resolution():
     """``"backend"`` emits what a policy result of ``None`` emits, so the two
     collapse where the policy resolves to ``None``."""
@@ -316,6 +380,8 @@ def test_tuning_knobs_leave_head_pack_to_the_plan():
     assert c2.tuning_knobs()["head_pack"] is True
 
 
+# Walks the whole unpruned structure space of four slices: minutes, not seconds.
+@pytest.mark.exhaustive
 def test_fallback_structure_order_is_meaningful_before_the_key():
     """Fewest arch VGPRs, then AGPRs, then the structure nearest the default,
     then LDS; the key only breaks exact ties."""

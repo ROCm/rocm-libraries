@@ -39,6 +39,19 @@ _TESTROOT = Path(__file__).resolve().parent
 if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
+# The library parity emitters load the platform emitter driver through
+# rocke.assets.platform_parity_dir(), and the attention IR parity test the
+# platform IR parity harness through rocke.assets.platform_instances_dir(). An
+# install has no platform root: it stages
+# the platform test payload in tests/, two levels above this tests/library/tests,
+# and pytest does not load the platform conftest.py that points the locators
+# there, so point them here the same way. Emitter subprocesses inherit the
+# setting. In a checkout that directory (rocke/) stages nothing, so this is a
+# no-op.
+from rocke.tests.staged_payload import point_locators_at_staged_payload
+
+point_locators_at_staged_payload(_TESTROOT.parents[1])
+
 # pytest rewrites asserts only in test modules and conftest files. Every
 # operation's pinned GPU tests come from this helper, so register it before a
 # test module imports it; otherwise a failed assert shows none of its values.
@@ -87,24 +100,28 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    """Pin the production comgr (the torch wheel's bundled library) by path
-    for this session and its child processes, without importing torch
-    (``kernels/common/attention_bwd_comgr.py``), and give comgr's code-object
-    cache a directory of this session's own (removed at exit). An explicit ``ROCKE_COMGR_LIB`` /
-    ``AMD_COMGR_CACHE_DIR`` wins; ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out.
+    """Give comgr's code-object cache a directory of this session's own, removed
+    at exit (``kernels/common/attention_bwd_comgr.py``; an explicit
+    ``AMD_COMGR_CACHE_DIR`` wins, ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out). The
+    compiler is the one rocKE's discovery loads; the session does not choose it.
 
     An import failure of the ``kernels`` package is reported, not raised: the
     tests that need the package fail on it themselves, the others still run
-    (the same rule as ``_restore_attention_arch_state`` below)."""
+    (the same rule as ``_restore_attention_arch_state`` below). It also
+    installs what every rocKE pytest root installs
+    (``rocke.tests.pytest_roots``)."""
+    from rocke.tests.pytest_roots import configure_pytest_root
+
+    configure_pytest_root(config, _TESTROOT, "library/tests")
     try:
-        from kernels.common.attention_bwd_comgr import ensure_production_comgr
+        from kernels.common.attention_bwd_comgr import pin_comgr_cache
     except Exception as exc:  # noqa: BLE001 - see the docstring
         config.issue_config_time_warning(
-            pytest.PytestConfigWarning(f"production comgr not pinned: {exc!r}"),
+            pytest.PytestConfigWarning(f"comgr cache not placed: {exc!r}"),
             stacklevel=2,
         )
         return
-    ensure_production_comgr()
+    pin_comgr_cache()
 
 
 def pytest_collection_finish(session):
@@ -283,7 +300,8 @@ def pytest_collection_modifyitems(config, items):
     ``rocke.tests.ctest_shard``; unset: every item); then group the tests
     of one kernel (:func:`_group_by_parameter_set`). When the run loads the
     ``rocke.tests.ctest_shard`` plugin, the plugin selects the shard after
-    this hook."""
+    this hook; the quarantine (``rocke.tests.quarantine``) skips its tests
+    after this hook and before the shard plugin."""
     from reference_common.pytest_support import select_reference_items
     from rocke.tests import ctest_shard
     from tests._affordable_lane import mark_exhaustive_items

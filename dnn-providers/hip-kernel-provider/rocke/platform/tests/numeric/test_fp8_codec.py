@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""rocke.numeric.fp8: the OCP e4m3 / e5m2 host codecs every fp8 harness shares.
+"""rocke.numeric.fp8: the fp8 host codecs every fp8 harness shares (OCP e4m3 /
+e5m2 and their FNUZ variants), and rocke.helpers.fp8_encoding: which of those
+encodings each target uses, with the largest value the codecs decode.
 
 The one home for the codec's own facts: the decode tables against the format
 definitions (and ``ml_dtypes`` where the ``dev`` extra is installed), the exact
@@ -14,13 +16,24 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+import pytest
 
+from rocke.helpers.fp8_encoding import (
+    BF8_E5M2_FNUZ,
+    BF8_E5M2_OCP,
+    FP8_E4M3_FNUZ,
+    FP8_E4M3_OCP,
+    fp8_element_format,
+)
 from rocke.numeric.fp8 import (
     bf8e5m2_decode_table,
     bf8e5m2_encode,
+    bf8e5m2fnuz_decode_table,
     fp8e4m3_decode_table,
     fp8e4m3_encode,
     fp8e4m3_round,
+    fp8e4m3fnuz_decode_table,
+    fp8e4m3fnuz_round,
 )
 
 
@@ -84,6 +97,47 @@ class TestE5m2Table(unittest.TestCase):
         self.assertEqual(int(np.isnan(t).sum()), 8)
 
 
+class TestFnuzTables(unittest.TestCase):
+    def test_known_codes_decode_to_their_format_values(self):
+        # The OCP layouts with the exponent bias one higher: 0x40 is 1.0 in both
+        # (e == bias), and 0x7f is the largest finite value. Hand-computed from
+        # s.eeee.mmm / bias 8 and s.eeeee.mm / bias 16.
+        for table, anchors in (
+            (
+                fp8e4m3fnuz_decode_table(),
+                (
+                    (0x00, 0.0),
+                    (0x40, 1.0),
+                    (0xC0, -1.0),
+                    (0x01, 2.0**-10),
+                    (0x7F, 240.0),
+                    (0xFF, -240.0),
+                ),
+            ),
+            (
+                bf8e5m2fnuz_decode_table(),
+                (
+                    (0x00, 0.0),
+                    (0x40, 1.0),
+                    (0xC0, -1.0),
+                    (0x01, 2.0**-17),
+                    (0x7F, 57344.0),
+                    (0xFF, -57344.0),
+                ),
+            ),
+        ):
+            for code, want in anchors:
+                with self.subTest(code=hex(code), want=want):
+                    self.assertEqual(float(table[code]), want)
+
+    def test_nan_only_at_0x80(self):
+        # FNUZ has no infinities and no negative zero: 0x80 is the one NaN and
+        # every other code is finite, the top exponent included.
+        for table in (fp8e4m3fnuz_decode_table(), bf8e5m2fnuz_decode_table()):
+            self.assertEqual(np.flatnonzero(np.isnan(table)).tolist(), [0x80])
+            self.assertFalse(np.isinf(table).any())
+
+
 class TestAgainstMlDtypes(unittest.TestCase):
     def test_tables_match_ml_dtypes(self):
         ml_dtypes = __import__("pytest").importorskip("ml_dtypes")
@@ -91,6 +145,8 @@ class TestAgainstMlDtypes(unittest.TestCase):
         for table, dt in (
             (fp8e4m3_decode_table(), ml_dtypes.float8_e4m3fn),
             (bf8e5m2_decode_table(), ml_dtypes.float8_e5m2),
+            (fp8e4m3fnuz_decode_table(), ml_dtypes.float8_e4m3fnuz),
+            (bf8e5m2fnuz_decode_table(), ml_dtypes.float8_e5m2fnuz),
         ):
             ref = codes.view(dt).astype(np.float32)
             finite = np.isfinite(ref)
@@ -160,6 +216,75 @@ class TestE4m3Round(unittest.TestCase):
     def test_shape_and_dtype(self):
         out = fp8e4m3_round(np.zeros((2, 3), dtype=np.float32))
         self.assertEqual((out.shape, out.dtype), ((2, 3), np.uint8))
+
+
+class TestE4m3FnuzRound(unittest.TestCase):
+    def test_every_finite_value_round_trips(self):
+        table = fp8e4m3fnuz_decode_table()
+        codes = np.flatnonzero(np.isfinite(table))
+        np.testing.assert_array_equal(
+            fp8e4m3fnuz_round(table[codes]), codes.astype(np.uint8)
+        )
+
+    def test_rounds_to_nearest_even_and_saturates_at_240(self):
+        # 1.0 = 0x40, 1.125 = 0x41, 1.25 = 0x42: midpoints go to the even code.
+        # 248 is the midpoint of 240 and the next binade's 256, which FNUZ does
+        # not hold, so it and everything above clamp to 240.
+        x = np.array([1.0625, 1.1875, 247.0, 248.0, 1000.0, -1000.0, -0.0])
+        self.assertEqual(
+            list(fp8e4m3fnuz_round(x.astype(np.float32))),
+            [0x40, 0x42, 0x7F, 0x7F, 0x7F, 0xFF, 0x00],
+        )
+
+    def test_nan_is_rejected_and_its_element_named(self):
+        with self.assertRaisesRegex(ValueError, "fp8e4m3fnuz round: NaN at element 1"):
+            fp8e4m3fnuz_round(np.array([1.0, np.nan], dtype=np.float32))
+
+
+# The encoding each target's conversions produce and its matrix cores read.
+# The C++ engine's test (tests/core/test_storage.cpp) pins the same table.
+_TARGET_ENCODINGS = (
+    ("gfx942", "fp8e4m3", FP8_E4M3_FNUZ),
+    ("gfx942", "bf8e5m2", BF8_E5M2_FNUZ),
+    ("gfx950", "fp8e4m3", FP8_E4M3_OCP),
+    ("gfx950", "bf8e5m2", BF8_E5M2_OCP),
+    ("gfx1250", "fp8e4m3", FP8_E4M3_OCP),
+    ("gfx1250", "bf8e5m2", BF8_E5M2_OCP),
+)
+
+
+@pytest.mark.parametrize("arch, dtype, encoding", _TARGET_ENCODINGS)
+def test_fp8_element_format_gives_each_targets_encoding(arch, dtype, encoding):
+    """FNUZ on gfx942, OCP on gfx950 and gfx1250."""
+    assert fp8_element_format(dtype, arch) is encoding
+
+
+@pytest.mark.parametrize(
+    "dtype, arch, message",
+    [
+        (
+            "fp8e4m3",
+            "gfx90a",
+            (
+                "fp8_element_format failed - arch='gfx90a', expected one of "
+                "('gfx942', 'gfx950', 'gfx1250')"
+            ),
+        ),
+        (
+            "i8",
+            "gfx950",
+            (
+                "fp8_element_format failed - dtype='i8', expected one of "
+                "('bf8e5m2', 'fp8e4m3')"
+            ),
+        ),
+    ],
+)
+def test_fp8_element_format_refuses_other_targets_and_dtypes(dtype, arch, message):
+    """The C++ engine's test (tests/core/test_storage.cpp) pins the same text."""
+    with pytest.raises(ValueError) as error:
+        fp8_element_format(dtype, arch)
+    assert str(error.value) == message
 
 
 if __name__ == "__main__":

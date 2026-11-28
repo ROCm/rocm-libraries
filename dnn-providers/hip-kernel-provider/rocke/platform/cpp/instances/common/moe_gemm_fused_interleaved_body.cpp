@@ -362,14 +362,14 @@ bool rocke_moe_interleaved_build_ctx_init(
         int b_lds_shape[2] = {ctx->block_n, ctx->block_k};
         ctx->a_lds_view.base = ctx->A_smem;
         ctx->a_lds_view.addr_space = ROCKE_ADDR_LDS;
-        if(rocke_tensor_descriptor_packed(&ctx->a_lds_view.desc, a_lds_shape, 2, sd) != ROCKE_OK)
+        if(rocke_tv_tensor_descriptor_packed(&ctx->a_lds_view.desc, a_lds_shape, 2, sd) != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "interleaved ctx_init: a_lds_view");
             return false;
         }
         ctx->b_lds_view.base = ctx->B_smem;
         ctx->b_lds_view.addr_space = ROCKE_ADDR_LDS;
-        if(rocke_tensor_descriptor_packed(&ctx->b_lds_view.desc, b_lds_shape, 2, sd) != ROCKE_OK)
+        if(rocke_tv_tensor_descriptor_packed(&ctx->b_lds_view.desc, b_lds_shape, 2, sd) != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "interleaved ctx_init: b_lds_view");
             return false;

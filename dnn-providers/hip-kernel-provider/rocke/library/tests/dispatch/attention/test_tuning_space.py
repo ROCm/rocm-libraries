@@ -188,46 +188,53 @@ class TestTuningSpace(unittest.TestCase):
                 self.assertTrue(specs)
                 self.assertFalse(any(s.kernel_spec.use_kv_lds_swizzle for s in specs))
 
-    def test_3d_cache_policy_base_follows_the_problem(self):
+    # One test per arch, so the two halves of the sweep can run on different
+    # CI shards.
+    def test_3d_cache_policy_base_follows_the_problem_on_gfx950(self):
+        self._check_3d_cache_policy_base_follows_the_problem("gfx950")
+
+    def test_3d_cache_policy_base_follows_the_problem_on_gfx942(self):
+        self._check_3d_cache_policy_base_follows_the_problem("gfx942")
+
+    def _check_3d_cache_policy_base_follows_the_problem(self, arch: str):
         """The 3D builder resolves the K/V cache policy per problem
         (``_kv_cache_policy_3d``): restating it names the default kernel, the
         other value stays reachable, and every id records the policy built."""
-        for arch in ("gfx950", "gfx942"):
-            # Decode streams K/V past the caches only when it exceeds the
-            # last-level cache (64 x 4096 tokens x 8 heads here, not 1 x 4096).
-            for seqlen_q, batch, auto in (
-                (1, 64, "stream"),
-                (1, 1, "all"),
-                (1024, 1, "all"),
-            ):
-                with self.subTest(arch=arch, seqlen_q=seqlen_q, batch=batch):
-                    prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
-                    kw = dict(arch=arch, batch=batch, seqlen_q=seqlen_q, seqlen_k=4096)
-                    specs = _sampled(prefix, 1000, **kw)
-                    kernels = {repr(s.kernel_spec) for s in specs}
-                    self.assertEqual(len(kernels), len(specs))
+        # Decode streams K/V past the caches only when it exceeds the
+        # last-level cache (64 x 4096 tokens x 8 heads here, not 1 x 4096).
+        for seqlen_q, batch, auto in (
+            (1, 64, "stream"),
+            (1, 1, "all"),
+            (1024, 1, "all"),
+        ):
+            with self.subTest(arch=arch, seqlen_q=seqlen_q, batch=batch):
+                prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
+                kw = dict(arch=arch, batch=batch, seqlen_q=seqlen_q, seqlen_k=4096)
+                specs = _sampled(prefix, 1000, **kw)
+                kernels = {repr(s.kernel_spec) for s in specs}
+                self.assertEqual(len(kernels), len(specs))
+                self.assertEqual(
+                    {s.kernel_spec.kv_cache_policy for s in specs},
+                    {"stream", "all"},
+                )
+                for s in specs:
                     self.assertEqual(
-                        {s.kernel_spec.kv_cache_policy for s in specs},
-                        {"stream", "all"},
+                        dict(s.knobs)["kv_cache_policy"],
+                        s.kernel_spec.kv_cache_policy,
                     )
-                    for s in specs:
-                        self.assertEqual(
-                            dict(s.knobs)["kv_cache_policy"],
-                            s.kernel_spec.kv_cache_policy,
-                        )
-                    candidate, req, _ = _specs_for(prefix, n=1, **kw)
-                    default = tuning_spec_with_knobs(req, candidate.spec_id, {})
-                    self.assertEqual(default.kernel_spec.kv_cache_policy, auto)
-                    others = {k: v for k, v in default.knobs if k != "kv_cache_policy"}
-                    restated = tuning_spec_with_knobs(
-                        req, candidate.spec_id, {**others, "kv_cache_policy": auto}
+                candidate, req, _ = _specs_for(prefix, n=1, **kw)
+                default = tuning_spec_with_knobs(req, candidate.spec_id, {})
+                self.assertEqual(default.kernel_spec.kv_cache_policy, auto)
+                others = {k: v for k, v in default.knobs if k != "kv_cache_policy"}
+                restated = tuning_spec_with_knobs(
+                    req, candidate.spec_id, {**others, "kv_cache_policy": auto}
+                )
+                self.assertEqual(restated.tuning_id, default.tuning_id)
+                for policy in ("stream", "all"):
+                    pinned = tuning_spec_with_knobs(
+                        req, candidate.spec_id, {"kv_cache_policy": policy}
                     )
-                    self.assertEqual(restated.tuning_id, default.tuning_id)
-                    for policy in ("stream", "all"):
-                        pinned = tuning_spec_with_knobs(
-                            req, candidate.spec_id, {"kv_cache_policy": policy}
-                        )
-                        self.assertEqual(pinned.kernel_spec.kv_cache_policy, policy)
+                    self.assertEqual(pinned.kernel_spec.kv_cache_policy, policy)
 
     def test_3d_auto_segment_variant_defaults_to_the_dispatched_spec(self):
         """At the dispatcher's tile, an auto-segment variant's default spec is

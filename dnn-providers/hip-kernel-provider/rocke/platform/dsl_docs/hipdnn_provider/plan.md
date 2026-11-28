@@ -1,5 +1,10 @@
 # rocke hipDNN Provider — Plan v0.9
 
+> **Binding note.** The provider build uses no pybind11 (`ROCKE_BUILD_PYBIND`
+> stays OFF there). Should a provider build ever need a Python engine module,
+> it would be a nanobind module. The pybind11 choices below are this plan's
+> history, not the direction.
+
 **Status:** All open questions resolved; plan is implementation-ready
 pending a final review pass. v0.9 renames the single M1 engine to
 `RockeConvImplicitGemmEngine` to make the eventual per-op engine
@@ -374,11 +379,9 @@ non-trivial kernel.
 (`dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`).
 
 **Shape:** the bake-off shape from
-`dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
+`dnn-providers/hip-kernel-provider/rocke/library/builders/common/bake_off_implicit_gemm.py`
 — `N=8, H=W=56, C=64, K=64, Y=X=3, stride=1, pad=1, dilation=1`, FP16,
-NHWC. This is the smallest shape we know already compiles cleanly; the
-example documents `248 TFLOPS per-launch / 280 TFLOPS graph 5×200` on
-MI300X (`bake_off_implicit_gemm.py:70–71`).
+NHWC. This is the smallest shape we know already compiles cleanly.
 
 **DSL compile cost:** documented as "typically <150 ms wall" for this
 kernel (`bake_off_implicit_gemm.py:16–17`). Tolerable for an
@@ -578,7 +581,7 @@ simplicity.
   `rocke.__version__` exist? If not, plan a small upstream patch to
   add it (we need it for the cache key).
 - **P-5.** Read `library/kernels/common/conv_implicit_gemm.py` and
-  `examples/common/bake_off_implicit_gemm.py` end to end. Inventory the 36
+  `library/builders/common/bake_off_implicit_gemm.py` end to end. Inventory the 36
   spec fields, mark which are graph-derived vs constexpr defaults, and
   capture the bake-off knob values verbatim. This becomes the
   initialiser for `ConvImplicitGemmSpec.hpp`.
@@ -828,7 +831,7 @@ All entries are committed code or in-tree documentation.
 - DSL compile entry: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/helpers/compile.py`
 - DSL instances: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/`
 - DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`
-- DSL conv example (shape + perf numbers cited in §4): `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/examples/common/bake_off_implicit_gemm.py`
+- DSL conv example (shape cited in §4): `dnn-providers/hip-kernel-provider/rocke/library/builders/common/bake_off_implicit_gemm.py`
 - Existing DSL C++ launcher (HSACO load + launch): `projects/composablekernel/example/ck_tile/dsl/common/launcher.cpp`
 - Plugin SDK developer guide: `projects/hipdnn/docs/PluginDevelopment.md`
 - RFC 0002 (Plugin SDK design): `projects/hipdnn/docs/rfcs/0002_PluginSdkDesign.md`

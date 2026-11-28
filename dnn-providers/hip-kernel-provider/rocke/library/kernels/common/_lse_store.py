@@ -238,39 +238,50 @@ def zero_keyless_row(b, packed, row_has_key, dtype, width=4):
     return b.bitcast(bits, VectorType(dtype, width))
 
 
+def _lse_info(lse):
+    """The ``ArrayInfo`` of a caller's LSE buffer: a torch tensor or a
+    ``rocke.runtime.device_array.DeviceArray``, anything else is refused."""
+    from rocke.runtime.device_array import array_info
+
+    try:
+        return array_info(lse)
+    except TypeError:
+        raise ValueError(
+            "lse must be a torch tensor or a rocke.runtime DeviceArray"
+        ) from None
+
+
 def _check_lse_buffer(lse, q, expected, inputs):
     """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
-    on q's GPU, and not overlapping any input or output tensor."""
-    import torch
+    on q's GPU, and not overlapping any input or output array.
 
-    if not isinstance(lse, torch.Tensor):
-        raise ValueError("lse must be a torch tensor")
-    if lse.dtype != torch.float32:
+    Each array is a torch tensor or a ``rocke.runtime.device_array.DeviceArray``;
+    the checks read its :func:`~rocke.runtime.device_array.array_info`."""
+    from rocke.runtime.device_array import array_info
+
+    lse_info = _lse_info(lse)
+    q_info = array_info(q)
+    if lse_info.dtype != "fp32":
         raise ValueError("lse must have dtype float32")
-    if tuple(lse.shape) != expected:
-        raise ValueError(f"lse shape {tuple(lse.shape)} != {expected}")
-    if not lse.is_contiguous():
+    if lse_info.shape != expected:
+        raise ValueError(f"lse shape {lse_info.shape} != {expected}")
+    if not lse_info.is_contiguous():
         raise ValueError("lse must be contiguous")
-    if not q.is_cuda or not lse.is_cuda or lse.device != q.device:
+    if q_info.device is None or lse_info.device != q_info.device:
         raise ValueError("lse and q must be GPU tensors on the same device")
 
-    lse_start = lse.data_ptr()
-    lse_end = lse_start + lse.numel() * lse.element_size()
+    lse_start, lse_end = lse_info.byte_span()
     for name, tensor in inputs.items():
         if tensor is None:
             continue
-        if not tensor.is_cuda or tensor.device != q.device:
+        info = array_info(tensor)
+        if info.device != q_info.device:
             raise ValueError(f"{name} must be on q's GPU device")
-        if not tensor.numel():
+        if not info.numel:
             continue
-        # Torch strides are nonnegative. Include holes conservatively when
-        # checking the span of an input view against the contiguous output.
-        span = 1 + sum(
-            (extent - 1) * stride
-            for extent, stride in zip(tensor.shape, tensor.stride())
-        )
-        start = tensor.data_ptr()
-        end = start + span * tensor.element_size()
+        # Include holes conservatively when checking the span of an input view
+        # against the contiguous output.
+        start, end = info.byte_span()
         if lse_start < end and start < lse_end:
             raise ValueError(f"lse overlaps {name}")
 
@@ -321,40 +332,47 @@ def validate_dense_lse(
 
     if not spec.varlen:
         return
-    for name, tensor, heads in (
-        ("q", q, spec.num_query_heads),
-        ("out", out, spec.num_query_heads),
-        ("k", k, spec.num_kv_heads),
-        ("v", v, spec.num_kv_heads),
+    from rocke.runtime.device_array import array_info, host_values
+
+    packed = {
+        name: array_info(tensor)
+        for name, tensor in (("q", q), ("out", out), ("k", k), ("v", v))
+    }
+    for name, heads in (
+        ("q", spec.num_query_heads),
+        ("out", spec.num_query_heads),
+        ("k", spec.num_kv_heads),
+        ("v", spec.num_kv_heads),
     ):
-        if tensor.ndim != 3 or tuple(tensor.shape[1:]) != (heads, spec.head_size):
+        info = packed[name]
+        if len(info.shape) != 3 or info.shape[1:] != (heads, spec.head_size):
             raise ValueError(
                 f"{name} must have packed [tokens, heads, head_size] shape"
             )
-        if not tensor.is_contiguous():
+        if not info.is_contiguous():
             raise ValueError(f"{name} must be contiguous")
-    if q.shape[0] != out.shape[0] or k.shape[0] != v.shape[0]:
+    q_tokens, k_tokens = packed["q"].shape[0], packed["k"].shape[0]
+    if q_tokens != packed["out"].shape[0] or k_tokens != packed["v"].shape[0]:
         raise ValueError("packed output/value extents must match query/key extents")
-    for name, tensor, extent, tile, maximum, allow_empty in (
-        ("cu_seqlens_q", cu_seqlens_q, q.shape[0], spec.block_m, spec.seqlen_q, True),
+    for name, offsets_array, extent, tile, maximum, allow_empty in (
+        ("cu_seqlens_q", cu_seqlens_q, q_tokens, spec.block_m, spec.seqlen_q, True),
         (
             "cu_seqlens_kv",
             cu_seqlens_kv,
-            k.shape[0],
+            k_tokens,
             spec.block_n,
             spec.seqlen_kv,
             False,
         ),
     ):
-        if str(tensor.dtype) != "torch.int32" or tuple(tensor.shape) != (
-            spec.batch + 1,
-        ):
+        info = array_info(offsets_array)
+        if info.dtype != "i32" or info.shape != (spec.batch + 1,):
             raise ValueError(f"{name} must be int32 [batch+1]")
-        if not tensor.is_contiguous():
+        if not info.is_contiguous():
             raise ValueError(f"{name} must be contiguous")
         # The existing packed body has no per-sequence load-tail handling.
-        # This enabled-path content check synchronizes device offsets to host.
-        offsets = tensor.tolist()
+        # This enabled-path content check copies the device offsets to the host.
+        offsets = host_values(offsets_array).tolist()
         if offsets[0] != 0 or offsets[-1] != extent:
             raise ValueError(f"{name} endpoints must span its packed tensor")
         for start, stop in zip(offsets, offsets[1:]):
@@ -377,19 +395,23 @@ def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
     before touching KV, so it may have no keys. Both rejections are implementation
     shortcuts of the packed body, not hardware limits, so they raise
     ``NotImplementedError`` with a NOT_YET_IMPLEMENTED detail; malformed offsets raise
-    ``ValueError``. The offsets must be int32 (the kernel reads them as such).
+    ``ValueError``. The offsets must be int32 (the kernel reads them as such), each
+    anything :func:`rocke.runtime.device_array.array_info` describes.
     Tile alignment and the spec maxima are not checked here; with LSE,
     :func:`validate_dense_lse` checks them. The spec has no sinks with varlen.
-    Synchronizes both offset tensors to host.
+    Copies both offset arrays to the host.
     """
-    for name, tensor in (
+    from rocke.runtime.device_array import array_info, host_values
+
+    for name, offsets_array in (
         ("cu_seqlens_q", cu_seqlens_q),
         ("cu_seqlens_kv", cu_seqlens_kv),
     ):
-        if str(tensor.dtype) != "torch.int32":
-            raise ValueError(f"{name} must be int32, got {tensor.dtype}")
-    q_off = cu_seqlens_q.tolist()
-    kv_off = cu_seqlens_kv.tolist()
+        dtype = array_info(offsets_array).dtype
+        if dtype != "i32":
+            raise ValueError(f"{name} must be int32, got {dtype}")
+    q_off = host_values(cu_seqlens_q).tolist()
+    kv_off = host_values(cu_seqlens_kv).tolist()
     if len(q_off) != spec.batch + 1 or len(kv_off) != spec.batch + 1:
         raise ValueError(
             "cu_seqlens_q and cu_seqlens_kv must each have batch+1 entries"
@@ -525,12 +547,14 @@ def validate_unified_lse(
         raise ValueError("emit_lse=True requires a caller-owned lse buffer")
     expected = (problem.total_q, problem.num_query_heads, 1)
     if lse_layout == "head_major":
-        # Any contiguous view of the elements; _check_lse_buffer rejects a non-tensor.
-        if hasattr(lse, "is_contiguous"):
-            if not lse.is_contiguous():
-                raise ValueError("lse must be contiguous")
-            lse = lse.reshape(-1)
-        expected = (problem.total_q * problem.num_query_heads,)
+        # Any contiguous view of the total_q * Hq elements, e.g. [B, Hq, S, 1].
+        info = _lse_info(lse)
+        if not info.is_contiguous():
+            raise ValueError("lse must be contiguous")
+        rows = problem.total_q * problem.num_query_heads
+        if info.numel != rows:
+            raise ValueError(f"lse shape {(info.numel,)} != {(rows,)}")
+        expected = info.shape
     _check_lse_buffer(
         lse,
         q,

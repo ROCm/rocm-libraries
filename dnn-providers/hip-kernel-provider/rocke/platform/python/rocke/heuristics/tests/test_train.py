@@ -14,6 +14,10 @@ import json
 import sys
 from pathlib import Path
 
+from ._requirements import skip_without_requirements
+
+skip_without_requirements()
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -318,10 +322,10 @@ class TestWarmStartTraining:
 
         assert warm_rmse <= base_rmse * 1.1
 
-    def test_warm_start_from_nonexistent_dir(self):
+    def test_warm_start_from_nonexistent_dir(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             check_feature_compatibility(
-                Path("/nonexistent/model/dir"), GemmUniversalFeatureEngine()
+                tmp_path / "no-model-here", GemmUniversalFeatureEngine()
             )
 
 

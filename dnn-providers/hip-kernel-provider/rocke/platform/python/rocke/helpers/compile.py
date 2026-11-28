@@ -32,7 +32,7 @@ Use `compile_kernel(...)` from a kernel-author script when:
 
 Existing callers choose targets before calling this module:
 
-  - ``examples/common/bake_off_direct_conv_4c.py`` forwards ``--isa`` as
+  - ``library/builders/common/bake_off_direct_conv_4c.py`` forwards ``--isa`` as
     ``isa=`` when present; otherwise it forwards ``--arch`` (default ``gfx950``).
   - ``benchmark/gemm/fp16_rcr_sweep.py`` starts with ``--arch`` or
     ``GemmSweepConfig.arch``, carries it through dispatch records, then passes
@@ -473,8 +473,7 @@ def lower_kernel_for_comgr(
     """The lowering half of :func:`compile_kernel`, without running COMGR.
 
     Resolves the target the same way and lowers through the same backend, so
-    ``build_hsaco_from_llvm_ir(c.llvm_text, isa=c.isa, options=list(c.options),
-    fresh_process=c.fresh_process)`` produces the binary
+    :func:`compile_comgr_input` of the result produces the binary
     ``compile_kernel(kernel, arch=arch)`` would, and it refuses the same
     compiler options ``compile_kernel`` refuses. The ISA name is chosen for the
     compiler COMGR loads in this process; where COMGR cannot be loaded, the
@@ -492,6 +491,19 @@ def lower_kernel_for_comgr(
         options=tuple(options),
         fresh_process=bool(kernel.attrs.get(COMGR_FRESH_PROCESS_ATTR)),
     )
+
+
+def compile_comgr_input(comgr_input: ComgrInput) -> bytes:
+    """The COMGR half of :func:`compile_kernel`: the code object of a
+    :func:`lower_kernel_for_comgr` result, built in this process or, for a
+    kernel that asks for one, in a fresh process."""
+    hsaco, _ = build_hsaco_from_llvm_ir(
+        comgr_input.llvm_text,
+        isa=comgr_input.isa,
+        options=list(comgr_input.options),
+        fresh_process=comgr_input.fresh_process,
+    )
+    return bytes(hsaco)
 
 
 def _lower_llvm_via_backend(
@@ -518,7 +530,7 @@ def _lower_llvm_via_backend(
     accepted for backward compatibility but is no longer consulted (the
     serialized-IR hand-off makes it unnecessary).
     """
-    from ..core.backend import lower_kernel_via_backend, resolve_backend
+    from ..core.backend import BACKEND_ENV, lower_kernel_via_backend, resolve_backend
 
     chosen = resolve_backend(backend)
     if backend is not None and chosen != resolve_backend():
@@ -527,8 +539,8 @@ def _lower_llvm_via_backend(
         # directly rather than the chokepoint's env-resolved default.
         import os
 
-        prev = os.environ.get("ROCKE_BACKEND")
-        os.environ["ROCKE_BACKEND"] = chosen
+        prev = os.environ.get(BACKEND_ENV)
+        os.environ[BACKEND_ENV] = chosen
         try:
             return lower_kernel_via_backend(
                 kernel,
@@ -537,9 +549,9 @@ def _lower_llvm_via_backend(
             )
         finally:
             if prev is None:
-                os.environ.pop("ROCKE_BACKEND", None)
+                os.environ.pop(BACKEND_ENV, None)
             else:
-                os.environ["ROCKE_BACKEND"] = prev
+                os.environ[BACKEND_ENV] = prev
 
     return lower_kernel_via_backend(
         kernel,

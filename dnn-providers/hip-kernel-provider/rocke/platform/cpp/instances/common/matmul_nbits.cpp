@@ -21,45 +21,12 @@
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.helpers.i4_dequant.h"
 #include "rocke/helper_rocke.instances.common._matmul_nbits_common.h"
+#include "rocke/helper_rocke.instances.common._matmul_nbits_decode_gemv.h"
 #include "rocke/helper_rocke.instances.common._matmul_nbits_large_n.h"
 #include "rocke/helper_rocke.instances.common._matmul_nbits_large_n_opt.h"
 #include "rocke/instance_matmul_nbits.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
-
-/* The decode-GEMV peer header
- * (helper_rocke.instances.common._matmul_nbits_decode_gemv.h) is intentionally
- * NOT included here: it re-declares rocke.helpers.i4_dequant's
- * unpack_i4_byte_to_pair_f32 with a stale (void-returning) signature as a
- * standalone-compilation fallback, which conflicts with the canonical
- * (rocke_status_t-returning) declaration in helper_rocke.helpers.i4_dequant.h
- * that the large-N body uses. We mirror the two decode-GEMV public symbols
- * below; the definitions live in the peer .c and are resolved at link time. */
-typedef enum rocke_matmul_nbits_scale_wire_dtype
-{
-    ROCKE_NBITS_SCALE_F16 = 0,
-    ROCKE_NBITS_SCALE_F32 = 1
-} rocke_matmul_nbits_scale_wire_dtype_t;
-
-typedef struct rocke_matmul_nbits_decode_gemv_spec
-{
-    int N;
-    int K;
-    int group_size;
-    int block_size;
-    rocke_matmul_nbits_scale_wire_dtype_t scale_wire;
-} rocke_matmul_nbits_decode_gemv_spec_t;
-
-/* C++ build: cross-TU C-ABI helper (defined with C linkage in
- * _matmul_nbits_decode_gemv.c); forward decl must be extern "C". No effect in C. */
-#ifdef __cplusplus
-extern "C" {
-#endif
-rocke_kernel_def_t* rocke_build_decode_gemv_matmul_nbits(
-    rocke_ir_builder_t* b, const rocke_matmul_nbits_decode_gemv_spec_t* spec, const char* arch);
-#ifdef __cplusplus
-}
-#endif
 
 /* ===================================================================== *
  *  small helpers
@@ -142,6 +109,24 @@ bool rocke_matmul_nbits_is_valid_spec(const rocke_matmul_nbits_spec_t* spec,
                      spec->N);
         }
         return false;
+    }
+
+    /* The optimized body (LDS-staged A, LDS epilogue) is written for gfx1201's
+     * WMMA fragment and accumulator layout; on gfx1151 it computes the wrong
+     * tile, so it is refused there.
+     *   if spec.optimized and arch != "gfx1201":
+     *       return False, f"optimized=True is built for gfx1201 only; got {arch}" */
+    {
+        const char* target = arch != NULL ? arch : ROCKE_MATMUL_NBITS_V1_ARCH;
+        if(spec->optimized && strcmp(target, "gfx1201") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "optimized=True is built for gfx1201 only; got %s", target);
+            }
+            return false;
+        }
     }
 
     rocke_mnb_copy_msg(reason, reason_cap, "ok");

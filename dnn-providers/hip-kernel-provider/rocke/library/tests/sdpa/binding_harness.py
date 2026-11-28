@@ -1,17 +1,28 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Map ``cases.py`` harness tensors onto ``sdpa_unified_bind``'s tensor contract.
+"""Map ``cases.py`` harness arrays onto the SDPA bindings' tensor contract.
 
-Shared by the CPU data-movement test and the GPU numeric test. Torch is
-imported lazily.
+Shared by the CPU data-movement tests (torch CPU tensors) and the GPU numeric
+tests (:class:`rocke.runtime.device_array.DeviceArray` s): ``bind_tensors`` and
+``outputs`` take either kind. Torch is imported lazily.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from rocke.numeric.storage import decode
+from rocke.runtime.device_array import array_info, device_values, host_values
+from rocke.runtime.hip_module import Runtime
 
-__all__ = ["bind_tensors", "outputs", "strided_tensor"]
+from tests.sdpa import helpers as H
+
+__all__ = [
+    "bind_and_check",
+    "bind_tensors",
+    "outputs",
+    "strided_tensor",
+]
 
 
 def strided_tensor(desc, *, misaligned: bool = False):
@@ -29,14 +40,14 @@ def strided_tensor(desc, *, misaligned: bool = False):
 
 
 def bind_tensors(case, dev, req):
-    """The binding's ``tensors`` for ``case``, from ``helpers.to_torch`` output.
+    """The binding's ``tensors`` for ``case``, from ``helpers.to_torch`` or
+    ``helpers.to_device_arrays`` output.
 
     A ragged operand is its packed ``[T, H, D]`` buffer with token offsets
     (``request_from_case`` sets ``ragged_offset_multiplier = H * D``). Stats
-    are allocated in the request's ``(B, H_q, S_q, 1)`` shape.
+    are allocated, zeroed, in the request's ``(B, H_q, S_q, 1)`` shape, of
+    the same kind as Q.
     """
-    import torch
-
     tensors = {n: dev[n] for n in ("q", "k", "v", "o")}
     for key, src in (
         ("seq_len_q", "seq_len_q"),
@@ -47,19 +58,38 @@ def bind_tensors(case, dev, req):
         if dev[src] is not None:
             tensors[key] = dev[src]
     if req.stats is not None:
-        tensors["stats"] = torch.zeros(
-            req.stats.dims, dtype=torch.float32, device=dev["q"].device
+        tensors["stats"] = device_values(
+            np.zeros(req.stats.dims, np.float32), like=dev["q"]
         )
     return tensors
 
 
+def _float64(array) -> np.ndarray:
+    """``array``'s elements on the host as float64 (raw bf16 bits decoded)."""
+    return decode(host_values(array), array_info(array).dtype).astype(np.float64)
+
+
 def outputs(case, tensors, req):
     """O and LSE as host arrays shaped like the case oracle's."""
-    o = tensors["o"].double().cpu().numpy()
+    o = _float64(tensors["o"])
     if req.stats is None:
         return o, None
-    stats = tensors["stats"][..., 0].double().cpu().numpy()
+    stats = _float64(tensors["stats"])[..., 0]
     if case.length_mode != "ragged":
         return o, stats
     q_lens, _ = case.lens()
     return o, np.concatenate([stats[b, :, :n].T for b, n in enumerate(q_lens)])
+
+
+def bind_and_check(bind, case, req) -> list:
+    """Bind ``case``'s arrays as rocKE ``DeviceArray`` s with ``bind``, launch
+    twice (the second launch reuses the bound buffers, as graph replay does)
+    and return ``helpers.compare``'s mismatches with the oracle."""
+    inputs = H.materialize(case)
+    tensors = bind_tensors(case, H.to_device_arrays(inputs), req)
+    binding = bind(req, tensors)
+    binding.launch()
+    binding.launch()
+    Runtime().sync()
+    o, lse = outputs(case, tensors, req)
+    return H.compare(case, o, lse, H.evaluate(inputs))

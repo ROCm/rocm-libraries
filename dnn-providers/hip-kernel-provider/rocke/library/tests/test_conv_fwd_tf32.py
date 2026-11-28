@@ -30,6 +30,9 @@ from kernels.common.conv_implicit_gemm import (
     is_valid_spec,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.runtime import comgr
+from rocke.tests.comgr import require_comgr_target
+from rocke.tests.lanes import BUILD_VARIANT, skip_until, skip_until_reason
 from rocke.tests.llc import find_llvm_tool
 
 _TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
@@ -351,18 +354,8 @@ class TestConvFwdTf32SpecDict(unittest.TestCase):
 
 def _compile(ir: str, arch: str) -> bytes:
     """comgr code object; skips only when comgr cannot target ``arch``."""
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    isa = f"amdgcn-amd-amdhsa--{arch}"
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    if isa not in isas:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"the loaded comgr cannot target {arch}")
-    hsaco, _ = comgr.build_hsaco_from_llvm_ir(ir, isa=isa)
+    require_comgr_target(arch)
+    hsaco, _ = comgr.build_hsaco_from_llvm_ir(ir, isa=f"amdgcn-amd-amdhsa--{arch}")
     return hsaco
 
 
@@ -372,7 +365,9 @@ def _disassemble(hsaco: bytes):
 
     objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
-        raise unittest.SkipTest("llvm-objdump not found; cannot inspect the ISA")
+        skip_until(
+            BUILD_VARIANT, reason="llvm-objdump not found; cannot inspect the ISA"
+        )
     readelf = find_llvm_tool("llvm-readelf")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "kernel.hsaco"
@@ -424,7 +419,9 @@ class TestConvFwdTf32Isa(unittest.TestCase):
 
 @unittest.skipIf(
     importlib.util.find_spec("rocke_library_engine") is None,
-    "rocke_library_engine extension not importable",
+    skip_until_reason(
+        BUILD_VARIANT, reason="rocke_library_engine extension not importable"
+    ),
 )
 class TestConvFwdTf32CrossEngine(unittest.TestCase):
     """The C++ conv builder builds TF32 specs too: every TF32 atom, pipeline,

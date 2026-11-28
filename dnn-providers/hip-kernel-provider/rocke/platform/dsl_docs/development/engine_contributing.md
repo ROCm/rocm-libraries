@@ -106,7 +106,7 @@ PYTHONPATH="$PY" python3 -m tests/instances/differential/run_diff.py --mode ir -
 `--mode ir --canonical` is the diagnostic lens: it separates a genuine
 divergence (`STRUCT_DRIFT`) from harmless SSA-id renumbering (`CANON_EQUAL`).
 Most "I changed the builder and the `.ll` is identical but the IR differs"
-surprises are the latter — see [`invariants.md`](./invariants.md#the-ir-builder-must-emit-operands-left-to-right).
+surprises are the latter — see [`invariants.md`](./invariants.md#2-the-ir-builder-must-emit-operands-left-to-right).
 
 ### Transitional state: when "red" vs this tree is expected
 
@@ -138,7 +138,7 @@ you changed:
 | Mode | Compares | Use when you changed… |
 |------|----------|------------------------|
 | `--mode ll` | final LLVM-IR text (the contract) | anything in lowering or builders — this is the gate of record |
-| `--mode ir` | the `ck.dsl.ir/v1` serialized IR (upstream of lowering) | a builder, to see drift *before* the lowerer absorbs it |
+| `--mode ir` | the `ck.dsl.ir/v1` serialized IR (upstream of lowering) | a builder, to see drift *before* the lowerer absorbs it; `check_byte_identity.py` gates on its bytes |
 | `--mode verify` | the IR verifier's diagnostics | the verifier or validity gates |
 
 Add `--canonical` to `--mode ir` to re-triage byte differences into "real" vs

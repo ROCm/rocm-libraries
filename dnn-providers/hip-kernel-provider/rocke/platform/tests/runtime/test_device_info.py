@@ -6,7 +6,6 @@ from __future__ import annotations
 from unittest import mock
 
 import pytest
-
 from rocke import runtime
 from rocke.runtime import device_info, hip_module
 
@@ -147,3 +146,18 @@ def test_device_info_owns_snapshot_with_read_only_properties() -> None:
     for name in ("target_id", "asic_revision", "base_arch", "compiler_target"):
         with pytest.raises(AttributeError):
             setattr(info, name, None)
+
+
+@pytest.mark.gpu
+def test_gpu_total_memory_is_fixed_while_an_allocation_is_held() -> None:
+    """hipMemGetInfo's total bytes stay the same while a 256 MiB buffer is held."""
+    from rocke.runtime.launcher import DeviceMem
+    from rocke.tests.gpu import current_device_arch
+
+    current_device_arch()
+    before = hip_module.get_device_total_memory()
+    assert before is not None and before > 0
+    held = DeviceMem(256 << 20)
+    during = hip_module.get_device_total_memory()
+    del held
+    assert during == before

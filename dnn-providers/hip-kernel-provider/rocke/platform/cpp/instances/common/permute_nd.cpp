@@ -34,15 +34,12 @@
  *                            v = global_load_f16/bf16(X, src_off);
  *                            global_store(Y, out_idx, v); }
  *
- * NOTE on the two rocke_tensor_descriptor_t types: transforms.h and
- * tensor_view.h both define a struct/function named rocke_tensor_descriptor_t /
- * rocke_tensor_descriptor_offset with DIFFERENT shapes; they cannot be included
- * in the same TU. This kernel needs the RICH descriptor (transforms.h) for the
- * out_idx->offset algebra, and only the GLOBAL-space load/store behaviour of
- * make_global_view -- which is exactly the builder primitives above. So we
- * include transforms.h and inline the global view path, leaving tensor_view.h
- * out. The emitted IR is identical to make_global_view + load_vec_at/
- * store_vec_at/load_scalar_at/store_scalar_at on a global view.
+ * This kernel uses the transforms.h descriptor for the out_idx->offset
+ * algebra and needs only the GLOBAL-space load/store behaviour of
+ * make_global_view -- which is exactly the builder primitives above -- so it
+ * inlines the global view path rather than building a tensor_view. The emitted
+ * IR is identical to make_global_view + load_vec_at/store_vec_at/
+ * load_scalar_at/store_scalar_at on a global view.
  */
 
 #include "rocke/instance_permute_nd.h"

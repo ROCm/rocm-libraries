@@ -33,6 +33,7 @@ from rocke.core.ir import (
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, _Lowerer
+from rocke.tests.engines import native_engine_or_skip
 
 # Explicit emitter signatures: catalog metadata cannot change the test oracle.
 # Fields are target, op_id, actual source type, accumulator width, packed bits.
@@ -102,11 +103,11 @@ def _kernel(case, *, concrete=False, atom=None, source=None, use_result=False):
 def _assert_rejects(kernel, case, flavor, error, engine):
     ir = serialize(kernel)
     if engine == "native":
-        native = pytest.importorskip("rocke_engine")
+        native = native_engine_or_skip()
         with pytest.raises(RuntimeError) as caught:
             native.lower_serialized_ir(ir, arch=case[0], flavor=flavor)
         assert str(caught.value) == (
-            f"rocke_engine.lower_serialized_ir: lower failed for arch '{case[0]}' "
+            f"rocke_lower_serialized_ir_to_llvm: lower failed for arch '{case[0]}' "
             f"(status 1): {error}"
         )
         return
@@ -196,7 +197,7 @@ def test_mfma_valid_llvm_signature_and_bytes(case, flavor, engine):
             == expected
         )
     if engine == "native":
-        native = pytest.importorskip("rocke_engine")
+        native = native_engine_or_skip()
         assert (
             native.lower_serialized_ir(serialize(kernel), arch=case[0], flavor=flavor)
             == expected
@@ -215,7 +216,7 @@ def test_mfma_valid_llvm_signature_and_bytes(case, flavor, engine):
 @pytest.mark.parametrize("engine", ["python", "native"])
 def test_mfma_llvm_rejects_actual_ssa_types(case, flavor, engine, subtests):
     if engine == "native":
-        pytest.importorskip("rocke_engine")
+        native_engine_or_skip()
     forms = (False, True) if engine == "python" else (False,)
     # Successful checks run inline; subtests retain failure/skip diagnostics.
     for concrete, role, kind in product(
@@ -246,7 +247,7 @@ def test_mfma_llvm_rejects_actual_ssa_types(case, flavor, engine, subtests):
 @pytest.mark.parametrize("engine", ["python", "native"])
 def test_mfma_llvm_rejects_arity(case, flavor, engine, subtests):
     if engine == "native":
-        pytest.importorskip("rocke_engine")
+        native_engine_or_skip()
     forms = (False, True) if engine == "python" else (False,)
     for concrete, kind in product(forms, ARITIES):
         try:
@@ -387,7 +388,7 @@ def test_mfma_preserves_equal_width_packed_carriers(case, carrier, flavor, engin
     kernel, _ = _kernel(case, source=carrier, use_result=True)
     expected = _lower_kernel_to_llvm_python(kernel, arch=case[0], llvm_flavor=flavor)
     if engine == "native":
-        native = pytest.importorskip("rocke_engine")
+        native = native_engine_or_skip()
         assert (
             native.lower_serialized_ir(serialize(kernel), arch=case[0], flavor=flavor)
             == expected
@@ -455,7 +456,7 @@ def test_mfma_unsigned_byte_carriers_match_signed_bytes(case, flavor, concrete, 
     signed, _ = _kernel(case, source=VectorType(I8, count), concrete=concrete)
     expected = _lower_kernel_to_llvm_python(signed, arch=case[0], llvm_flavor=flavor)
     if engine == "native":
-        native = pytest.importorskip("rocke_engine")
+        native = native_engine_or_skip()
         actual = native.lower_serialized_ir(
             serialize(unsigned), arch=case[0], flavor=flavor
         )

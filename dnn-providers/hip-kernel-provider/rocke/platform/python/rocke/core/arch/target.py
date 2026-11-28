@@ -1879,6 +1879,9 @@ class MmaCatalog:
 
     def __init__(self, ops: List[MmaOp]) -> None:
         self._ops = tuple(ops)
+        # Normalized query -> its matching atoms. The catalog is immutable and the
+        # sweeps and spec validators repeat the same few queries many times.
+        self._matches: dict[tuple, tuple[MmaOp, ...]] = {}
 
     @property
     def ops(self) -> Tuple[MmaOp, ...]:
@@ -1914,6 +1917,23 @@ class MmaCatalog:
         # Preserve the historical three-dtype query by defaulting dst to src2.
         # Indexed callers can state a distinct result.
         dst_key = normalize_dtype(src_dtypes[2] if dst_dtype is None else dst_dtype)
+        query = (family, src_keys, dst_key, scales, m, n)
+        matches = self._matches.get(query)
+        if matches is None:
+            matches = tuple(self._scan(*query))
+            self._matches[query] = matches
+        return list(matches)
+
+    def _scan(
+        self,
+        family: str,
+        src_keys: tuple[str, str, str],
+        dst_key: str,
+        scales: tuple[str | None, str | None, int | None] | None,
+        m: int | None,
+        n: int | None,
+    ) -> list[MmaOp]:
+        """The atoms matching one normalized :meth:`enumerate` query, natives preferred."""
         out = []
         for op in self._ops:
             if op.family != family:
@@ -2584,10 +2604,11 @@ def target_id_from_isa(isa: str) -> str:
     return isa[start:] if start >= 0 else isa
 
 
-# The whole of a value parse_target_id accepts: an optional AMDHSA triple with an
-# empty or "unknown" environment field, a processor, then feature suffixes.
+# The whole of a value parse_target_id accepts: an optional AMDHSA triple (its
+# architecture field "amdgcn" or "amdgpu" with a version, and an empty or "unknown"
+# environment field), a processor, then feature suffixes.
 _TARGET_ID = re.compile(
-    r"(?:amdgcn-amd-amdhsa-(?:unknown)?-)?"
+    r"(?:(?:amdgcn|amdgpu[0-9]+(?:\.[0-9a-z]+)?)-amd-amdhsa-(?:unknown)?-)?"
     r"(gfx[0-9a-z]+(?:-[0-9a-z]+)*(?::[0-9a-z_]+[+-])*)"
 )
 
@@ -2598,20 +2619,28 @@ def parse_target_id(value: str) -> str:
     ``value`` is either an AMDHSA ISA name, as a code object's ``amdhsa.target``
     note records it, or a bare target ID. All of it must be, in order:
 
-    - optionally the triple ``amdgcn-amd-amdhsa-`` with an empty or ``unknown``
-      environment field and its closing ``-`` (``amdgcn-amd-amdhsa--`` or
-      ``amdgcn-amd-amdhsa-unknown-``; compilers write either);
+    - optionally an AMDHSA triple: the architecture field, ``-amd-amdhsa-``,
+      an empty or ``unknown`` environment field and its closing ``-``. The
+      architecture field is ``amdgcn`` or, from newer compilers, ``amdgpu``
+      followed by the processor's version: digits, then optionally ``.`` and
+      lower-case letters and digits (``amdgpu9.42`` for gfx942, ``amdgpu9.0a``
+      for gfx90a, ``amdgpu11`` for gfx11-generic). So ``amdgcn-amd-amdhsa--``,
+      ``amdgcn-amd-amdhsa-unknown-`` and ``amdgpu9.42-amd-amdhsa-unknown-`` are
+      all accepted; the version is not checked against the processor;
     - a processor: ``gfx`` then lower-case letters and digits, with ``-``
       separated parts for names such as ``gfx11-generic`` or ``gfx9-4-generic``;
     - zero or more feature suffixes, each ``:`` then a name then ``+`` or ``-``
       (``:sramecc+:xnack-``).
 
     Returns the target ID with its feature suffixes, without the triple:
-    ``amdgcn-amd-amdhsa-unknown-gfx942:xnack-`` gives ``gfx942:xnack-``.
+    ``amdgcn-amd-amdhsa-unknown-gfx942:xnack-`` and
+    ``amdgpu9.42-amd-amdhsa-unknown-gfx942:xnack-`` both give ``gfx942:xnack-``.
     :func:`processor_from_target_id` then gives the processor.
 
     Raises ``ValueError`` naming the value for anything else: an empty value, an
-    other environment field (``amdgcn-amd-amdhsa-linux-gfx950``), a processor
+    other environment field (``amdgcn-amd-amdhsa-linux-gfx950``), an
+    ``amdgpu`` architecture field without its version
+    (``amdgpu-amd-amdhsa--gfx950``), a processor
     name in the wrong place (``notgfx950``, ``amdgcn-amd-amdhsa-unknown-:gfx950``)
     or a feature without its sign (``gfx950:xnack``). Unlike
     :func:`target_id_from_isa`, it never guesses a processor out of a malformed
@@ -2625,9 +2654,10 @@ def parse_target_id(value: str) -> str:
         # the C++ engine writes the same text byte for byte.
         raise ValueError(
             f"'{value}' is not a target ID: expected an optional "
-            "amdgcn-amd-amdhsa-- or amdgcn-amd-amdhsa-unknown- prefix, a processor "
-            "such as gfx942 or gfx11-generic, then any :feature+ or :feature- "
-            "suffixes"
+            "amdgcn-amd-amdhsa-- or amdgcn-amd-amdhsa-unknown- prefix (or the same "
+            "with amdgpu and a version, such as amdgpu9.42, in place of amdgcn), "
+            "a processor such as gfx942 or gfx11-generic, then any :feature+ or "
+            ":feature- suffixes"
         )
     return match.group(1)
 

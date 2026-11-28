@@ -194,6 +194,7 @@ from rocke.core.ir import (
     I64,
 )
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
+from rocke.helpers.spec import require_bool_fields
 
 # Shared problem/geometry fields live in an architecture-neutral module.
 from kernels.common.attention_dense_decode import (
@@ -214,6 +215,7 @@ from kernels.common.attention_dense_spec import (
     check_dense_scale,
     check_dense_spec_preflight,
     partial_tile_reason,
+    validate_dense_sinks,
 )
 
 # C-output lane maps: IDENTICAL between the 32x32x8 (gfx942) and 32x32x16 (gfx950)
@@ -243,7 +245,6 @@ from kernels.common._lse_store import (
     validate_dense_lse,
     zero_keyless_row,
 )
-from kernels.common._spec_checks import require_bool
 
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -528,23 +529,16 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         # Reject, never coerce: bool("false") is True, so a truthiness read would
         # silently build the CFVST kernel the caller asked to turn off.
-        if self.use_cfvst is not None and type(self.use_cfvst) is not bool:
-            raise ValueError(
-                f"use_cfvst must be None or a bool, got {type(self.use_cfvst).__name__}"
-            )
+        require_bool_fields(self, "use_cfvst", allow_none=True)
         if type(self.lds_num_buffers) is not int:
             raise ValueError(
                 "lds_num_buffers must be an int, got "
                 f"{type(self.lds_num_buffers).__name__}"
             )
-        if type(self.v_reg_prefetch) is not bool:
-            raise ValueError(
-                "v_reg_prefetch must be a bool, got "
-                f"{type(self.v_reg_prefetch).__name__}"
-            )
+        require_bool_fields(self, "v_reg_prefetch")
 
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
@@ -997,7 +991,7 @@ def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
     215 VGPR down to ~117 (0 spill). D64's LDS is only 16 KB (allows 4 WGs), so the
     smaller per-wave budget lets a SECOND WG co-reside (2 WG/CU), and the bf16 ``.1k``
     schedule is serialized enough at wpe=2 that its HBM latency is EXPOSED -- the
-    extra resident WG hides it. Measured on MI300X it is a large win at S512 and S8192
+    extra resident WG hides it. Measured on gfx942 it is a large win at S512 and S8192
     and neutral at S256 and S2048, so there is no seqlen gate.
 
     Why not the other configs (all measured, all kept at 2):
@@ -2378,7 +2372,7 @@ def _build_attention_dense_single_buffer(
                     trips,
                     b.const_i32(1),
                     [(f"wm{tag}", m_i), (f"wl{tag}", l_i)]
-                    + [(f"wo{dt}_{tag}", o_acc[dt]) for dt in range(D_TILES)],
+                    + [(f"wo{dt}_t{tag}", o_acc[dt]) for dt in range(D_TILES)],
                     iv_name=f"ws{tag}",
                 )
                 with sk as (_iv, sc):
@@ -2935,7 +2929,11 @@ def run_attention_dense_torch(
     validate_paged: bool = True,
 ):
     """High-level framework entry: compile (cached) + launch the gfx942 dense prefill
-    kernel on torch tensors. ``q``/``out`` are ``[B, S, Hq, D]`` and ``k``/``v`` are
+    kernel on caller-owned device arrays: torch tensors or
+    :class:`rocke.runtime.device_array.DeviceArray`, anything
+    :func:`~rocke.runtime.device_array.array_info` describes (scratch, when the spec
+    needs it, is allocated of the same kind as ``q``). ``q``/``out`` are
+    ``[B, S, Hq, D]`` and ``k``/``v`` are
     ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)),
     in ``[2**-64, 2**4]``: :func:`check_dense_scale` raises for any other.
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
@@ -2944,8 +2942,7 @@ def run_attention_dense_torch(
     / ``kv_lens`` ([B] i32) are required; ``validate_paged=False`` skips the host check
     of their contents (a device->host sync), see
     :func:`kernels.common._attention_dense_paged.validate_paged_launch`.
-    Returns ``out``. torch is imported lazily by the launcher, so this module stays
-    torch-free at import time. Serves both the default and the P4 persistent grid
+    Returns ``out``. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
@@ -2960,7 +2957,7 @@ def run_attention_dense_torch(
     ABI has no ``cu_seqlens`` args (:func:`attention_dense_signature`); passing
     ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument.
 
-    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
+    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` array
     [B, Hq, Sq, 1] on the same GPU, separate from every input and output. The kernel
     writes the natural-log softmax normalizer while still returning ``out``. Rows
     with no allowed key (a sliding window past the end of the keys) write O=0 and
@@ -2977,21 +2974,7 @@ def run_attention_dense_torch(
             "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
         )
     validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
-    if not spec.use_sinks and sinks is not None:
-        raise ValueError("sinks provided but spec.use_sinks is False")
-    if spec.use_sinks:
-        if sinks is None:
-            raise ValueError("spec.use_sinks=True requires sinks that are not None")
-        if sinks.shape != (spec.num_query_heads,):
-            raise ValueError(
-                f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
-            )
-        if sinks.dtype != q.dtype:
-            raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
-        if not sinks.is_contiguous():
-            raise ValueError("sinks must be contiguous")
-        if not sinks.is_cuda:
-            raise ValueError("sinks must be a CUDA tensor")
+    validate_dense_sinks(spec, q, sinks)
     validate_dense_lse(
         spec, q, k, v, out, lse, block_tables=block_tables, kv_lens=kv_lens, sinks=sinks
     )
@@ -3026,7 +3009,7 @@ def run_attention_dense_torch(
     if spec.emit_lse:
         vals["lse_ptr"] = lse
     if spec.kv_segments > 1:
-        workspace = allocate_segment_workspace(spec, q.device)
+        workspace = allocate_segment_workspace(spec, like=q)
         vals.update(workspace)
     launcher(
         vals,

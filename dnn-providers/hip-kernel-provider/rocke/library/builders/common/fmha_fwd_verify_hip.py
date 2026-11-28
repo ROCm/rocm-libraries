@@ -21,7 +21,7 @@ is judged within a tolerance (default ``2e-2``, matching the attention parity
 gate), not bit-for-bit.
 
 Must run on a device matching ``--arch`` (e.g. a SLURM cluster with
-``--gres=gpu:gfx950-mi350x:1`` or ``--gres=gpu:gfx1151:1``).
+a GPU gres of the matching gfx target).
 
     PYTHONPATH=python python3 -m builders.common.fmha_fwd_verify_hip \
         --arch gfx950 --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4

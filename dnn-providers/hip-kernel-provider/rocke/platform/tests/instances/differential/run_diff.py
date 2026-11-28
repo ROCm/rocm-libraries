@@ -14,12 +14,13 @@
 #                                                  of .ll; needs emitter mode arg)
 #   L1  mode=verify  verifier diagnostics        (needs emitter mode arg)
 #
-# An emitter that does not yet accept a mode arg is exercised in its default
-# (.ll) mode for L3 and reported as MODE_UNSUPPORTED for L2/L1 -- so this runner
-# already works against the current emitters and gains L2/L1 coverage family by
-# family as emitters are extended. MODE_UNSUPPORTED is also the one gate-passing
-# status that means "not compared" (see GATE_PASS below), which is admissible
-# only because the gating L3/ll lane cannot produce it.
+# An emitter that refuses a mode arg is exercised in its default (.ll) mode for
+# L3 and reported as MODE_UNSUPPORTED for L2/L1: a family whose output has no
+# such form (conv_abi prints kernarg lists, which are not IR) has nothing to
+# compare there. MODE_UNSUPPORTED is the one gate-passing status that means "not
+# compared" (see GATE_PASS below). The run lists those families in a NOT
+# COMPARED block, so a pass never hides them, and the ll lane cannot produce
+# the status at all.
 #
 # Two levels, and the words are not interchangeable: a VERDICT classifies one
 # (family, config); a STATUS rolls a family's verdicts up, and the gate rules on
@@ -30,6 +31,9 @@
 #   IDENTICAL          both non-empty, sha equal
 #   MISMATCH           both non-empty, sha differ              (drift)
 #   BOTH_REJECTED      both empty + positive rc, not end-of-range (parity-faithful)
+#   REFUSAL_MISMATCH   both rejected, but with different messages, in a family
+#                      whose refusals are compared (REFUSAL_COMPARED_FAMILIES)
+#                                                              (drift)
 #   ASYMMETRIC         one empty / rc disagree                 (drift)
 #   CRASH              either side died on a signal (rc < 0)   (drift)
 #   END                both report "unknown config" (range end; stops the family)
@@ -99,15 +103,14 @@ LIBRARY_ARCHIVE_NAME = "librocke_library.a"
 LIBRARY_ARCHIVE: Path | None = None
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
-TOOLS = ROCKE / "tools"  # absent in an installed tree, which ships _hostcaps.py here
 # A script launch gets HERE from Python automatically; import-by-path does not.
-# Bootstrap both homes explicitly so this module has the same imports in focused
+# Bootstrap these homes explicitly so this module has the same imports in focused
 # pytest and in isolated xdist workers as it does at its command-line entry point.
-for module_root in (HERE, TOOLS):
+# The rocke package (PYROOT) serves golden_store's golden_file import.
+for module_root in (HERE, PYROOT):
     if module_root.is_dir() and str(module_root) not in sys.path:
         sys.path.insert(0, str(module_root))
 
-from _hostcaps import available_cpus  # noqa: E402 -- tools path bootstrap above
 from python_batch_worker import canonical_digest  # noqa: E402 -- HERE bootstrap above
 from golden_store import (  # noqa: E402 -- HERE bootstrap above
     IR_CANONICAL,
@@ -115,6 +118,22 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
     GoldenStore,
     compare,
 )
+from rocke.core.golden_file import rerecord_hint
+from rocke.tests.ci_shard import (
+    ACTIVATION_FLAG,
+    Shard,
+    ShardKeyListing,
+    add_shard_argument,
+    header_line,
+    list_keys_path,
+    shard_from_arguments,
+)
+from rocke.tests.host_cpus import available_cpus
+from rocke.tests.staged_payload import point_locators_at_staged_payload
+
+# The differential golden's name in the golden index, printed in its re-record
+# command (which re-records both golden files, every mode and flavor).
+GOLDEN_NAME = "differential"
 
 # L5 golden anchor: committed per-(mode,family,config) reference shas. This is
 # the absolute regression anchor -- any future change that alters an emitted
@@ -148,6 +167,10 @@ def golden_kind(mode, canonical):
     )
 
 
+# How an emitter process is told which LLVM flavor to write IR for.
+FLAVOR_ENV = "ROCKE_LLVM_FLAVOR"
+
+
 def _llvm_flavors() -> tuple[str, ...]:
     if str(PY_REF_ROOT) not in sys.path:
         sys.path.insert(0, str(PY_REF_ROOT))
@@ -156,15 +179,16 @@ def _llvm_flavors() -> tuple[str, ...]:
     return tuple(LLVM_FLAVORS)
 
 
-def pin_llvm_flavor(requested: str) -> str:
-    """The LLVM flavor this run emits for, exported to both emitters.
+def selected_llvm_flavor(requested: str) -> str:
+    """The LLVM flavor a run emits for.
 
     `requested` (``--flavor``) wins; otherwise ROCKE_LLVM_FLAVOR, otherwise the
-    flavor rocke resolves for this host. Exporting it means every emitter
-    process writes IR for the same flavor the golden records or checks.
+    flavor rocke resolves for this host. The run hands it to every emitter it
+    starts (``emitter_env``), so each one writes IR for the flavor the golden
+    records or checks; this process's environment is left as it is.
     """
     flavors = _llvm_flavors()
-    flavor = (requested or os.environ.get("ROCKE_LLVM_FLAVOR", "")).strip().lower()
+    flavor = (requested or os.environ.get(FLAVOR_ENV, "")).strip().lower()
     if not flavor:
         from rocke.core.lower_llvm import _resolve_llvm_flavor
 
@@ -173,8 +197,17 @@ def pin_llvm_flavor(requested: str) -> str:
         raise SystemExit(
             f"unknown LLVM flavor {flavor!r}, expected one of {list(flavors)}"
         )
-    os.environ["ROCKE_LLVM_FLAVOR"] = flavor
     return flavor
+
+
+def emitter_env(flavor: str | None) -> dict[str, str]:
+    """The environment an emitter process starts with: this process's, with
+    ``flavor`` as its LLVM flavor. ``None`` leaves the emitter to resolve its
+    own, as a plain parity run without ``--flavor`` does."""
+    env = dict(os.environ)
+    if flavor is not None:
+        env[FLAVOR_ENV] = flavor
+    return env
 
 
 def collect_ref_shas(results):
@@ -438,15 +471,19 @@ def _run_native_configs(
     indices: Iterable[int],
     mode: str = "ll",
     canonical: bool = False,
+    flavor: str | None = None,
 ) -> BatchResult:
     """Stream native configs through short-lived, pipe-backed emitters."""
     emissions = []
+    env = emitter_env(flavor)
     for index in indices:
         args = [str(binpath), str(index)]
         if mode != "ll":
             args.append(mode)
         try:
-            process = subprocess.run(args, capture_output=True, timeout=TIMEOUT)
+            process = subprocess.run(
+                args, capture_output=True, timeout=TIMEOUT, env=env
+            )
             emission = _emission(
                 process.returncode,
                 process.stdout,
@@ -457,7 +494,7 @@ def _run_native_configs(
             emission = Emission(124, False, None, f"TIMEOUT in native config {index}")
         emissions.append(emission)
         if (
-            _is_end_emission(emission)
+            is_end_emission(emission)
             or emission.returncode < 0
             or emission.returncode == 124
         ):
@@ -473,8 +510,11 @@ PY_REF_ROOT = PYROOT
 SHIM_DIR = None
 
 
-def _python_emitter_env(src_dir: Path) -> dict[str, str]:
-    env = dict(os.environ)
+def python_emitter_env(src_dir: Path, flavor: str | None = None) -> dict[str, str]:
+    """The environment a Python emitter in ``src_dir`` runs in: ``emitter_env``
+    for ``flavor``, plus the reference rocke package, the library and the
+    parity directories on ``PYTHONPATH``, and no debug-location capture."""
+    env = emitter_env(flavor)
     # The C emitters build their IR natively and so have no Python authoring
     # stack to record; letting location capture through here would give the
     # reference side debug metadata the other side cannot have, and report drift
@@ -482,6 +522,12 @@ def _python_emitter_env(src_dir: Path) -> dict[str, str]:
     # compared where the comparison is meaningful -- one kernel, both lowerers --
     # by tests/core/test_debug_info.py under ROCKE_BACKEND=both.
     env.pop("ROCKE_DEBUG_LOC", None)  # ir.LOC_CAPTURE_ENV
+    # A library emitter locates the platform parity driver through
+    # ROCKE_PLATFORM_PARITY_DIR when it is set. This runner has no conftest to
+    # set it, so it points the locators at ROCKE's tests/ the way the conftests
+    # do; that names PARITY, the driver's home in a checkout and in an installed
+    # test tree alike.
+    point_locators_at_staged_payload(ROCKE / "tests", env)
     roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(src_dir), str(PARITY)]
     if SHIM_DIR:
         roots.insert(0, str(SHIM_DIR))
@@ -498,12 +544,14 @@ def _run_python_batch(
     src_dir: Path | None = None,
     canonical: bool = False,
     digest_in_worker: bool = False,
+    flavor: str | None = None,
 ) -> BatchResult:
     """Emit one family's configurations with a deadline for each invocation.
 
     With `canonical`, the canonical hash is computed here from the worker's
     output files, or, with `digest_in_worker`, by the worker itself (in
-    parallel across families; nothing is written to disk)."""
+    parallel across families; nothing is written to disk). `flavor` is the
+    LLVM flavor the emitter writes IR for (``emitter_env``)."""
     if src_dir is None:
         src_dir = PARITY
     indices = list(indices)
@@ -527,7 +575,7 @@ def _run_python_batch(
                 stdout=subprocess.PIPE,
                 stderr=errors,
                 text=True,
-                env=_python_emitter_env(src_dir),
+                env=python_emitter_env(src_dir, flavor),
             )
             assert process.stdout is not None
             records: queue.Queue[str | None] = queue.Queue()
@@ -566,16 +614,7 @@ def _run_python_batch(
                             raise ValueError(
                                 "batch worker returned different config index"
                             )
-                        if canonical and digest_in_worker:
-                            emission = Emission(
-                                record["returncode"],
-                                record["has_output"],
-                                record["sha256"],
-                                record["stderr"],
-                                record["canonical_sha"],
-                                record["canonical_error"],
-                            )
-                        elif canonical:
+                        if canonical and not digest_in_worker:
                             output = (output_dir / f"{record['idx']}.out").read_bytes()
                             emission = _emission(
                                 record["returncode"],
@@ -588,12 +627,7 @@ def _run_python_batch(
                                     "batch worker output hash changed in transit"
                                 )
                         else:
-                            emission = Emission(
-                                record["returncode"],
-                                record["has_output"],
-                                record["sha256"],
-                                record["stderr"],
-                            )
+                            emission = emission_from_record(record, canonical=canonical)
                     except (
                         KeyError,
                         OSError,
@@ -607,7 +641,7 @@ def _run_python_batch(
                             emissions, f"invalid batch worker response: {exc}"
                         )
                     emissions.append(emission)
-                    if _is_end_emission(emission):
+                    if is_end_emission(emission):
                         break
 
                 try:
@@ -644,15 +678,77 @@ def _run_python_batch(
 _MODE_REJECTION_PREFIXES = ("unknown mode", "usage:")
 
 
+def last_error_line(emission: Emission) -> str:
+    """The last non-blank line `emission` wrote to stderr, stripped, or "".
+
+    For a failing config that is the exception line of its traceback; for an
+    emitter rejecting its argv, its one-line message."""
+    lines = [line.strip() for line in emission.error.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+# The native emitters report a builder refusal on stderr behind this prefix; a
+# Python emitter's refusal is its exception line, ``<Type>Error: <message>``.
+NATIVE_REFUSAL_PREFIX = "builder error: "
+
+# The families whose BOTH_REJECTED configs must also carry the same refusal
+# message in both engines. A family joins once its native emitter reports every
+# refusal as ``builder error: <message>`` (the others print a bare "build
+# failed:" or a status code today, so their refusals cannot be compared yet).
+REFUSAL_COMPARED_FAMILIES = frozenset(
+    {
+        "buffer_atomic_fadd",
+        "buffer_load_vN",
+        "buffer_store_vN",
+        "coalesced_loader_async",
+        "img2col",
+        "tensor_view_buffer",
+    }
+)
+
+
+def native_refusal_message(emission: Emission) -> str | None:
+    """The message of a native builder refusal, or None when the native
+    emitter failed some other way."""
+    line = last_error_line(emission)
+    if not line.startswith(NATIVE_REFUSAL_PREFIX):
+        return None
+    return line.removeprefix(NATIVE_REFUSAL_PREFIX)
+
+
+def python_refusal_message(emission: Emission) -> str | None:
+    """The message of a Python refusal (its exception line), or None when the
+    Python emitter failed some other way."""
+    exception_type, _, message = last_error_line(emission).partition(": ")
+    if not message or not exception_type.endswith("Error"):
+        return None
+    return message
+
+
 def mode_unsupported(emission: Emission) -> bool:
     """True when `emission` is the emitter refusing the mode itself."""
     if emission.returncode != 2 or emission.has_output:
         return False
-    lines = [line.strip() for line in emission.error.splitlines() if line.strip()]
-    return bool(lines) and lines[-1].lower().startswith(_MODE_REJECTION_PREFIXES)
+    return last_error_line(emission).lower().startswith(_MODE_REJECTION_PREFIXES)
 
 
-def _is_end_emission(emission: Emission) -> bool:
+def emission_from_record(record: dict, *, canonical: bool = False) -> Emission:
+    """The emission one ``python_batch_worker.py`` record reports; with
+    ``canonical``, also the canonical hash the worker computed (``--canonical``),
+    which the record must carry."""
+    return Emission(
+        record["returncode"],
+        record["has_output"],
+        record["sha256"],
+        record["stderr"],
+        record["canonical_sha"] if canonical else None,
+        record["canonical_error"] if canonical else None,
+    )
+
+
+def is_end_emission(emission: Emission) -> bool:
+    """True when `emission` is the emitter reporting that its config list has
+    ended (the index is past the last config), not a config failing."""
     return (
         emission.returncode != 0
         and not emission.has_output
@@ -661,15 +757,17 @@ def _is_end_emission(emission: Emission) -> bool:
 
 
 def classify_emissions(
-    c_emission: Emission, p_emission: Emission
+    c_emission: Emission, p_emission: Emission, compare_refusals: bool = False
 ) -> tuple[str, tuple[str | None, str | None] | None]:
-    """Classify two reduced results without retaining their raw IR."""
+    """Classify two reduced results without retaining their raw IR. With
+    ``compare_refusals``, a config both engines reject is REFUSAL_MISMATCH
+    unless both report the same refusal message."""
     # A timed-out emitter is a harness failure, never a clean spec rejection.
     # Fail the family immediately rather than paying the timeout again for every
     # remaining config and making the gate look hung.
     if c_emission.returncode == 124 or p_emission.returncode == 124:
         return "TIMEOUT", None
-    if _is_end_emission(c_emission) and _is_end_emission(p_emission):
+    if is_end_emission(c_emission) and is_end_emission(p_emission):
         return "END", None
     if c_emission.returncode < 0 or p_emission.returncode < 0:
         return "CRASH", None
@@ -685,9 +783,16 @@ def classify_emissions(
         if c_emission.returncode == 0 and p_emission.returncode == 0:
             return "IDENTICAL", None
         if c_emission.returncode > 0 and p_emission.returncode > 0:
+            if compare_refusals and not _same_refusal(c_emission, p_emission):
+                return "REFUSAL_MISMATCH", None
             return "BOTH_REJECTED", None
         return "ASYMMETRIC", None
     return "ASYMMETRIC", (c_emission.output_sha, p_emission.output_sha)
+
+
+def _same_refusal(c_emission: Emission, p_emission: Emission) -> bool:
+    native = native_refusal_message(c_emission)
+    return native is not None and native == python_refusal_message(p_emission)
 
 
 # Per-config verdicts that force the family to DRIFT: the engines disagreed, or
@@ -697,12 +802,15 @@ def classify_emissions(
 DRIFT_VERDICTS = (
     "MISMATCH",
     "ASYMMETRIC",
+    "REFUSAL_MISMATCH",
     "STRUCT_DRIFT",
     "CANON_ERROR",
     "CRASH",
     "TIMEOUT",
 )
 TERMINAL_VERDICTS = ("CRASH", "TIMEOUT")
+# Verdicts whose config record keeps both engines' stderr as evidence.
+_ERROR_RECORDING_VERDICTS = (*TERMINAL_VERDICTS, "REFUSAL_MISMATCH")
 
 
 class FamilyStatus(NamedTuple):
@@ -751,9 +859,9 @@ def _config_record(
         "c_rc": c_emission.returncode,
         "p_rc": p_emission.returncode,
     }
-    if verdict in TERMINAL_VERDICTS and c_emission.error:
+    if verdict in _ERROR_RECORDING_VERDICTS and c_emission.error:
         record["c_error"] = c_emission.error
-    if verdict in TERMINAL_VERDICTS and p_emission.error:
+    if verdict in _ERROR_RECORDING_VERDICTS and p_emission.error:
         record["p_error"] = p_emission.error
     return record
 
@@ -766,20 +874,20 @@ def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) 
     if len(emissions) == limit:
         return True
     return (
-        _is_end_emission(tail)
+        is_end_emission(tail)
         or tail.returncode < 0
         or tail.returncode == 124
         or (mode != "ll" and mode_unsupported(tail))
     )
 
 
-def _run_family_hashed(name, binpath, mode, canonical, src_dir):
+def _run_family_hashed(name, binpath, mode, canonical, src_dir, flavor=None):
     """Run both emitters once when comparison needs hashes, not raw text."""
     limit = config_limit(name)
     emitter_workers = min(2, available_cpus())
     with ThreadPoolExecutor(max_workers=emitter_workers) as emitters:
         c_future = emitters.submit(
-            _run_native_configs, binpath, range(limit), mode, canonical
+            _run_native_configs, binpath, range(limit), mode, canonical, flavor=flavor
         )
         p_future = emitters.submit(
             _run_python_batch,
@@ -788,6 +896,7 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             mode,
             src_dir=src_dir,
             canonical=canonical,
+            flavor=flavor,
         )
         c_batch = c_future.result()
         p_batch = p_future.result()
@@ -827,26 +936,28 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             mode_unsupported(c_emission) or mode_unsupported(p_emission)
         ):
             return configs, range_drift, True, None
-        c_end = _is_end_emission(c_emission)
-        p_end = _is_end_emission(p_emission)
+        c_end = is_end_emission(c_emission)
+        p_end = is_end_emission(p_emission)
         if c_end and p_end:
             break
         if c_end or p_end:
             range_drift = {"idx": idx, "c_end": c_end, "p_end": p_end}
             break
-        verdict, shas = classify_emissions(c_emission, p_emission)
-        if canonical and verdict == "MISMATCH":
-            if c_emission.canonical_error or p_emission.canonical_error:
-                verdict = "CANON_ERROR"
-            elif c_emission.canonical_sha == p_emission.canonical_sha:
+        verdict, shas = classify_emissions(
+            c_emission, p_emission, name in REFUSAL_COMPARED_FAMILIES
+        )
+        if canonical and _canonical_form_missing(c_emission, p_emission):
+            # Equal bytes do not excuse it: there is no canonical hash to
+            # compare, record or check.
+            verdict = "CANON_ERROR"
+        elif canonical and verdict == "MISMATCH":
+            if c_emission.canonical_sha == p_emission.canonical_sha:
                 verdict = "CANON_EQUAL"
             else:
                 verdict = "STRUCT_DRIFT"
-        ref_sha = (
-            p_emission.canonical_sha or p_emission.output_sha
-            if canonical
-            else p_emission.output_sha
-        )
+        # Without a canonical form there is no canonical hash to record or
+        # check; the config then reads as missing, never as its raw bytes.
+        ref_sha = p_emission.canonical_sha if canonical else p_emission.output_sha
         configs.append(
             _config_record(
                 idx,
@@ -862,7 +973,12 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
     return configs, range_drift, False, None
 
 
-def run_family(name, archive, mode, canonical=False, src_dir=None):
+def _canonical_form_missing(*emissions: Emission) -> bool:
+    """True when any of ``emissions`` has output and no canonical form."""
+    return any(e.has_output and e.canonical_error for e in emissions)
+
+
+def run_family(name, archive, mode, canonical=False, src_dir=None, flavor=None):
     if src_dir is None:
         src_dir = PARITY
     binpath, cerr = compile_c(name, archive, src_dir=src_dir)
@@ -874,7 +990,7 @@ def run_family(name, archive, mode, canonical=False, src_dir=None):
             "configs": [],
         }
     configs, range_drift, unsupported, batch_error = _run_family_hashed(
-        name, binpath, mode, canonical, src_dir
+        name, binpath, mode, canonical, src_dir, flavor
     )
     if batch_error:
         return {
@@ -916,11 +1032,13 @@ GATE_PASS = {
     "GREEN": "every sampled config agreed -- identical bytes, or both engines "
     "rejected the spec",
     "CANON_ONLY": "differs only in incidental SSA-id numbering",
-    # ll mode -- the gating mode -- never yields this; only the non-gating
-    # ir/verify modes can, where an emitter that predates the mode arg is a
-    # known coverage gap rather than a parity failure.
-    "MODE_UNSUPPORTED": "emitter does not accept this mode yet",
+    # ll mode never yields this; only the ir/verify modes can, for a family
+    # whose emitter refuses the mode because its output has no such form. It
+    # passes, compared nothing, and is listed by uncompared_families().
+    "MODE_UNSUPPORTED": "the emitter refuses this mode, so nothing was compared",
 }
+# The gate-passing statuses that compared no bytes.
+GATE_PASS_UNCOMPARED = ("MODE_UNSUPPORTED",)
 GATE_FAIL = {
     "DRIFT": "configs diverge between the engines",
     "RANGE_DRIFT": "the engines disagree about how many configs exist",
@@ -989,6 +1107,29 @@ def gate_verdict(results):
     return (1 if failures else 0), failures
 
 
+class UncomparedFamily(NamedTuple):
+    """One family the gate passes although it compared nothing, and why."""
+
+    family: str
+    status: str
+    reason: str
+
+
+def uncompared_families(results) -> list[UncomparedFamily]:
+    """The families that passed without comparing anything.
+
+    The gate lets them pass, so the summary prints them in their own block,
+    where a reader cannot mistake them for compared families.
+    """
+    return [
+        UncomparedFamily(
+            r.get("family", "<unnamed>"), r["status"], GATE_PASS[r["status"]]
+        )
+        for r in results
+        if r.get("status") in GATE_PASS_UNCOMPARED
+    ]
+
+
 def _print_family_result(result: dict) -> None:
     """Print one completed family without affecting dashboard ordering."""
     tag = result["status"]
@@ -1012,20 +1153,27 @@ def _print_family_result(result: dict) -> None:
                         print(f"          {side}: {config[side]}", flush=True)
 
 
-def _default_family_workers(family_count: int, _mode: str) -> int:
-    """Size the outer pool from the child processes active per family."""
-    children_per_family = 2
+# Child processes one pooled task keeps busy: a parity comparison runs the
+# native and the Python emitter side by side, a golden run only the Python one.
+PARITY_CHILDREN_PER_TASK = 2
+GOLDEN_CHILDREN_PER_TASK = 1
+
+
+def _default_family_workers(task_count: int, children_per_task: int) -> int:
+    """Size the outer pool from the child processes each task keeps busy."""
     return min(
-        family_count,
-        max(1, available_cpus() // children_per_family),
+        task_count,
+        max(1, available_cpus() // children_per_task),
         8,
     )
 
 
-def python_reference_shas(name, mode, canonical, src_dir):
+def python_reference_shas(name, mode, canonical, src_dir, flavor=None):
     """One family's Python reference hashes, {config index: sha}, without the
-    C++ engine: what a golden records. Returns (shas, error); a family whose
-    emitter does not accept the mode yields ({}, None)."""
+    C++ engine: what a golden records, for LLVM flavor ``flavor``. Returns
+    (shas, error); a family whose emitter does not accept the mode yields
+    ({}, None). With ``canonical``, an output without a canonical form is an
+    error: no hash stands in for it."""
     limit = config_limit(name)
     batch = _run_python_batch(
         name,
@@ -1034,6 +1182,7 @@ def python_reference_shas(name, mode, canonical, src_dir):
         src_dir=src_dir,
         canonical=canonical,
         digest_in_worker=True,
+        flavor=flavor,
     )
     if batch.error:
         return {}, f"Python batch failed: {batch.error}"
@@ -1045,38 +1194,45 @@ def python_reference_shas(name, mode, canonical, src_dir):
     for idx, emission in enumerate(emissions):
         if mode != "ll" and mode_unsupported(emission):
             return {}, None
-        if _is_end_emission(emission):
+        if is_end_emission(emission):
             break
         if emission.returncode < 0 or emission.returncode == 124:
             return shas, f"config {idx}: {emission.error or 'crashed'}"
-        if emission.has_output:
-            shas[str(idx)] = (
-                emission.canonical_sha or emission.output_sha
-                if canonical
-                else emission.output_sha
-            )
+        if not emission.has_output:
+            continue
+        if canonical and emission.canonical_error:
+            return shas, f"config {idx}: no canonical form: {emission.canonical_error}"
+        shas[str(idx)] = emission.canonical_sha if canonical else emission.output_sha
     return shas, None
 
 
-def python_reference_families(families, mode, canonical, family_workers):
-    """`python_reference_shas` for every family, concurrently. Returns
-    ({family: {idx: sha}}, [(family, error)])."""
-    shas, errors = {}, []
+def python_reference_families(families, flavors, mode, canonical, family_workers):
+    """`python_reference_shas` for every (family, flavor) pair, in one pool:
+    no flavor waits for another flavor's slowest family. Returns
+    {flavor: ({family: {idx: sha}}, [(family, error)])} for each of
+    ``flavors``."""
+    results = {flavor: ({}, []) for flavor in flavors}
     if not families:
-        return shas, errors
+        return results
     with ThreadPoolExecutor(max_workers=family_workers) as pool:
         futures = {
-            pool.submit(python_reference_shas, name, mode, canonical, src_dir): name
+            pool.submit(
+                python_reference_shas, name, mode, canonical, src_dir, flavor
+            ): (name, flavor)
             for name, src_dir in families
+            for flavor in flavors
         }
         for future in as_completed(futures):
-            name = futures[future]
+            name, flavor = futures[future]
+            shas, errors = results[flavor]
             family_shas, error = future.result()
             if error:
                 errors.append((name, error))
             if family_shas:
                 shas[name] = family_shas
-    return shas, sorted(errors)
+    for _shas, errors in results.values():
+        errors.sort()
+    return results
 
 
 def _run_families(
@@ -1085,6 +1241,7 @@ def _run_families(
     mode: str,
     canonical: bool = False,
     family_workers: int | None = None,
+    flavor: str | None = None,
 ) -> list[dict]:
     """Run independent families concurrently and return discovery order.
 
@@ -1096,7 +1253,9 @@ def _run_families(
         return []
     if family_workers is None:
         # Cap concurrency to avoid excessive captured-IR memory.
-        family_workers = _default_family_workers(len(families), mode)
+        family_workers = _default_family_workers(
+            len(families), PARITY_CHILDREN_PER_TASK
+        )
     ordered: dict[int, dict] = {}
     with ThreadPoolExecutor(max_workers=family_workers) as pool:
         futures = {
@@ -1107,6 +1266,7 @@ def _run_families(
                 mode,
                 canonical=canonical,
                 src_dir=src_dir,
+                flavor=flavor,
             ): index
             for index, (name, src_dir) in enumerate(families)
         }
@@ -1118,18 +1278,6 @@ def _run_families(
 
 
 def main():
-    """Run the CLI without leaking its pinned flavor to in-process callers."""
-    previous_flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
-    try:
-        return _main()
-    finally:
-        if previous_flavor is None:
-            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
-        else:
-            os.environ["ROCKE_LLVM_FLAVOR"] = previous_flavor
-
-
-def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="ll", choices=["ll", "ir", "verify"])
     ap.add_argument(
@@ -1173,7 +1321,10 @@ def _main():
         "--jobs",
         type=int,
         default=0,
-        help="families to compare concurrently (default: min(8, available CPUs))",
+        help="emitter tasks to run concurrently: families for a parity run, "
+        "(family, flavor) pairs for --python-only (default: at most 8, and "
+        "no more than the available CPUs hold at one or two emitter processes "
+        "per task)",
     )
     ap.add_argument(
         "--record-golden",
@@ -1194,10 +1345,11 @@ def _main():
     ap.add_argument(
         "--flavor",
         default="",
-        help="LLVM flavor to emit for and to record / check under (llvm20, "
-        "llvm22, llvm23); default ROCKE_LLVM_FLAVOR, else the host's flavor. "
-        "--python-only --mode ll takes a comma-separated list and handles "
-        "each flavor in turn",
+        help="LLVM flavor to emit for and to record / check under "
+        f"({', '.join(_llvm_flavors())}); default ROCKE_LLVM_FLAVOR, else the host's "
+        "flavor. "
+        "--python-only --mode ll takes a comma-separated list, or 'all' for "
+        "every flavor rocke qualifies, and emits for all of them in one pool",
     )
     ap.add_argument(
         "--golden-file",
@@ -1212,11 +1364,23 @@ def _main():
         "Python reference hashes, and the flavor is a lowering argument, so "
         "any host can record or check every flavor this way.",
     )
+    add_shard_argument(
+        ap,
+        help="with --python-only --check-golden: check only the families of this "
+        "CI shard, from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and "
+        "GTEST_TOTAL_SHARDS (rocke.tests.ci_shard); without either, every family",
+        list_help="write the cases the CI shards split, keyed by family, to this path "
+        "instead of checking them",
+    )
     args = ap.parse_args()
     if args.record_golden and args.check_golden:
         ap.error("--record-golden and --check-golden are exclusive")
     if args.python_only and not (args.record_golden or args.check_golden):
         ap.error("--python-only only runs the golden record / check")
+    if args.shard_from_gtest_env and not (args.python_only and args.check_golden):
+        ap.error(f"{ACTIVATION_FLAG} needs --python-only --check-golden")
+    shard = shard_from_arguments(ap, args)
+    listing = list_keys_path(args)
 
     global PY_REF_ROOT, SHIM_DIR
     if args.pyroot:
@@ -1227,7 +1391,10 @@ def _main():
 
     golden = args.record_golden or args.check_golden
     kind = golden_kind(args.mode, args.canonical) if golden else None
-    flavors = [f for f in args.flavor.split(",") if f.strip()] or [""]
+    if args.flavor == "all":
+        flavors = list(_llvm_flavors())
+    else:
+        flavors = [f for f in args.flavor.split(",") if f.strip()] or [""]
     if len(flavors) > 1 and not (args.python_only and kind == LL):
         ap.error("several --flavor values need --python-only --mode ll")
 
@@ -1240,6 +1407,9 @@ def _main():
         kept = [(n, d) for n, d in fams if n not in excluded]
         if fams and not kept:
             # The caller compares these families in another lane.
+            if listing is not None:
+                ShardKeyListing({}).write(listing)
+                return 0
             print(
                 f"[diff] every selected family is excluded ({args.exclude}); nothing to do"
             )
@@ -1248,23 +1418,35 @@ def _main():
     # A filtered run records or checks only the families it ran.
     scope = [name for name, _ in fams] if (args.only or args.exclude) else None
 
-    jobs = args.jobs or _default_family_workers(len(fams), args.mode)
     if args.python_only:
         if not fams:
             # Checking nothing would print GOLDEN OK; recording nothing would
             # empty the section. A typo in --only must not do either.
             print(f"\nNO_FAMILIES: {GATE_FAIL['NO_FAMILIES']}")
             return 1
+        if listing is not None:
+            _shard_key_listing(args, kind, flavors, fams).write(listing)
+            return 0
+        run_fams = fams
+        if args.shard_from_gtest_env:
+            print(header_line(shard))
+        if shard is not None:
+            print(shard.split_line(name for name, _ in fams))
+            run_fams = [(name, d) for name, d in fams if shard.owns(name)]
         status = 0
-        for requested in flavors:
-            flavor = pin_llvm_flavor(requested)
+        selected = list(dict.fromkeys(selected_llvm_flavor(f) for f in flavors))
+        jobs = args.jobs or _default_family_workers(
+            len(run_fams) * len(selected), GOLDEN_CHILDREN_PER_TASK
+        )
+        references = python_reference_families(
+            run_fams, selected, args.mode, args.canonical, jobs
+        )
+        for flavor in selected:
             print(
-                f"mode={args.mode}  flavor={flavor}  families={len(fams)}  "
+                f"mode={args.mode}  flavor={flavor}  families={len(run_fams)}  "
                 f"jobs={jobs}  python-only"
             )
-            cur, errors = python_reference_families(
-                fams, args.mode, args.canonical, jobs
-            )
+            cur, errors = references[flavor]
             if errors:
                 print("\n=== PYTHON REFERENCE FAILURES ===")
                 for family, error in errors:
@@ -1274,12 +1456,12 @@ def _main():
                 )
                 status = 1
                 continue
-            status |= _golden_step(args, kind, flavor, cur, scope, [], fams)
+            status |= _golden_step(args, kind, flavor, cur, scope, [], fams, shard)
         return status
 
     # A golden is per flavor, so its runs always pin one; a plain parity run
     # leaves each emitter to resolve its own unless --flavor is given.
-    flavor = pin_llvm_flavor(flavors[0]) if (golden or args.flavor) else "host"
+    flavor = selected_llvm_flavor(flavors[0]) if (golden or args.flavor) else None
 
     archive = Path(args.archive)
     if not archive.exists():
@@ -1311,9 +1493,10 @@ def _main():
             "(tools/check_byte_identity.py does), or pass --library-archive"
         )
 
+    jobs = args.jobs or _default_family_workers(len(fams), PARITY_CHILDREN_PER_TASK)
     print(
-        f"mode={args.mode}  flavor={flavor}  families={len(fams)}  jobs={jobs}  "
-        f"archive={archive}"
+        f"mode={args.mode}  flavor={flavor or 'host'}  families={len(fams)}  "
+        f"jobs={jobs}  archive={archive}"
     )
     print(f"engine build-id: {archive_build_id(archive)}")
     if LIBRARY_ARCHIVE is not None:
@@ -1324,6 +1507,7 @@ def _main():
         args.mode,
         canonical=args.canonical,
         family_workers=jobs,
+        flavor=flavor,
     )
 
     Path(args.json).write_text(json.dumps(results, indent=2))
@@ -1335,6 +1519,11 @@ def _main():
     for k in sorted(by):
         print(f"  {k:16s} {by[k]}")
     exit_code, failures = gate_verdict(results)
+    uncompared = uncompared_families(results)
+    if uncompared:
+        print("\n=== NOT COMPARED (passes; no bytes compared) ===")
+        for family, status, reason in uncompared:
+            print(f"  {status:16s} {family}: {reason}")
     if failures:
         print("\n=== GATE FAILURES ===")
         for family, status, reason in failures:
@@ -1342,10 +1531,29 @@ def _main():
     print(f"\ndashboard: {args.json}")
 
     if golden:
+        uncanonical = _canon_error_configs(results)
+        if args.record_golden and uncanonical:
+            # The python-only record refuses these too: a config without a
+            # canonical form has no hash to bless.
+            print(
+                "\nnothing recorded: output with no canonical form: "
+                + ", ".join(uncanonical)
+            )
+            return 1
         return _golden_step(
             args, kind, flavor, collect_ref_shas(results), scope, failures, fams
         )
     return exit_code
+
+
+def _canon_error_configs(results) -> list[str]:
+    """``family[idx]`` of every CANON_ERROR config in a dashboard."""
+    return [
+        f"{r['family']}[{c['idx']}]"
+        for r in results
+        for c in r.get("configs", [])
+        if c.get("verdict") == "CANON_ERROR"
+    ]
 
 
 def _explicit_golden_file(args) -> bool:
@@ -1368,9 +1576,9 @@ def _golden_files(args, fams) -> dict[Path, set[str]]:
 def _misrouted_families(kind, flavor, fams) -> list[str]:
     """Run families blessed in a golden file other than the one anchoring them.
 
-    Checked against the wrong file, a family's configs read as NEW
-    (informational) and the check prints GOLDEN OK; its blessings in the
-    other file name the misrouting instead."""
+    Checked against the wrong file, a family's configs read as new, which
+    fails the check without naming the cause; its blessings in the other file
+    name the misrouting instead."""
     sections = {
         path: GoldenStore.load(path).section(kind, flavor)
         for path in (GOLDEN_FILE, LIB_GOLDEN_FILE)
@@ -1386,9 +1594,11 @@ def _misrouted_families(kind, flavor, fams) -> list[str]:
     return sorted(found)
 
 
-def _golden_step(args, kind, flavor, cur, scope, failures, fams):
+def _golden_step(args, kind, flavor, cur, scope, failures, fams, shard=None):
     """Record `cur` into the golden, or check it against the golden, one
-    golden file at a time."""
+    golden file at a time. `fams` are the families the run selected; with a
+    `shard`, `cur` holds only the families that shard owns, and only those are
+    checked."""
     files = _golden_files(args, fams)
     if args.check_golden and len(files) > 1:
         sections = {
@@ -1399,7 +1609,8 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams):
             print("\nGOLDEN CONFLICT: blessed in two golden files: " + ", ".join(twice))
             return 1
     if args.check_golden and not _explicit_golden_file(args):
-        misrouted = _misrouted_families(kind, flavor, fams)
+        owned = [f for f in fams if shard is None or shard.owns(f[0])]
+        misrouted = _misrouted_families(kind, flavor, owned)
         if misrouted:
             print("\nGOLDEN MISROUTED: blessed outside their golden file:")
             for line in misrouted:
@@ -1408,18 +1619,51 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams):
     status = 0
     for golden_file, names in files.items():
         file_scope = None if scope is None else [f for f in scope if f in names]
-        if file_scope == []:
-            continue
         file_cur = {f: v for f, v in cur.items() if f in names}
+        store = GoldenStore.load(golden_file)
+        if shard is not None:
+            file_scope = _shard_scope(shard, store, file_cur, file_scope)
+        if file_scope == []:
+            if shard is not None:
+                print(f"\nno family of {golden_file} falls in this shard")
+            continue
         status |= _golden_step_file(
-            args, kind, flavor, golden_file, file_cur, file_scope, failures
+            args, kind, flavor, golden_file, store, file_cur, file_scope, failures
         )
     return status
 
 
-def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
-    """Record `cur` into `golden_file`, or check it against that file."""
-    store = GoldenStore.load(golden_file)
+def _shard_key_listing(args, kind, flavors, fams) -> ShardKeyListing:
+    """The cases a sharded golden check splits, keyed by family as the shards
+    split them: each blessed config of each selected family at each flavor the
+    run checks. A family with no blessed config is one case."""
+    key_of_case = {}
+    files = _golden_files(args, fams)
+    for flavor in dict.fromkeys(selected_llvm_flavor(f) for f in flavors):
+        for golden_file, names in files.items():
+            section = GoldenStore.load(golden_file).section(kind, flavor)
+            for family in sorted(names):
+                configs = section.get(family) or {"": ""}
+                for config in configs:
+                    key_of_case[f"{family}/{flavor}/{config}"] = family
+    return ShardKeyListing(key_of_case)
+
+
+def _shard_scope(
+    shard: Shard, store: GoldenStore, cur: dict, scope: list[str] | None
+) -> list[str]:
+    """The families of `store` a sharded check compares: those `shard` owns
+    among `scope`, or, with no `scope`, among every family the file names or
+    the run produced. The shards of one run thus split exactly what an
+    unsharded check compares."""
+    if scope is None:
+        scope = store.families() | set(cur)
+    return sorted(family for family in scope if shard.owns(family))
+
+
+def _golden_step_file(args, kind, flavor, golden_file, store, cur, scope, failures):
+    """Record `cur` into `golden_file` (loaded as `store`), or check it
+    against that file."""
     where = f"{kind}[{flavor}]" if kind == LL else kind
     if args.record_golden:
         # The golden records the PYTHON reference sha per config, which is the
@@ -1453,8 +1697,15 @@ def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
     blessed = store.section(kind, flavor)
     if not blessed:
         print(
-            f"\nNO GOLDEN for {where}. Bless first: run_diff.py --mode {args.mode}"
-            f"{' --canonical' if args.canonical else ''} --flavor {flavor} --record-golden"
+            f"\nNO GOLDEN for {where} in {golden_file}.\n" + rerecord_hint(GOLDEN_NAME)
+        )
+        return 1
+    stale = store.stale_fingerprints(scope)
+    if stale:
+        print(
+            f"\nGOLDEN FINGERPRINT STALE ({golden_file}): {', '.join(stale)}\n"
+            "  their hashes changed without a re-record (a hand edit or a merge).\n"
+            + rerecord_hint(GOLDEN_NAME, stale)
         )
         return 1
     result = compare(blessed, cur, families=scope)
@@ -1463,17 +1714,23 @@ def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
     print(f"  UNBLESSED CHANGE: {len(result.changed)}")
     print(f"  MISSING (gone)  : {len(result.missing)}")
     print(f"  NEW (unblessed) : {len(result.new)}")
-    for fam, idx in (result.changed + result.missing)[:30]:
+    for fam, idx in (result.changed + result.missing + result.new)[:30]:
         print(f"    {fam}[{idx}]")
-    if not result.ok:
+    if result.changed or result.missing:
+        drifting = {family for family, _ in result.changed + result.missing}
         print(
-            "\nGOLDEN MISMATCH: emitted output changed vs the committed "
-            "anchor. If this change is expected & reviewed, re-bless with "
-            "--record-golden; otherwise you introduced a regression."
+            "\nGOLDEN MISMATCH: emitted output changed vs the committed anchor; "
+            "unless the change is intended, it is a regression.\n"
+            + rerecord_hint(GOLDEN_NAME, drifting)
         )
-        return 1
     if result.new:
-        print("\nNew configs not in golden (informational; re-bless to add).")
+        print(
+            "\nGOLDEN UNBLESSED: configs with output and no blessed hash are not "
+            "checked; bless them.\n"
+            + rerecord_hint(GOLDEN_NAME, {family for family, _ in result.new})
+        )
+    if not result.ok:
+        return 1
     print("GOLDEN OK")
     return 0
 

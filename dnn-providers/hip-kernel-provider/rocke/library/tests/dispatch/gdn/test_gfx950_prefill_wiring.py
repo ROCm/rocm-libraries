@@ -11,11 +11,13 @@ GPU here -- this asserts the request maps onto the right spec, tile and grid.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
+from rocke.tests.bool_flags import bool_flag_reason
 
 from dispatch.gdn import (
-    GDN_PREFILL_REGISTRY,
     GdnPrefillRequest,
     dispatch_gdn_prefill,
     gdn_prefill_candidates,
@@ -77,7 +79,6 @@ def test_dispatched_prep_matches_the_builder_prep_spec():
     """
     import dataclasses
 
-    pytest.importorskip("torch", reason="builder module imports torch")
     from builders.gfx950.kda.kda_chunk_split import prep_spec_of
     from dispatch.gdn.prefill_gfx950 import _prep_spec, _scan_spec
 
@@ -240,20 +241,28 @@ def test_non_int_head_dim_is_rejected(algorithm, field, bad):
 @pytest.mark.parametrize("bad", ["false", 1, 0, None])
 def test_non_bool_state_flag_is_rejected(algorithm, field, bad):
     """``bool("false")`` used to select the kernel that reads h0."""
-    with pytest.raises(ValueError, match=f"{field} must be a bool"):
+    with pytest.raises(ValueError, match=re.escape(bool_flag_reason(field, bad))):
         dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
 
 
+# Values of a field that takes an int, none of them an int.
+_NOT_INTS = ("32", "1024", 32.0, True, [32])
+
+
 @pytest.mark.parametrize("algorithm", ["chunk_prep", "chunk_scan"])
-@pytest.mark.parametrize("field", ["seqlen", "chunk_size"])
-@pytest.mark.parametrize("bad", [None, "32", "1024", 32.0, True, [32]])
+@pytest.mark.parametrize(
+    "bad, field",
+    # chunk_size=None is a valid request (the tuned default); seqlen=None is not.
+    [
+        (None, "seqlen"),
+        *((bad, field) for field in ("seqlen", "chunk_size") for bad in _NOT_INTS),
+    ],
+)
 def test_non_int_seqlen_and_chunk_are_rejected_by_name(algorithm, field, bad):
     """``num_chunks`` divides ``seqlen`` by the chunk, and the capability
     prefilter reads it through ``dims()`` before any request check runs, so a
     non-int ``seqlen`` / ``chunk_size`` raised a bare ``TypeError`` from the
     arithmetic (``None % 32``, ``"1024" % 32``) instead of the named error."""
-    if field == "chunk_size" and bad is None:
-        pytest.skip("chunk_size=None means the tuned default")
     with pytest.raises(ValueError, match=f"{field} must be an int"):
         dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
 
@@ -280,13 +289,10 @@ def test_split_tile_agrees_with_the_builder_it_mirrors():
     so they compare the copy to the copy: change the builder's geometry and they
     still pass while dispatch ships the stale numbers. This reads both sources.
     """
-    # the builder module imports torch at module scope; skip rather than error
-    # where torch is absent -- this is a source-agreement check, not a kernel run
-    pytest.importorskip("torch", reason="builders.kda_chunk_split imports torch")
 
     from builders.gfx950.kda.kda_chunk_split import aligned_split_specs
-    from kernels.gfx950.kda_chunkwise import KdaTileSpec
     from dispatch.gdn.prefill_gfx950 import _SPLIT_TILE
+    from kernels.gfx950.kda_chunkwise import KdaTileSpec
 
     for vs, listed in sorted(_SPLIT_TILE.items()):
         scan, _ = aligned_split_specs(vs)

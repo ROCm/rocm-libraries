@@ -19,11 +19,13 @@ The GPU probe class is skipped unless run on a gfx1250 device.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
 # Subprocess `-m` runs (rocke.*, kernels.*, builders.*) resolve through the
 # editable-installed rocke + library packages; no PYTHONPATH wiring needed
@@ -677,11 +679,13 @@ class TestGfx1250Qwen3KvCache(unittest.TestCase):
         self.assertNotIn("cvt.scalef32.pk.f32.bf8", ll)
 
     def test_kv_append_rope_lowers_for_bf16_fp8_bf8_storage(self):
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.core.lower_llvm import llvm_f32_literal, lower_kernel_to_llvm
+        from rocke.helpers.quant import quant_max_abs
         from rocke.instances.gfx1250.qwen3_kv_cache import (
             Qwen3KvAppendRopeSpec,
             build_qwen3_kv_append_rope,
         )
+        from rocke.tests.engines import available_engines, lower_with_engine
 
         expectations = {
             "bf16": "store bfloat",
@@ -689,22 +693,49 @@ class TestGfx1250Qwen3KvCache(unittest.TestCase):
             "bf8e5m2": "llvm.amdgcn.cvt.pk.bf8.f32",
         }
         for kv_storage_dtype, needle in expectations.items():
-            ll = lower_kernel_to_llvm(
-                build_qwen3_kv_append_rope(
-                    Qwen3KvAppendRopeSpec(kv_storage_dtype=kv_storage_dtype),
-                    arch="gfx1250",
-                ),
+            kernel = build_qwen3_kv_append_rope(
+                Qwen3KvAppendRopeSpec(kv_storage_dtype=kv_storage_dtype),
                 arch="gfx1250",
             )
+            ll = lower_kernel_to_llvm(kernel, arch="gfx1250")
             self.assertIn("rocke_gfx1250_qwen3_kv_append_rope", ll)
             self.assertIn("fsub float", ll)
             self.assertIn("fadd float", ll)
             self.assertIn(needle, ll)
+            if kv_storage_dtype == "bf16":
+                continue
+            # The conversions do not saturate, so each of the K and V stores
+            # converts ``isnan(x / scale) ? x / scale : clamp(x / scale)``,
+            # clamped to the largest value of gfx1250's encoding.
+            bound = quant_max_abs(kv_storage_dtype, arch="gfx1250")
+            clamped_convert = re.compile(
+                r"  %(fdiv_\d+) = fdiv float %\w+, %[kv]_scale\n"
+                r"  %(fmax_\d+) = call float @llvm\.maxnum\.f32\(float "
+                + re.escape(llvm_f32_literal(-bound))
+                + r", float %\1\)\n"
+                r"  %(fmin_\d+) = call float @llvm\.minnum\.f32\(float "
+                + re.escape(llvm_f32_literal(bound))
+                + r", float %\2\)\n"
+                r"  %(fcmp_\d+) = fcmp uno float %\1, %\1\n"
+                r"  %(sel_\d+) = select i1 %\4, float %\1, float %\3\n"
+                r"  %\w+ = call i32 @" + re.escape(needle) + r"\(float %\5, "
+            )
+            for engine in available_engines():
+                text = lower_with_engine(kernel, "gfx1250", engine=engine)
+                self.assertEqual(
+                    len(clamped_convert.findall(text)),
+                    2,
+                    f"{engine} engine, {kv_storage_dtype}: K and V must each "
+                    "convert the NaN-keeping clamp of x / scale",
+                )
 
 
 @unittest.skipUnless(
     _ARCH == "gfx1250",
-    f"gfx1250 WMMA GPU probe; running on {_ARCH!r} (needs a gfx1250 device)",
+    arch_skip_reason(
+        ("gfx1250",),
+        f"gfx1250 WMMA GPU probe; running on {_ARCH!r} (needs a gfx1250 device)",
+    ),
 )
 class TestGfx1250Gpu(unittest.TestCase):
     """GPU probe: build + numerically verify WMMA GEMM / attention on hardware."""

@@ -3,7 +3,7 @@
 
 """On-device numeric checks for the KDA gate kind of the decode kernel.
 
-Scored against the same whole-tensor fp32 reference the GDN mode uses, with the
+Scored against the same whole-array float64 reference the GDN mode uses, with the
 per-channel gate selected. The reference shares no algebra with the kernel --
 no tiling, no warp structure, no cross-lane reductions -- so agreement is
 evidence about the algorithm rather than a restatement of the implementation.
@@ -15,8 +15,8 @@ recurrent state in place; checking only the output would let a corrupted state
 write ship silently, because nothing reads the state back until the next decode
 step.
 
-These lanes need a real gfx950 and ROCm torch, so they are marked ``gpu`` and
-skipped elsewhere. The spec rules and the reference are covered by CPU-only
+These lanes need a real gfx950, so they are marked ``gpu`` and skipped
+elsewhere. The spec rules and the reference are covered by CPU-only
 tests so this family still contributes coverage without a device.
 """
 
@@ -25,33 +25,24 @@ from __future__ import annotations
 import dataclasses as dc
 
 import pytest
+from rocke.numeric import storage
+from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason
+
+from dispatch.gdn.axes import AUTO_DEFAULTS
 
 ARCH = "gfx950"
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
 pytestmark = pytest.mark.gpu
-
-
-from dispatch.gdn.axes import AUTO_DEFAULTS  # noqa: E402
 
 # Every KDA auto tile (plain and fused cases), each built here on the plain path.
 _KDA_AUTO_TILES = sorted(
     {d.tile for (gate, _, _), d in AUTO_DEFAULTS.items() if gate == "kda"}
 )
 
-
-def _device_is_gfx950() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    try:
-        return ARCH in torch.cuda.get_device_properties(0).gcnArchName
-    except Exception:
-        return False
-
-
 requires_gfx950 = pytest.mark.skipif(
-    not _device_is_gfx950(), reason=f"needs a {ARCH} device"
+    probe_device_arch()[0] != ARCH,
+    reason=arch_skip_reason(("gfx950",), f"needs a {ARCH} device"),
 )
 
 
@@ -59,17 +50,21 @@ requires_gfx950 = pytest.mark.skipif(
 def harness():
     from builders.gfx950.gdn.gdn_decode import (
         check,
+        drain,
         gate,
         make_inputs,
         prepare,
+        read_back,
         reference,
     )
 
     return {
         "check": check,
+        "drain": drain,
         "gate": gate,
         "make_inputs": make_inputs,
         "prepare": prepare,
+        "read_back": read_back,
         "reference": reference,
     }
 
@@ -151,9 +146,10 @@ def test_kda_dispatch_launches_the_auto_kernel(
 ):
     """Exercise request → dispatch → selected tile → compile → launch → oracle.
     The tile is the case's at every batch."""
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
     result = dispatch_gdn_decode(
         GdnDecodeRequest(
@@ -178,11 +174,12 @@ def test_kda_dispatch_launches_the_auto_kernel(
     )
 
     inp = harness["make_inputs"](spec, batch)
-    values, _ = harness["prepare"](spec, inp, batch)
+    device_values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
-        launcher(values, config=cfg)
-    torch.cuda.synchronize()
+        launcher(device_values, config=cfg)
+    harness["drain"]()
+    values = harness["read_back"](spec, device_values)
 
     verdict = harness["gate"](spec, inp, values, harness["reference"](spec, inp))
     assert (
@@ -218,7 +215,8 @@ def test_precomputed_decay_agrees_with_fused_gate():
     between them is gate-activation cost and nothing else. Without this, an
     arm-1 number could be comparing two different computations.
     """
-    import torch
+    import numpy as np
+    from rocke.numeric.gated_delta import kda_log_decay
 
     from builders.gfx950.gdn.gdn_decode import launcher_for, make_inputs, run
 
@@ -229,20 +227,23 @@ def test_precomputed_decay_agrees_with_fused_gate():
     inp = make_inputs(fused, batch)
 
     # Precompute exactly what the fused kernel's gate produces, in log domain.
-    gx = inp["a"][:, 0].float() + inp["dt_bias"].float()
-    inner = torch.exp(inp["A_log"].float())[None, :, None] * gx
-    log_decay = fused.lower_bound * torch.sigmoid(inner)  # [B, HV, DK]
-
-    raw_inp = dict(inp)
-    raw_inp["a"] = log_decay[:, None].to(inp["a"].dtype).contiguous()
-    raw_inp["state"] = inp["state"].clone()
+    log_decay = kda_log_decay(
+        storage.decode(inp["a"][:, 0], "bf16"),
+        inp["dt_bias"],
+        inp["A_log"][:, None],
+        fused.lower_bound,
+    )  # [B, HV, DK]
+    raw_inp = dict(inp, a=storage.encode(log_decay[:, None], "bf16"))
 
     out_f, state_f = run(fused, inp, launcher_for(fused), batch)
     out_r, state_r = run(raw, raw_inp, launcher_for(raw), batch)
 
     # Inline: two launches are compared with each other under their own looser
-    # tolerance, not against the fp32 reference. Both comparisons fail on NaN.
+    # tolerance, not against the reference. Both comparisons fail on NaN.
     # bf16 gate logits round differently on the two paths, so this is an
     # agreement check at input precision, not bit-equality.
-    assert (out_f.float() - out_r.float()).abs().max().item() <= 2e-2
-    assert (state_f.float() - state_r.float()).abs().max().item() <= 2e-2
+    def spread(a, b):
+        return np.abs(storage.decode(a, "bf16") - storage.decode(b, "bf16")).max()
+
+    assert spread(out_f, out_r) <= 2e-2
+    assert spread(state_f, state_r) <= 2e-2

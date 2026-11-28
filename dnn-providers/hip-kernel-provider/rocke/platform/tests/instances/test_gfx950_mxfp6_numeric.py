@@ -3,8 +3,15 @@
 """gfx950 MXFP6 non-unity scaled MFMA numerical cases."""
 
 import pytest
+from rocke.tests.arch_marks import arch_specific
+
+pytestmark = pytest.mark.gpu
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it (test_wrong_target_rejection in tests/core/test_gfx950_scaled_mfma.py checks the refusal)",
+)
 @pytest.mark.parametrize("dtype", ["fp6", "bf6"])
 @pytest.mark.parametrize("output", ["bf16", "fp16"])
 @pytest.mark.parametrize("route", ["comgr", "hip"])
@@ -13,6 +20,10 @@ def test_numeric(gfx950_numeric, dtype, output, route, M, N, K):
     gfx950_numeric(dtype, dtype, output, route, M, N, K)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="scaled MFMA exists on gfx950 only; gfx942 refuses it (test_wrong_target_rejection in tests/core/test_gfx950_scaled_mfma.py checks the refusal)",
+)
 @pytest.mark.parametrize(
     "a,b", [("fp6", "fp6"), ("bf6", "bf6"), ("fp6", "bf6"), ("bf6", "fp6")]
 )

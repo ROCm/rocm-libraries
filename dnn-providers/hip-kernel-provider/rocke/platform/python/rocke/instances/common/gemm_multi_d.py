@@ -49,6 +49,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List, Literal, Optional, Tuple
 
+from ...core.dtypes import normalize_dtype
 from ...core.ir import F16, IRBuilder, Type, Value, KernelDef
 from ...helpers.fuse import (
     FusedEpilogue,
@@ -353,6 +354,13 @@ def is_valid_spec(spec: GemmMultiDSpec, arch: str = "gfx950") -> Tuple[bool, str
                 f"D param_name {name!r} collides with a reserved GEMM kernel parameter"
             )
         names.add(name)
+    # The epilogue combines each D with the C tile in C's element type, so a D
+    # of another type has nothing to combine with.
+    if normalize_dtype(spec.d_dtype) != normalize_dtype(spec.base.data.dtype_c):
+        return False, (
+            f"d_dtype {spec.d_dtype!r} must be the C dtype "
+            f"{spec.base.data.dtype_c!r}: each D combines with C in C's type"
+        )
     # Same arch validation as universal GEMM (arch-aware: a gfx950-only
     # warp-tile atom requested for gfx942 is rejected here).
     from .gemm_universal import is_valid_spec as _is_valid_gemm

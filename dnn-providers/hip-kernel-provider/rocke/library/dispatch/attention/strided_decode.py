@@ -17,7 +17,7 @@ from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _explicit_path_supported,
     _strided_3d_specs_from_problem,
-    _tiled_3d_signatures,
+    tiled_3d_signatures,
     _validate_strided_3d_spec,
 )
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange, TorchBinding
@@ -39,13 +39,15 @@ def _dense_layout(req) -> bool:
 
 
 def _dense_as_strided(request, tensors):
-    """Dense-ABI decode tensors as the strided runner's views and metadata.
+    """Dense-ABI decode arrays as the strided runner's views and metadata.
 
     Q/O ``[B,1,Hq,D]`` (or ``[B,Hq,1,D]``) become ``[B,Hq,D]`` views, K/V
     become logical ``[B,Hkv,S,D]`` views of the caller's storage, and every
-    sequence takes one query row and ``seqlen_k`` keys.
+    sequence takes one query row and ``seqlen_k`` keys. The views and the
+    metadata arrays are of the caller's kind (torch tensors or ``DeviceArray``).
     """
-    import torch
+    import numpy as np
+    from rocke.runtime.device_array import array_info, device_values, strided_view
 
     from .bindings import _dense_axis_order, _shape
 
@@ -70,19 +72,27 @@ def _dense_as_strided(request, tensors):
                 f"{name} must have {order.upper()} shape {(batch, *kv_shape)}, "
                 f"got {_shape(tensor, name)}"
             )
-    try:
-        q3 = q.view(batch, heads, dim)
-        out3 = out.view(batch, heads, dim)
-    except RuntimeError as exc:
-        raise ValueError(f"dense decode q/out must be contiguous: {exc}") from exc
+    for name, tensor in (("q", q), ("out", out)):
+        if not array_info(tensor).is_contiguous():
+            raise ValueError(f"dense decode {name} must be contiguous")
+
+    def bhsd_view(tensor):
+        if order == "bhsd":
+            return tensor
+        info = array_info(tensor)
+        b, s, h, d = info.shape
+        sb, ss, sh, sd = info.strides
+        return strided_view(tensor, (b, h, s, d), (sb, sh, ss, sd))
+
+    rows = (batch, heads, dim)
     adapted = {
-        "q": q3,
-        "out": out3,
-        "k": k.transpose(1, 2) if order == "bshd" else k,
-        "v": v.transpose(1, 2) if order == "bshd" else v,
-        "cu_seqlens_q": torch.arange(batch + 1, dtype=torch.int32, device=q.device),
-        "seqused_k": torch.full(
-            (batch,), int(request.seqlen_k), dtype=torch.int32, device=q.device
+        "q": strided_view(q, rows, (heads * dim, dim, 1)),
+        "out": strided_view(out, rows, (heads * dim, dim, 1)),
+        "k": bhsd_view(k),
+        "v": bhsd_view(v),
+        "cu_seqlens_q": device_values(np.arange(batch + 1, dtype=np.int32), like=q),
+        "seqused_k": device_values(
+            np.full(batch, int(request.seqlen_k), np.int32), like=q
         ),
     }
     if "problem" in tensors:
@@ -243,7 +253,7 @@ def make_candidate() -> KernelCandidate:
         select_spec=select,
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
         build=lambda spec, arch: spec.build(arch),
-        signature=lambda spec: _tiled_3d_signatures(
+        signature=lambda spec: tiled_3d_signatures(
             spec.arch, spec.kernel_spec.dtype, strided_kv=True
         )[0],
         grid=lambda spec, req: spec.launch_grid(attention_problem(req)),

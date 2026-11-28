@@ -11,8 +11,7 @@ that has ``library/`` on ``PYTHONPATH`` — no platform edit, no torch.
 ``DV`` live on the manifest because the remote CLI only forwards three
 ints.
 
-The torch builder GPU tests in ``kda_chunk_fused.py`` are a separate
-experimentation lane and are not used here.
+The pack is ``hostpack.py``'s, as in the builders' own GPU tests.
 """
 
 from __future__ import annotations
@@ -20,18 +19,19 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from rocke.helpers.manifest import make_simple_op_manifest
-from rocke.runtime.host_buffers import as_u8_buffer, nbytes, require_numpy
-from rocke.runtime.hip_module import Runtime
-from rocke.runtime.packing import pack_args
+from rocke.numeric import storage
+from rocke.numeric.gated_delta import gated_delta_recurrence
 from rocke.run_manifest import register_manifest_runner
+from rocke.runtime.hip_module import Runtime
+from rocke.runtime.host_buffers import as_u8_buffer, nbytes, require_numpy
+from rocke.runtime.packing import pack_args
+
+from builders.common.kda_host import dense_inputs, initial_state
 
 from .hostpack import (
     PackedFused,
-    bf16_bits_to_f32,
-    make_inputs,
     pack_initial_state,
     pack_v_partitions,
-    ref_token_serial,
     unpack_outputs,
 )
 
@@ -125,7 +125,7 @@ def run_kda_fused_manifest_problem(
     signature = list(manifest["args_signature"])
     threads = int(manifest["threads_per_block"])
 
-    q, k, v, g, beta = make_inputs(B, H, T, head_k, logical_head_v, gate_low=gate_low)
+    q, k, v, g, beta = dense_inputs(B, H, T, head_k, logical_head_v, gate_low=gate_low)
     packed: PackedFused = pack_v_partitions(chunk, head_v, q, k, v, g, beta)
     nt = packed.bh * packed.parts * packed.nc
     o = np.zeros((nt, packed.chunk * packed.head_v), dtype=np.uint16)
@@ -136,10 +136,7 @@ def run_kda_fused_manifest_problem(
     h0_dense = None
     h0_packed = None
     if has_h0:
-        rng = np.random.default_rng(7)
-        h0_dense = np.float32(0.1) * rng.standard_normal(
-            (B, H, head_k, logical_head_v), dtype=np.float32
-        )
+        h0_dense = initial_state(B, H, head_k, logical_head_v)
         h0_packed = pack_initial_state(head_v, h0_dense, packed.parts)
 
     grid = (packed.bh * packed.parts, 1, 1)
@@ -156,9 +153,7 @@ def run_kda_fused_manifest_problem(
         + (0 if h0_packed is None else h0_packed.nbytes)
     )
 
-    q_f = bf16_bits_to_f32(q)
-    k_f = bf16_bits_to_f32(k)
-    v_f = bf16_bits_to_f32(v)
+    q_f, k_f, v_f = (storage.decode(x, "bf16") for x in (q, k, v))
 
     def make_args(rt: Runtime):
         q_dev = rt.alloc(nbytes(packed.q))
@@ -219,9 +214,11 @@ def run_kda_fused_manifest_problem(
             NC=packed.nc,
             parts=packed.parts,
         )
-        o_got = bf16_bits_to_f32(o_got_bits).astype(np.float64)
-        o_ref, s_ref = ref_token_serial(q_f, k_f, v_f, g, beta, scale, h0=h0_dense)
-        # Same criterion as the torch builder: max_abs / ref_absmax vs verify_tol.
+        o_got = storage.decode(o_got_bits, "bf16").astype(np.float64)
+        o_ref, s_ref = gated_delta_recurrence(
+            q_f, k_f, v_f, g, beta, scale=scale, initial_state=h0_dense
+        )
+        # The builder's criterion: max_abs / ref_absmax vs verify_tol.
         max_abs = 0.0
         bad_total = 0
         total = 0

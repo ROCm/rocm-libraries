@@ -3,7 +3,7 @@
 
 """Authoritative prefill-2D benchmark: LIVE Triton vs rocke variant sweep (gfx942).
 
-gfx942 (CDNA3 / MI300X) sibling of
+gfx942 (CDNA3) sibling of
 ``benchmarks/gfx950/attention/prefill/benchmark_prefill2d_live.py``.
 
 Unlike ``benchmark_prefill2d_traces.py`` (which only times rocke and joins a
@@ -20,7 +20,7 @@ pre-profiled Triton CSV), this harness:
 
 gfx942 differences vs gfx950:
   * ``arch="gfx942"`` passed to compile / build / supports helpers.
-  * ``num_cus`` defaults to 120 (MI300X production dispatch value).
+  * ``num_cus`` defaults to 120 (gfx942 production dispatch value).
   * The flash-regime combo variant uses ``use_mfma_32x32x8=True`` (the
     ``mfma_f32_32x32x8_f16`` atom available on gfx942; fp16-only) rather than
     the gfx950 ``use_mfma_32x32=True`` (``mfma_f32_32x32x16_{f16,bf16}``).
@@ -466,7 +466,7 @@ class CkVariantBench:
         from kernels.common.attention_unified import (
             _enable_i64_kv_addr,
             _tiled_2d_impl,
-            _tiled_2d_signature,
+            tiled_2d_signature,
         )
         from rocke.runtime import KernelLauncher
 
@@ -540,7 +540,7 @@ class CkVariantBench:
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_tiled_2d_signature(ARCH, dtype),
+                    signature=tiled_2d_signature(ARCH, dtype),
                     cache_key=("prefill2d_live_gfx942", key),
                 ),
                 spec,
@@ -821,7 +821,7 @@ def main() -> int:
     ap.add_argument("--iterations", type=int, default=50)
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
-    # MI300X has 228 CUs; 120 is the production dispatch value used by the
+    # gfx942 parts have 228 or 304 CUs; 120 is the production dispatch value used by the
     # gfx942 attention provider (matches parity_unified_attention.py).
     ap.add_argument("--cap-blocks", type=int, default=65536)
     ap.add_argument("--num-cus", type=int, default=120)

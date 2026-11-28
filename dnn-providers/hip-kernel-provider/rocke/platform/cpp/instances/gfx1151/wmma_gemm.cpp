@@ -4,7 +4,7 @@
  * instance_gfx1151_wmma_gemm.c -- C99 port of
  * rocke/instances/gfx1151/wmma_gemm.py.
  *
- * The gfx1151 (RDNA3.5 / Strix Halo) WMMA GEMM kernel: one wave32 per 16x16
+ * The gfx1151 (RDNA3.5) WMMA GEMM kernel: one wave32 per 16x16
  * output tile, no LDS, RCR layout (C = A @ B.T). The build op order tracks
  * build_wmma_gemm() top-to-bottom so a reviewer can diff line by line.
  *

@@ -72,7 +72,7 @@ from rocke.runtime import (  # noqa: E402
 )
 
 _TOL = 2e-2
-_FP8_E4M3_MAX = quant_max_abs("fp8e4m3")
+_FP8_E4M3_MAX = quant_max_abs("fp8e4m3", arch="gfx950")
 
 
 def _quantize_fp8(t):

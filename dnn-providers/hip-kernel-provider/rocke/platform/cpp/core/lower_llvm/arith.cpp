@@ -271,7 +271,7 @@ static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(
-            L, ROCKE_ERR_NOTIMPL, "fabs: unsupported FP type %s", ty_name ? ty_name : "(null)");
+            L, ROCKE_ERR_NOTIMPL, "fabs: unsupported FP type '%s'", ty_name ? ty_name : "(null)");
     }
     char key[32];
     snprintf(key, sizeof key, "fabs.%s", ty_name);
@@ -301,7 +301,7 @@ static void _op_arith_fma(rocke_lower_t* L, const rocke_op_t* op)
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(
-            L, ROCKE_ERR_NOTIMPL, "fma: unsupported FP type %s", ty_name ? ty_name : "(null)");
+            L, ROCKE_ERR_NOTIMPL, "fma: unsupported FP type '%s'", ty_name ? ty_name : "(null)");
     }
     char key[32];
     snprintf(key, sizeof key, "fmuladd.%s", ty_name);
@@ -320,11 +320,13 @@ static void _op_arith_fma(rocke_lower_t* L, const rocke_op_t* op)
 }
 
 /* Shared body for fmax3 / fmin3: two back-to-back maxnum/minnum calls.
- * `op_kind` is "max" or "min" (selects maxnum/minnum + the bc fresh prefix). */
+ * `intrin` is "maxnum" or "minnum", `fresh_prefix` the bc fresh prefix, and
+ * `label` the op ("fmax3" / "fmin3") a refusal names, as Python's does. */
 static void ll_fminmax3(rocke_lower_t* L,
                         const rocke_op_t* op,
                         const char* intrin,
-                        const char* fresh_prefix)
+                        const char* fresh_prefix,
+                        const char* label)
 {
     const rocke_value_t* res = ll_result(op);
     if(!rocke_ll_live(L) || !res)
@@ -340,8 +342,8 @@ static void ll_fminmax3(rocke_lower_t* L,
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
-                      "%s3: unsupported FP type %s",
-                      intrin,
+                      "%s: unsupported FP type '%s'",
+                      label,
                       ty_name ? ty_name : "(null)");
     }
     char key[32];
@@ -399,7 +401,7 @@ static void _op_arith_fdot2(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
-                      "fdot2: unsupported element type %s",
+                      "fdot2: unsupported element type '%s'",
                       elem_name ? elem_name : "(null)");
         return;
     }
@@ -420,15 +422,18 @@ static void _op_arith_fdot2(rocke_lower_t* L, const rocke_op_t* op)
 /* Python _op_arith_fmax3 -> maxnum(a, maxnum(b, c)). */
 static void _op_arith_fmax3(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_fminmax3(L, op, "maxnum", "fmax3.bc");
+    ll_fminmax3(L, op, "maxnum", "fmax3.bc", "fmax3");
 }
 /* Python _op_arith_fmin3 -> minnum(a, minnum(b, c)). */
 static void _op_arith_fmin3(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_fminmax3(L, op, "minnum", "fmin3.bc");
+    ll_fminmax3(L, op, "minnum", "fmin3.bc", "fmin3");
 }
 
-/* Python _op_arith_cmp. */
+/* Python _op_arith_cmp: the op is checked by the IR rule first
+ * (rocke_i_cmp_error: a pred that is absent or not a known string is refused,
+ * not read as "lt", "ult" takes i32 or i64 operands, and the operands are
+ * integers or i1 of one type). */
 static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -436,13 +441,17 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
-    if(pred == NULL)
-    {
-        pred = "lt";
-    }
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status
+        = rocke_i_cmp_error(&op->attrs, a->type, b->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+    {
+        rocke_ll_fail(L, cmp_status, "%s", cmp_buf);
+        return;
+    }
+    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     const char* llvm_pred = rocke_ll_icmp_predicate(L, "arith.cmp", pred, a->type);
     rocke_ll_emitf(L,
                    "  %s = icmp %s %s %s, %s",
@@ -453,7 +462,9 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, b));
 }
 
-/* Python _op_arith_fcmp (pred passed through verbatim). */
+/* Python _op_arith_fcmp: the op is checked by the IR rule first
+ * (rocke_i_fcmp_error: a required, known pred and float operands of one
+ * type), then the pred is emitted verbatim. */
 static void _op_arith_fcmp(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -461,13 +472,17 @@ static void _op_arith_fcmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
-    if(pred == NULL)
-    {
-        pred = "olt";
-    }
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
+    char fcmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t fcmp_status
+        = rocke_i_fcmp_error(&op->attrs, a->type, b->type, fcmp_buf, sizeof fcmp_buf);
+    if(fcmp_status != ROCKE_OK)
+    {
+        rocke_ll_fail(L, fcmp_status, "%s", fcmp_buf);
+        return;
+    }
+    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     rocke_ll_emitf(L,
                    "  %s = fcmp %s %s %s, %s",
                    res->name,
@@ -477,8 +492,10 @@ static void _op_arith_fcmp(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, b));
 }
 
-/* Shared body for fmax / fmin (single maxnum/minnum call). */
-static void ll_fminmax(rocke_lower_t* L, const rocke_op_t* op, const char* intrin)
+/* Shared body for fmax / fmin (single maxnum/minnum call); `label` is the op
+ * ("fmax" / "fmin") a refusal names, as Python's does. */
+static void
+    ll_fminmax(rocke_lower_t* L, const rocke_op_t* op, const char* intrin, const char* label)
 {
     const rocke_value_t* res = ll_result(op);
     if(!rocke_ll_live(L) || !res)
@@ -495,8 +512,8 @@ static void ll_fminmax(rocke_lower_t* L, const rocke_op_t* op, const char* intri
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
-                      "%s: unsupported FP type %s",
-                      intrin,
+                      "%s: unsupported FP type '%s'",
+                      label,
                       ty_name ? ty_name : "(null)");
     }
     char key[32];
@@ -517,12 +534,12 @@ static void ll_fminmax(rocke_lower_t* L, const rocke_op_t* op, const char* intri
 /* Python _op_arith_fmax. */
 static void _op_arith_fmax(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_fminmax(L, op, "maxnum");
+    ll_fminmax(L, op, "maxnum", "fmax");
 }
 /* Python _op_arith_fmin. */
 static void _op_arith_fmin(rocke_lower_t* L, const rocke_op_t* op)
 {
-    ll_fminmax(L, op, "minnum");
+    ll_fminmax(L, op, "minnum", "fmin");
 }
 
 /* Python _op_arith_select. */

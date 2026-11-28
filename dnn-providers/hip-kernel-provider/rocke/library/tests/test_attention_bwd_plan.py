@@ -24,9 +24,11 @@ import itertools
 import json
 import math
 import random
+import re
 from pathlib import Path
 
 import pytest
+from rocke.tests.bool_flags import bool_flag_refusal
 from tests.sdpa.bwd_cases import backward_cases, select_bwd
 from tests.sdpa.bwd_kernel_cases import (
     SUPPLEMENTARY_CASES,
@@ -2073,17 +2075,25 @@ def test_untakeable_tuned_knobs_are_declined_not_raised():
 )
 @pytest.mark.parametrize("bad", [1, 0, "yes", None])
 def test_request_flags_must_be_bools(field_name, bad):
-    with pytest.raises(TypeError, match=f"{field_name} must be a bool"):
+    message = bool_flag_refusal(field_name, bad, what="AttnBwdRequest")
+    with pytest.raises(ValueError, match=re.escape(message)):
         _req(**{field_name: bad})
 
 
 def test_request_extents_must_be_ints():
     import numpy as np
 
-    for name, bad in (("s_q", 128.0), ("b", True), ("h_k", "8"), ("num_cus", 1.5)):
-        with pytest.raises(TypeError, match=f"{name} must be"):
+    for name, bad, expected in (
+        ("s_q", 128.0, "an int"),
+        ("b", True, "an int"),
+        ("h_k", "8", "an int"),
+        ("num_cus", 1.5, "None or an int"),
+    ):
+        message = f"AttnBwdRequest failed - {name}={bad!r}, expected {expected}"
+        with pytest.raises(ValueError, match=re.escape(message)):
             _req(**{name: bad})
-    with pytest.raises(TypeError, match="block_table_injective must be a bool"):
+    message = bool_flag_refusal("block_table_injective", 1, what="AttnBwdRequest")
+    with pytest.raises(ValueError, match=re.escape(message)):
         _req(block_table_injective=1)
     # numpy integers are integers; None stays legal for the optional hints
     assert attn_bwd_support(_req(s_q=np.int64(128), num_cus=None), "gfx942").ok

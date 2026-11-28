@@ -10,11 +10,23 @@
 # capability, a second lane re-runs the affected families at llvm23. Profiles
 # that already carry the capability (llvm23 and llvm24) run them directly.
 #
+# A last lane compares the two engines' serialized IR byte for byte (run_diff
+# --mode ir): the IR the builders make, before lowering. The .ll
+# lanes cannot see a builder difference the lowering happens to absorb (an
+# attribute the lowering ignores, two op spellings that lower alike), and such a
+# difference turns into .ll drift as soon as the lowering starts to read it.
+# This lane gates like the others. It runs once, at the host's LLVM flavor:
+# the serialized IR comes before lowering, so every flavor would check the same
+# thing. --no-ir skips it for quick local loops; a gate run must not. To triage
+# a failure, run_diff --mode ir --canonical separates a real structural change
+# from SSA-id renumbering; it is not the gate because it canonicalizes every
+# config, which costs far more than comparing bytes.
+#
 # Cross-platform (Windows + Linux) replacement for the legacy check_byte_identity.sh.
 # All paths are derived relative to this file so the rocke/platform/ tree stays copy-able.
 #
 # Usage:
-#   python rocke/platform/tools/check_byte_identity.py [--ir] [--only SUBSTR]
+#   python rocke/platform/tools/check_byte_identity.py [--no-ir] [--only SUBSTR]
 #       [--build-root DIR] [--ref-pyroot DIR] [--ref-shim DIR]
 
 from __future__ import annotations
@@ -27,10 +39,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _hostcaps import available_cpus
-
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> rocKE
+if str(ROCKE / "python") not in sys.path:
+    sys.path.insert(0, str(ROCKE / "python"))
+from rocke.tests.host_cpus import available_cpus
+
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
 # Library-owned C++ mirrors (library/cpp, added by platform/CMakeLists.txt when
 # the sibling tree exists). Absent from a platform-only copy of this tree.
@@ -53,15 +67,21 @@ TARGET_OP_PROFILE_FAMILIES = (
 
 def _selected_profile_supports_target_ops() -> bool:
     """Resolve the selected lane once and query its structural profile."""
-    python_root = ROCKE / "python"
-    if str(python_root) not in sys.path:
-        sys.path.insert(0, str(python_root))
     from rocke.core.lower_llvm import (
         _resolve_llvm_flavor,
-        _supports_llvm23_target_ops,
+        supports_llvm23_target_ops,
     )
 
-    return _supports_llvm23_target_ops(_resolve_llvm_flavor())
+    return supports_llvm23_target_ops(_resolve_llvm_flavor())
+
+
+def _host_flavor_env() -> dict[str, str]:
+    """This environment without ROCKE_LLVM_FLAVOR, so both engines resolve the
+    host's flavor: the serialized-IR lane checks the same thing whichever flavor
+    the invocation selected."""
+    env = dict(os.environ)
+    env.pop("ROCKE_LLVM_FLAVOR", None)
+    return env
 
 
 def _cxx() -> str | None:
@@ -75,7 +95,9 @@ def _cxx() -> str | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE byte-identity gate")
     ap.add_argument(
-        "--ir", action="store_true", help="also run the IR canonical diff (diagnostic)"
+        "--no-ir",
+        action="store_true",
+        help="skip the serialized-IR lane (quick local loops only; the gate runs it)",
     )
     ap.add_argument(
         "--only",
@@ -249,20 +271,23 @@ def main() -> int:
             only=["--only", ",".join(llvm23_only)],
             env=env,
         )
-    if args.ir:
-        # Diagnostic, not gating: its exit code is deliberately discarded, so a
-        # GATE FAILURES block under this label does not turn the result RED.
-        run_gate(
-            "IR canonical (diagnostic)",
+    if not args.no_ir:
+        status |= run_gate(
+            "serialized IR, host flavor",
             str(build_root / "dashboard_ir.json"),
-            ["--mode", "ir", "--canonical"],
+            ["--mode", "ir"],
+            env=_host_flavor_env(),
         )
 
     print()
     if status == 0:
+        compared = ".ll is" if args.no_ir else "serialized IR and .ll are"
         print(
-            "RESULT: GREEN - engine builds and .ll emission is byte-identical to Python."
+            f"RESULT: GREEN - engine builds and its {compared} "
+            "byte-identical to Python."
         )
+        if args.no_ir:
+            print("   (serialized-IR lane skipped by --no-ir: not a full gate run)")
     else:
         # Not "the engines disagree" -- they may not have been compared at all
         # (nothing built, nothing enumerated). The GATE FAILURES block says which.

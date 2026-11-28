@@ -43,20 +43,60 @@ def _load_main(path: Path):
     return main
 
 
+# A line an emitter prints between the kernels of one output, such as
+# fused_moe_e2e's "; === fused_moe_e2e stage: ROUTER ===". It is not
+# ck.dsl.ir/v1 text, so it is kept as written rather than parsed.
+_BANNER_PREFIX = ";"
+
+
+def canonical_text(text: str) -> str:
+    """The canonical form of an emitter's ck.dsl.ir/v1 output: each kernel
+    canonicalized (stable SSA ids, locations stripped) and each banner line
+    kept as written, in output order.
+
+    An output holds one kernel or several, each starting at its format header
+    line, with banner lines between them. One kernel and no banner
+    canonicalizes to that kernel's canonical text alone. Raises ``ValueError``
+    for text that holds no kernel or does not parse."""
+    from rocke.core.ir_serialize import FORMAT_NAME, canonicalize, parse
+
+    pieces: list[str] = []
+    kernel_lines: list[str] = []
+    kernels = 0
+
+    def end_kernel() -> None:
+        nonlocal kernels
+        if kernel_lines:
+            pieces.append(canonicalize(parse("\n".join(kernel_lines) + "\n")))
+            kernel_lines.clear()
+            kernels += 1
+
+    for line in text.splitlines():
+        if line.startswith(_BANNER_PREFIX):
+            end_kernel()
+            pieces.append(line + "\n")
+        elif line.split(" ", 1)[0] == FORMAT_NAME:
+            end_kernel()
+            kernel_lines.append(line)
+        elif kernel_lines or line.strip():
+            kernel_lines.append(line)
+    end_kernel()
+    if not kernels:
+        raise ValueError("no ck.dsl.ir kernel in the output")
+    return "".join(pieces)
+
+
 def canonical_digest(output: bytes) -> tuple[str | None, str | None]:
-    """sha256 of the canonical ck.dsl.ir/v1 form of an emitter's output (stable
-    SSA ids, locations stripped), or (None, reason) when the text does not parse.
+    """sha256 of an emitter output's canonical form (:func:`canonical_text`),
+    or (None, reason) when the text does not parse.
 
     Applied to both engines' IR, it separates a byte mismatch that is only
     incidental SSA-id renumbering (equal canonical hashes) from real structural
     drift (differing attrs or op order). The one definition of the canonical
     hash: this worker computes it in its own process, and run_diff.py calls it
     for output it holds itself."""
-    from rocke.core.ir_serialize import canonicalize, parse
-
     try:
-        text = output.decode("utf-8", "replace")
-        canonical = canonicalize(parse(text))
+        canonical = canonical_text(output.decode("utf-8", "replace"))
     except Exception as exc:  # noqa: BLE001 -- the reason is the result
         return None, f"{type(exc).__name__}: {exc}"
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest(), None
@@ -106,6 +146,16 @@ def _run_one(
     return record
 
 
+def _failed_without_output(record: dict) -> bool:
+    """True when the config exited non-zero without printing anything."""
+    return record["returncode"] != 0 and not record["has_output"]
+
+
+def _ends_the_config_list(record: dict) -> bool:
+    """True when the emitter reported the index is past its last config."""
+    return not record["has_output"] and "unknown config" in record["stderr"].lower()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path)
@@ -114,8 +164,17 @@ def main() -> int:
         action="store_true",
         help="also report each output's canonical ck.dsl.ir/v1 hash",
     )
+    parser.add_argument(
+        "--recheck-failures-in",
+        metavar="MODE",
+        help="run again, in MODE and in this process, each config that exits "
+        "non-zero without printing anything; report that run as the record's "
+        "'recheck'",
+    )
     parser.add_argument("emitter", type=Path)
-    parser.add_argument("mode", choices=("ll", "ir", "verify"))
+    # The emitter owns its mode list (``_emit_common.MODES`` for most) and
+    # answers an unknown one with "unknown mode", which callers rely on.
+    parser.add_argument("mode")
     parser.add_argument("indices", nargs="+", type=int)
     args = parser.parse_args()
 
@@ -130,10 +189,19 @@ def main() -> int:
             args.output_dir,
             args.canonical,
         )
+        ends_the_list = _ends_the_config_list(record)
+        if (
+            args.recheck_failures_in
+            and _failed_without_output(record)
+            and not ends_the_list
+        ):
+            record["recheck"] = _run_one(
+                emitter_main, args.emitter, index, args.recheck_failures_in, None
+            )
         # One flushed record per configuration lets the parent apply TIMEOUT to
         # each invocation while retaining this process and its imported module.
         print(json.dumps(record, separators=(",", ":")), flush=True)
-        if not record["has_output"] and "unknown config" in record["stderr"].lower():
+        if ends_the_list:
             break
     return 0
 

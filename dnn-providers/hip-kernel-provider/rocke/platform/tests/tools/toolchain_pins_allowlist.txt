@@ -1,0 +1,129 @@
+# Files under rocke/ whose test or library code still pins a toolchain, with
+# the kinds of pin each has (rocke.tests.toolchain_pins.ToolchainPinKind), how
+# many pins of each, and the issue that removes them. Tests use the compiler
+# rocKE's discovery loads (dsl_docs/reference/env_flags.md, "Compiler detection
+# and provenance"): this list only shrinks. Lower a count, or remove a kind or a
+# file's line, when its pins go; never add or raise one. test_toolchain_pins.py
+# fails on any pin not counted here and on any line that no longer matches the
+# tree. Paths are relative to rocke/.
+#
+# AICK-3320: the attention backward resource gate keeps its reference toolchain
+# (and reads the comgr through private names) until AICK-3320 unpins it.
+# AICK-3514: pins written before this check, burned down under that ticket.
+library/benchmarks/common/attention_bwd_bench.py: private_import=1  # AICK-3514
+library/benchmarks/gfx1151/attention/benchmark_sdpa.py: private_import=1  # AICK-3514
+library/benchmarks/gfx942/attention/prefill/bench_rocke_7way_specs.py: private_import=5  # AICK-3514
+library/benchmarks/gfx950/gdn/decode_table_sweep.py: private_import=1 rocm_version=1  # AICK-3514
+library/builders/common/convolution_backward_data.py: private_import=1  # AICK-3514
+library/builders/common/convolution_forward.py: flavor_pin=1  # AICK-3514
+library/dispatch/grouped_convolution.py: flavor_pin=1  # AICK-3514
+library/kernels/common/attention_bwd_cache.py: private_import=1 rocm_version=1  # AICK-3514
+library/kernels/common/attention_bwd_run.py: private_import=1 rocm_version=1  # AICK-3514
+library/kernels/common/attention_unified.py: private_import=1  # AICK-3514
+library/kernels/common/conv_winograd_gemm_wmma.py: flavor_pin=1  # AICK-3514
+library/kernels/conv/aot_jobs.py: flavor_pin=1  # AICK-3514
+library/kernels/conv/kernel_identity.py: private_import=1  # AICK-3514
+library/kernels/mla/mla_prefill_gfx942.py: private_import=2  # AICK-3514
+library/tests/_attention_bwd_resources.py: flavor_pin=1 private_import=3 rocm_pin=1 rocm_version=1  # AICK-3320
+library/tests/_tiled_3d_binding_ir.py: private_import=1  # AICK-3514
+library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py: private_import=2  # AICK-3514
+library/tests/dispatch/attention/test_review_followups.py: private_import=1  # AICK-3514
+library/tests/dispatch/attention/test_unified_mask_wiring.py: private_import=1  # AICK-3514
+library/tests/dispatch/test_grouped_conv_dispatch.py: flavor_pin=1 private_import=1  # AICK-3514
+library/tests/gates/attention_bwd_counted_structural_gate.py: private_import=1  # AICK-3514
+library/tests/parity/conv_direct_grouped_emit.py: private_import=1  # AICK-3514
+library/tests/parity/fmha_splitkv_decode_emit.py: private_import=1  # AICK-3514
+library/tests/parity/gfx942_attention_tiled_3d_emit.py: private_import=1  # AICK-3514
+library/tests/parity/gfx950_attention_tiled_3d_emit.py: private_import=1  # AICK-3514
+library/tests/reference_common/worker.py: private_import=2  # AICK-3514
+library/tests/test_attention_builds.py: private_import=2  # AICK-3514
+library/tests/test_attention_bwd.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_access.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_addr.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_aux.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_band.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_barrier_fence.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_barrier_merge.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_caps.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_dq.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_dq_levers.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_dq_sched.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_epilogue.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_frag.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_gemm.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_ir.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_ir_golden.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_mirror.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_noatomic.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_ring_sched.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_sched_body.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_sinks.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_split.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_split_sched.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_sweep.py: flavor_pin=1  # AICK-3514
+library/tests/test_attention_bwd_transpose_probe.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_unified.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_unit_ops.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_valu.py: private_import=1  # AICK-3514
+library/tests/test_attention_bwd_xt.py: private_import=1  # AICK-3514
+library/tests/test_attention_dense_bwd.py: private_import=1  # AICK-3514
+library/tests/test_attention_dense_bwd_ir.py: private_import=2  # AICK-3514
+library/tests/test_attention_dense_bwd_split.py: private_import=1  # AICK-3514
+library/tests/test_attention_dense_d64_lds.py: private_import=2  # AICK-3514
+library/tests/test_attention_dense_gfx942.py: private_import=2  # AICK-3514
+library/tests/test_attention_dense_gfx942_golden.py: private_import=3  # AICK-3514
+library/tests/test_attention_dense_gfx942_lds.py: private_import=2  # AICK-3514
+library/tests/test_attention_gfx942_kv_pages.py: private_import=1  # AICK-3514
+library/tests/test_attention_scalar_cache_key.py: private_import=1  # AICK-3514
+library/tests/test_attention_tiled_2d_head_counts_gfx942.py: private_import=1  # AICK-3514
+library/tests/test_attention_tiled_3d_kv_cache_policy.py: private_import=2  # AICK-3514
+library/tests/test_attention_tiled_cache_key.py: private_import=1  # AICK-3514
+library/tests/test_attention_unified_2d_lse_ir.py: private_import=1  # AICK-3514
+library/tests/test_attention_workspace.py: private_import=1  # AICK-3514
+library/tests/test_attn_k_slice_hd.py: private_import=1  # AICK-3514
+library/tests/test_barrier_fence_parity_emit.py: private_import=1  # AICK-3514
+library/tests/test_benchmark_tf32_plumbing.py: flavor_pin=1  # AICK-3514
+library/tests/test_conv_dgrad_correctness.py: private_import=2  # AICK-3514
+library/tests/test_conv_dgrad_depthwise_windowed.py: private_import=3  # AICK-3514
+library/tests/test_conv_direct_grouped_backend_parity.py: private_import=1  # AICK-3514
+library/tests/test_conv_engine_bridge_sched.py: flavor_pin=1  # AICK-3514
+library/tests/test_conv_fwd_split_k.py: flavor_pin=1  # AICK-3514
+library/tests/test_conv_reference_contract.py: flavor_pin=1  # AICK-3514
+library/tests/test_conv_wgrad_correctness.py: private_import=1  # AICK-3514
+library/tests/test_conv_wgrad_streamk.py: private_import=6  # AICK-3514
+library/tests/test_conv_wgrad_streamk_gpu.py: private_import=1  # AICK-3514
+library/tests/test_conv_wgrad_tf32.py: private_import=1  # AICK-3514
+library/tests/test_convolution_backward_data_aot_packaging.py: flavor_pin=1 private_import=1  # AICK-3514
+library/tests/test_d256_gfx942_fast_routing.py: private_import=2  # AICK-3514
+library/tests/test_dsa_indexer_gfx942_spec.py: private_import=2  # AICK-3514
+library/tests/test_dtype_dispatch.py: private_import=1  # AICK-3514
+library/tests/test_gdn_decode_fused.py: private_import=2  # AICK-3514
+library/tests/test_gdn_decode_golden.py: private_import=3  # AICK-3514
+library/tests/test_gdn_decode_ir_cpp_parity.py: private_import=1  # AICK-3514
+library/tests/test_gdn_decode_knobs.py: private_import=1  # AICK-3514
+library/tests/test_gdn_decode_spec.py: private_import=1  # AICK-3514
+library/tests/test_gdn_decode_table_sweep.py: rocm_pin=1  # AICK-3514
+library/tests/test_gfx942_3d_d192_lds.py: private_import=1  # AICK-3514
+library/tests/test_kda_gfx942_golden.py: private_import=1  # AICK-3514
+library/tests/test_kda_gfx950_golden.py: private_import=1  # AICK-3514
+library/tests/test_kernel_label.py: flavor_pin=1  # AICK-3514
+library/tests/test_lse_store_ir.py: private_import=1  # AICK-3514
+library/tests/test_mla_prefill_gfx942.py: flavor_pin=1 private_import=2  # AICK-3514
+library/tests/test_mla_prefill_gfx942_golden.py: private_import=1  # AICK-3514
+library/tests/test_mla_prefill_gfx942_numeric.py: private_import=2  # AICK-3514
+library/tests/test_strided_kv_lds.py: flavor_pin=1 private_import=1  # AICK-3514
+platform/python/rocke/portable_ir/tests/test_recording_builder.py: flavor_pin=1  # AICK-3514
+platform/tests/core/test_compile_target_selection.py: flavor_pin=2  # AICK-3514
+platform/tests/core/test_compile_target_with_this_hosts_compiler.py: flavor_pin=1  # AICK-3514
+platform/tests/core/test_fp8_scale_conversion_gate.py: flavor_pin=1  # AICK-3514
+platform/tests/core/test_gfx1250_scaled_wmma_operand_forms.py: flavor_pin=1  # AICK-3514
+platform/tests/core/test_scf_for_yields.py: flavor_pin=1  # AICK-3514
+platform/tests/core/test_scf_if_else_results.py: flavor_pin=1  # AICK-3514
+platform/tests/instances/differential/test_check_byte_identity_progress.py: flavor_pin=1  # AICK-3514
+platform/tests/instances/differential/test_gate_verdict.py: flavor_pin=1  # AICK-3514
+platform/tests/instances/test_differential_golden_routing.py: flavor_pin=1  # AICK-3514
+platform/tests/instances/test_gemm_tdm_traits_cpp_engine.py: flavor_pin=1  # AICK-3514
+platform/tests/portable_ir/test_recipe_roller.py: flavor_pin=4  # AICK-3514
+platform/tests/test_rocke.py: rocm_version=4  # AICK-3514
+platform/tests/tools/test_arch_domain_artifact.py: flavor_pin=22  # AICK-3514
+platform/tests/tools/test_dsl_probes.py: flavor_pin=1  # AICK-3514

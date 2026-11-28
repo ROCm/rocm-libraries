@@ -13,7 +13,7 @@ import pytest
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
-from rocke.core.backend import _cpp_strict, resolve_backend
+from rocke.core.backend import cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, Param, PtrType, VectorType
 from rocke.core.ir_serialize import parse, serialize
@@ -28,6 +28,8 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
+from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.lanes import TICKET, skip_until
 
 
 def _scaled_atom(dtype="fp8", scale16=False):
@@ -102,12 +104,12 @@ def _assert_scaled_lowering_rejects(kernel, message, engine, *, hip_message=None
     neutral = any(op.name == "tile.mma" for op in kernel.body.ops)
     if engine == "native":
         if not neutral:
-            pytest.skip("native LLVM uses neutral MMA dispatch")
-        native = pytest.importorskip("rocke_engine")
+            skip_until(TICKET, reason="native LLVM uses neutral MMA dispatch")
+        native = native_engine_or_skip()
         with pytest.raises(RuntimeError) as caught:
             native.lower_serialized_ir(ir, arch="gfx1250", flavor="llvm23")
         assert str(caught.value) == (
-            "rocke_engine.lower_serialized_ir: lower failed for arch 'gfx1250' "
+            "rocke_lower_serialized_ir_to_llvm: lower failed for arch 'gfx1250' "
             f"(status 1): {message}"
         )
         return
@@ -372,7 +374,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         # A native rejection is retried in Python unless strict C++ is requested.
         error_type = (
             RuntimeError
-            if resolve_backend() == "cpp" and _cpp_strict()
+            if resolve_backend() == "cpp" and cpp_strict()
             else NotImplementedError
         )
         for flavor in ("llvm20", "llvm22"):
@@ -506,23 +508,28 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("requires block_k=16", why)
 
-    def test_python_unknown_scaled_atom_reports_supported_operations(self):
-        # The supported-operation listing is a Python lowerer diagnostic.
+    def test_python_unknown_scaled_atom_is_refused_by_the_catalog_gate(self):
+        # An op_id no catalog lists is refused before any scaled-WMMA handler
+        # runs, with the one catalog text, in the LLVM and the HIP lowering.
         for scale16 in (False, True):
             with self.subTest(scale16=scale16):
                 kernel = _build_scaled_atom(scale16=scale16)
                 call = next(op for op in kernel.body.ops if op.name == "tile.mma")
                 mode = "wmma_scale16" if scale16 else "wmma_scale"
-                call.attrs["op_id"] = f"{mode}_f32_16x16x128_fp16_fp16"
-                with self.assertRaisesRegex(
-                    NotImplementedError, "not yet wired for gfx1250"
-                ) as error:
+                op_id = f"{mode}_f32_16x16x128_fp16_fp16"
+                call.attrs["op_id"] = op_id
+                refusal = (
+                    f"tile.{op_id} is not available on gfx1250: "
+                    "its MMA catalog does not list it"
+                )
+                with self.assertRaises(NotImplementedError) as error:
                     _lower_kernel_to_llvm_python(
                         kernel, arch="gfx1250", llvm_flavor="llvm23"
                     )
-                self.assertIn(_scaled_atom("bf8", scale16).op_id, str(error.exception))
-                with self.assertRaisesRegex(NotImplementedError, "no HIP lowering"):
+                self.assertEqual(str(error.exception), refusal)
+                with self.assertRaises(NotImplementedError) as error:
                     lower_kernel_to_hip(kernel, arch="gfx1250")
+                self.assertEqual(str(error.exception), refusal)
 
 
 if __name__ == "__main__":
@@ -548,12 +555,13 @@ def _scaled_matrix_error(op_id, role, bad, dtype, register_words=16):
 @pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp6", "bf6", "fp4"])
 def test_scaled_lowering_rejects_sources(scale16, engine, dtype, subtests):
     if engine == "native":
-        pytest.importorskip("rocke_engine")
-    # Only failures and existing skips need per-combination subtest reports.
+        native_engine_or_skip()
+    # Every combination reports as a subtest, so a run of only skipped
+    # combinations is told apart from one that checked something.
     for concrete, role, kind in product(
         (False, True), (0, 1, 3, 4), ("scalar", "dtype", "short", "long")
     ):
-        try:
+        with subtests.test(concrete=concrete, role=role, kind=kind):
             kernel, call = _scaled_call(scale16, concrete, dtype)
             if role < 2:
                 bad = (
@@ -598,9 +606,6 @@ def test_scaled_lowering_rejects_sources(scale16, engine, dtype, subtests):
             _assert_scaled_lowering_rejects(
                 kernel, message, engine, hip_message=hip_message
             )
-        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
-            with subtests.test(concrete=concrete, role=role, kind=kind):
-                raise
 
 
 @pytest.mark.parametrize("scale16", [False, True])

@@ -69,9 +69,9 @@ def test_llvm_ir_offsets_without_inbounds_and_casts_the_pointer_to_i64():
     steps = [line for line in text.splitlines() if "%X, i64 %off" in line]
     assert len(steps) == 1
     assert re.fullmatch(
-        r"  %gptr\d+ = getelementptr i8, ptr addrspace\(1\) %X, i64 %off", steps[0]
+        r"  %gptr_\d+ = getelementptr i8, ptr addrspace\(1\) %X, i64 %off", steps[0]
     ), steps[0]
-    assert re.search(r" = ptrtoint ptr addrspace\(1\) %gptr\d+ to i64\n", text)
+    assert re.search(r" = ptrtoint ptr addrspace\(1\) %gptr_\d+ to i64\n", text)
 
 
 def test_both_engines_emit_the_same_llvm_ir():
@@ -86,9 +86,9 @@ def test_hip_offsets_in_integer_arithmetic_and_casts_the_pointer_to_int64():
     # The result keeps the pointer's element type, so indexing it counts
     # elements, as indexing X does.
     assert re.search(
-        r"float\* (gptr\d+) = \(float\*\)\(\(uintptr_t\)X \+ \(uint64_t\)off\);", hip
+        r"float\* (gptr_\d+) = \(float\*\)\(\(uintptr_t\)X \+ \(uint64_t\)off\);", hip
     ), hip
-    assert re.search(r"int64_t gaddr\d+ = \(int64_t\)\(uintptr_t\)gptr\d+;", hip), hip
+    assert re.search(r"int64_t gaddr_\d+ = \(int64_t\)\(uintptr_t\)gptr_\d+;", hip), hip
 
 
 # --------------------------------------------------------------------------
@@ -286,17 +286,6 @@ def _gpu_kernel(name):
     return b.kernel
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _run(blob, kernel_name, x):
     """Launch one lane; return the device address of X, Y and Z."""
     from rocke.runtime.hip_module import Runtime
@@ -327,11 +316,12 @@ def _run(blob, kernel_name, x):
     return buffers[0], y, z
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_offset_pointers(route):
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     kernel = _gpu_kernel(f"gpo_gpu_{route}")
     if route == "llvm":
         from rocke.helpers.compile import compile_kernel

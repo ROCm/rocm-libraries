@@ -3,7 +3,7 @@
 **Status**: design proposal — implementation lives in rocke repo, not here.
 **Target repo**: `rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/`
 **Target shape (benchmark)**: `d64_b32_h64kv8_q1000_k1035_ns284_tq8192_sw0_sc0_sinks1_bfloat16`
-**Target hardware**: gfx950 (MI350X), gfx942 (MI300X) as secondary.
+**Target hardware**: gfx950, gfx942 as secondary.
 
 ## 1. Goal
 
@@ -29,17 +29,13 @@ Today they are mutually exclusive (validator
 
 ## 2. Why each lever in isolation underperforms
 
-From `analysis/2026-05-21-experiment-hsaco-structural-diff.md` and the cohort
-re-bench (`results/rocke_ua_prefill2d_bf16_r4.csv`):
+From the experiment's out-of-tree HSACO structural diff and cohort re-bench
+(see §11):
 
-| variant                | target shape | cohort geomean ratio vs stock |
-|------------------------|------------:|------------------------------:|
-| Triton                 | 0.405 ms    | 0.71 (1.41× faster)           |
-| rocke stock (16×16)   | 0.924 ms    | 1.00                           |
-| rocke R1 (BMW=32)     | 0.946 ms    | 0.67× (49% slower)             |
-| rocke R1 (BMW=16)     | 0.866 ms    | 0.76× (24% slower)             |
-| rocke R4 (no sinks)   | 0.566 ms    | 0.97× geomean (3.5% faster, 39% target) |
-| rocke R1+R4 (target)  | TBD         | TBD                             |
+- R1 alone with the 16×16 atom (BMW=16 or 32) is a net loss on the cohort.
+- R4 alone is faster on the target shape, but it has an open correctness bug
+  with sinks (§5), so its timings are not a result.
+- R1+R4 is unmeasured.
 
 R1 alone with the 16×16 atom is structurally a net loss: it removes 32
 `ds_write_b16`/iter but replaces them with **288** register-class permutes
@@ -50,8 +46,8 @@ each PV MFMA.
 R4 alone shifts to the 32×32×16 atom (whose C-out lane layout is *natively*
 the A-in lane layout for the next chained MFMA), but in the current rocke
 code path it still feeds PV with a P that was staged for the 16×16 emit
-contract. Net K-loop instruction count must be measured (see §6) but R4 alone
-gives only +3.5% geomean on the cohort, suggesting structural overhead
+contract. Net K-loop instruction count must be measured (see §6); R4 alone
+gives only a small gain on the cohort, suggesting structural overhead
 remains.
 
 Combining R1+R4 should give the Triton-style kernel: 32×32 atom + P kept in
@@ -163,10 +159,9 @@ Three things change in rocke:
 
 ## 5. Pre-requisite: fix R4 sinks-wiring bug
 
-Currently in `tests/test_rocke_ua_mfma_32x32_sinks.py`, the R4-with-sinks run
-on the target shape gives `max_abs_diff = 0.0625` with `mean = 5.3e-5` against
-the 16×16 reference. This is too localized to be a generic atom bug — it's a
-sink-row offset.
+Currently the out-of-tree R4 sinks validator, run on the target shape, gives
+`max_abs_diff = 0.0625` with `mean = 5.3e-5` against the 16×16 reference. This
+is too localized to be a generic atom bug — it's a sink-row offset.
 
 **Hypothesis**: the sinks m_init code at `attention_tiled_2d.py:1080-1093`
 iterates `REGS_PER_LANE` slots and applies the sink contribution to slot 0
@@ -195,8 +190,9 @@ This fix is a prerequisite to landing R1+R4 because:
 ## 6. Pre-requisite analysis: R4 HSACO baseline
 
 Before landing the source change, capture an R4 HSACO on the target shape and
-run `src/stage3_extract_isa/compare_ua_hsacos.py` with the existing
-`triton + rocke_stock` baseline. This is required to:
+run `compare_ua_hsacos.py`
+(`platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/`) with the
+existing `triton + rocke_stock` baseline. This is required to:
 
 1. Confirm R4 already has 0 `ds_write_b16`/iter (expected) and 0
    `v_accvgpr_*`/iter (expected — 32×32 acc lives in VGPRs).
@@ -206,25 +202,19 @@ run `src/stage3_extract_isa/compare_ua_hsacos.py` with the existing
    justified and the measured count gives the upper bound on what R1+R4
    removes.
 3. Measure R4 VGPR/AGPR count to predict R1+R4 register pressure (target:
-   stay below the 256-VGPR boundary that drops MI350X occupancy).
+   stay below the 256-VGPR boundary that drops gfx950 occupancy).
 
-**Capture command** (uses existing infrastructure, no new code):
+**Capture**: dump the R4 HSACO on the target shape with the experiment's
+out-of-tree dump harness, with the R4 patch from its out-of-tree cohort driver
+applied before invocation (preferred over adding a flag, since it doesn't augment
+kernel code). Then compare it against the Triton and rocke-stock HSACOs:
 ```bash
-source setup_env.sh && source .venv/bin/activate
-python tests/dump_rocke_ua_hsaco.py \
-    --shape-signature d64_b32_h64kv8_q1000_k1035_ns284_tq8192_sw0_sc0_sinks1_bfloat16 \
-    --enable-mfma-32x32 \
-    --out tests/logs/r4_hsaco_dump
-python src/stage3_extract_isa/compare_ua_hsacos.py \
-    --label triton       tests/logs/triton_hsaco_dump/kernel_unified_attention_2d.hsaco \
-    --label rocke_stock  tests/logs/regpv_pair/stock__...hsaco \
-    --label rocke_r4     tests/logs/r4_hsaco_dump/...hsaco \
+python compare_ua_hsacos.py \
+    --label triton       <triton unified_attention_2d hsaco> \
+    --label rocke_stock  <rocke stock hsaco> \
+    --label rocke_r4     <rocke R4 hsaco> \
     --dump-loops
 ```
-
-(`dump_rocke_ua_hsaco.py` may need a `--enable-mfma-32x32` flag added, or
-the R4 monkey-patch from `experiments/bench_rocke_ua_r4_cohort.py` applied
-before invocation. The latter is preferred — it doesn't augment kernel code.)
 
 ## 7. Validation plan
 
@@ -235,23 +225,16 @@ For each `(shape, BMW)` in the target shape × `{16, 32}`:
 2. Candidate: R1+R4 path, same `use_sinks`.
 3. Pass if `max_abs_diff ≤ 2e-2` (matches existing R4 test tolerance).
 
-Test harness: `tests/test_rocke_ua_register_pv_sinks.py` and
-`tests/test_rocke_ua_mfma_32x32_sinks.py` already have the patch/revert
-plumbing. A new test
-`tests/test_rocke_ua_register_pv_mfma_32x32.py` should:
+Test harness: the experiment's out-of-tree R1 and R4 sinks validators already
+have the patch/revert plumbing. A new R1+R4 validator should:
 - Apply both R1 and R4 patches (lift sinks gate AND lift validator).
 - Compare against stock 16×16 baseline.
 - Run with `--bench` to get latency.
 
 ### 7.2 Latency (gates the rollout)
 
-Cohort re-bench using existing harness:
-```bash
-python experiments/bench_rocke_ua_r1r4_cohort.py \
-    --output results/rocke_ua_prefill2d_bf16_r1r4.csv \
-    --shape-list /tmp/r4_shape_sigs.txt  # same 142 shapes as R4 cohort
-```
-(driver mirrors `bench_rocke_ua_r4_cohort.py`, with both patches applied.)
+Cohort re-bench with the experiment's out-of-tree cohort driver, both patches
+applied, over the same 142 shapes as the R4 cohort.
 
 Pass criteria:
 - Geomean ratio R1+R4 / stock ≥ 1.20 (cohort-wide ≥ 20% speedup).
@@ -285,7 +268,7 @@ HSACO three-way compare R1+R4 vs Triton vs stock should show:
 - `head_size ∉ {64, 128}`: existing selector gate.
 - 1D unified attention (`backend="default"`): different kernel.
 - AITER / vLLM integration: this is purely a rocke kernel-emit change.
-- MI300X (gfx942): primary target is gfx950; gfx942 should work
+- gfx942: primary target is gfx950; gfx942 should work
   structurally but needs separate perf validation.
 
 ## 10. Suggested sequencing
@@ -303,23 +286,16 @@ HSACO three-way compare R1+R4 vs Triton vs stock should show:
 | 9    | 3-way HSACO confirm (§7.3)                          | step 7            | this repo     |
 | 10   | Promote validator gate (default-on for bf16 long-prefill) | step 8 + 9   | rocke repo   |
 
-Step 5 is a real decision point — if R4-with-fixed-sinks already gives
-+20% cohort geomean, R1+R4 may be unnecessary (or a tail optimization).
-The current R4 number (3.5% cohort geomean) is depressed by the sinks
-shapes falling back; the sinks-fixed number could be significantly higher
-without R1.
+Step 5 is a real decision point — if R4-with-fixed-sinks already meets the
+§7.2 cohort criterion, R1+R4 may be unnecessary (or a tail optimization).
+The current R4 cohort gain is small and depressed by the sinks shapes falling
+back; the sinks-fixed gain could be significantly higher without R1.
 
 ## 11. References
 
-- `analysis/2026-05-21-experiment-hsaco-structural-diff.md` — root cause and
-  per-iter histograms
-- `analysis/2026-05-21-experiment-triton-vs-rocke-design-gap.md` — design gap analysis
-- `analysis/2026-05-20-experiment-rocke-ua-optimization-plan.md` — R1..R4 ladder
-- `results/triton_ua_prefill2d_bf16.csv` — Triton baseline (142 shapes)
-- `results/rocke_ua_prefill2d_bf16.csv` — rocke stock baseline (142 shapes)
-- `results/rocke_ua_prefill2d_bf16_r4.csv` — rocke R4 cohort (142 shapes)
-- `tests/test_rocke_ua_mfma_32x32_sinks.py` — R4 validator
-- `tests/test_rocke_ua_register_pv_sinks.py` — R1 validator
-- `experiments/bench_rocke_ua_r4_cohort.py` — R4 cohort driver
-- rocke: `rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/attention_unified.py`
-- rocke: `rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/attention_tiled_2d.py`
+- Out-of-tree experiment notes (not in this tree): the HSACO structural diff with
+  per-iter histograms, the Triton-vs-rocke design-gap analysis, the R1..R4
+  optimization ladder, the Triton / rocke-stock / R4 cohort results over 142 bf16
+  prefill-2D shapes, the R1 and R4 sinks validators and the R4 cohort driver.
+- rocke: `library/kernels/common/attention_unified.py`
+- rocke: `library/kernels/gfx950/attention_tiled_2d.py`

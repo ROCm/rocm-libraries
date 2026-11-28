@@ -979,12 +979,10 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      */
     if(ctx.is_pointwise)
     {
-        /* Python: _always_valid_d = b.const_i32(1), used as the pointwise
-         * d_addr's validity. Grouped, d_addr reuses the loaders'
-         * k_out_group_base (g*kpg) and strides rows by all K channels;
-         * ungrouped, K == kpg and the row pitch stays p_kpg. */
+        /* Grouped, the pointwise d_addr reuses the loaders' k_out_group_base
+         * (g*kpg) and strides rows by all K channels; ungrouped, K == kpg and
+         * the row pitch stays p_kpg. */
         ctx.d_k_out_group_base = ctx.grouped ? ctx.k_out_group_base : NULL;
-        ctx.ir_always_valid_d = rocke_b_const_i32(b, 1);
         ctx.ir_d_pitch_pw = ctx.grouped ? ctx.p_K : ctx.p_kpg;
     }
     else
@@ -1005,7 +1003,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         {
             ctx.d_k_out_group_base = NULL;
         }
-        ctx.ir_always_valid_d = NULL;
         ctx.ir_d_pitch_pw = NULL;
     }
 

@@ -48,6 +48,7 @@ from typing import ClassVar
 from rocke.core.ir import BF16, F16, F64, I32, IRBuilder, PtrType
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.engines import assert_engine_rejects, available_engines
 
 
 class TestPackedBf16AtomicLowering(unittest.TestCase):
@@ -177,9 +178,9 @@ class TestSmemTypedVectorLoadHip(unittest.TestCase):
         from rocke.core.lower_hip import _vec_prefix
 
         with self.assertRaises(NotImplementedError) as cm:
-            _vec_prefix("i64", "global_load_vN")
+            _vec_prefix("u8", "global_load_vN")
         self.assertIn("global_load_vN", str(cm.exception))
-        self.assertIn("i64", str(cm.exception))
+        self.assertIn("u8", str(cm.exception))
 
 
 class TestHipArchSeamValidation(unittest.TestCase):
@@ -255,7 +256,8 @@ class TestHipF64Rejection(unittest.TestCase):
 
     def test_unsupported_ops_raise(self):
         # The whole message is pinned, not just the exception type, so a
-        # rejection raised for an unrelated reason cannot pass.
+        # rejection raised for an unrelated reason cannot pass; the LLVM
+        # refusal is checked on every engine this run drives.
         for op_name, (hip_msg, llvm_msg) in self._REJECTIONS.items():
             with self.subTest(op=op_name):
                 kernel = self._kernel(op_name)
@@ -263,10 +265,14 @@ class TestHipF64Rejection(unittest.TestCase):
                     NotImplementedError, rf"^{re.escape(hip_msg)}$"
                 ):
                     lower_kernel_to_hip(kernel, arch="gfx942")
-                with self.assertRaisesRegex(
-                    NotImplementedError, rf"^{re.escape(llvm_msg)}$"
-                ):
-                    lower_kernel_to_llvm(kernel, arch="gfx942")
+                for engine in available_engines():
+                    assert_engine_rejects(
+                        kernel,
+                        "gfx942",
+                        engine=engine,
+                        error_type=NotImplementedError,
+                        message=llvm_msg,
+                    )
 
     def test_fabs_stays_in_double(self):
         # The f32 helper would round the value to f32; both lowerings keep it

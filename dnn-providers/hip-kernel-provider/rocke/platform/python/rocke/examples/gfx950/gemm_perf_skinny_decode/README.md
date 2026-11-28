@@ -1,7 +1,7 @@
 # gemm_perf_skinny_decode — Runbook-driven walkthrough
 
 A self-contained example of the
-[CK DSL Optimization Runbook](../../../dsl_docs/optimization/optimization_runbook.md)
+[CK DSL Optimization Runbook](../../../../../dsl_docs/optimization/optimization_runbook.md)
 applied to one concrete problem: a Qwen3-8B **`o_proj` decode** matmul
 (`bf16`, `M=2`, `N=4096`, `K=4096`) — a low-utilization, HBM-bound GEMM
 typical of the decode phase (the same kind of projection the
@@ -60,7 +60,7 @@ name: split-K, which fills the idle CUs the decode grid leaves behind.
 
 | | |
 |---|---|
-| GPU | MI355X / gfx950 |
+| GPU | gfx950 |
 | ROCm | 7.0.2 |
 | torch | 2.12.0+rocm7.2 |
 | CK DSL | this repo (`dnn-providers/hip-kernel-provider/rocke/platform/python/rocke`) |
@@ -304,10 +304,10 @@ Diagnostic read (§17.4 form):
 - **`persistent`: noise.** The shape has only `M_tiles × N_tiles = 1 × 64 = 64`
   macro tiles. The non-persistent grid is already small; persistent's
   amortization of launch cost has nothing to amortize.
-- **`chiplet_swizzle`: small loss.** MI355X has 8 XCDs; at 64 tiles
+- **`chiplet_swizzle`: small loss.** gfx950 has 8 XCDs; at 64 tiles
   the swizzle remaps `tiles ÷ chunk_size = 64 / 64 = 1` chunk, so the
   remap is a no-op for L2-reuse purposes and the extra entry-time
-  scalar math is pure overhead. §12.1.L's "MI300X / MI325X / MI350X
+  scalar math is pure overhead. §12.1.L's "gfx950 and the 304-CU gfx942 part
   have 8 XCDs" works for shapes with many more tiles per N stripe.
 - **Pipeline+persistent co-evolution: noise.** The §17.4 lesson "a
   structural change often needs multiple co-evolved levers" applies to
@@ -668,7 +668,7 @@ this shape.
 
 > Runbook §12.1.L (chiplet swizzle).
 
-MI355X has 8 XCDs; the default WG dispatch order scatters consecutive
+gfx950 has 8 XCDs; the default WG dispatch order scatters consecutive
 CTAs across XCDs so each XCD's L2 sees uncorrelated traffic.
 `chiplet_swizzle` remaps WGIDs via `chiplet_aware_super_tile_dynamic`
 so consecutive WGs land on the same XCD. At `M=2` the same 16 KiB A
@@ -750,7 +750,7 @@ written to tolerate a shared GPU — it also prints median + spread, and warns i
 the rocBLAS spread exceeds 40 % (a sign the device is contended and the baseline
 needs a clean re-run).
 
-**Measured result (gfx950 MI355X, exclusive GPU, clean serial median).** On this
+**Measured result (gfx950, exclusive GPU, clean serial median).** On this
 exact shape the sweep's optimum is **`tile 16×64×64`, `split_k=8` ≈ 1.6× rocBLAS**
 (two independent clean-serial runs agreed at 1.61× / 1.61×) — the realized
 structural win the single-pass steps could only point at (`split_k=1` is that
@@ -795,7 +795,7 @@ to step 23.
 ## Why this is the ceiling (and what would break it)
 
 The shape transfers ≈33.5 MB total (B = 32 MiB, C = 16 KiB, A = 16 KiB).
-At MI355X's 8 TB/s theoretical HBM peak, the *floor* is 4.2 µs. The
+At gfx950's 8 TB/s theoretical HBM peak, the *floor* is 4.2 µs. The
 sustained streaming-bf16 ceiling on this part is ~3.5 TB/s ≈ 44 % of
 peak — which is where both DSL (44 %) and rocBLAS (42 %) live.
 

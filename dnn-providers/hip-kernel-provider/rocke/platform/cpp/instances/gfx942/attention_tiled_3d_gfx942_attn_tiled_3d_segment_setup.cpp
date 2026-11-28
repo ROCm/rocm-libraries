@@ -317,7 +317,7 @@ void rocke_gfx942_attention_tiled_3d_declare_params(
     ctx->softcap_p = rocke_b_param(B, "softcap", rocke_f32(), NULL);
     ctx->num_seqs_p = rocke_b_param(B, "num_seqs", rocke_i32(), NULL);
     ctx->bt_stride_p = rocke_b_param(B, "block_table_stride", rocke_i32(), NULL);
-    ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride_0", rocke_i32(), NULL);
+    ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride0", rocke_i32(), NULL);
     ctx->num_qh_p = rocke_b_param(B, "num_query_heads", rocke_i32(), NULL);
     ctx->num_kv_p = rocke_b_param(B, "num_kv_heads", rocke_i32(), NULL);
     ctx->sliding_window_p = rocke_b_param(B, "sliding_window", rocke_i32(), NULL);

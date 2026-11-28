@@ -123,11 +123,11 @@ head_size=256, bf16, sliding-window extremes, bias combinations), `fmha`
 `tile_engine/ops/fmha/ck_fmha_testing_matrix.yaml` subset that fits the
 paged-attention constraints), and `all` (`default` + `creative`).
 
-## Latest results (MI355X, gfx950, ROCm 7.2 / torch 2.12)
+## Latest results (gfx950, ROCm 7.2 / torch 2.12)
 
 > ### Measurement conditions (read first — every number below depends on these)
 >
-> * **Only same-session A/B ratios are load-bearing.** This MI355X
+> * **Only same-session A/B ratios are load-bearing.** This gfx950
 >   auto-clocks within roughly **±25-30%** (no clock-lock is available on this
 >   node), so absolute microsecond values drift run-to-run and **cross-session
 >   absolute ms are NOT comparable**. Every ratio in the tables below is a
@@ -151,7 +151,7 @@ paged-attention constraints), and `all` (`default` + `creative`).
 > * **Re-measured 2026-06-19** on verified llvm22, `--attempts 30 --warmup 10`,
 >   median of 3 same-session runs.
 
-> **Re-baselined 2026-06-19 on this MI355X / gfx950 box, verified llvm22 /
+> **Re-baselined 2026-06-19 on this gfx950 box, verified llvm22 /
 > comgr 7.2** (torch imported first; `resolved_lib_rocm_version()==(7,2)`),
 > median of 3 same-session runs. Against AITER's Triton `unified_attention`
 > **on each backend's own selector**: geomean **1.04x (auto)** / **1.20x
@@ -205,7 +205,7 @@ under-measured CK lanes for some shapes.
 
 The numbers below were produced on **2026-06-19** with
 ``--attempts 30 --warmup 10`` and are the **per-cell median of 3 full
-harness runs** on this box (the MI355X is perf-noisy under load, so the
+harness runs** on this box (the gfx950 is perf-noisy under load, so the
 median rejects the occasional outlier launch). Re-running may shift any
 single cell by a few percent; the geomeans are stable.
 
@@ -601,7 +601,7 @@ limiter read (MFMA-busy ≈5%→18%), and the occupancy table (nw2 296 VGPR /
 Modes 0/1 (`iglp_opt` at the loop top) are ported to the gfx950 C twin; mode
 2 is Python-only and rejected by the C path.
 
-Measured on gfx950 MI355X (comgr llvm22, same-session vs the shipped auto
+Measured on gfx950 (comgr llvm22, same-session vs the shipped auto
 path across the gap-doc cohort), correctness `max_abs = 0.0` vs the shipped
 kernel on every shape. The speedup bundles the interleave hint **and** the
 nw2→nw4 widening vs the shipped nw2 baseline:
@@ -625,7 +625,7 @@ mutual-exclusion with `use_sched_barrier`), so it is *technically* legal on
 d64, multi-seq d128, sliding-window d128, and d256. It was measured on all
 of them. The hint is a pure scheduling change (`max_abs = 0.0` vs the same
 spec with it off), so the only question is timing. Adding **only** the hint
-to each cohort's **shipped** geometry (MI355X, vs the production baseline):
+to each cohort's **shipped** geometry (gfx950, vs the production baseline):
 
 | cohort (shipped geometry) | S1024 | S2048 | S4096 |
 |---------------------------|------:|------:|------:|
@@ -819,7 +819,8 @@ builders' i32 path stops at `0x7FFF0000` bytes (their buffer `num_records`), so
 the cache switches to i64 strictly above that. Some tiled K/V loaders have no
 i64 branch yet, so an i64 spec that enables one keeps that loader's i32 limit:
 2^31 bytes for the flat loads of gfx942 cfv and vhbm, and `0x7FFF0000`
-for the buffer loads of gfx942 khbm and of fp8-PV on both arches. The scalar,
+for the buffer loads of fp8-PV on both arches. The gfx942 khbm K read has no
+i64 branch either, and its spec refuses `use_i64_kv_addr` instead. The scalar,
 gfx942 4-warp GQA and gfx1250 kernels have no i64 path and index K/V with i32
 element offsets, so their limit is 2^31 elements. Not checked: the 3D split-KV
 path and the gfx1250 `tiled_2d_verify.py` harness, which pack their own
@@ -876,8 +877,8 @@ variant per shape + bucket; writes a JSON to `--output-json`, default
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/benchmark_prefill2d_live.py \
+PYTHONPATH="python:../library:${AITER_PATH}" python \
+  ../library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_live.py \
   --shapes <path/to/unified_attention_shapes.jsonl> --variants prod combo fallback
 ```
 
@@ -888,8 +889,8 @@ CSV; the joined file is emitted to the path given by `--combined-csv`:
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/benchmark_prefill2d_traces.py \
+PYTHONPATH="python:../library:${AITER_PATH}" python \
+  ../library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_traces.py \
   --shapes <path/to/unified_attention_shapes.jsonl> \
   --combined-csv prefill2d_bf16_triton_ckdsl_perf.csv
 ```

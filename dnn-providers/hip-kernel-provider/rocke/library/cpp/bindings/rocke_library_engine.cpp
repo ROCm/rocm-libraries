@@ -27,9 +27,7 @@ namespace py = pybind11;
  * reduce), direct grouped / non-grouped conv, deep fused conv+pool. */
 void register_conv(py::module_& m);
 
-/* rocke_library_engine_img2col.cpp: a separate TU because img2col's helper
- * header defines its own struct rocke_conv_problem, which clashes with the
- * implicit-GEMM conv headers in one translation unit. */
+/* rocke_library_engine_img2col.cpp: the img2col family. */
 void register_img2col(py::module_& m);
 
 /* rocke_library_engine_winograd_{fwd,gemm,gen,fused1d}.cpp: the Winograd

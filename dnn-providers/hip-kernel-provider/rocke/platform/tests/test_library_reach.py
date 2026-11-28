@@ -29,8 +29,6 @@ import ast
 from collections import Counter
 from pathlib import Path
 
-import pytest
-
 PLATFORM = Path(__file__).resolve().parents[1]
 # The counts are of the source tree. An installed test tree has no python/,
 # cpp/ or dsl_docs/, and stages the library under tests/library, so the audit
@@ -94,11 +92,17 @@ def _current() -> Counter:
     return found
 
 
-@pytest.mark.skipif(
-    not _IS_SOURCE_CHECKOUT,
-    reason="audits the platform sources, which an installed test layout omits",
-)
 def test_platform_library_imports_only_shrink():
+    if not _IS_SOURCE_CHECKOUT:
+        # Imported here: the pre-commit hook runs this file without rocke on
+        # its path, in a source checkout, where this branch is not taken.
+        from rocke.tests.lanes import SOURCE_TREE, skip_until
+
+        skip_until(
+            SOURCE_TREE,
+            reason="audits the platform sources, which an installed test layout "
+            "omits",
+        )
     found = _current()
     problems = []
     for rel, n in sorted(found.items()):

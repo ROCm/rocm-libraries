@@ -9,7 +9,7 @@ AND measures graph-mode kernel time:
   * narrow      : the current shipped bf16 path (16x16x16, the BEFORE)
   * wide        : the bf16 32x32x8 transposed path with the naive strided-V feed
   * wide_cfonly : wide + conflict-free V store (cfvst) -- the PRODUCTION D64
-                  config; ~3% faster than naive-V on D64 (MI300X, steady-state)
+                  config; ~3% faster than naive-V on D64 (gfx942, steady-state)
   * wide_cf     : cfvst + sliced-K ring -- ported from fp16 but the ring
                   REGRESSES bf16 (kept for A/B); not used in production
   * flash       : PyTorch SDPA FLASH_ATTENTION backend (the bar to beat)
@@ -39,7 +39,7 @@ from kernels import build_unified_attention_2d_tiled  # noqa: E402
 from kernels.gfx942.attention_tiled_2d import (  # noqa: E402
     UnifiedAttention2DTiledSpec,
 )
-from kernels.common.attention_unified import _tiled_2d_signature  # noqa: E402
+from kernels.common.attention_unified import tiled_2d_signature  # noqa: E402
 from rocke.runtime import KernelLauncher  # noqa: E402
 
 BS = H.BLOCK_SIZE
@@ -136,7 +136,7 @@ def build_launcher(s, spec, kind):
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,
-        signature=_tiled_2d_signature("gfx942", s.dtype),
+        signature=tiled_2d_signature("gfx942", s.dtype),
         cache_key=("bf16wide", spec.kernel_name(), kind),
     )
     return launcher

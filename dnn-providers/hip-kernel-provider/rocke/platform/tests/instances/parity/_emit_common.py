@@ -5,13 +5,20 @@
 # emitters. Every <family>_emit.py parses the same argv (config index in
 # argv[1], optional mode in argv[2] defaulting to "ll"), then dispatches on the
 # mode: "ll" prints lower_kernel_to_llvm, "ir" prints the ck.dsl.ir/v1
-# serialization, "verify" prints verifier diagnostics, and any other mode is a
+# serialization, "verify" prints verifier diagnostics, "hip-case" prints the
+# kernel's HIP source identity case (see hip_case), and any other mode is a
 # usage error. run_emit() centralizes that boilerplate so each emitter only has
 # to provide its config selector and kernel builder.
+from __future__ import annotations
+
 import sys
+from typing import TYPE_CHECKING
 
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
+
+if TYPE_CHECKING:
+    from rocke.core.ir import KernelDef
 
 # The "ll" mode must emit the NATIVE Python engine's .ll regardless of the
 # package-default backend (this driver is the python reference oracle). On
@@ -24,14 +31,32 @@ except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
 
 
+# The emitter modes run_emit accepts. A bespoke emitter that parses its own argv
+# accepts the same names.
+MODES = ("ll", "ir", "verify", "hip-case")
+
+
+def hip_case(kernel: KernelDef, arch: str) -> str:
+    """The "hip-case" text for one kernel: its HIP source identity case
+    (``rocke.tests.hip_identity_cases``). An emitter that builds several kernels
+    for one config prints one case per kernel, back to back.
+
+    ``hip_case_text`` is imported here rather than at the top so that the other
+    modes still run against a reference Python root (``run_diff.py --pyroot``)
+    that predates its module."""
+    from rocke.tests.hip_identity_cases import hip_case_text
+
+    return hip_case_text(kernel, arch)
+
+
 def run_emit(spec_fn, build_fn, *, usage=None, arch="gfx950"):
     """Drive one parity emitter and return its process exit code.
 
     spec_fn(idx) returns either a spec or a (spec, arch) tuple; a bare spec uses
     the `arch` argument (default "gfx950"), while a tuple supplies its own arch.
     build_fn(spec, arch=arch) returns the kernel. The selected mode (argv[2], default
-    "ll") chooses the native Python lowerer, serialize, or verifier-diagnostic
-    output; an unrecognized mode is rejected.
+    "ll") chooses the native Python lowerer, serialize, verifier-diagnostic or
+    hip_case output; an unrecognized mode is rejected.
 
     The "ll" mode deliberately uses the NATIVE Python lowerer
     (``_lower_kernel_to_llvm_python``) rather than the backend-dispatching
@@ -42,11 +67,11 @@ def run_emit(spec_fn, build_fn, *, usage=None, arch="gfx950"):
     default flip.
     """
     if len(sys.argv) < 2:
-        sys.stderr.write(usage or "usage: <config_index> [ll|ir|verify]\n")
+        sys.stderr.write(usage or "usage: <config_index> [ll|ir|verify|hip-case]\n")
         return 2
     idx = int(sys.argv[1])
     mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
-    if mode not in ("ll", "ir", "verify"):
+    if mode not in MODES:
         sys.stderr.write(f"unknown mode {mode}\n")
         return 2
     selected = spec_fn(idx)
@@ -64,6 +89,8 @@ def run_emit(spec_fn, build_fn, *, usage=None, arch="gfx950"):
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))
+    elif mode == "hip-case":
+        sys.stdout.write(hip_case(kernel, arch))
     else:  # verify
         sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     return 0

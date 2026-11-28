@@ -246,7 +246,7 @@ def main() -> int:
     # ABI param order from attention_tiled_2d._declare_params:
     #   out, query, key, value, sink, block_tables, seq_lens, alibi, qq_bias,
     #   cu_q, scale, k_scale, v_scale, out_scale, softcap,
-    #   num_seqs, block_table_stride, qq_bias_stride_0
+    #   num_seqs, block_table_stride, qq_bias_stride0
     packed = struct.pack(
         "<" + "Q" * 10 + "f" * 5 + "i" * 3,
         od,

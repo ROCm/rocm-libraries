@@ -44,22 +44,61 @@ if(ROCKE_BUILD_PYENV)
     set(ROCKE_PYENV_PYTHON "${_rocke_pyenv_python}"
         CACHE FILEPATH "Interpreter for the rocke editable Python env")
 
+    # cmake/make_pyenv.py creates the venv and owns the Python build tooling it
+    # needs: it checks, with the venv's own interpreter, that setuptools can make
+    # editable installs and build wheels without pip's isolated build
+    # environment. The venv gets --system-site-packages so it reuses the
+    # interpreter's packages (the system ROCm torch is never reinstalled); when
+    # Python3_EXECUTABLE is itself a virtualenv, the script also adds that
+    # virtualenv's site directories, which --system-site-packages alone skips.
+    #
+    # Hermetic mode. When rocKE is built as part of the hip-kernel-provider
+    # (ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR is set by the provider), the build
+    # must not need a package index: release builds run offline and the Python
+    # tooling comes from the interpreter's environment. So the script downloads
+    # nothing and gives the venv no pip of its own (--offline), pip resolves no
+    # dependencies (NumPy etc. are runtime dependencies that the editable install
+    # does not need to build) and builds without its isolated build environment,
+    # which would download setuptools.
+    # The same check runs here at configure time, against Python3_EXECUTABLE, so
+    # a missing tool fails before the build starts. Standalone builds upgrade
+    # pip, setuptools and wheel in the venv instead.
+    set(_rocke_make_pyenv "${CMAKE_CURRENT_SOURCE_DIR}/cmake/make_pyenv.py")
+    if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" "${_rocke_make_pyenv}" --check
+            RESULT_VARIABLE _rocke_build_tools_rc
+            ERROR_VARIABLE _rocke_build_tools_error
+            OUTPUT_QUIET)
+        if(NOT _rocke_build_tools_rc EQUAL 0)
+            message(FATAL_ERROR
+                "cmake/make_pyenv.py --check failed for ${Python3_EXECUTABLE} "
+                "(exit ${_rocke_build_tools_rc}):\n${_rocke_build_tools_error}")
+        endif()
+        set(_rocke_make_pyenv_flags --offline)
+        set(_rocke_pyenv_platform_flags --no-deps --no-build-isolation)
+        set(_rocke_pyenv_isolation_flags --no-build-isolation)
+    else()
+        set(_rocke_make_pyenv_flags "")
+        set(_rocke_pyenv_platform_flags "")
+        set(_rocke_pyenv_isolation_flags "")
+    endif()
+
     add_custom_command(
         OUTPUT "${ROCKE_PYENV_STAMP}"
-        # --system-site-packages so the venv inherits the system ROCm torch
-        # (it is never reinstalled here).
-        COMMAND "${Python3_EXECUTABLE}" -m venv --system-site-packages --copies "${ROCKE_PYENV_DIR}"
-        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q --upgrade pip "setuptools>=61" wheel
+        COMMAND "${Python3_EXECUTABLE}" "${_rocke_make_pyenv}" ${_rocke_make_pyenv_flags}
+                "${ROCKE_PYENV_DIR}"
         # editable_mode=compat writes a .pth pointing at the source root, so even
         # newly added modules are importable without reinstalling.
-        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q
+        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q ${_rocke_pyenv_platform_flags}
                 --config-settings editable_mode=compat
                 -e "${CMAKE_CURRENT_SOURCE_DIR}/platform"
-        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q --no-deps
+        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q --no-deps ${_rocke_pyenv_isolation_flags}
                 --config-settings editable_mode=compat
                 -e "${CMAKE_CURRENT_SOURCE_DIR}/library"
         COMMAND "${CMAKE_COMMAND}" -E touch "${ROCKE_PYENV_STAMP}"
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/platform/pyproject.toml"
+        DEPENDS "${_rocke_make_pyenv}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/platform/pyproject.toml"
                 "${CMAKE_CURRENT_SOURCE_DIR}/library/pyproject.toml"
         COMMENT "rocke-pyenv: editable-installing platform + library"
         VERBATIM)
@@ -103,14 +142,19 @@ if(ROCKE_BUILD_PYENV)
     # value does not itself become a rebuild trigger.
     set(_rocke_wheel_env "${CMAKE_COMMAND}" -E env "SOURCE_DATE_EPOCH=1700000000")
 
+    set(_rocke_library_wheel_script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_library_wheel.py")
     set(_rocke_platform_wheel "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
     add_custom_command(
         OUTPUT "${_rocke_platform_wheel}"
+        # Built from a temporary copy of just what the wheel ships (pyproject.toml,
+        # README.md, python/) so that setuptools' build/ and *.egg-info never
+        # land in the source tree. See cmake/build_library_wheel.py.
         COMMAND ${_rocke_wheel_env}
-                "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
-                --wheel-dir "${ROCKE_WHEEL_DIR}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/platform"
+                "${ROCKE_PYENV_PYTHON}" "${_rocke_library_wheel_script}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/platform" "${ROCKE_WHEEL_DIR}"
+                pyproject.toml README.md python
         DEPENDS "${ROCKE_PYENV_STAMP}"
+                "${_rocke_library_wheel_script}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/platform/pyproject.toml"
                 ${_rocke_platform_sources}
         COMMENT "Building rocke platform wheel"
@@ -121,7 +165,6 @@ if(ROCKE_BUILD_PYENV)
     # sources, which would match the glob above and force a CMake re-run on
     # the next build. (Filtering the list does not help: CONFIGURE_DEPENDS
     # re-checks the unfiltered glob.) See cmake/build_library_wheel.py.
-    set(_rocke_library_wheel_script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_library_wheel.py")
     set(_rocke_library_wheel "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
     add_custom_command(
         OUTPUT "${_rocke_library_wheel}"

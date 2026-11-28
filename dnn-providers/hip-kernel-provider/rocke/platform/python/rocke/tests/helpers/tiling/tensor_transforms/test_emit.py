@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir import F16, F32, I32, I64, IRBuilder, PtrType, Value
 from rocke.core.ir_print import print_ir
 from rocke.core.lower_llvm import LLVM_FLAVORS
@@ -56,9 +57,12 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     UniformPart,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
+from rocke.tests.comgr import require_comgr_target
 from rocke.tests.engines import lower_with_both_engines
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
+# The goldens' name in the golden index, printed in their re-record command.
+GOLDEN_NAME = "tensor_transforms_emit"
 WAVE = 64
 
 
@@ -886,10 +890,19 @@ GOLDEN_CASES = {
 
 @pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
 def test_emitted_ir_text_matches_its_reviewed_golden(case):
-    b, _ = GOLDEN_CASES[case]()
-    assert print_ir(b.kernel) + "\n" == (GOLDEN_DIR / f"emit_{case}.txt").read_text(
+    assert _golden_text(case) == _golden_path(case).read_text(
         encoding="utf-8"
-    )
+    ), rerecord_hint(GOLDEN_NAME)
+
+
+def _golden_path(case: str) -> Path:
+    return GOLDEN_DIR / f"emit_{case}.txt"
+
+
+def _golden_text(case: str) -> str:
+    """The IR text a golden case records: its kernel, printed."""
+    b, _ = GOLDEN_CASES[case]()
+    return print_ir(b.kernel) + "\n"
 
 
 def _store_parts(b: IRBuilder, addresses: tuple[tt.ElementAddress, ...]) -> int:
@@ -932,23 +945,11 @@ def test_every_golden_case_lowers_to_the_same_ir_in_both_engines(case, arch, fla
     assert lower_with_both_engines(_golden_kernel(case), arch, flavor)
 
 
-def _require_comgr_target(arch: str) -> None:
-    """Skip when the loaded comgr cannot target ``arch`` (an older ROCm lacks the newest
-    targets); after this, any compile error is the kernel's and fails the test."""
-    comgr = pytest.importorskip("rocke.runtime.comgr")
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:
-        pytest.skip(f"comgr unavailable: {exc}")
-    if arch not in {name.split("--")[-1].split(":")[0] for name in isas}:
-        pytest.skip(f"the loaded comgr cannot target {arch}")
-
-
 @pytest.mark.parametrize("arch", GOLDEN_ARCHES)
 @pytest.mark.parametrize("case", sorted(GOLDEN_CASES))
 def test_every_golden_case_compiles(case, arch):
     compile_kernel = pytest.importorskip("rocke.helpers.compile").compile_kernel
-    _require_comgr_target(arch)
+    require_comgr_target(arch)
     assert compile_kernel(_golden_kernel(case), arch=arch).hsaco
 
 
@@ -1190,3 +1191,17 @@ def test_gpu_conv_over_more_than_two_to_the_31_elements_keeps_the_lane_part_in_o
             expected = transform_address_of(graph, tensor, coords)
             assert sums[blk][t][i] == expected
     assert max(transform_address_of(graph, tensor, (m0 + 31, 0)), 0) >= 2**31
+
+
+if __name__ == "__main__":
+    # From rocke/platform/python:
+    #   python -m rocke.tests.helpers.tiling.tensor_transforms.test_emit --write
+    import sys
+
+    if sys.argv[1:] != ["--write"]:
+        sys.exit("usage: python -m <this module> --write")
+    for golden_case in sorted(GOLDEN_CASES):
+        _golden_path(golden_case).write_text(
+            _golden_text(golden_case), encoding="utf-8"
+        )
+        print(f"wrote {_golden_path(golden_case)}")

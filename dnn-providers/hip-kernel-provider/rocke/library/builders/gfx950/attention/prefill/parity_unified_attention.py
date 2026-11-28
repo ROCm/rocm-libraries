@@ -26,11 +26,17 @@ import argparse
 import json
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import torch
+
+from builders.gfx950.attention.prefill.unified_attention_cases import (
+    Scenario,
+    band_scenarios,
+    nomask_scenarios,
+    topleft_scenarios,
+)
 
 aiter_path = os.environ.get("AITER_PATH")
 if aiter_path:
@@ -250,34 +256,6 @@ def ref_paged_attn(
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Scenario:
-    name: str
-    seq_lens: List[Tuple[int, int]]
-    num_query_heads: int
-    num_kv_heads: int
-    head_size: int
-    block_size: int
-    dtype: torch.dtype
-    sliding_window: Optional[int] = None
-    softcap: float = 0.0
-    use_sinks: bool = False
-    num_blocks: int = 32768
-    use_alibi: bool = False
-    use_qq_bias: bool = False
-    qq_bias_stride_0: int = 0
-    # Band (see ``ref_paged_attn``): diagonal alignment and right bound
-    # (0 = causal, -1 = unbounded, R > 0 = lookahead); ``sliding_window`` is the left
-    # bound. Defaults are the paged bottom-right causal mask; the Triton lane only
-    # implements that one, so it is skipped for any other.
-    causal_top_left: bool = False
-    right_bound: int = 0
-
-    @property
-    def default_mask(self) -> bool:
-        return not self.causal_top_left and self.right_bound == 0
-
-
 def default_scenarios() -> List[Scenario]:
     return [
         Scenario(
@@ -287,7 +265,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="decode_d128_b64",
@@ -296,7 +274,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=64,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="decode_d256_b16",
@@ -305,7 +283,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         # D256 gfx950 bf16 prefill fast path (Qwen3-Next-80B-A3B cohort,
         # GQA 16/2). Exercises the _d256_gfx950_fast route (32x32 transposed
@@ -317,7 +295,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         Scenario(
             name="prefill_d256_gqa8_b16_sq8192",
@@ -326,7 +304,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # bs=32 D256: takes the same fast route (T=64 forced -> 2 blocks/tile),
         # a distinct multi-block ratio from the bs=16 (4/tile) validated points.
@@ -337,7 +315,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=32,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         Scenario(
             name="prefill_d128_b16",
@@ -346,7 +324,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="mixed_d128_b16",
@@ -355,7 +333,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="sliding_d128_b16",
@@ -364,7 +342,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             sliding_window=256,
         ),
         # single-sequence (num_seqs==1) long prefill, the exact
@@ -379,7 +357,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=128,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             sliding_window=4096,
         ),
         Scenario(
@@ -389,7 +367,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             softcap=50.0,
         ),
         Scenario(
@@ -399,7 +377,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         Scenario(
             name="alibi_decode_d128_b16",
@@ -408,7 +386,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             use_alibi=True,
         ),
         Scenario(
@@ -418,7 +396,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             use_alibi=True,
         ),
         Scenario(
@@ -428,7 +406,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             use_qq_bias=True,
             qq_bias_stride_0=256,
         ),
@@ -442,7 +420,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             softcap=50.0,
             use_alibi=True,
             use_qq_bias=True,
@@ -456,7 +434,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             softcap=50.0,
             use_alibi=True,
             use_qq_bias=True,
@@ -472,7 +450,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=64,
             block_size=32,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # Same combo cohort with softcap + ALiBi + QQ-bias enabled.  max_seqlen_q
         # == 512 > 256 keeps routing on the 2D combo path (_enable_combo_2d).
@@ -484,7 +462,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=64,
             block_size=32,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             softcap=50.0,
             use_alibi=True,
             use_qq_bias=True,
@@ -501,7 +479,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=64,
             block_size=32,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # NQK non-power-of-2 correctness cases: NQK does not divide BLOCK_M, so
         # the padded-block-q path must mask the extra rows written by the CTA.
@@ -513,7 +491,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=128,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # NQK=7 (Hq=28, Hkv=4): another non-power-of-2 ratio.
         Scenario(
@@ -523,7 +501,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=4,
             head_size=128,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # NQK=3 (Hq=24, Hkv=8): smaller non-power-of-2.
         Scenario(
@@ -533,7 +511,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=128,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # NQK=8 baseline (divides BLOCK_M evenly): sanity check that the fix
         # does not regress the power-of-2 path.
@@ -544,7 +522,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=4,
             head_size=128,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # fp16 sink prefill: the cohort the combo widening admits. Gate 1 (D64
         # b32 GQA-8, multi-seq) and Gate 2 (D64 b16, single-seq).
@@ -555,7 +533,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=64,
             block_size=32,
-            dtype=torch.float16,
+            dtype="fp16",
             use_sinks=True,
             num_blocks=1024,
         ),
@@ -566,7 +544,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=64,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             use_sinks=True,
             num_blocks=512,
         ),
@@ -584,7 +562,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=64,
             block_size=32,
-            dtype=torch.float16,
+            dtype="fp16",
             use_sinks=True,
             sliding_window=512,
             num_blocks=1024,
@@ -596,7 +574,7 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=64,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             use_sinks=True,
             sliding_window=512,
             num_blocks=512,
@@ -619,8 +597,8 @@ def fmha_scenarios() -> List[Scenario]:
     fits those constraints, translated to `(batch * seqlen_q,
     seqlen_k)` per-sequence pairs.
     """
-    fp16 = torch.float16
-    bf16 = torch.bfloat16
+    fp16 = "fp16"
+    bf16 = "bf16"
 
     def rep(n: int, q: int, k: int) -> List[Tuple[int, int]]:
         return [(q, k)] * int(n)
@@ -891,227 +869,6 @@ def fmha_scenarios() -> List[Scenario]:
     ]
 
 
-def topleft_scenarios() -> List[Scenario]:
-    """Unshifted (top-left) causal cohort: query p attends keys <= p per sequence.
-
-    Mixes ``q < kv``, ``q > kv`` and ``q == kv`` sequences in one batch. The
-    ``q > kv`` rows past ``kv_len`` see every key, so the in-prefix bound (not
-    the causal bound) ends their KV loop.
-    """
-    fp16, bf16 = torch.float16, torch.bfloat16
-
-    def tl(name, seq_lens, **kw):
-        base = dict(
-            num_query_heads=16,
-            num_kv_heads=2,
-            head_size=128,
-            block_size=16,
-            dtype=fp16,
-        )
-        base.update(kw)
-        return Scenario(
-            name=f"tl_{name}", seq_lens=seq_lens, causal_top_left=True, **base
-        )
-
-    lt = [(256, 1024), (100, 300), (1, 700)]
-    gt = [(1024, 256), (300, 100), (700, 1)]
-    mixed = [(512, 512), (700, 200), (200, 700), (64, 64)]
-    return [
-        tl("q_lt_kv", lt),
-        tl("q_gt_kv", gt),
-        tl("mixed", mixed),
-        tl("mixed_bf16_b64", mixed, dtype=bf16, block_size=64),
-        tl(
-            "gqa64x8_prefill",
-            [(2048, 4096), (1500, 700)],
-            num_query_heads=64,
-            num_kv_heads=8,
-            dtype=bf16,
-        ),
-        tl("d64", mixed, head_size=64, num_query_heads=8, num_kv_heads=1),
-        tl(
-            "d256_bf16",
-            [(1024, 2048), (900, 300)],
-            head_size=256,
-            dtype=bf16,
-            num_query_heads=64,
-            num_kv_heads=8,
-        ),
-        tl("sinks", mixed, use_sinks=True),
-        tl("softcap", mixed, softcap=30.0),
-        tl("sliding_window", [(300, 1024), (500, 200), (256, 256)], sliding_window=64),
-        tl("alibi", mixed, use_alibi=True),
-        tl("qq_bias", mixed, use_qq_bias=True, qq_bias_stride_0=1024),
-        # ALiBi + sliding window together is NOT covered: that combination already
-        # yields NaN/wrong rows at bottom-right on the unmodified 2D kernel.
-        tl("decode_q1", [(1, 1024), (1, 4096), (1, 33)]),
-        # D256 bf16 decode cohort (``attention_d256_decode`` candidate).
-        tl(
-            "d256_decode_q1",
-            [(1, 2048), (1, 4096), (1, 512)],
-            head_size=256,
-            dtype=bf16,
-        ),
-    ]
-
-
-def nomask_scenarios() -> List[Scenario]:
-    """No-mask cohort: every query attends every key (standard SDPA default).
-
-    The unified kernels were unconditionally causal, so this also covers equal
-    ``q == kv`` sequences, where the old (silently causal) kernel was wrong too.
-    """
-    fp16, bf16 = torch.float16, torch.bfloat16
-
-    def nm(name, seq_lens, **kw):
-        base = dict(
-            num_query_heads=16,
-            num_kv_heads=2,
-            head_size=128,
-            block_size=16,
-            dtype=fp16,
-        )
-        base.update(kw)
-        return Scenario(name=f"nm_{name}", seq_lens=seq_lens, right_bound=-1, **base)
-
-    mixed = [(512, 512), (700, 200), (200, 700), (64, 64)]
-    return [
-        nm("equal", [(512, 512), (257, 257), (64, 64)]),
-        nm("q_lt_kv", [(256, 1024), (100, 300), (1, 700)]),
-        nm("q_gt_kv", [(1024, 256), (300, 100), (700, 1)]),
-        nm("mixed", mixed),
-        nm("mixed_bf16_b64", mixed, dtype=bf16, block_size=64),
-        nm(
-            "gqa64x8_prefill",
-            [(2048, 4096), (1500, 700)],
-            num_query_heads=64,
-            num_kv_heads=8,
-            dtype=bf16,
-        ),
-        nm("d64", mixed, head_size=64, num_query_heads=8, num_kv_heads=1),
-        nm(
-            "d256_bf16",
-            [(1024, 2048), (900, 300)],
-            head_size=256,
-            dtype=bf16,
-            num_query_heads=64,
-            num_kv_heads=8,
-        ),
-        nm("sinks", mixed, use_sinks=True),
-        nm("softcap", mixed, softcap=30.0),
-        nm("decode_q1", [(1, 1024), (1, 4096), (1, 33)]),
-        nm(
-            "d256_decode_q1",
-            [(1, 2048), (1, 4096), (1, 512)],
-            head_size=256,
-            dtype=bf16,
-        ),
-    ]
-
-
-def band_scenarios() -> List[Scenario]:
-    """Non-causal sliding-window / lookahead bands: ``(sliding_window, right_bound)``
-    around the top-left or bottom-right diagonal, cuDNN-style.
-
-    ``right_bound=-1`` is a left-only window (the future is visible); ``R > 0`` a
-    two-sided window or a lookahead (``sliding_window == 0``). Sequences mix
-    ``q < kv``, ``q > kv`` and ``q == kv`` so both alignments differ, and ``q > kv``
-    top-left rows past ``kv_len`` exercise empty-band rows.
-    """
-    fp16, bf16 = torch.float16, torch.bfloat16
-
-    def bd(name, seq_lens, *, tl, window=0, right=-1, **kw):
-        base = dict(
-            num_query_heads=16,
-            num_kv_heads=2,
-            head_size=128,
-            block_size=16,
-            dtype=fp16,
-        )
-        base.update(kw)
-        align = "tl" if tl else "br"
-        return Scenario(
-            name=f"bd_{align}_{name}",
-            seq_lens=seq_lens,
-            causal_top_left=tl,
-            right_bound=right,
-            sliding_window=window or None,
-            **base,
-        )
-
-    mixed = [(512, 512), (700, 200), (200, 700), (64, 64)]
-    out: List[Scenario] = []
-    for tl in (False, True):
-        out += [
-            bd("left_only_w64", mixed, tl=tl, window=64),
-            bd("two_sided_w64_r32", mixed, tl=tl, window=64, right=32),
-            bd("lookahead_r16", mixed, tl=tl, right=16),
-            # right=0 is a plain causal window; the mixed lengths include q > kv, whose
-            # rows past the band are empty (output 0).
-            bd("causal_w100", mixed, tl=tl, window=100, right=0),
-            bd("q_lt_kv_w128", [(256, 1024), (100, 300), (1, 700)], tl=tl, window=128),
-            bd(
-                "q_gt_kv_w128_r8",
-                [(1024, 256), (300, 100), (700, 1)],
-                tl=tl,
-                window=128,
-                right=8,
-            ),
-            bd(
-                "bf16_b64_w96_r48",
-                mixed,
-                tl=tl,
-                window=96,
-                right=48,
-                dtype=bf16,
-                block_size=64,
-            ),
-            bd(
-                "gqa64x8_w256",
-                [(2048, 4096), (1500, 700)],
-                tl=tl,
-                window=256,
-                num_query_heads=64,
-                num_kv_heads=8,
-                dtype=bf16,
-            ),
-            bd(
-                "gqa64x8_r64",
-                [(2048, 4096), (1500, 700)],
-                tl=tl,
-                right=64,
-                num_query_heads=64,
-                num_kv_heads=8,
-                dtype=bf16,
-            ),
-            bd(
-                "d64_w64_r32",
-                mixed,
-                tl=tl,
-                window=64,
-                right=32,
-                head_size=64,
-                num_query_heads=8,
-                num_kv_heads=1,
-            ),
-            bd(
-                "d256_bf16_w128_r16",
-                [(1024, 2048), (900, 300)],
-                tl=tl,
-                window=128,
-                right=16,
-                head_size=256,
-                dtype=bf16,
-                num_query_heads=64,
-                num_kv_heads=8,
-            ),
-            bd("sinks_w64_r32", mixed, tl=tl, window=64, right=32, use_sinks=True),
-            bd("softcap_w64", mixed, tl=tl, window=64, softcap=30.0),
-            bd("decode_q1_r8", [(1, 1024), (1, 4096), (1, 33)], tl=tl, right=8),
-        ]
-    return out
-
-
 def creative_scenarios() -> List[Scenario]:
     """Exploratory sweep: corners we don't hit in the default 11 scenarios.
 
@@ -1130,7 +887,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="creative_decode_32k",
@@ -1139,7 +896,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="creative_decode_64k_bf16_b64",
@@ -1148,7 +905,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # --- big decode batch (varied kv per seq) ---
         Scenario(
@@ -1175,7 +932,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         # --- tiny + large prefill ---
         Scenario(
@@ -1185,7 +942,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="creative_prefill_512",
@@ -1194,7 +951,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="creative_prefill_2k",
@@ -1203,7 +960,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         # --- chunked prefill (q < kv, mid-context) ---
         Scenario(
@@ -1213,7 +970,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         # --- GQA / MQA / wider heads ---
         Scenario(
@@ -1223,7 +980,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=4,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="creative_mqa_h16_k1",
@@ -1232,7 +989,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=1,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="creative_gqa_h64_k8",
@@ -1241,7 +998,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         Scenario(
             name="creative_r1r4_bf16_d64_sinks",
@@ -1250,7 +1007,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=64,
             block_size=32,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             use_sinks=True,
             num_blocks=1024,
         ),
@@ -1262,7 +1019,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # --- PR #9233: D256 gfx950 bf16 prefill fast-path cohort (Sq bs64) ---
         # These are the shapes the PR perf table reports (+9.1% @ Sq4096,
@@ -1276,7 +1033,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=64 * (4096 // 16),
         ),
         Scenario(
@@ -1286,7 +1043,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=64 * (8192 // 16),
         ),
         # bs64 == block_size=64 interpretation, single long sequence (batch 1):
@@ -1299,7 +1056,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=16,
             head_size=256,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=4096 // 64,
         ),
         Scenario(
@@ -1309,7 +1066,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=16,
             head_size=256,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=8192 // 64,
         ),
         Scenario(
@@ -1319,7 +1076,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=8,
             head_size=256,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=8192 // 64,
         ),
         Scenario(
@@ -1329,7 +1086,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=8192 // 64,
         ),
         Scenario(
@@ -1339,7 +1096,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=1,
             head_size=256,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=8192 // 64,
         ),
         Scenario(
@@ -1349,7 +1106,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=16,
             head_size=256,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=4096 // 16,
         ),
         Scenario(
@@ -1359,7 +1116,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=16,
             head_size=256,
             block_size=16,
-            dtype=torch.bfloat16,
+            dtype="bf16",
             num_blocks=8192 // 16,
         ),
         Scenario(
@@ -1369,7 +1126,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=256,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
         ),
         # --- bf16 + block_size=64 chunked prefill ---
         Scenario(
@@ -1379,7 +1136,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=64,
-            dtype=torch.bfloat16,
+            dtype="bf16",
         ),
         # --- sliding-window extremes ---
         Scenario(
@@ -1389,7 +1146,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             sliding_window=64,
         ),
         Scenario(
@@ -1399,7 +1156,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             sliding_window=4096,
         ),
         # --- ALiBi + sliding window ---
@@ -1410,7 +1167,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             sliding_window=512,
             use_alibi=True,
         ),
@@ -1422,7 +1179,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             sliding_window=512,
             softcap=30.0,
         ),
@@ -1434,7 +1191,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             use_qq_bias=True,
             qq_bias_stride_0=512,
         ),
@@ -1446,7 +1203,7 @@ def creative_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=128,
             block_size=16,
-            dtype=torch.float16,
+            dtype="fp16",
             sliding_window=256,
             softcap=30.0,
             use_alibi=True,
@@ -1459,8 +1216,13 @@ def creative_scenarios() -> List[Scenario]:
 # ---------------------------------------------------------------------------
 
 
+#: Scenario dtype name -> the torch dtype the harness builds tensors in.
+_TORCH_DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
+
+
 def make_inputs(s: Scenario, seed: int = 0):
     torch.manual_seed(seed)
+    dtype = _TORCH_DTYPES[s.dtype]
     query_lens = [x[0] for x in s.seq_lens]
     kv_lens_list = [x[1] for x in s.seq_lens]
     num_seqs = len(s.seq_lens)
@@ -1468,14 +1230,14 @@ def make_inputs(s: Scenario, seed: int = 0):
     max_kv_len = max(kv_lens_list)
     scale = s.head_size**-0.5
     query = torch.randn(
-        sum(query_lens), s.num_query_heads, s.head_size, dtype=s.dtype, device="cuda"
+        sum(query_lens), s.num_query_heads, s.head_size, dtype=dtype, device="cuda"
     )
     key_cache = torch.randn(
         s.num_blocks,
         s.block_size,
         s.num_kv_heads,
         s.head_size,
-        dtype=s.dtype,
+        dtype=dtype,
         device="cuda",
     )
     value_cache = torch.randn_like(key_cache)
@@ -1488,7 +1250,7 @@ def make_inputs(s: Scenario, seed: int = 0):
         0, s.num_blocks, (num_seqs, max_blocks), dtype=torch.int32, device="cuda"
     )
     sinks = (
-        torch.randn(s.num_query_heads, dtype=s.dtype, device="cuda")
+        torch.randn(s.num_query_heads, dtype=dtype, device="cuda")
         if s.use_sinks
         else None
     )
@@ -1735,7 +1497,7 @@ def _run_rocke(
             supports_tiled_2d,
         )
         from kernels.common.attention_unified import (
-            _tiled_2d_signature,
+            tiled_2d_signature,
             _attn_values,
             _spec_kv_addr_limit,
             _select_2d_compile_backend,
@@ -1775,7 +1537,7 @@ def _run_rocke(
             launcher = KernelLauncher(
                 hsaco=artifact.hsaco,
                 kernel_name=artifact.kernel_name,
-                signature=_tiled_2d_signature(_ARCH, dtype_str),
+                signature=tiled_2d_signature(_ARCH, dtype_str),
                 cache_key=("d256_fast_direct", spec.kernel_name()),
             )
             if probe_occupancy:
@@ -1846,7 +1608,7 @@ def _run_rocke(
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
             kernel_name=artifact.kernel_name,
-            signature=_tiled_2d_signature(_ARCH, dtype_str),
+            signature=tiled_2d_signature(_ARCH, dtype_str),
             cache_key=("prod_2d_direct", spec.kernel_name()),
         )
         vals = _attn_values(

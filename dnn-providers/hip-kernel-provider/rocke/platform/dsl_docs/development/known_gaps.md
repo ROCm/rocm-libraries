@@ -47,7 +47,7 @@ ported and byte-identity GREEN**. What is missing is the **host-side end-to-end
 forward orchestration** that, in Python, compiles those kernels to HSACO and
 drives them on device.
 
-This is the bulk of the engine's remaining `TODO(port)` markers (74 of 80).
+This is the bulk of the engine's remaining `TODO(port)` markers.
 
 | File | What's missing | Why blocked |
 |---|---|---|
@@ -57,7 +57,6 @@ This is the bulk of the engine's remaining `TODO(port)` markers (74 of 80).
 | `fused_moe_e2e_host_helpers.cpp` (13) | `data_ptr`-keyed lazy weight-packing caches (`w_down` / `gu_concat` / `gu_interleaved` ± preshuffled). Cache-key arithmetic and hit/miss decision ported exactly. | `rocke_tensor_t` has no data accessor/allocator; the actual torch `cat/stack/permute/reshape/contiguous` and the host pre-shuffle element permutation are runtime concerns. A `data_ptr` surrogate uses handle identity until a real device pointer is exposed. |
 | `fused_moe_e2e_ctx_init.cpp` (1) | `rocke_fmoe_build_ctx_destroy` should free runtime-owned resources. | Nothing to free yet: pool / launcher / tensor peers are opaque forward-decls with no allocator. The lifecycle hook exists so a future HIP backend fills it in. |
 | `helpers/fused_moe_e2e_spec.cpp` (1) | `rocke_fmoe_resolve_launch_arch` device-arch probe. | Python probes `get_device_arch()` via `rocke.runtime.hip_module`. The codegen-only library has no HIP runtime; it takes the documented no-device `gfx950` fallback (byte-faithful to Python's except-path). |
-| `helpers/fused_moe_e2e_orchestrator.cpp` (4 + 3 NOTIMPL) | Legacy standalone orchestrator surface: forward/static/dynamic stub bodies. | Same device-launch chain. Tile-policy is intentionally *not* duplicated here — the golden-verified policy lives in `rocke_fmoe_build_ctx_init`; duplicating it would risk a drifting second copy. Blocked until this legacy surface is retired or re-pointed at `ctx_init`. |
 
 **What unblocks all of the above:** a HIP runtime backend for the C engine
 exposing (a) `compile_kernel(IR) -> HSACO`, (b) a `rocke_kernel_launcher_t`
@@ -216,7 +215,11 @@ With the flag off (the default) nothing is emitted, so every bias-off kernel is
 byte-identical and the gate is unaffected. With it on, the C++ engine has no
 equivalent and `rocke_ir_parity_harness.py` has no bias-on case. The C++ provider
 cannot request bias either, so Python and C++ selection agree on every problem
-the provider can express.
+the provider can express. The selector binding
+(`rocke_engine.gfx950_attn_tiled_spec_from_problem`) refuses a problem with the
+flag on rather than selecting it as bias-off, as it refuses the other problem
+fields its struct cannot carry (`emit_lse`, a pinned `waves_per_eu`, a top-left
+or right-bounded mask); `library/tests/test_selector_cpp_parity.py` checks both.
 
 | Area | What's missing | Why blocked / what unblocks it |
 |---|---|---|
@@ -274,7 +277,8 @@ additive bias + LSE is built by Python only. That belongs to the additive-bias
 gap (5).
 
 **Why deferred:** the C entry points take selector output, and no C caller
-requests LSE today; the Python host and dispatcher are the only request path.
+requests LSE today; the Python host and dispatcher are the only request path. The
+selector binding refuses an LSE request (see 5).
 
 **What closes it:** an `emit_lse` field on `rocke_unified_attn_problem_t`, the
 support-gate refusals mirrored into the C selectors, `!emit_lse` mirrored into
@@ -384,6 +388,34 @@ mirrors are not maintained for attention bodies added after the port.
 
 **What closes it:** a decision to restore per-family C++ builder mirrors, or
 retiring the C engine.
+
+---
+
+## 10. gfx950 D256 bf16 prefill fast route — Python-only selection
+
+**Subsystem:** `instances/common/attention_unified_selectors.cpp`, the gfx950
+tiled 2D instance
+
+For the gfx950 bf16 D256 prefill cohort (`_d256_gfx950_cohort` in
+`library/kernels/common/attention_unified.py`: no window, softcap, sinks or score
+bias, `max_seqlen_q > 1`) the Python selector narrows the launch geometry
+(`num_warps`, `tile_size`, `block_m_per_warp`) and applies the knob set of
+`_d256_gfx950_spec_overrides` (Q-direct-register body, softmax/MFMA interleave
+mode 2, K_lds pad, reversed query blocks, ...). The C selector has the cohort
+predicate (`d256_gfx950_fast`) but narrows only the tile size and applies none of
+the knobs, so the two engines pick different specs for these problems, and the C
+tiled 2D twin rejects the Q-direct-register body and the interleave in
+`validate()`.
+
+**What is gated:** `library/tests/test_selector_cpp_parity.py` compares the two
+selectors through the `rocke_engine` binding and names this cohort as the one
+expected divergence: it fails if those problems stop differing, so the
+exception is deleted with the port.
+
+**What closes it:** the warp-count and rows-per-warp narrowing in the C
+selectors, the override knobs in the C spec assembly, and the Q-direct-register
+and interleave bodies in the gfx950 tiled 2D C twin (or a decision to keep the
+route Python-only and refuse it in C).
 
 ---
 

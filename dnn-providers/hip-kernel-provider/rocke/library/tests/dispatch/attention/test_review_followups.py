@@ -28,6 +28,8 @@ from dispatch.attention.unified_rules import (
     _explicit_configs,
 )
 from kernels.common import attention_unified as au
+from rocke.tests.bool_flags import bool_flag_refusal
+from rocke.tests.host_arrays import HostArray
 
 
 def _req(**kw) -> AttentionRequest:
@@ -306,7 +308,7 @@ class TestFp8DenseGuards(unittest.TestCase):
         """Bind an fp8 grid spec and launch, returning the dict the runner saw."""
         req, spec = self._fp8_grid_spec()
         captured = {}
-        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        fp8 = HostArray((1,), "fp8e4m3")
         with mock.patch(
             "dispatch.attention.bindings._dense_runner",
             return_value=lambda **call: captured.update(call),
@@ -348,7 +350,7 @@ class TestFp8DenseGuards(unittest.TestCase):
         # Dense binding.
         req, spec = self._fp8_grid_spec()
         k_scale, v_scale = _CountingScale(0.5), _CountingScale(0.25)
-        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        fp8 = HostArray((1,), "fp8e4m3")
         with mock.patch(
             "dispatch.attention.bindings._dense_runner",
             return_value=lambda **_call: None,
@@ -397,7 +399,7 @@ class TestFp8DenseGuards(unittest.TestCase):
         # deleting the dtype check still raises the missing-scale error, which
         # also says "fp8", and this test passes with the guard gone.
         req, spec = self._fp8_grid_spec()
-        bf16 = SimpleNamespace(dtype="torch.bfloat16")
+        bf16 = HostArray((1,), "bf16")
         with mock.patch(
             "dispatch.attention.bindings._dense_runner",
             return_value=lambda **_call: None,
@@ -440,32 +442,49 @@ class TestFp8DenseGuards(unittest.TestCase):
     def test_fp8_request_flags_must_be_bools(self):
         """``bool("false")`` is True and ``bool(None)`` is False, so coercing
         these flags before checking them would let a string select an fp8 kernel
-        and a missing encoding pass as OCP. ``_request_errors`` checks the types,
-        so the refusal names the flag."""
-        from dispatch.attention.common import _request_errors
-
+        and a missing encoding pass as OCP. The request refuses them when it is
+        built, so the refusal names the flag."""
         for flag, bad in (("use_fp8", "false"), ("fp8_fnuz", None)):
-            with self.subTest(flag=flag):
-                req = self._fp8_req(**{flag: bad})
-                self.assertIn(
-                    f"{flag} must be a bool",
-                    " ".join(_request_errors(req)),
-                )
-                # And it is fatal through dispatch, not merely reported.
-                with self.assertRaises(ValueError):
-                    attention_tuning_spec(req, "gfx950_dense_grid")
+            with self.subTest(flag=flag), self.assertRaises(ValueError) as caught:
+                self._fp8_req(**{flag: bad})
+            self.assertEqual(
+                str(caught.exception),
+                bool_flag_refusal(flag, bad, what="AttentionRequest"),
+            )
 
     def test_runner_rejects_non_ocp_kv_for_an_fp8_spec(self):
         # The binding guard only covers dispatch callers; a direct call to the
         # runner must reject a bf16 or FNUZ K/V for an fp8 spec too, before any
         # launch -- otherwise the OCP-declared pointers read the wrong encoding.
-        # The runner compares the dtype by name, so fakes keep this on the CPU lane.
+        # The runner reads only the arrays' descriptions here, so host-only
+        # stand-ins keep this on the CPU lane: a bf16 array, and the attributes
+        # of a FNUZ torch tensor (only torch holds FNUZ fp8).
         from kernels.gfx950.attention_dense import run_attention_dense_torch
 
+        class _FnuzTorchTensor:
+            __module__ = "torch"
+            dtype = "torch.float8_e4m3fnuz"
+            device = SimpleNamespace(type="cuda", index=0)
+            shape = (1,)
+
+            def stride(self):
+                return (1,)
+
+            def element_size(self):
+                return 1
+
+            def data_ptr(self):
+                return 4096
+
+            def untyped_storage(self):
+                return SimpleNamespace(nbytes=lambda: 1)
+
+            def storage_offset(self):
+                return 0
+
         spec = self._fp8_grid_spec()[1].kernel_spec
-        for wrong in ("torch.bfloat16", "torch.float8_e4m3fnuz"):
-            kv = SimpleNamespace(dtype=wrong)
-            with self.subTest(dtype=wrong):
+        for kv in (HostArray((1,), "bf16"), _FnuzTorchTensor()):
+            with self.subTest(dtype=kv.dtype):
                 with self.assertRaisesRegex(ValueError, r"fp8 dense expects OCP fp8 k"):
                     run_attention_dense_torch(
                         spec=spec,
@@ -485,7 +504,7 @@ class TestFp8DenseGuards(unittest.TestCase):
         from kernels.gfx950.attention_dense import run_attention_dense_torch
 
         spec = self._fp8_grid_spec()[1].kernel_spec
-        fp8 = SimpleNamespace(dtype="torch.float8_e4m3fn")
+        fp8 = HostArray((1,), "fp8e4m3")
         with self.assertRaisesRegex(ValueError, r"requires 'k_scale'"):
             run_attention_dense_torch(
                 spec=spec, q=fp8, k=fp8, v=fp8, out=fp8, scale=0.125

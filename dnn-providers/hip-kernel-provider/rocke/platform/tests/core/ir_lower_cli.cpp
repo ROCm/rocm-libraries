@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * tests/ir_lower_cli.cpp -- family-agnostic IR-artifact lowering tool.
+ * tests/core/ir_lower_cli.cpp -- family-agnostic IR-artifact lowering tool.
  *
  * Reads serialized `ck.dsl.ir/v1` text (from a file argument, or stdin when no
  * file is given), parses it back into a KernelDef with rocke_ir_parse, lowers it
@@ -14,20 +14,39 @@
  *   ir_lower_cli [arch] [ir_file]
  *     arch     ISA target gfx string; defaults to "gfx950".
  *     ir_file  path to serialized IR; "-" or omitted reads stdin.
+ *   ir_lower_cli --hip-batch
+ *     Lowers many kernels to HIP source in one process, each through
+ *     rocke_lower_serialized_ir_to_hip, which the binding's
+ *     lower_serialized_ir_hip also calls. stdin holds one frame per kernel,
+ *     "<arch> <byte count>\n" then that many bytes of serialized IR; stdout
+ *     gets one frame per kernel in order, "<status> <byte count>\n" then the
+ *     bytes: the HIP source when the status is 0, else the engine's refusal
+ *     message, with the rocke_status_t code the engine returned. A refusal is
+ *     data, not a failure: the process exits 0 once every frame is answered,
+ *     and 2 on a malformed frame or when stdout cannot be written.
  *
- * On any parse or lowering failure a clean message is written to stderr and the
- * process exits nonzero. The engine's extern "C" boundary already converts every
- * internal failure (including raised exceptions) into a status code and an error
- * string, so this tool never aborts/terminates -- it only reports and exits.
+ * All streams are binary, so the text is passed through unchanged on every
+ * host. Without --hip-batch, any parse or lowering failure writes a clean
+ * message to stderr and the process exits nonzero. The engine's extern "C"
+ * boundary already converts every internal failure (including raised
+ * exceptions) into a status code and an error string, so this tool never
+ * aborts/terminates -- it only reports and exits.
  */
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/strbuf.h"
 
 namespace
 {
@@ -45,10 +64,84 @@ std::string read_all(FILE* f)
     return text;
 }
 
+// Lower one --hip-batch kernel and write its reply frame: the source with status
+// 0, or the engine's status and refusal message. False when the reply cannot be
+// allocated or written.
+bool write_hip_frame(const std::string& ir_text, const char* arch)
+{
+    rocke_strbuf_t source;
+    rocke_strbuf_t message;
+    if(rocke_strbuf_init(&source, 0) != 0)
+    {
+        return false;
+    }
+    if(rocke_strbuf_init(&message, 0) != 0)
+    {
+        rocke_strbuf_free(&source);
+        return false;
+    }
+    const rocke_status_t st
+        = rocke_lower_serialized_ir_to_hip(ir_text.c_str(), arch, &source, &message);
+    const char* reply = rocke_strbuf_cstr(st == ROCKE_OK ? &source : &message);
+    const size_t reply_size = std::strlen(reply);
+    const bool written = std::fprintf(stdout, "%d %zu\n", (int)st, reply_size) > 0
+                         && std::fwrite(reply, 1, reply_size, stdout) == reply_size;
+    rocke_strbuf_free(&message);
+    rocke_strbuf_free(&source);
+    return written;
+}
+
+// The largest serialized kernel a --hip-batch frame may carry; a larger count
+// is a malformed header rather than an allocation to attempt.
+constexpr size_t kMaxFrameBytes = size_t(1) << 30;
+
+// --hip-batch: answer one frame per kernel until stdin ends (see the header).
+int lower_hip_batch()
+{
+    char arch[64];
+    size_t size = 0;
+    for(;;)
+    {
+        const int fields = std::fscanf(stdin, "%63s %zu", arch, &size);
+        if(fields == EOF)
+        {
+            return std::fflush(stdout) == 0 && !std::ferror(stdout) ? 0 : 2;
+        }
+        if(fields != 2 || size > kMaxFrameBytes || std::fgetc(stdin) != '\n')
+        {
+            std::fprintf(stderr, "ir_lower_cli: malformed --hip-batch frame header\n");
+            return 2;
+        }
+        std::string ir_text(size, '\0');
+        if(std::fread(&ir_text[0], 1, size, stdin) != size)
+        {
+            std::fprintf(stderr, "ir_lower_cli: --hip-batch frame shorter than its count\n");
+            return 2;
+        }
+        if(!write_hip_frame(ir_text, arch))
+        {
+            std::fprintf(stderr, "ir_lower_cli: cannot write the --hip-batch reply\n");
+            return 2;
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
+#ifdef _WIN32
+    // The engine's text and messages pass through unchanged: no CRLF
+    // translation on any stream.
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+#endif
+    if(argc == 2 && std::strcmp(argv[1], "--hip-batch") == 0)
+    {
+        return lower_hip_batch();
+    }
+
     const char* arch = "gfx950";
     const char* ir_path = nullptr;
 

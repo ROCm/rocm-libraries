@@ -3,9 +3,11 @@
 
 """Host checks for the dense runners' optional-output error boundary."""
 
+import re
 from dataclasses import replace
 
 import pytest
+from rocke.tests.bool_flags import bool_flag_refusal
 
 from kernels.gfx942 import attention_dense as gfx942_dense
 from kernels.gfx950 import attention_dense as gfx950_dense
@@ -34,7 +36,8 @@ def _spec(arch):
 @pytest.mark.parametrize("bad_emit_lse", ["false", 0, 1, None])
 def test_direct_spec_rejects_non_boolean_emit_lse(arch, bad_emit_lse):
     spec_type, _ = _RUNNERS[arch]
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    message = bool_flag_refusal("emit_lse", bad_emit_lse, what=spec_type.__name__)
+    with pytest.raises(ValueError, match=re.escape(message)):
         spec_type(
             batch=1,
             seqlen_q=256,

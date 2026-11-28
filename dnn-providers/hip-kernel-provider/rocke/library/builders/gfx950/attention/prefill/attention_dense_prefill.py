@@ -33,8 +33,6 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
-
 from dispatch.attention import AttentionRequest, tuning_spec_with_knobs  # noqa: E402
 from kernels.common.attention_dense_spec import (  # noqa: E402
     DENSE_TILE_GEOMETRIES,
@@ -57,7 +55,6 @@ from rocke.runtime import (  # noqa: E402
     time_launches,
 )
 
-_TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
 
 
@@ -209,8 +206,12 @@ def run(
     check: bool = True,
     seed: int = 0,
 ):
+    # The parity check and the timing run on torch tensors; spec construction
+    # (make_spec_from_shape) does not need torch.
+    import torch
+
     dev = "cuda"
-    dt = _TORCH_DT[spec.dtype]
+    dt = {"bf16": torch.bfloat16, "fp16": torch.float16}[spec.dtype]
     B, Sq, Skv = spec.batch, spec.seqlen_q, spec.seqlen_kv
     Hq, Hkv, D = spec.num_query_heads, spec.num_kv_heads, spec.head_size
     torch.manual_seed(seed)

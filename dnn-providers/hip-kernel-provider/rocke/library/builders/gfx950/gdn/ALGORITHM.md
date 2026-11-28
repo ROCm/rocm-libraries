@@ -29,7 +29,7 @@
   - [3.1 The two regimes](#31-the-two-regimes)
   - [3.2 Why decode is not prefill at C = 1](#32-why-decode-is-not-prefill-at-c--1)
   - [3.3 Why decode also needs serving infrastructure](#33-why-decode-also-needs-serving-infrastructure)
-- [4. Decode kernel](#4-decode-kernel)
+- [4. Decode kernel shared by GDN and KDA](#4-decode-kernel-shared-by-gdn-and-kda)
   - [4.1 Tensor contract](#41-tensor-contract)
   - [4.2 Parallel decomposition](#42-parallel-decomposition)
   - [4.3 Dataflow and pipeline](#43-dataflow-and-pipeline)
@@ -47,7 +47,7 @@
   - [5.4 Split and fused schedules](#54-split-and-fused-schedules)
   - [5.5 value_splits](#55-value_splits)
   - [5.6 GDN-mode deltas, all in prep](#56-gdn-mode-deltas-all-in-prep)
-- [6. Reuse in the other direction: KDA on GDN](#6-reuse-in-the-other-direction-kda-on-gdn)
+- [6. Reuse in both directions](#6-reuse-in-both-directions)
 - [7. Validation strategy](#7-validation-strategy)
 - [8. Known limits and follow-ups](#8-known-limits-and-follow-ups)
 
@@ -312,8 +312,8 @@ serving infrastructure.
 
 ### 4.1 Tensor contract
 
-Every tensor below is contiguous row-major (the fused-mode rows of §4.9 are the one exception:
-they may be strided row slices). `gate_kind` changes the extent and type of the gate inputs, not
+Every tensor below is contiguous row-major (the fused-mode rows of §4.9 may be wider than the
+kernel reads). `gate_kind` changes the extent and type of the gate inputs, not
 the recurrent-state layout or the rest of the ABI:
 
 | Tensor | GDN shape/type | KDA shape/type | Direction |
@@ -333,11 +333,13 @@ stores (two 16-byte accesses per 8 elements instead of one). With a 2-byte state
 emitted code is exactly what it was before `f32` was admitted.
 
 The launch also passes a trailing `batch_size` `i32` scalar (not a tensor).
-`prepare()` validates the gate-kind-dependent shapes, dtypes, devices and
-contiguity before launch, in addition to the state-pool checks in §4.5. It also
-checks every pointer's base address against the alignment the emitted vector
-accesses assume (`gdn_decode_pointer_alignment`: 16 B for the vector-loaded
-tensors, 32 B for KDA's f32 `dt_bias`), because nothing on the device does.
+The driver's inputs are host arrays in these storage types. `prepare()` validates the
+gate-kind-dependent shapes, element types and contiguity (`validate_inputs()`, host only) before
+it uploads them, in addition to the state-pool checks in §4.5. It allocates every device buffer
+itself, so every base address meets the alignment the emitted vector accesses assume
+(`gdn_decode_pointer_alignment`: 16 B for the vector-loaded tensors, 32 B for KDA's f32
+`dt_bias`; an allocation is aligned to at least 256 B), and it checks that, because nothing on the
+device does.
 
 ### 4.2 Parallel decomposition
 
@@ -486,8 +488,8 @@ base pointer is advanced by a **sign-extended 64-bit byte offset**; all indices 
 32-bit, since they are bounded by the slot stride.
 
 The kernel bounds-checks nothing on device. The host `prepare()` therefore validates the state
-shape and the index range (allowing the `-1` skip sentinel) against pool depth — a default-on,
-hot-path-disableable check. This guard lives on the driver/`prepare()` path; as with the decay
+shape and the index range (allowing the `-1` skip sentinel) against pool depth on the host
+inputs, before anything is uploaded. This guard lives on the driver/`prepare()` path; as with the decay
 guard in §8, dispatch selects a *spec*, not tensors, so a caller that launches the selected spec
 without going through `prepare()` gets neither this host validation nor a device bounds-check. A
 production launch path must call `prepare()`, or replicate its shape and index-range checks,
@@ -566,7 +568,7 @@ combinations and `waves_per_eu` `1`–`3` and `5`–`8` are pinnable but not dev
 space is meant to shrink as these measurements are reviewed: `decode_table_sweep.py` measures
 every configuration at the chosen
 `--sweep-level` (default `production`: `waves_per_eu` 0 and 4 only; `full`: a random sample of
-`--tuning-sample N` per tile), each checked against the fp32 reference before it is timed. The sweep and
+`--tuning-sample N` per tile), each checked against the reference before it is timed. The sweep and
 `decode_defaults_report.py` re-derive the evidence for the `AUTO_DEFAULTS` table from rocKE's own
 registry, and a person edits the table; neither reproduces any external comparison.
 
@@ -694,8 +696,8 @@ per model). Two spec flags fuse them into the warp-tiled kernel, independently:
 | `fuse_conv` | `x'_c = silu(h0_c w0_c + h1_c w1_c + h2_c w2_c + x_c w3_c)` (scalars; `h0` oldest); the taps shift in place to `(h1, h2, x)` | `mixed_qkv [B, ≥ C_conv]`, rows `qkv_stride` elements apart (replaces `query`/`key`/`value`); `conv_state [pool, C_conv, W − 1]` (I/O dtype, same read/write slots as the recurrent state); `conv_weight [C_conv, W]` f32 |
 | `fuse_out_norm` | `y = o ⊙ rsqrt(mean(o ⊙ o) + norm_eps) ⊙ norm_weight ⊙ act(out_gate)` over the head's `DV` outputs, `act` = SiLU for GDN, sigmoid for KDA | `out_gate [B, ≥ Hv × DV]`, rows `og_stride` elements apart; `norm_weight [DV]` f32, shared by every head; runtime `norm_eps` |
 
-Each row of `mixed_qkv` / `out_gate` must be contiguous; the rows may be slices of a wider
-buffer, so only the first `C_conv` / `Hv × DV` elements of a row are read. `qkv_stride` must keep
+Each row of `mixed_qkv` / `out_gate` must be contiguous; the rows may be wider than the kernel
+reads, so only the first `C_conv` / `Hv × DV` elements of a row are read. `qkv_stride` must keep
 every row on a 16-byte boundary, since `q`/`k` chunks are vector loads.
 
 Both flags off emit exactly the unfused kernel: the name gains `_cv` / `_rn` only when a flag is
@@ -810,7 +812,7 @@ the per-lane path. Two knobs change a rounding order:
 `interleave_cols` gives each lane different K columns, so its partial dot products sum in a
 different order, and `norm_gate_once` computes `(o ⊙ r) ⊙ (act(out_gate) ⊙ norm_weight)` instead of
 `(o ⊙ r ⊙ norm_weight) ⊙ act(out_gate)`, where `r = rsqrt(mean(o ⊙ o) + norm_eps)` (§4.9). On
-device every knob is checked against the fp32 reference, and with a bf16 or `f32` state every
+device every knob is checked against the float64 reference, and with a bf16 or `f32` state every
 knob except these two is also compared with the knob-off kernel's output, state and conv state
 (`row_loads`: with the auto order's; §7 lists the tiles). With bf16 output that comparison is bit
 for bit. With f16 output it is bit for bit except `out_lds`'s output, which may differ by one f16 ulp (unit in the last place): the

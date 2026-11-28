@@ -64,12 +64,13 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/io.py` | `io_ir_type`, `load_scalar`, `load_scalar_as_f32`, `load_vec`, `load_vec_as_f32`, `pack_f32_to`, `store_scalar`, `store_scalar_from_f32`, `store_vec`. |
 | `helpers/reduction.py` | `ReduceCombine`, `block_lds_reduce`. |
 | `helpers/spec.py` | `IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`, `ptr_type_str`, `sig_param`, `sig_scalar`; host integer and naming utilities (no IR): `ceil_div`, `align_up`, `non_default_fields`, `salted_kernel_name`. |
-| `helpers/quant.py` | `QDType`, `QUANT_MAX_ABS`, `quant_ir_type`, `quant_max_abs`, `quantize_scalar_f32`, `dequantize_scalar_to_f32`, `ir_to_qdtype`. |
+| `helpers/quant.py` | `QDType`, `quant_ir_type`, `quant_max_abs`, `quantize_scalar_f32`, `quantize_prescaled_f32`, `dequantize_scalar_to_f32`, `ir_to_qdtype`. |
 | `helpers/scan.py` | `lds_zero_i32`, `block_histogram_i32`, `block_exclusive_scan_i32`. Block-wide cooperative scan + histogram primitives. |
 | `helpers/persistent.py` | `build_persistent_counter_init`, `persistent_tile_loop` (ctx-manager), `persistent_tile_for_each` (functional). Persistent-grid pattern shared with StreamK. |
 | `helpers/streamk.py` | `StreamKPartition`, `StreamKReductionStrategy`, `compute_streamk_grid_size`, `emit_streamk_decode`, `streamk_num_macro_tiles`. Tile-id decode + grid sizing for the StreamK GEMM family. |
-| `helpers/i4_dequant.py` | `unpack_i4_byte_to_pair_i32` / `_i8` / `_f32`, `dequant_i4_byte_to_fp8_pair`, `dequant_i4_byte_to_bf8_pair`. Packed-i4 weight unpack + sign-extend + scale-apply chain. |
+| `helpers/i4_dequant.py` | `unpack_i4_byte_to_pair_i32` / `_i8` / `_f32` / `_f16`, `dequant_i4_byte_to_f16_pair`. Packed-i4 weight unpack + sign-extend + scale-apply chain. |
 | `helpers/mx_scale.py` | `decode_mx_scale_e8m0`, `apply_mx_scale`, `add_mx_scaled_dot`, `largest_safe_mx_scale_code`, `load_and_decode_mx_scale_byte`. OCP MX shared-exponent decode + per-block fmul; a group's dot product scaled by an A and a B scale with ldexp; the largest code a scaled MFMA takes without overflow. |
+| `helpers/fp8_encoding.py` | `Fp8ElementFormat`, the four OCP / FNUZ fp8 and bf8 encodings, `fp8_element_format`. The encoding each target's fp8 / bf8 conversions produce and its matrix cores read. |
 | `helpers/preshuffle.py` | `PreshuffleBSpec`, `emit_preshuffleb_offset`, `host_preshuffle_layout`. Tile-major B-layout descriptor for FP8 / BF8 / i4 GEMM bandwidth path. |
 | `helpers/gather_scatter.py` | `gather_row_offset`, `scatter_token_offset`, `load_sorted_token_id`, `load_sorted_topk_weight`. Per-token indirect-address chain for the fused-MoE gather / topk-weighted scatter kernels; consumes the moe-sort outputs. |
 | `helpers/rotary.py` | `RotaryLayout`, `RotarySpec`, `pair_indices`, `load_cos_sin`, `apply_rotary_pair_f32`. RoPE primitives for both interleaved (GPT-J) and LLaMA-half layouts; one (cos, sin) f32 pair per call, 2x2 rotation lowering to two `v_fma_f32`. |
@@ -78,7 +79,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/qk_scale.py` | `QkScaleSpec`, `QkScaleLayout`, `load_q_scale_for_block`, `load_k_scale_for_block`, `apply_qk_scales`. Per-head or per-block Q/K scale loaders for Sage attention; one ``v_mul_f32`` per score after the AMDGPU combiner folds the scale-multiply pair. |
 | `helpers/codebook.py` | `codebook_lookup_i8_to_fp8`, `codebook_lookup_i8_to_bf8`, `codebook_lookup_i4_pair_to_fp8`, `codebook_lookup_i4_pair_to_bf8`, `apply_per_tensor_scale`. i8 / i4 -> {fp8, bf8} codebook dequant chains for the Sage int variants; reuses 's `unpack_i4_byte_to_pair_i32` for the i4 unpack. |
 | `helpers/sparse_iter.py` | `BlockSparseSpec`, `VsaSparseSpec`, `block_sparse_iter`, `vsa_lut_iter`, `load_block_count`. Block-sparse bitmap loop + variable-size attention LUT loop primitives shared between the Jenga and VSA sparse-attention kernels. |
-| `helpers/grid.py` | `NUM_XCDS_MI300X`, `NUM_XCDS_MI325X`, `NUM_XCDS_MI350X`, `SuperTileSwizzleResult`, `chiplet_aware_super_tile`, `chiplet_aware_super_tile_dynamic`, `chiplet_transform_chunked`, `xcd_remap`, `xcd_remap_plane`, `super_tile_swizzle`, etc. |
+| `helpers/grid.py` | `NUM_XCDS_GFX942`, `NUM_XCDS_GFX950`, `SuperTileSwizzleResult`, `chiplet_aware_super_tile`, `chiplet_aware_super_tile_dynamic`, `chiplet_transform_chunked`, `xcd_remap`, `xcd_remap_plane`, `super_tile_swizzle`, etc. |
 | `helpers/autotune.py` | `Autotuner`, `AutotuneConfig`, `AutotuneKey`, `AutotuneResult`, `autotune_sweep`, `make_autotune_key`, `spec_replace`. |
 | `helpers/fuse.py` | Graph-level fusion driver: `compile_fn`, `explain_fn`, `fuse_matmul_bias_relu`, `EpilogueOp`, `BiasAdd`, `Cast`, `Clamp`, `GELU`, `ReLU`, `ResidualAdd`, `ResidualMul`, `Scale`, `SiLU`, `FusedEpilogue`, `FusionMatchError`, `FusionPlan`, `dtype_to_ir`, `ir_dtype_zero`, `ir_dtype_const`, `ir_dtype_global_load`. |
 | `helpers/fusion_ir.py` | `FusionGraph`, `FusionOp`, `FusionRegion`, `FusionTensor`, `build_graph`. |
@@ -179,24 +180,24 @@ Python-only family (the C++-engine statement and waiver: `dsl_docs/instances/att
 | `library/kernels/common/attention_bwd_dq.py` | `AttnBwdDqSpec`, `validate_attn_bwd_dq_spec`, `build_attn_bwd_dq`. Split dQ kernel. |
 | `library/kernels/common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, prep / convert / reduce / page-role builders. |
 | `library/kernels/common/attention_bwd_plan.py` | `AttnBwdRequest`, `attn_bwd_support`, `attn_bwd_plan`, `attn_bwd_declaration`, `AttnBwdPolicy`, `shipped_policy`, `attn_bwd_tuning_key`. |
-| `library/kernels/common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | Launch glue; on-disk code-object cache (`ROCKE_BWD_HSACO_CACHE`); torch-free production comgr pin. |
+| `library/kernels/common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | Launch glue; on-disk code-object cache (`ROCKE_BWD_HSACO_CACHE`); the process-tree directory of comgr's code-object cache. |
 | `library/kernels/common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py`, `attention_bwd_unified_run.py` | Unified (paged KV) spec, builder, request, predicate, plan, launch glue. |
 | `library/kernels/common/attention_dense_bwd_spec.py`, `attention_dense_bwd_plan.py`, `attention_dense_bwd_dq.py`, `_attention_dense_bwd_shell.py`; `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | Dense (shape-specialised) family: spec (incl. `ArchAttentionDenseBwdSpec`, the target-parameterised spec the per-arch specs bind), plan, dense split dQ kernel, shell, per-arch builders. |
 | `library/kernels/common/_attention_bwd_*.py`, `_lse_store.py` | Family glue: tile step (`_body`), block GEMM (`_gemm`), fragments (`_frag`), LDS planner (`_lds`), rings (`_ring`), counted waits (`_counted`), VALU levers (`_valu`), tiles (`_tiles`), split dQ body (`_dqbody`), arch capabilities (`_caps`), band (`_band`), addressing (`_addr`), paged addressing (`_paged`), sinks (`_sinks`), CTA decode (`_worklist`), stage tables (`_sched`), resource refusals (`_refusals`); the forward LSE store. |
 | `library/dispatch/attention_bwd/` | `tuning_common.py` (knob registry, `backward_spec_legality`, `BWD_KNOWN_WRONG_KNOBS`), `dense_tuning.py`, `unified_tuning.py` (unified axes, `unified_spec_legality`), `gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py`, `routing.py` (`plan_attention_bwd`, `routed_policy`, `attention_bwd_declaration`), `registry.py` (`ATTENTION_BWD_REGISTRY`, `attention_bwd_ranker`, `dispatch_attention_bwd`, `run_attention_bwd`). |
 | `library/benchmarks/common/attention_bwd_sweep.py`, `attention_bwd_bench.py`, `attention_bwd_compile.py`, `attention_bwd_rocke_arm.py`, `attention_bwd_unified_bench.py`, `attention_bwd_census.json` | Funnel sweep, paired timing harness, compile cache and crash isolation, rocKE arm, unified bench, shape census (no measurements). |
 | `library/tests/test_attention_bwd_ir_golden.py`, `library/tests/golden/attention_bwd_ir_sha256.json`; `library/tests/parity/barrier_fence_emit.py` | Backward IR golden hashes; the barrier-fence parity emitter. |
+| `library/builders/common/bake_off_implicit_gemm.py` | Implicit-GEMM conv generator + manifest (used by `08_bake_off_implicit_gemm`). |
+| `library/builders/common/bake_off_direct_conv_16c.py` | Direct grouped 16c generator (`09_bake_off_direct_conv_16c`). |
+| `library/builders/common/bake_off_direct_conv_4c.py` | Direct grouped 4c generator (`10_bake_off_direct_conv_4c`). |
 
 ## `examples/`
 
 | Path | Purpose |
 |---------------------------------------------------|--------------------------------------------------------------------|
-| `examples/common/bake_off_implicit_gemm.py` | Implicit-GEMM conv generator + manifest (used by `08_bake_off_implicit_gemm`). |
-| `examples/common/bake_off_direct_conv_16c.py` | Direct grouped 16c generator (`09_bake_off_direct_conv_16c`). |
-| `examples/common/bake_off_direct_conv_4c.py` | Direct grouped 4c generator (`10_bake_off_direct_conv_4c`). |
 | `examples/common/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
 | `examples/common/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
-| `examples/common/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
+| `examples/common/ck_tile_parity.py` | Small-op parity harness vs numpy references. |
 
 The attention parity harnesses are not examples; they live in the library, one
 per arch:
@@ -230,7 +231,7 @@ Each `gen.py` wraps a generator from `rocke.examples` or `rocke.instances`. The 
 |-----------------------------------------|----------------------------------------------------------------------|
 | `python/rocke/README.md` | Package README. |
 | `python/rocke/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
-| `python/rocke/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
+| `dsl_docs/architecture/transform_dag.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
 | `dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
 | `dsl_docs/fusion/adding_fused_kernels.md` | Fused-kernel decision guide: when a fusion pays, when it doesn't, how to land one. |
 | `dsl_docs/` | This documentation tree. |

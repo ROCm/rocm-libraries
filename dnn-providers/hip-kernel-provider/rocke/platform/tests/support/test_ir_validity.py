@@ -25,6 +25,7 @@ from rocke.tests.ir_validity import (
     _validity_tool,
     arbiter_verdict,
     assert_target_accepts,
+    skip_without_verdict,
     target_mnemonics,
 )
 
@@ -175,10 +176,30 @@ def test_each_tools_dir_gets_its_own_copy_of_the_tool(tmp_path):
         assert Path(loaded.__file__).parent == directory.resolve()
         for imported in (
             loaded._requires_newer_flavor,
-            loaded.available_cpus,
+            loaded._load_corpus,
             loaded.tool_identity,
         ):
             assert Path(imported.__code__.co_filename).parent == directory.resolve()
         assert {name: sys.modules.get(name) for name in imported_before} == (
             imported_before
         )
+
+
+def test_without_the_platform_tools_a_case_waits_for_the_source_tree_run(tmp_path):
+    """An installed layout has no platform tools: its cases cannot be judged
+    there and wait for the source-tree run; a host that has the tools but no
+    verdict (a clang that cannot target the arch) skips plainly."""
+    absent = tmp_path / "no-tools"
+    with (
+        mock.patch.dict(os.environ, {"ROCKE_PLATFORM_TOOLS_DIR": str(absent)}),
+        pytest.raises(pytest.skip.Exception) as without_tools,
+    ):
+        skip_without_verdict("rocke platform tools not found")
+    assert without_tools.value.msg == (
+        "waits for source-tree: rocke platform tools not found"
+    )
+    if _validity_tool() is None:
+        pytest.skip("this layout has no platform tools to compare with")
+    with pytest.raises(pytest.skip.Exception) as with_tools:
+        skip_without_verdict("host clang cannot target gfx9999")
+    assert with_tools.value.msg == "host clang cannot target gfx9999"

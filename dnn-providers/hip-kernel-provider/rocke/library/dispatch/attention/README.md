@@ -232,9 +232,9 @@ base values. The checks run in this order:
   and the kernel's `supports_tiled_*` run. On gfx950 2D, `UnifiedSpace.validate`
   then checks what that validator does not model: the LDS footprint
   (`_gfx950_2d_lds_bytes`, the pool the LLVM lowering packs) against the
-  arch's LDS capacity. Over-budget specs fail codegen on MI355X. A padded K
+  arch's LDS capacity. Over-budget specs fail codegen on gfx950. A padded K
   slot that holds Q is not this check's: the kernel spec's `__post_init__`
-  refuses it (such specs mismatched the reference on MI355X).
+  refuses it (such specs mismatched the reference on gfx950).
 - **Dense:** `DenseSpace` (through `KnobSpace.canonicalize`) applies the
   knobs to the base spec, so the dataclass validators run. It drops any
   setting that would compile to the same IR as another under a new symbol:
@@ -476,9 +476,11 @@ Masks are runtime arguments: one prefill object per mask class (`none`, or
 `causal` for every causal/window request) and one decode object serve every
 bound. `use_attn_bias=True` adds the `attn_bias` feature and requires an
 `attn_bias` tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
-`attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
-expanded, permuted, and row-padded views are accepted without copies; invalid
-dtype, rank, extent, or key stride raises `ValueError`. `emit_lse=True`
+`attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype); any other
+spelling, or a flag that is not a real bool, raises `ValueError` when the
+request is built. Broadcast, expanded, permuted, and row-padded views are
+accepted without copies; invalid dtype, rank, extent, or key stride raises
+`ValueError`. `emit_lse=True`
 requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
 `[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph
 contract uses rank-4 stats. Fully masked rows store `-inf` (the sink with

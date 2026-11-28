@@ -102,7 +102,7 @@ typedef struct rocke_coalesced_tile_loader
     int tile_rows;
     int tile_cols;
     int block_size;
-    int load_vec; /* halves per thread per chunk */
+    int load_vec; /* elements per thread per chunk */
     bool use_buffer_rsrc; /* Python default True */
     int oob_sentinel; /* Python default (1 << 31) - 1 */
     /* Python `vector_axis: str = "col"`. false = "col" (load_vec run along
@@ -308,12 +308,13 @@ void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
  *
  * Same slot partition and descriptor contract as load() in vector_axis="col"
  * mode, but each in-range chunk is one per-lane global_load_async_to_lds of
- * load_vec 16-bit elements from `ptr` to smem_dst[row, col]. The copy has no
+ * load_vec elem_dtype elements from `ptr` to smem_dst[row, col]; `ptr` and
+ * smem_dst must hold elements of elem_dtype's width. The copy has no
  * buffer-resource range check, so the one the resource would make (byte offset
  * below `num_bytes`, compared unsigned) is ANDed into the descriptor's valid; a
- * chunk failing either is zero-filled with an ordinary LDS store of the
- * destination tile's element type (f16 or bf16) instead. The caller drains
- * the copies with s_wait_asynccnt (and the zero stores with an LDS barrier). */
+ * chunk failing either is zero-filled with an ordinary LDS store of elem_dtype
+ * zeros instead. The caller drains the copies with s_wait_asynccnt (and the
+ * zero stores with an LDS barrier). */
 void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
                                                    const rocke_coalesced_tile_loader_t* self,
                                                    rocke_value_t* tid,

@@ -263,7 +263,7 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `fp8 fnuz` (gfx942 only) | 1 | 3 | 1 | 1 | 1 | 1 | **44%** | [P] |
 | **Sub-byte / block formats** | | | | | | | | |
 | `i4` (packed) | 1 | 1 | 1 | 2 | 2 | 2 | **50%** | [C][P] |
-| `fp4` (E2M1, MX) | 0 | 2 | 1 | 1 | 0 | 2 | **33%** | [P][M] |
+| `fp4` (E2M1, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `fp6` (E2M3, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `bf6` (E3M2, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `e8m0` (MX scale) | 0 | 3 | 3 | 2 | 3 | 2 | **72%** | — |
@@ -335,7 +335,7 @@ mode. The missing selector and precision contract are described in §2.5.
   per-channel, so two callers can disagree about what a scale means.
 - **`i4` C1=1 / C3=1** -- `I4` is a logical IR `Type` with no LLVM rendering; its values travel packed.
   [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) provides conversions
-  from packed i4 to i32, f32, f16, fp8, and bf8, but no reverse f32→packed-i4
+  from packed i4 to i32, f32 and f16, but no reverse f32→packed-i4
   conversion. The quantization helpers accept only i8, fp8, and bf8
   (`quant.py:58-70`). This is one-direction support under C3's round-trip
   criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
@@ -347,16 +347,13 @@ mode. The missing selector and precision contract are described in §2.5.
   `mfma_f32_16x16x128_fp4fp6fp8`. The hipBLASLt provider already maps
   `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
   the silicon are both ready — but **no rocKE kernel instance ships**.
-- **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:252`) decodes a
-  packed byte to two f32 via a hand-written 16-entry codebook
-  (`_FP4_CODEBOOK`, `:216-233`) that matches OCP E2M1
-  (`±{0, 0.5, 1, 1.5, 2, 3, 4, 6}`). Partial rather than Full because there is no
-  scalar `cvt` primitive and no f32→fp4 direction.
+- **`fp4` C3=0** — no fp4 decoder or encoder: there is no scalar `cvt`
+  primitive and no packed-byte unpack helper in either direction.
 - **`fp6` (E2M3) C3=0 — there is no E2M3 decoder at all.** Despite the name,
-  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:315`) does not implement E2M3;
+  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:203`) does not implement E2M3;
   see the next entry.
 - **`bf6` (E3M2) C3=0 — a decoder exists but is defective and must not be used.**
-  `_FP6_CODEBOOK` (`i4_dequant.py:276-294`) is built as
+  `_FP6_CODEBOOK` (`i4_dequant.py:163-181`) is built as
   `2^(e-3) × (1 + m/4)` over a 3-bit exponent (bias 3) and a 2-bit mantissa, which
   is **E3M2 — i.e. `bf6`, not `fp6`** (CK-Tile is explicit about the split:
   `pk_fp6_t = pk_float6_e2m3_t` and `pk_bf6_t = pk_float6_e3m2_t`,
@@ -409,11 +406,12 @@ mode. The missing selector and precision contract are described in §2.5.
   `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
   conversions or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
-  The f64 MFMA atom `mfma_f64_16x16x4_f64` is declared on gfx90a/gfx942/gfx950,
-  and gfx942 also declares `mfma_f64_4x4x4_f64` (section 4B). Universal GEMM
-  and its batched/grouped wrappers select `mfma_f64_16x16x4_f64` with fp64
-  accumulation on gfx90a, gfx942 and gfx950, every target that declares it;
-  gfx90a, which has no DRAM->LDS DMA, refuses `direct_to_lds` (§5).
+  The f64 MFMA atoms `mfma_f64_16x16x4_f64` and the four-block
+  `mfma_f64_4x4x4_f64` are declared on gfx90a/gfx942/gfx950 (section 4B).
+  Universal GEMM and its batched/grouped wrappers select
+  `mfma_f64_16x16x4_f64` with fp64 accumulation on gfx90a, gfx942 and gfx950,
+  every target that declares it; gfx90a, which has no DRAM->LDS DMA, refuses
+  `direct_to_lds` (§5).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -462,13 +460,17 @@ bucket the ticket calls out):
 | `sitofp_f32` primitive from `i8/i16` | Primitive accepts i32 only. For signed i8, use [quant.py](../../python/rocke/helpers/quant.py) `dequantize_scalar_to_f32(b, x, scale=b.const_f32(1.0))`; it emits sext + sitofp internally. For signed i16, explicitly sext to i32 first. | [P] |
 | MX scaled cvt (`cvt_scalef32_pk_*`) | E8M0 scale only → **power-of-two scales**; arbitrary scale needs unscaled cvt + `fmul` | [P] |
 | packed store `store_packed_chunk_local` | `n∈{4,8}` only (no `n=2`); `load_vec`/`store_vec` `n∈{2,4,8}` | [P] |
-| scalar `cvt_fp4_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) `unpack_fp4_byte_to_pair_f32` (`:252`) decodes E2M1 from a 16-entry codebook (`:216-233`) without MFMA, and is correct. | [P] |
+| scalar `cvt_fp4_to_f32` | No scalar cvt primitive and no unpack helper; fp4 reaches only the matrix-core operands. | [C] |
 | scalar `cvt_fp6_to_f32` / `cvt_bf6_to_f32` | **No usable decoder.** Do not use `unpack_fp6_bytes_to_quad_f32` for either format; its width and naming defects are detailed in [§2.5](#25-score-justifications-why-each-non-3-was-assigned). | [P][C] |
 | stochastic rounding (any quant) | not implemented ("v2 follow-on") | [M] |
 
 Rounding/saturation that **is** present: round-to-nearest-even + saturating
-clamp for all `f32→{i8,fp8e4m3,bf8e5m2}` (`quant.py:141-204`, `ir.py:1128-1139`);
-clamp magnitudes `i8=127`, `fp8e4m3=448`, `bf8e5m2=57344` (`quant.py:66-70`).
+clamp for all `f32→{i8,fp8e4m3,bf8e5m2}` in `quantize_scalar_f32`
+([quant.py](../../python/rocke/helpers/quant.py)); the clamp magnitude is
+`quant_max_abs(qdtype, arch=...)`: `i8=127`, and for fp8 / bf8 the largest
+value of the target's encoding (`fp8e4m3` 240 on gfx942's FNUZ, 448 on OCP;
+`bf8e5m2` 57344). The fp8 / bf8 conversions themselves do not saturate, and
+the helper keeps NaN as NaN.
 
 ---
 
@@ -515,14 +517,14 @@ to gfx1251, so this is not a missing gfx1250 atom.
 
 `core/arch/data/arch_specs.json` is rocKE's architecture SSOT. An atom that is not
 declared there is unusable by any kernel regardless of what the silicon provides.
-The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
+The declared atoms per target:
 
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
-| `gfx908` | `mfma_f32_{16x16x4,32x32x2}_f32`, `mfma_f32_{16x16x16,32x32x8}_f16`, `mfma_i32_{16x16x16,32x32x8}_i8`, `mfma_f32_{16x16x8,32x32x4}_bf16` | f32, f16, bf16, i8 |
-| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x8,32x32x4}_bf16` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
-| `gfx942` | the gfx90a f32/f16/bf16 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
-| `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_{16x16x128,32x32x64}_f8f6f4_<a>_<b>` (every format pair; fp8 x fp8 at 16x16x128 is `mfma_f32_16x16x128_fp8`) + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, f64 |
+| `gfx908` | `mfma_f32_{16x16x4,32x32x2}_f32`, `mfma_f32_{16x16x16,32x32x8,4x4x4}_f16`, `mfma_i32_{16x16x16,32x32x8}_i8`, `mfma_f32_{16x16x8,32x32x4}_bf16` | f32, f16, bf16, i8 |
+| `gfx90a` | `mfma_f32_{16x16x16,32x32x8,4x4x4}_{f16,bf16}` + `mfma_f32_{16x16x8,32x32x4}_bf16` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, i8, f64 |
+| `gfx942` | the gfx90a f32/f16/bf16/f64 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
+| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_{16x16x128,32x32x64}_f8f6f4_<a>_<b>` (every format pair; fp8 x fp8 at 16x16x128 is `mfma_f32_16x16x128_fp8`) + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_gfx1250_f32_16x16x128_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand), `wmma_gfx1250_f32_32x16x128_f4`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, u8 (+ fp8 block-scaled) |
@@ -633,8 +635,7 @@ in §2.4 is blocked on it.
 
 #### 4C.6 f64 matrix (closed on CDNA)
 `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, and `mfma_f64_16x16x4_f64`
-is declared on all three; gfx942 also declares the four-block
-`mfma_f64_4x4x4_f64` (section 4B).
+and the four-block `mfma_f64_4x4x4_f64` are declared on all three (section 4B).
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set

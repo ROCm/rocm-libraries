@@ -35,24 +35,27 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 
 ## Prerequisites
 
-- **ROCm 7.x** with `libamd_comgr` and `libamdhip64` on the dynamic-linker path
-  (7.2 recommended). AUTO selects the IR flavor from the loaded COMGR
-  compiler’s LLVM version; ROCm release metadata does not select it. ROCm is a
-  system dependency, not a pip package.
+- **ROCm** (the release the
+  [setup guide](dsl_docs/development/setup_guide.md#1-recommended-stack) names)
+  with `libamd_comgr` and `libamdhip64`, which rocKE finds itself
+  ([BUILD.md](BUILD.md#runtime-finding-rocm-libamd_comgr--libamdhip64);
+  `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` select others). AUTO selects the IR flavor
+  from the loaded COMGR compiler’s LLVM version; ROCm release metadata does not
+  select it. ROCm is a system dependency, not a pip package.
 - **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.16+
   (3.18+ for the `cpp/bindings` pybind module). The C++ build needs the Python
   interpreter too: it generates the engine's intrinsic arch-domain table from the
   committed JSON columns (`tools/gen_arch_domain_cpp.py`), standard library only.
-- Python deps: `pip install -r requirements.txt` (adds `numpy`, plus `pytest` /
-  `pybind11` in the `dev` extra). **torch** must be the ROCm build for your
-  system, installed separately from the ROCm wheel index (not via this repo),
-  for example: `pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch`.
+- Python deps: `pip install -r requirements.txt` (`numpy` plus the test
+  packages); building the `rocke_engine` binding also needs `pybind11`
+  (`pip install -e '.[dev]'`). rocKE does not depend on torch; its
+  remaining uses are being removed (`TESTING.md`, "No torch").
 - GPU lanes need a HIP-visible device; on a shared box that may require running
   under `sudo -E` (or membership in the `video`/`render` groups).
 
 ```bash
 export ROCKE=$(pwd)        # run from this rocke/platform/ directory
-export PYTHONPATH=$ROCKE/Python
+export PYTHONPATH=$ROCKE/python
 ```
 
 ## Build
@@ -77,12 +80,13 @@ cmake -S "$ROCKE/cpp/bindings" -B /tmp/rocke_pybind -DCMAKE_BUILD_TYPE=Release \
   -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
   -DPYTHON_EXECUTABLE="$(which python)"
 cmake --build /tmp/rocke_pybind -j$(nproc)
-export PYTHONPATH="$ROCKE/Python:/tmp/rocke_pybind"   # so `import rocke_engine` resolves
+export PYTHONPATH="$ROCKE/python:/tmp/rocke_pybind"   # so `import rocke_engine` resolves
 ```
 
-If `rocke_engine` is not importable, the default `cpp` backend transparently falls
-back to the native Python lowerer (set `ROCKE_CPP_STRICT=1` to make that an
-error). See [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
+The default `cpp` backend lowers through the shared engine `librocke` (the
+`rocke_shared` target; point `ROCKE_ONLINE_LIB` at it). If none is found it
+transparently falls back to the native Python lowerer (set `ROCKE_CPP_STRICT=1`
+to make that an error). `rocke_engine` adds the per-family C++ builders. See [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
 
 ## Run
 
@@ -138,7 +142,7 @@ cmake -S "$ROCKE" -B /tmp/rocke && cmake --build /tmp/rocke -j$(nproc)
 ctest --test-dir /tmp/rocke --output-on-failure
 
 # 4) On-GPU numeric (needs a HIP device; use sudo -E on a shared box)
-sudo -n -E env PYTHONPATH="$ROCKE/Python" python \
+sudo -n -E env PYTHONPATH="$ROCKE/python" python \
   "$ROCKE/tests/instances/differential/numeric.py" --arch gfx950
 ```
 

@@ -36,6 +36,7 @@ HIP_LAUNCH_PARAM_END = ctypes.c_void_p(3)
 
 hipMemcpyHostToDevice = 1
 hipMemcpyDeviceToHost = 2
+hipMemcpyDeviceToDevice = 3
 
 
 class HipError(RuntimeError):
@@ -185,6 +186,10 @@ _hipDrvLaunchKernelEx = _b(
 )
 _hipMalloc = _b("hipMalloc", ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t)
 _hipFree = _b("hipFree", ctypes.c_void_p)
+_hipHostMalloc = _b(
+    "hipHostMalloc", ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t, ctypes.c_uint
+)
+_hipHostFree = _b("hipHostFree", ctypes.c_void_p)
 _hipMemcpy = _b(
     "hipMemcpy", ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int
 )
@@ -196,11 +201,31 @@ _hipMemcpyAsync = _b(
     ctypes.c_int,
     ctypes.c_void_p,
 )
+_hipMemcpy2DAsync = _b(
+    "hipMemcpy2DAsync",
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_size_t,
+    ctypes.c_size_t,
+    ctypes.c_int,
+    ctypes.c_void_p,
+)
 _hipMemset = _b("hipMemset", ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t)
 _hipMemsetAsync = _b(
     "hipMemsetAsync",
     ctypes.c_void_p,
     ctypes.c_int,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+)
+_hipMemset2DAsync = _b(
+    "hipMemset2DAsync",
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_int,
+    ctypes.c_size_t,
     ctypes.c_size_t,
     ctypes.c_void_p,
 )
@@ -218,10 +243,19 @@ _hipStreamWaitValue32 = _b(
     ctypes.c_uint,
     ctypes.c_uint32,
 )
+_hipMemGetInfo = _b(
+    "hipMemGetInfo", ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_size_t)
+)
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
 _hipStreamCreate = _b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
+_hipStreamCreateWithFlags = _b(
+    "hipStreamCreateWithFlags", ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint
+)
 _hipStreamDestroy = _b("hipStreamDestroy", ctypes.c_void_p)
+_hipStreamWaitEvent = _b(
+    "hipStreamWaitEvent", ctypes.c_void_p, _HipEventHandle, ctypes.c_uint
+)
 _hipStreamIsCapturing = _b(
     "hipStreamIsCapturing", ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)
 )
@@ -245,6 +279,8 @@ HIP_ERROR_NOT_FOUND = 500
 HIP_ERROR_NOT_READY = 600
 # hipStreamCaptureStatus: the stream is not being captured.
 HIP_STREAM_CAPTURE_STATUS_NONE = 0
+# hipStreamCreateWithFlags: no implicit ordering against the null stream.
+HIP_STREAM_NON_BLOCKING = 1
 
 
 def _check(s: int, where: str) -> None:
@@ -379,6 +415,26 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     except (AttributeError, OSError):
         return None
     return int(v.value) if rc == 0 and v.value > 0 else None
+
+
+def _device_memory_info() -> tuple[int, int] | None:
+    """``(free, total)`` bytes of HIP's current device (``hipMemGetInfo``), or
+    ``None`` if the runtime cannot be queried."""
+    free, total = ctypes.c_size_t(0), ctypes.c_size_t(0)
+    try:
+        rc = _hipMemGetInfo(ctypes.byref(free), ctypes.byref(total))
+    except (AttributeError, OSError):
+        return None
+    return (int(free.value), int(total.value)) if rc == 0 else None
+
+
+def get_device_total_memory() -> int | None:
+    """Total bytes of HIP's current device (``hipMemGetInfo``), or ``None`` if the
+    runtime cannot be queried. It is fixed for the device, so a test that needs a
+    large allocation decides on it whether the device can run the case and gets
+    the same answer whatever else runs on the device."""
+    info = _device_memory_info()
+    return None if info is None else info[1]
 
 
 # Per-device ``clusterLaunch`` answers; a device's capability does not change
@@ -828,6 +884,18 @@ class Runtime:
     def free(self, ptr: int) -> None:
         _check(_hipFree(ctypes.c_void_p(ptr)), "hipFree")
 
+    def host_alloc(self, nbytes: int) -> int:
+        """``nbytes`` of page-locked host memory (``hipHostMalloc``, default
+        flags). Release it with :meth:`host_free`;
+        :func:`rocke.runtime.host_buffers.pinned_empty` wraps both."""
+        ptr = ctypes.c_void_p(0)
+        _check(_hipHostMalloc(ctypes.byref(ptr), nbytes, 0), f"hipHostMalloc({nbytes})")
+        return int(ptr.value)
+
+    def host_free(self, ptr: int) -> None:
+        """Release a :meth:`host_alloc` block (``hipHostFree``)."""
+        _check(_hipHostFree(ctypes.c_void_p(ptr)), "hipHostFree")
+
     def memcpy_h2d(self, dst: int, src_buf: ctypes.Array, nbytes: int) -> None:
         _check(
             _hipMemcpy(ctypes.c_void_p(dst), src_buf, nbytes, hipMemcpyHostToDevice),
@@ -840,8 +908,63 @@ class Runtime:
             "hipMemcpyD2H",
         )
 
+    def memcpy2d_d2d_async(
+        self,
+        dst: int,
+        dst_pitch: int,
+        src: int,
+        src_pitch: int,
+        width: int,
+        height: int,
+        stream: int = 0,
+    ) -> None:
+        """Queue a copy of ``height`` rows of ``width`` bytes from device address
+        ``src`` to device address ``dst`` on ``stream`` (``hipMemcpy2DAsync``):
+        row ``r`` starts ``r * src_pitch`` bytes past ``src`` and lands
+        ``r * dst_pitch`` bytes past ``dst``; each pitch is at least ``width``.
+        Ordered against the stream's launches by FIFO alone, as
+        :meth:`memset_async` is."""
+        _check(
+            _hipMemcpy2DAsync(
+                ctypes.c_void_p(dst),
+                dst_pitch,
+                ctypes.c_void_p(src),
+                src_pitch,
+                width,
+                height,
+                hipMemcpyDeviceToDevice,
+                ctypes.c_void_p(stream),
+            ),
+            "hipMemcpy2DAsyncD2D",
+        )
+
     def memset(self, ptr: int, value: int, nbytes: int) -> None:
         _check(_hipMemset(ctypes.c_void_p(ptr), value, nbytes), "hipMemset")
+
+    def memset2d_async(
+        self,
+        ptr: int,
+        pitch: int,
+        value: int,
+        width: int,
+        height: int,
+        stream: int = 0,
+    ) -> None:
+        """Queue a fill of ``height`` rows of ``width`` bytes with byte ``value``
+        on ``stream`` (``hipMemset2DAsync``): row ``r`` starts ``r * pitch``
+        bytes past ``ptr``, and ``pitch`` is at least ``width``. Ordered as
+        :meth:`memset_async` is."""
+        _check(
+            _hipMemset2DAsync(
+                ctypes.c_void_p(ptr),
+                pitch,
+                value,
+                width,
+                height,
+                ctypes.c_void_p(stream),
+            ),
+            "hipMemset2DAsync",
+        )
 
     def memset_async(self, ptr: int, value: int, nbytes: int, stream: int = 0) -> None:
         """Queue a fill on ``stream`` instead of draining the device for it.
@@ -888,9 +1011,14 @@ class Runtime:
         if not bucket:
             self._pending_args.pop(s, None)
 
-    def create_stream(self) -> int:
-        """A new HIP stream (``hipStreamCreate``), as the int handle every
-        launch and wait takes. Destroy it with :meth:`destroy_stream`.
+    def create_stream(self, *, non_blocking: bool = False) -> int:
+        """A new HIP stream, as the int handle every launch and wait takes.
+        Destroy it with :meth:`destroy_stream`.
+
+        By default (``hipStreamCreate``) its work is ordered against the null
+        stream (stream 0) both ways. With ``non_blocking`` it is not
+        (``hipStreamNonBlocking``): it runs alongside stream 0, and only
+        explicit waits (:meth:`stream_wait_event`) order the two.
 
         A launch on it is not mapped to torch's current stream, as one on
         stream 0 is (``torch_interop.resolve_stream``), so a caller that does
@@ -898,7 +1026,15 @@ class Runtime:
         """
         _ensure_hip_init()
         handle = ctypes.c_void_p(0)
-        _check(_hipStreamCreate(ctypes.byref(handle)), "hipStreamCreate")
+        if non_blocking:
+            _check(
+                _hipStreamCreateWithFlags(
+                    ctypes.byref(handle), HIP_STREAM_NON_BLOCKING
+                ),
+                "hipStreamCreateWithFlags",
+            )
+        else:
+            _check(_hipStreamCreate(ctypes.byref(handle)), "hipStreamCreate")
         return int(handle.value)
 
     def destroy_stream(self, stream: int) -> None:
@@ -912,6 +1048,15 @@ class Runtime:
             self.wait_stream(stream)
         finally:
             _check(_hipStreamDestroy(ctypes.c_void_p(int(stream))), "hipStreamDestroy")
+
+    def stream_wait_event(self, stream: int, event: Event) -> None:
+        """Make work queued on ``stream`` after this call wait until ``event``
+        (recorded on any stream) completes (``hipStreamWaitEvent``). The host
+        does not block: this is the device-side fork / join between streams."""
+        _check(
+            _hipStreamWaitEvent(ctypes.c_void_p(int(stream)), event.handle, 0),
+            "hipStreamWaitEvent",
+        )
 
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.
@@ -1308,7 +1453,7 @@ class Runtime:
         be safely freed by the Python frame's normal cleanup; no
         :attr:`_pending_args` bookkeeping is needed for the launch.
 
-        Empirical cost on ROCm 7 / MI355X: ~0.3 us per call vs
+        Empirical cost on ROCm 7 / gfx950: ~0.3 us per call vs
         ~43 us for the event-based fence. Mirrors CK Tile's
         ``launch_kernel`` post-amble (``hipStreamSynchronize(stream_id_)``).
 

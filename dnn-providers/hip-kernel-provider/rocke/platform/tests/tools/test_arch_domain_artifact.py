@@ -74,14 +74,11 @@ _DATA = Path(str(resource_files("rocke.core.arch") / "data"))
 
 # Import the generator for its constants and its decl-table merge rule, so the
 # gate cannot disagree with the tool about what "the decl table for a flavor"
-# means. `_hostcaps` rides along on the same path entry; it is shared with
-# `tools/check_byte_identity.py`, so the pool-sizing test below covers both
-# callers.
+# means.
 if str(_ROCKE / "tools") not in sys.path:
     sys.path.insert(0, str(_ROCKE / "tools"))
 import _bounded_run as B
 import gen_arch_domain as G
-from _hostcaps import available_cpus
 
 
 def _columns() -> list[tuple[str, Path]]:
@@ -112,62 +109,15 @@ class DeclarationTableTest(unittest.TestCase):
         self.assertTrue(all("addrspace(15)" in llvm24[key] for key in changed))
 
 
-class AvailableCpusTest(unittest.TestCase):
-    """The worker cap must reflect this process's share, not the host's size.
+class WorkerCountTest(unittest.TestCase):
+    """The worker cap must reflect this process's share, not the host's size
+    (rocke.tests.host_cpus.available_cpus, whose own tests cover the quotas).
 
     `os.cpu_count()` reports the machine -- observed at 384 against an affinity
     of 2 on a scheduler-pinned host. Oversubscribing is not just slow: a
     load-dependent `probe_error` makes the artifact nondeterministic and
     `--check` flaky.
     """
-
-    def _root(self, files: dict[str, str]) -> Path:
-        root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root, True)
-        for rel, text in files.items():
-            path = root / rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        return root
-
-    def test_a_cpu_quota_caps_the_worker_count(self):
-        # Asserted as "<= 1", not "== 1": affinity also feeds the minimum, so
-        # the guarantee is that a quota can only ever lower the answer.
-        for label, files in (
-            ("v2", {"cpu.max": "100000 100000"}),
-            (
-                "v1",
-                {"cpu/cpu.cfs_quota_us": "100000", "cpu/cpu.cfs_period_us": "100000"},
-            ),
-        ):
-            with self.subTest(cgroup=label):
-                self.assertLessEqual(available_cpus(self._root(files)), 1)
-
-    def test_a_fractional_quota_still_leaves_one_worker(self):
-        """Half a CPU is a *rate*, not half a process. Rounding down gives a
-        zero-worker pool, which is a hang rather than a slow sweep."""
-        root = self._root({"cpu.max": "50000 100000"})
-        self.assertEqual(available_cpus(root), 1)
-
-    def test_no_quota_does_not_lower_the_answer(self):
-        """`max` and a negative v1 quota both mean unlimited -- neither is a
-        cap of zero, which is what parsing them as numbers would produce."""
-        for label, files in (
-            ("v2-max", {"cpu.max": "max 100000"}),
-            (
-                "v1-negative",
-                {"cpu/cpu.cfs_quota_us": "-1", "cpu/cpu.cfs_period_us": "100000"},
-            ),
-            ("absent", {}),
-        ):
-            with self.subTest(cgroup=label):
-                root = self._root(files)
-                self.assertEqual(available_cpus(root), available_cpus(root / "nope"))
-
-    def test_the_answer_is_always_a_usable_worker_count(self):
-        for files in ({}, {"cpu.max": "garbage"}, {"cpu.max": "0 0"}):
-            with self.subTest(files=sorted(files)):
-                self.assertGreaterEqual(available_cpus(self._root(files)), 1)
 
     def test_no_tool_sizes_a_pool_from_the_machine(self):
         """The helper only helps the callers that ask it.
@@ -1668,7 +1618,7 @@ sys.exit(0)
                         mock.patch.object(
                             G,
                             "_compare_support",
-                            return_value=G._SupportComparison([], changes),
+                            return_value=G._SupportComparison([], changes, []),
                         ),
                     ):
                         rc = self._run(
@@ -1694,6 +1644,40 @@ sys.exit(0)
                     )
                     self.assertEqual(out.read_text(), before)
 
+    def test_a_probe_timeout_is_an_unvalidated_check_not_a_failure(self):
+        """With only timed-out probes of working cells, --check reports the
+        check unvalidated: the code --unvalidated-exit-code asks for (77, a
+        CTest skip), else the legacy failure exit."""
+        out, tools = self._baseline_from_other_compiler()
+        before = out.read_text()
+        empty = {kind: [] for kind in G._compare_support(before, before).changes}
+        timed_out = [f"a.b/gfx942: ok -> {G.STATUS_TOOLCHAIN_TIMEOUT}"]
+        for exit_arguments, expected in (
+            (("--unvalidated-exit-code", "77"), 77),
+            ((), 1),
+        ):
+            with self.subTest(exit_arguments=exit_arguments):
+                stdout = io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}),
+                    mock.patch("sys.stdout", stdout),
+                    mock.patch.object(
+                        G,
+                        "_compare_support",
+                        return_value=G._SupportComparison([], empty, timed_out),
+                    ),
+                ):
+                    rc = self._run(
+                        tools, out, "--only", "fabs.f32", "--check", *exit_arguments
+                    )
+                text = stdout.getvalue()
+                self.assertEqual(rc, expected)
+                self.assertIn("TIMED OUT: 1 probes of working cells", text)
+                self.assertIn("UNVALIDATED:", text)
+                self.assertIn(timed_out[0], text)
+                self.assertNotIn("SUPPORT OK", text)
+                self.assertEqual(out.read_text(), before)
+
     def test_failure_summary_reports_total_and_omitted_count(self):
         out, tools = self._baseline_from_other_compiler()
         before = out.read_text()
@@ -1708,7 +1692,7 @@ sys.exit(0)
                     mock.patch.object(
                         G,
                         "_compare_support",
-                        return_value=G._SupportComparison(failures, empty),
+                        return_value=G._SupportComparison(failures, empty, []),
                     ),
                 ):
                     rc = self._run(tools, out, "--only", "fabs.f32", "--check")
@@ -1776,31 +1760,39 @@ class ProbeTimeoutTest(unittest.TestCase):
     its timeout: only the driver was killed, and the orphaned child spun at
     full CPU until the host was rebooted, one per hanging probe per sweep.
 
-    The stub stands in for that driver: it starts a child that never exits,
-    records both pids, and never exits itself.
+    The stub stands in for that driver: it starts a child that never exits and
+    records both pids. By default it then never exits itself; the
+    `_EXITS_LEAVING_A_CHILD` variant exits first, leaving the child holding its
+    output streams open.
     """
 
     ARCH = "gfx942"
 
-    _HANGS_WITH_A_CHILD = """
+    _EXITS_LEAVING_A_CHILD = """
 import os, subprocess, sys, time
 {prelude}
 child = subprocess.Popen([sys.executable, "-c", "import time\\nwhile True: time.sleep(1)"])
 with open({pids!r}, "a") as f:
     f.write(f"{{os.getpid()}} {{child.pid}}\\n")
-while True:
+"""
+    _HANGS_WITH_A_CHILD = (
+        _EXITS_LEAVING_A_CHILD
+        + """while True:
     time.sleep(1)
 """
+    )
 
-    def _stub(self, name: str, prelude: str = "") -> tuple[str, Path]:
-        """A stub tool `name` that runs `prelude`, then hangs with a child."""
+    def _stub(
+        self, name: str, prelude: str = "", script: str = _HANGS_WITH_A_CHILD
+    ) -> tuple[str, Path]:
+        """A stub tool `name` that runs `prelude`, then `script` (by default it
+        hangs with a child)."""
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
         pids = root / "pids"
         path = root / name
         path.write_text(
-            "#!/usr/bin/env python3\n"
-            + self._HANGS_WITH_A_CHILD.format(pids=str(pids), prelude=prelude)
+            "#!/usr/bin/env python3\n" + script.format(pids=str(pids), prelude=prelude)
         )
         path.chmod(0o755)
         self.addCleanup(self._kill_survivors, pids)
@@ -1996,6 +1988,176 @@ except KeyboardInterrupt:
         self.assertLess(seconds, 10, "waited for the probes' timeout")
         self.assertEqual(len(self._started(pids)), 4, "stubs did not start")
         self.assertEqual(self._survivors(pids), [], "outlived the interrupt")
+
+    _PROBES_UNTIL_KILLED = """
+import sys
+sys.path.insert(0, {tools!r})
+import gen_arch_domain as G
+from _bounded_run import run_bounded
+with G._probe_pool(1) as ex:
+    ex.submit(run_bounded, [{tool!r}], timeout=120).result()
+"""
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "a probe dies with its sweep only on Linux (PR_SET_PDEATHSIG)",
+    )
+    def test_killing_the_sweep_ends_its_running_probe(self):
+        """A sweep killed outright -- a CTest timeout, an outer `timeout`, a
+        SIGKILL -- gets no chance to clean up, and each probe runs in its own
+        session, out of reach of anything sent to the sweep's process group.
+        The probe must still end, compiler child included, instead of running
+        on as an orphan. The sweep is a child process probing from a worker
+        thread, as the generator does."""
+        tool, pids = self._stub("clang")
+        script = self._PROBES_UNTIL_KILLED.format(
+            tools=str(_ROCKE / "tools"), tool=tool
+        )
+        sweep = subprocess.Popen([sys.executable, "-c", script])
+        self.addCleanup(sweep.wait)
+        self.addCleanup(sweep.kill)
+        deadline = time.monotonic() + 30
+        while not pids.exists() or len(self._started(pids)) < 2:
+            self.assertIsNone(sweep.poll(), "the sweep exited before probing")
+            self.assertLess(time.monotonic(), deadline, "the probe did not start")
+            time.sleep(0.05)
+        sweep.kill()
+        sweep.wait()
+        self.assertEqual(self._survivors(pids), [], "outlived the killed sweep")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "a probe dies with its sweep only on Linux (PR_SET_PDEATHSIG)",
+    )
+    def test_killing_the_sweep_ends_a_child_its_exited_driver_left(self):
+        """A driver can exit while a child it started still runs and holds its
+        output open, so the sweep keeps waiting. Killing the sweep then must
+        still end that child: the session leader has to outlive the driver for
+        as long as anything it started is running."""
+        tool, pids = self._stub("clang", script=self._EXITS_LEAVING_A_CHILD)
+        script = self._PROBES_UNTIL_KILLED.format(
+            tools=str(_ROCKE / "tools"), tool=tool
+        )
+        sweep = subprocess.Popen([sys.executable, "-c", script])
+        self.addCleanup(sweep.wait)
+        self.addCleanup(sweep.kill)
+        deadline = time.monotonic() + 30
+        while (
+            not pids.exists()
+            or len(self._started(pids)) < 2
+            or self._alive(self._started(pids)[0])
+        ):
+            self.assertIsNone(sweep.poll(), "the sweep exited before the child did")
+            self.assertLess(time.monotonic(), deadline, "the driver did not exit")
+            time.sleep(0.05)
+        sweep.kill()
+        sweep.wait()
+        self.assertEqual(self._survivors(pids), [], "outlived the killed sweep")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "only Linux runs commands under a session leader",
+    )
+    def test_the_command_status_passes_through_a_descendant_that_outlives_it(self):
+        """The leader waits for every descendant left in its group before it
+        exits, and must then exit with the command's status, not a
+        descendant's."""
+        completed = B.run_bounded(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import subprocess, sys\n"
+                    "subprocess.Popen([sys.executable, '-c', "
+                    "'import time; time.sleep(0.5); raise SystemExit(5)'])\n"
+                    "print('out')\n"
+                    "sys.exit(3)"
+                ),
+            ],
+            timeout=60,
+        )
+        self.assertEqual((completed.returncode, completed.stdout), (3, "out\n"))
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "only Linux runs commands under a session leader",
+    )
+    def test_a_detached_daemon_does_not_hold_up_the_command(self):
+        """A descendant that leaves the process group with its output closed (a
+        detached daemon) is not the leader's to wait for: `run_bounded` returns
+        the command's status as soon as the command exits."""
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        pids = scratch / "pids"
+        self.addCleanup(self._kill_survivors, pids)
+        started = time.monotonic()
+        completed = B.run_bounded(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import subprocess, sys\n"
+                    "daemon = subprocess.Popen([sys.executable, '-c', "
+                    "'import time\\nwhile True: time.sleep(1)'], "
+                    "start_new_session=True, stdin=subprocess.DEVNULL, "
+                    "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                    f"open({str(pids)!r}, 'w').write(str(daemon.pid))\n"
+                    "sys.exit(4)"
+                ),
+            ],
+            timeout=60,
+        )
+        self.assertEqual(completed.returncode, 4)
+        self.assertLess(time.monotonic() - started, 30, "waited for the daemon")
+        self.assertTrue(self._alive(self._started(pids)[0]), "the daemon was ended")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "only Linux runs commands under a session leader",
+    )
+    def test_the_session_leader_passes_the_command_through(self):
+        """What makes a probe die with its sweep is a session leader between
+        `run_bounded` and the command. Callers must not see it: the probes read
+        a negative return code as a toolchain crash, and a missing tool must
+        still raise. A leader that cannot start must fail loudly instead of
+        passing for the command's result."""
+        scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, scratch, True)
+        python = [sys.executable, "-c"]
+        finished = B.run_bounded(
+            python + ["import sys; print('out'); sys.exit('err')"], timeout=60
+        )
+        self.assertEqual(
+            (finished.returncode, finished.stdout, finished.stderr),
+            (1, "out\n", "err\n"),
+        )
+        killed = B.run_bounded(
+            python + ["import os, signal; os.kill(os.getpid(), signal.SIGTERM)"],
+            timeout=60,
+        )
+        self.assertEqual(killed.returncode, -signal.SIGTERM)
+
+        missing = str(scratch / "no-such-tool")
+        with self.assertRaises(FileNotFoundError) as caught:
+            B.run_bounded([missing], timeout=60)
+        self.assertEqual(caught.exception.filename, missing)
+        not_executable = scratch / "not-executable"
+        not_executable.write_text("")
+        with self.assertRaises(PermissionError):
+            B.run_bounded([str(not_executable)], timeout=60)
+
+        broken_python = scratch / "python"
+        broken_python.write_text(
+            f"#!{sys.executable}\nimport sys\nsys.exit('the leader cannot start')\n"
+        )
+        broken_python.chmod(0o755)
+        with (
+            mock.patch.object(B.sys, "executable", str(broken_python)),
+            self.assertRaisesRegex(
+                RuntimeError, r"exited with status 1 .*the leader cannot start"
+            ),
+        ):
+            B.run_bounded(python + ["pass"], timeout=60)
 
 
 class ProbeTimeoutGfx950Test(ProbeTimeoutTest):

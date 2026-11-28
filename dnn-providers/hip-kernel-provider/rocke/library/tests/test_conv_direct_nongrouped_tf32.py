@@ -14,19 +14,14 @@ dilation, padding and stride on gfx950 and gfx942, the AOT shape invariance,
 and -- for fp16 / bf16 and fp32 / tf32 alike -- that the Python IR matches the
 C++ engine byte for byte. One comgr compile per (arch, dtype, atom) checks the ISA.
 
-On silicon (gfx942 / gfx950 + torch): output against an IEEE fp32
-``conv2d`` reference computed on the CPU, relative to the output peak. On
-gfx942 the TF32 reference reads the inputs masked to what the native XF32 MFMA
-consumes (``conv_reference.tf32_reference_inputs``).
-
-Run GPU tests as a script if pytest reports "No HIP GPUs are available"::
-
-    python library/tests/test_conv_direct_nongrouped_tf32.py
+On silicon (gfx942 / gfx950): output against a float64 numpy reference of the
+fp32 inputs, relative to the output peak. On gfx942 the TF32 reference reads
+the inputs masked to what the native XF32 MFMA consumes
+(``conv_reference.tf32_reference_inputs``).
 """
 
 from __future__ import annotations
 
-import ctypes
 import importlib.util
 import re
 import subprocess
@@ -35,37 +30,37 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
+import pytest
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
+from rocke.runtime import comgr
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.comgr import require_comgr_target
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
+from rocke.tests.llc import find_llvm_tool
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-if _HAS_TORCH:
-    from builders.common.conv_reference import (
-        tf32_reference_inputs,
-        tf32_reference_tol,
-    )
-if _HAS_TORCH:
-    # Claim the HIP context for torch before rocke's runtime touches it (see
-    # test_direct_conv_correctness.py).
-    import torch
-
-    torch.cuda.is_available()
-
-from kernels.common.conv_direct_grouped import DirectConvProblem  # noqa: E402
-from kernels.common.conv_direct_nongrouped import (  # noqa: E402
+from builders.common.conv_reference import (
+    tf32_reference_inputs,
+    tf32_reference_tol,
+)
+from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.common.conv_direct_nongrouped import (
     _ATOMS,
     DirectNongroupedConvSpec,
     _sweep_atoms,
     build_direct_conv_nongrouped,
     default_lds_pad,
-    is_valid_nongrouped_spec,
     grouped_knobs,
+    is_valid_nongrouped_spec,
     nongrouped_knobs,
     nongrouped_live_regs,
     nongrouped_specs,
     nongrouped_split_knobs,
 )
-from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
-from rocke.tests.llc import find_llvm_tool
+
+from ._direct_conv_numeric import direct_fwd_reference, launch_direct_conv, poisoned
 
 _F32_DTYPES = ("fp32", "tf32")
 _ARCHES = ("gfx950", "gfx942")
@@ -347,7 +342,9 @@ class TestNongroupedF32Build(unittest.TestCase):
         from rocke.core import backend
 
         if importlib.util.find_spec("rocke_library_engine") is None:
-            self.skipTest("rocke_library_engine extension not importable")
+            skip_until(
+                BUILD_VARIANT, reason="rocke_library_engine extension not importable"
+            )
         for arch, atoms in (
             ("gfx950", ("32x32x16", "16x16x32")),
             ("gfx942", ("32x32x8", "16x16x16")),
@@ -400,18 +397,8 @@ class TestNongroupedF32Build(unittest.TestCase):
 
 
 def _compile(ir: str, arch: str) -> bytes:
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    isa = f"amdgcn-amd-amdhsa--{arch}"
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    if isa not in isas:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"the loaded comgr cannot target {arch}")
-    hsaco, _ = comgr.build_hsaco_from_llvm_ir(ir, isa=isa)
+    require_comgr_target(arch)
+    hsaco, _ = comgr.build_hsaco_from_llvm_ir(ir, isa=f"amdgcn-amd-amdhsa--{arch}")
     return hsaco
 
 
@@ -420,7 +407,9 @@ def _disassemble(hsaco: bytes):
 
     objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
-        raise unittest.SkipTest("llvm-objdump not found; cannot inspect the ISA")
+        skip_until(
+            BUILD_VARIANT, reason="llvm-objdump not found; cannot inspect the ISA"
+        )
     readelf = find_llvm_tool("llvm-readelf")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "kernel.hsaco"
@@ -500,8 +489,6 @@ GPU_ARCH = get_device_arch(0)
 def _gpu_skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
-    if not _HAS_TORCH:
-        return "torch not importable"
     if GPU_ARCH not in _ARCHES:
         return f"unsupported arch {GPU_ARCH!r}"
     return ""
@@ -511,7 +498,7 @@ _GPU_SKIP = _gpu_skip_reason()
 
 
 def _tolerance(dtype: str, arch: str) -> float:
-    """Max |error| relative to the output peak, against an IEEE fp32 reference.
+    """Max |error| relative to the output peak, against a float64 reference.
 
     fp32 is exact fp32 MFMA arithmetic. TF32 is the shared bound
     (``conv_reference.tf32_reference_tol``): BF16x3 tracks the full fp32
@@ -523,26 +510,6 @@ def _tolerance(dtype: str, arch: str) -> float:
     return 1e-5
 
 
-def _u8(t):
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _reference(A_t, B_t, p):
-    """IEEE fp32 conv2d on the CPU, NHWK."""
-    import torch.nn.functional as F
-    from builders.common.conv_reference import ieee_fp32
-
-    with ieee_fp32():
-        out = F.conv2d(
-            A_t.permute(0, 3, 1, 2),
-            B_t.permute(0, 3, 1, 2),
-            padding=p.PAD,
-            stride=p.stride,
-            dilation=(p.dil_h, p.dil_w),
-        )
-    return out.permute(0, 2, 3, 1).contiguous()
-
-
 def run_f32_spec(arch: str, spec, artifact=None):
     """Compile, launch and check one fp32-storage spec; ``(ok, rel_err)``.
 
@@ -551,11 +518,6 @@ def run_f32_spec(arch: str, spec, artifact=None):
     tensors and an fp32 reference.
     """
     from rocke import compile_kernel
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     p = spec.problem
     ok, why = is_valid_nongrouped_spec(spec, arch=arch)
@@ -566,52 +528,26 @@ def run_f32_spec(arch: str, spec, artifact=None):
             build_direct_conv_nongrouped(spec, arch=arch), arch=arch
         )
 
-    g = torch.Generator().manual_seed(0)
-    A_t = torch.empty(p.N, p.H, p.W, p.cpg).uniform_(-1.0, 1.0, generator=g)
-    B_t = torch.empty(p.kpg, p.KH, p.KW, p.cpg).uniform_(-1.0, 1.0, generator=g)
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.kpg)
-    ref = _reference(
-        tf32_reference_inputs(A_t, arch, p.dtype),
-        tf32_reference_inputs(B_t, arch, p.dtype),
+    rng = np.random.default_rng(0)
+    x = storage.encode(rng.uniform(-1.0, 1.0, (p.N, p.H, p.W, p.cpg)), "fp32")
+    w = storage.encode(rng.uniform(-1.0, 1.0, (p.kpg, p.KH, p.KW, p.cpg)), "fp32")
+    ref = direct_fwd_reference(
         p,
+        tf32_reference_inputs(x, arch, p.dtype),
+        tf32_reference_inputs(w, arch, p.dtype),
     )
-
-    rt = Runtime()
-    bufs = [rt.alloc(t.nbytes) for t in (A_t, B_t, D_t)]
-    try:
-        rt.memcpy_h2d(bufs[0], _u8(A_t), A_t.nbytes)
-        rt.memcpy_h2d(bufs[1], _u8(B_t), B_t.nbytes)
-        # NaN fill: an output the kernel never writes cannot pass as zero.
-        D_t.fill_(float("nan"))
-        rt.memcpy_h2d(bufs[2], _u8(D_t), D_t.nbytes)
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            # fp32 pointers for both "fp32" and "tf32": tf32 is fp32 storage.
-            signature=conv_direct_args_signature("fp32"),
-        )
-        launcher(
-            ConvArgs.from_problem(p).to_launch_values(
-                int(bufs[0]),
-                int(bufs[1]),
-                int(bufs[2]),
-                A_t.nbytes,
-                B_t.nbytes,
-                D_t.nbytes,
-            ),
-            config=LaunchConfig(
-                grid=spec.grid(), block=(spec.threads_per_block, 1, 1), fence=True
-            ),
-        )
-        out = torch.empty_like(D_t)
-        rt.memcpy_d2h(_u8(out), bufs[2], D_t.nbytes)
-    finally:
-        for buf in bufs:
-            rt.free(buf)
-        synchronize_and_release(0)
-    if not torch.isfinite(out).all():
+    # NaN fill: an output the kernel never writes cannot pass as zero.
+    out = launch_direct_conv(
+        artifact,
+        p,
+        (x, w),
+        poisoned((p.N, p.Ho, p.Wo, p.kpg), "fp32", 0xFF),
+        grid=spec.grid(),
+        block=(spec.threads_per_block, 1, 1),
+    )
+    if not np.isfinite(out).all():
         return False, float("inf")
-    rel = float((out - ref).abs().max() / ref.abs().max().clamp(min=1.0))
+    rel = peak_relative_error(out, ref, floor=1.0)
     return rel < _tolerance(p.dtype, arch), rel
 
 
@@ -693,6 +629,7 @@ class TestNongroupedF32Gpu(unittest.TestCase):
                     )
                     self.assertTrue(ok, f"{case.id} {dt}: rel_err {rel:.3e}")
 
+    @pytest.mark.exhaustive
     def test_sweep_candidates(self):
         for dt in _F32_DTYPES:
             p = _problem(dt, N=2, W=48, kpg=128)

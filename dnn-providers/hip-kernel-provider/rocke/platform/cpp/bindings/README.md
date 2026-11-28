@@ -126,13 +126,13 @@ test7 both reject (unsupported fp16 warp_tile (32,32,32) on gfx950)
 
 ## How this becomes the `ROCKE_BACKEND=cpp` backend
 
-This module is the engine side of the dual-backend switch, and `cpp` is now the
-**default**: `rocke.core.backend` routes lowering through this engine. For a
-Python-authored kernel it serializes the IR and calls the family-agnostic
-`rocke_engine.lower_serialized_ir(...)`; for cataloged families the per-family
-`<fam>_lower_llvm` / `_serialize_ir` / `_verify` entry points are used. If
-`rocke_engine` isn't importable, the chokepoint auto-falls back to the native
-Python lowerer (byte-identical) and records why. Select explicitly with
+`cpp` is the **default** backend. For a Python-authored kernel
+`rocke.core.backend` serializes the IR and lowers it through the shared engine
+`librocke`'s C entry (`rocke.core.native_engine`, which needs no compiled
+extension); this module's `lower_serialized_ir(...)` wraps the same entry. For
+cataloged families the per-family `<fam>_lower_llvm` / `_serialize_ir` /
+`_verify` entry points here are used. If no `librocke` is found, the chokepoint
+auto-falls back to the native Python lowerer (byte-identical) and records why. Select explicitly with
 `ROCKE_BACKEND=python|cpp|both`.
 
 **Environment flags:** this harness uses `ROCKE_PARITY_BUILD` (the `.so` dir) and

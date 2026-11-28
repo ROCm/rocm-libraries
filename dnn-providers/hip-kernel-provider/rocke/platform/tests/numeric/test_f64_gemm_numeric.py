@@ -24,7 +24,7 @@ from rocke.instances.common.gemm_universal import (
     is_valid_spec,
 )
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.engines import available_engines
+from rocke.tests.engines import available_builder_engines
 from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.source_tree import require_dsl_docs
 from rocke.tests.universal_gemm import launch_universal_gemm, lower_universal_gemm
@@ -103,13 +103,14 @@ def _preshuffle_b(bt, tile_n, tile_k):
 def _assert_both_engines_refuse(spec, arch, reason):
     admitted, verdict = is_valid_spec(spec, arch=arch)
     assert not admitted and reason in verdict
-    if "cpp" in available_engines():
+    if "cpp" in available_builder_engines():
         import rocke_engine as native
 
         spec_dict = universal_gemm_spec_to_dict(spec)
         assert native.gemm_is_valid(spec_dict, arch=arch) == (admitted, verdict)
 
 
+@pytest.mark.gpu
 @arch_specific(
     _F64_GEMM_HARDWARE_VERIFIED_ARCHS,
     reason="fp64 GEMM numerics have passed on hardware for these targets only",
@@ -172,7 +173,7 @@ def test_f64_gemm_numeric(tile, pipeline, epilogue, pad, trait):
             return _preshuffle_b(bt, tile_n, tile_k)
         return None
 
-    for engine in available_engines():
+    for engine in available_builder_engines():
         llvm_ir = lower_universal_gemm(spec, engine, arch=arch)
         a = rng.integers(-8, 9, (m, k)).astype(np.float64)
         bt = rng.integers(-8, 9, (n, k)).astype(np.float64)
@@ -189,6 +190,7 @@ def test_f64_gemm_numeric(tile, pipeline, epilogue, pad, trait):
         assert np.max(error) < k * np.finfo(np.float64).eps
 
 
+@pytest.mark.gpu
 @arch_specific(
     _F64_GEMM_HARDWARE_VERIFIED_ARCHS,
     reason="fp64 GEMM numerics have passed on hardware for these targets only",
@@ -216,7 +218,7 @@ def test_f64_batched_active_tile_skip_numeric(tile, pipeline, epilogue):
     ids = np.arange(batches * m, dtype=np.int32).reshape(batches, m)
     for z, mi in skipped:
         ids[z, mi * tile_m] = -1
-    for engine in available_engines():
+    for engine in available_builder_engines():
         llvm_ir = lower_universal_gemm(spec, engine, arch=arch)
         c = launch_universal_gemm(llvm_ir, spec, a, bt, arch=arch, sorted_ids=ids)
         for z in range(batches):
@@ -228,16 +230,12 @@ def test_f64_batched_active_tile_skip_numeric(tile, pipeline, epilogue):
                     np.testing.assert_array_equal(c[z, rows], expected[z, rows])
 
 
-# Refusals that follow the target: the warp-tile message and the LDS cap differ.
+# The refusal that follows the target: per arch, the K padding that overflows
+# its LDS, and the refusal it gets. The MMA catalog lists the f64 4x4x4 atom on
+# both arches, so a (4, 4, 4) warp tile gets the fp64 GEMM's own refusal on each.
 _F64_GEMM_REFUSALS = {
-    "gfx942": {
-        "warp_tile": "fp64 GEMM supports only warp_tile (16, 16, 4)",
-        "lds_k_pad": (64, "LDS budget 81920 > 65536 cap"),
-    },
-    "gfx950": {
-        "warp_tile": "unsupported fp64 warp_tile (4, 4, 4) on gfx950",
-        "lds_k_pad": (160, "LDS budget 180224 > 163840 cap"),
-    },
+    "gfx942": {"lds_k_pad": (64, "LDS budget 81920 > 65536 cap")},
+    "gfx950": {"lds_k_pad": (160, "LDS budget 180224 > 163840 cap")},
 }
 
 
@@ -251,7 +249,7 @@ def test_f64_gemm_rejects_unsupported(arch, case):
     spec, reason = {
         "warp_tile": (
             _spec((64, 64, 16, 2, 2), "mem", "default", warp_tile=(4, 4, 4)),
-            expected["warp_tile"],
+            "fp64 GEMM supports only warp_tile (16, 16, 4)",
         ),
         "acc": (
             _spec((64, 64, 16, 2, 2), "mem", "default", acc="fp32"),
@@ -336,7 +334,7 @@ def test_f64_gemm_lds_k_pad_budget(lds_k_pad, smem_bytes):
     assert is_valid_spec(spec, arch="gfx942") == (True, "ok")
     lowered = {
         engine: lower_universal_gemm(spec, engine, arch="gfx942")
-        for engine in available_engines()
+        for engine in available_builder_engines()
     }
     for llvm_ir in lowered.values():
         assert f"[{smem_bytes} x i8] poison" in llvm_ir

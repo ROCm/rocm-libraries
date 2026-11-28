@@ -27,8 +27,8 @@
 # C++-engine waiver in dsl_docs/instances/attention_bwd.md). The C++ engine's
 # own fence emission is unit-tested by tests/core/test_barrier_fence.cpp (the
 # probe), and library/tests/test_barrier_fence_parity_emit.py lowers this
-# emitter's "ir" output with rocke_engine.lower_serialized_ir when the engine is
-# built, comparing it byte for byte with the "ll" output (the cross-engine
+# emitter's "ir" output with the C++ engine (rocke.core.native_engine) when
+# the shared engine is found, comparing it byte for byte with the "ll" output (the cross-engine
 # check of every config, backward kernels included).
 from dataclasses import dataclass
 

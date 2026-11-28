@@ -21,8 +21,8 @@ odd ones, and agpr_acc for batches averaging >= 320 query rows per sequence
 shapes: agpr_acc forced on for short / ragged batches, and the unfused
 ``absorbed_query`` composition.
 
-The numeric tests are marked ``gpu`` and skip without a gfx942 device and ROCm
-torch (torch also runs the ``absorbed_query`` lane's head projections); the
+The numeric tests are marked ``gpu`` and skip without a gfx942 device (the
+``absorbed_query`` lane models its two head projections on the host); the
 scenario-table and dispatch checks run on CPU. Run:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_mla_prefill_gfx942_numeric.py
@@ -31,20 +31,10 @@ scenario-table and dispatch checks run on CPU. Run:
 from __future__ import annotations
 
 import pytest
-
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
-
-def _gpu_ready() -> bool:
-    """True on a gfx942 box with ROCm torch (gated on ``gcnArchName``, the ISA
-    target, as the dense numeric lane does)."""
-    if not torch.cuda.is_available():
-        return False
-    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
+from rocke.tests.gpu import probe_device_arch
 
 requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
+    probe_device_arch()[0] != "gfx942", reason="needs a gfx942 GPU"
 )
 
 # Scenario names come from the probe's table; spelled out here so the test ids
@@ -82,6 +72,28 @@ _ABSORBED = [
     "six_heads_h6",
     "many_seqs_h64",
 ]
+
+
+# Rough gfx942 seconds of the two long scenarios in each lane that runs them;
+# a scenario's lanes share one shard key, so the CI shards and their workers
+# share these heavy keys (rocke.tests.ctest_shard). The other scenarios take
+# about a second.
+_SCENARIO_SHARD_COSTS = {"sk4096_h128": 7, "many_seqs_h64": 8}
+
+
+def _scenario_params(names: list[str]) -> list:
+    """``names`` as parameters, each heavy one with its shard cost."""
+    return [
+        pytest.param(
+            name,
+            marks=(
+                [pytest.mark.rocke_shard_cost(_SCENARIO_SHARD_COSTS[name])]
+                if name in _SCENARIO_SHARD_COSTS
+                else []
+            ),
+        )
+        for name in names
+    ]
 
 
 def _probe():
@@ -126,11 +138,12 @@ def test_scenario_lists_match_probe_table():
     assert sorted(_ALL_SCENARIOS) == sorted(probe.SCENARIOS)
     assert set(_AGPR_FORCED) <= set(probe.SCENARIOS)
     assert set(_ABSORBED) <= set(probe.SCENARIOS)
+    assert set(_SCENARIO_SHARD_COSTS) <= set(probe.SCENARIOS)
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("name", _ALL_SCENARIOS)
+@pytest.mark.parametrize("name", _scenario_params(_ALL_SCENARIOS))
 def test_mla_prefill_numeric_dispatched(name):
     assert _run(name) is True, f"{name}: see captured stdout for per-seq residuals"
 
@@ -146,7 +159,7 @@ def test_mla_prefill_numeric_agpr_forced(name):
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-@pytest.mark.parametrize("name", _ABSORBED)
+@pytest.mark.parametrize("name", _scenario_params(_ABSORBED))
 def test_mla_prefill_numeric_absorbed_query(name):
     assert (
         _run(name, absorbed_query=True) is True

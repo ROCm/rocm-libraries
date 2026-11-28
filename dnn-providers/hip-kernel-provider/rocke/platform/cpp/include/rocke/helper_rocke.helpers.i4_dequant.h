@@ -11,11 +11,9 @@
  *   unpack_i4_byte_to_pair_f16(b, byte) rocke_unpack_i4_byte_to_pair_f16(...)
  *   dequant_i4_byte_to_f16_pair(b, ...) rocke_dequant_i4_byte_to_f16_pair(...)
  *
- * SCOPE: only these four symbols. The fp8 / bf8 dequant siblings
- * (dequant_i4_byte_to_fp8_pair / _bf8_pair, which route through
- * rocke.helpers.quant.quantize_scalar_f32), the i8 alias
- * (unpack_i4_byte_to_pair_i8, a thin wrapper over the i32 form), and the OCP MX
- * fp4 / fp6 unpackers are NOT in scope for this phase.
+ * SCOPE: only these four symbols. The i8 alias (unpack_i4_byte_to_pair_i8, a
+ * thin wrapper over the i32 form) and the OCP MX fp6 unpacker are NOT in scope
+ * for this phase.
  *
  * Unlike the atoms / distribution helpers, every symbol here EMITS IR via the
  * builder (rocke_b_* op calls). The op sequence is reproduced byte-faithfully from

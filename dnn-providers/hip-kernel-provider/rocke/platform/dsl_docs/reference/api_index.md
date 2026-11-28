@@ -123,11 +123,14 @@ compute_streamk_grid_size, emit_streamk_decode, streamk_num_macro_tiles
 
 # helpers
 # i4 packed-weight dequant (helpers/i4_dequant.py)
-unpack_i4_byte_to_pair_f32, unpack_i4_byte_to_pair_i32, unpack_i4_byte_to_pair_i8
-dequant_i4_byte_to_fp8_pair, dequant_i4_byte_to_bf8_pair
+unpack_i4_byte_to_pair_f32, unpack_i4_byte_to_pair_i32, unpack_i4_byte_to_pair_i8,
+unpack_i4_byte_to_pair_f16, dequant_i4_byte_to_f16_pair
+# fp8 / bf8 element encodings (helpers/fp8_encoding.py)
+Fp8ElementFormat, FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ,
+fp8_element_format
 # OCP MX E8M0 shared-exponent (helpers/mx_scale.py)
 decode_mx_scale_e8m0, apply_mx_scale, add_mx_scaled_dot, largest_safe_mx_scale_code,
-MxElementFormat, load_and_decode_mx_scale_byte
+load_and_decode_mx_scale_byte
 # Preshuffled-B layout (helpers/preshuffle.py)
 PreshuffleBSpec, emit_preshuffleb_offset, host_preshuffle_layout
 # FP8 / BF8 MFMA catalog (helpers/atoms.py)
@@ -176,12 +179,12 @@ ceil_div, align_up # host integer math (no IR)
 non_default_fields, salted_kernel_name # spec-keyed kernel names
 
 # Quantization (helpers/quant.py)
-QDType, QUANT_MAX_ABS
-quantize_scalar_f32, dequantize_scalar_to_f32
+QDType
+quantize_scalar_f32, quantize_prescaled_f32, dequantize_scalar_to_f32
 quant_ir_type, quant_max_abs, ir_to_qdtype
 
 # Chiplet swizzle (helpers/grid.py)
-NUM_XCDS_MI300X, NUM_XCDS_MI325X, NUM_XCDS_MI350X
+NUM_XCDS_GFX942, NUM_XCDS_GFX950
 SuperTileSwizzleResult
 chiplet_aware_super_tile, chiplet_aware_super_tile_dynamic
 chiplet_transform_chunked, chiplet_transform_chunked_dynamic, chiplet_transform_chunked_runtime

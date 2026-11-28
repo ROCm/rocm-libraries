@@ -5,21 +5,21 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
 
 import numpy as np
 import pytest
+from rocke.numeric.gated_delta import gated_delta_recurrence
+from rocke.run_manifest import registered_manifest_kinds, resolve_manifest_runner
+from rocke.runtime.host_buffers import as_u8_buffer
+from rocke.runtime.packing import pack_args
 
+from builders.common.kda_host import dense_inputs
 from builders.gfx942.kda.hostpack import (
-    bf16_bits_to_f32,
-    f32_to_bf16_bits,
-    make_inputs,
     pack_initial_state,
     pack_v_partitions,
-    ref_token_serial,
     unpack_outputs,
 )
 from builders.gfx942.kda.manifest import (
@@ -32,9 +32,6 @@ from kernels.gfx942.kda_chunkwise import (
     KdaChunkFusedSpec,
     kda_chunk_fused_signature,
 )
-from rocke.run_manifest import registered_manifest_kinds, resolve_manifest_runner
-from rocke.runtime.host_buffers import as_u8_buffer
-from rocke.runtime.packing import pack_args
 
 
 def test_hostpack_does_not_import_torch_or_dispatch():
@@ -74,12 +71,6 @@ def test_manifest_adapter_does_not_import_dispatch():
     assert out.stdout.strip() == "[]", out.stdout + out.stderr
 
 
-def test_bf16_roundtrip_preserves_magnitude():
-    x = np.array([1.0, -0.5, 0.0, 3.25], dtype=np.float32)
-    y = bf16_bits_to_f32(f32_to_bf16_bits(x))
-    assert np.max(np.abs(y - x)) < 1e-2
-
-
 def test_oracle_identity_query_on_one_token():
     B, H, T, DK, DV = 1, 1, 1, 4, 8
     q = np.zeros((B, H, T, DK), dtype=np.float32)
@@ -90,7 +81,7 @@ def test_oracle_identity_query_on_one_token():
     g = np.zeros((B, H, T, DK), dtype=np.float32)
     beta = np.ones((B, H, T), dtype=np.float32)
     scale = DK**-0.5
-    o, S = ref_token_serial(q, k, v, g, beta, scale)
+    o, S = gated_delta_recurrence(q, k, v, g, beta, scale=scale)
     # S = k u^T with u = v, so o = scale * (q·k) v = scale * v
     np.testing.assert_allclose(o[0, 0, 0], scale * v[0, 0, 0], atol=1e-12)
     np.testing.assert_allclose(S[0, 0, 0], v[0, 0, 0], atol=1e-12)
@@ -129,6 +120,54 @@ def test_unpack_inverts_v_pack():
     np.testing.assert_array_equal(got, v)
 
 
+def test_pack_places_every_element_where_the_fused_kernel_reads_it():
+    """Each packed row is one (batch * head, V partition, chunk): Q, K and g
+    rows hold that chunk's ``C`` tokens of ``DK`` channels and beta its ``C``
+    gates, the same in every partition; V rows hold the partition's ``head_v``
+    channels of each token; the initial state holds the partition's channels
+    transposed, ``[head_v, DK]``. Every input element is distinct, so a swapped
+    axis or a wrong row base puts a value where another one is expected."""
+    B, H, T, DK, DV, C, head_v = 2, 3, 32, 4, 8, 16, 4
+    count = B * H * T
+
+    def distinct(*shape: int, start: int) -> np.ndarray:
+        return np.arange(start, start + np.prod(shape), dtype=np.float32).reshape(shape)
+
+    q = distinct(B, H, T, DK, start=0)
+    k = distinct(B, H, T, DK, start=count * DK)
+    g = distinct(B, H, T, DK, start=2 * count * DK)
+    v = distinct(B, H, T, DV, start=3 * count * DK)
+    beta = distinct(B, H, T, start=3 * count * DK + count * DV)
+    h0 = distinct(B, H, DK, DV, start=0)
+    packed = pack_v_partitions(C, head_v, q, k, v, g, beta)
+    parts, chunks = DV // head_v, T // C
+    state = pack_initial_state(head_v, h0, parts)
+    for b in range(B):
+        for h in range(H):
+            for part in range(parts):
+                for d in range(DK):
+                    for e in range(head_v):
+                        assert (
+                            state[(b * H + h) * parts + part, e, d]
+                            == h0[b, h, d, part * head_v + e]
+                        )
+                for chunk in range(chunks):
+                    row = ((b * H + h) * parts + part) * chunks + chunk
+                    for t in range(C):
+                        token = chunk * C + t
+                        assert packed.beta[row, t] == beta[b, h, token]
+                        for d in range(DK):
+                            column = t * DK + d
+                            assert packed.q[row, column] == q[b, h, token, d]
+                            assert packed.k[row, column] == k[b, h, token, d]
+                            assert packed.g[row, column] == g[b, h, token, d]
+                        for e in range(head_v):
+                            assert (
+                                packed.v[row, t * head_v + e]
+                                == v[b, h, token, part * head_v + e]
+                            )
+
+
 @pytest.mark.parametrize("parts", (1, 2, 4))
 def test_pack_returns_writable_owned_buffers(parts):
     """Every packed field must be uploadable, at any partition count.
@@ -142,7 +181,7 @@ def test_pack_returns_writable_owned_buffers(parts):
     head_v = 4
     B, H, T, DK, C = 2, 2, 32, 8, 16
     dense = dict(
-        zip(("q", "k", "v", "g", "beta"), make_inputs(B, H, T, DK, head_v * parts))
+        zip(("q", "k", "v", "g", "beta"), dense_inputs(B, H, T, DK, head_v * parts))
     )
     packed = pack_v_partitions(C, head_v, **dense)
     assert packed.parts == parts
@@ -154,7 +193,7 @@ def test_pack_returns_writable_owned_buffers(parts):
 
 
 def test_pack_rejects_ragged_sequence():
-    q, k, v, g, beta = make_inputs(1, 1, 17, 8, 8)
+    q, k, v, g, beta = dense_inputs(1, 1, 17, 8, 8)
     with pytest.raises(ValueError, match="divisible"):
         pack_v_partitions(16, 4, q, k, v, g, beta)
 
@@ -220,45 +259,3 @@ def test_runner_geometry_without_gpu():
     )
     # 8 pointers + f32 + i32, naturally aligned, 72 bytes.
     assert len(packed) == 72
-
-
-@pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None,
-    reason="torch not installed",
-)
-def test_numpy_pack_matches_torch_builder_layout():
-    import torch
-
-    from builders.gfx942.kda import kda_chunk_fused as fused
-    from kernels.gfx942.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
-
-    B, H, T, DK, DV, C, head_v = 1, 2, 32, 8, 8, 16, 4
-    spec = KdaChunkFusedSpec(
-        head_k=DK,
-        head_v=head_v,
-        tile=KdaTileSpec(chunk=C, block_size=256),
-    )
-    rng = np.random.default_rng(3)
-    q_f = rng.standard_normal((B, H, T, DK), dtype=np.float32)
-    k_f = rng.standard_normal((B, H, T, DK), dtype=np.float32)
-    v_f = rng.standard_normal((B, H, T, DV), dtype=np.float32)
-    g = rng.random((B, H, T, DK), dtype=np.float32)
-    beta = rng.random((B, H, T), dtype=np.float32)
-    q_b, k_b, v_b = (f32_to_bf16_bits(x) for x in (q_f, k_f, v_f))
-    packed = pack_v_partitions(C, head_v, q_b, k_b, v_b, g, beta)
-
-    def as_bf16(bits):
-        return torch.from_numpy(np.ascontiguousarray(bits)).view(torch.bfloat16)
-
-    q_t, k_t, v_t = (as_bf16(x) for x in (q_b, k_b, v_b))
-    g_t = torch.from_numpy(np.ascontiguousarray(g))
-    beta_t = torch.from_numpy(np.ascontiguousarray(beta))
-    qf, kf, vf, gf, bf, BH, NC, parts = fused._pack_v_partitions(
-        spec, q_t, k_t, v_t, g_t, beta_t
-    )
-    assert (BH, NC, parts) == (packed.bh, packed.nc, packed.parts)
-    np.testing.assert_array_equal(qf.view(torch.uint16).numpy(), packed.q)
-    np.testing.assert_array_equal(kf.view(torch.uint16).numpy(), packed.k)
-    np.testing.assert_array_equal(vf.view(torch.uint16).numpy(), packed.v)
-    np.testing.assert_allclose(gf.numpy(), packed.g, atol=0, rtol=0)
-    np.testing.assert_allclose(bf.numpy(), packed.beta, atol=0, rtol=0)

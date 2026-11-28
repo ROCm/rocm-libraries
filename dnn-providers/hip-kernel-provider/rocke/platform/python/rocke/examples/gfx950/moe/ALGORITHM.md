@@ -6,7 +6,7 @@ This is the algorithm the `FusedMoeForward` pipeline computes, and *why* it is a
 optimization history; this file is the specification, the data layout, and the
 precise per-stage steps.
 
-> A different example, [`examples/gfx950/fused_mega_moe/`](../../fused_mega_moe/),
+> A different example, [`examples/gfx950/fused_mega_moe/`](../fused_mega_moe/),
 > computes the **same math** as a single fused kernel. The two are deliberate
 > opposites: that one keeps the intermediate in LDS across one launch; this one
 > streams it through HBM across a chain of composable launches. The README's
@@ -78,7 +78,7 @@ Two structural decisions make the chain efficient at decode:
 - **Active-tile skip.** A GEMM threadgroup whose first token slot is padding
   (`SortedTokenIds[...] == -1`) does one bucket-head load and exits — no MFMAs,
   no LDS reads, no stores. At decode only a few experts are active, so most tiles
-  skip. (See §6 and `test_active_tile_skip.py`.)
+  skip. (See §6 and `active_tile_skip_check.py`.)
 
 ---
 
@@ -204,7 +204,7 @@ B-load becomes one wide `buffer_load_dwordx4` per warp.
 (E, N, K) row-major  ->  (E, k_tiles, n_tiles, block_n, block_k) contiguous
 ```
 
-This is `host_preshuffle_b` in `test_preshuffle_b.py`. It is purely a load-layout
+This is `host_preshuffle_b` in `preshuffle_b_check.py`. It is purely a load-layout
 change — the math (and the bitwise result) is unchanged — so it is gated on
 correctness alone and exposed per weight via three orchestrator knobs
 (`preshuffle_w_down`, `preshuffle_w_gate_up_packed`, `preshuffle_w_gate_up_interleaved`).
@@ -226,7 +226,7 @@ do_work = SortedTokenIds[block_id_z * slot_size + block_m_off] >= 0
 
 and wraps the K-loop + epilogue in `scf.if(do_work)`. An inactive tile (first row
 token `== -1`) does one bucket-head load and exits — no MFMAs, no LDS, no stores.
-`test_active_tile_skip.py` measures this directly: all-active is within ~1 % of
+`active_tile_skip_check.py` measures this directly: all-active is within ~1 % of
 the dense kernel (zero overhead), all-inactive is ~13× faster (the kernel just
 exits), and both cases are bitwise-correct on the active rows while leaving the
 inactive output rows untouched. It is the largest decode lever for shapes with
@@ -281,5 +281,5 @@ preshuffled-B, active-tile skip, the GEMM tile shape / trait sweep, static-offse
 graph replay, the streaming `block_size` — change **only how these stages are
 scheduled and laid out**, never what is computed. Correctness is pinned by the
 torch reference (`max_abs` gate) and by the bitwise-parity tests
-(`test_preshuffle_b.py`, `test_active_tile_skip.py`,
-`test_fused_moe_preshuffle.py`); performance is the per-stage schedule.
+(`preshuffle_b_check.py`, `active_tile_skip_check.py`,
+`fused_moe_preshuffle_check.py`); performance is the per-stage schedule.

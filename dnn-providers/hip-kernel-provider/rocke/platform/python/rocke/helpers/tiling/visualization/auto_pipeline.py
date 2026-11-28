@@ -117,7 +117,7 @@ def render_lds_store(
     # emit `vw` (pre-coalescing) or the register index. A run wider than b128 splits into multiple shades.
     from .layout_render import vector_transactions
 
-    shade, n_shades = vector_transactions(pos, addr_fn, dtype_bits)
+    shade, n_shades = vector_transactions(pos, addr_fn, dtype_bits, space="lds")
     edge_kind, edge_why = describe_edge(
         label, None, src_dims=dims, to_space="lds"
     )  # reposition, label invariant
@@ -890,7 +890,11 @@ def _lds_load_shade(pipeline, mma_op, operand, op_enc):
     eb = element_bytes(rd.dtype_name)
     # cap at b128: a descriptor's contiguous run may exceed one ds_read; the hardware splits it (§9.6 ceiling).
     return vector_transactions(
-        as_forward_map(op_enc), af, eb * 8, max_bits=min(128, rd_run * eb * 8)
+        as_forward_map(op_enc),
+        af,
+        eb * 8,
+        max_bits=min(128, rd_run * eb * 8),
+        space="lds",
     )[0]
 
 
@@ -1548,7 +1552,7 @@ def _view_epilogue_flow(pipeline, *, out_path):
     nreg = max(r for _l, r in store_fm) + 1
     mem_order = tuple(sorted(range(nreg), key=lambda r: c_addr(*store_fm[(0, r)])))
     store_ts, _n = vector_transactions(
-        store_fm, c_addr, c_bits, order_by="addr"
+        store_fm, c_addr, c_bits, order_by="addr", space="global"
     )  # store TIME order = by address
     store_shade = store_ts
     tile_shade = {

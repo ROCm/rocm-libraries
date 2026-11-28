@@ -21,11 +21,17 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
+from ..analysis import read_code_object_notes
+from .compiler_tools import require_tools_or_skip
+from .lanes import BUILD_VARIANT, skip_until_reason
+
 __all__ = [
     "checked_llc_output",
+    "code_object_notes",
     "find_amdgpu_llc",
     "find_llvm_tool",
     "lists_amdgpu_backend",
@@ -83,13 +89,19 @@ def require_amdgpu_llc(*, with_readelf: bool = True) -> str:
 
     ``with_readelf`` also requires llvm-readelf, which reads the notes of the
     code objects that llc builds. Raises ``unittest.SkipTest`` naming what is
-    missing.
+    missing, as waiting for the CI test environment's tools (``BUILD_VARIANT``).
     """
     llc = find_amdgpu_llc()
     if llc is None:
-        raise unittest.SkipTest("no llc with the AMDGPU backend found")
+        raise unittest.SkipTest(
+            skip_until_reason(
+                BUILD_VARIANT, reason="no llc with the AMDGPU backend found"
+            )
+        )
     if with_readelf and find_llvm_tool("llvm-readelf") is None:
-        raise unittest.SkipTest("no llvm-readelf found")
+        raise unittest.SkipTest(
+            skip_until_reason(BUILD_VARIANT, reason="no llvm-readelf found")
+        )
     return llc
 
 
@@ -166,3 +178,17 @@ def llc_code_object(
     if obj is None:
         raise unittest.SkipTest(f"this llc does not know {processor}")
     return obj
+
+
+def code_object_notes(code_object: bytes) -> str:
+    """``llvm-readelf --notes`` of ``code_object``: its AMDGPU metadata as text,
+    for :func:`rocke.analysis.parse_kernel_arguments`. Skips the test when
+    llvm-readelf is missing (fails instead under
+    ``ROCKE_REQUIRE_COMPILER_TOOLS=1``)."""
+    readelf = find_llvm_tool("llvm-readelf")
+    if readelf is None:
+        require_tools_or_skip("llvm-readelf not found (ROCM_PATH / PATH)")
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "code_object.hsaco"
+        path.write_bytes(code_object)
+        return read_code_object_notes(path, readelf=readelf)

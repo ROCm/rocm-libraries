@@ -51,6 +51,7 @@
 
 #include <string.h>
 
+#include "rocke/helper_rocke.helpers.i4_dequant.h" /* rocke_unpack_i4_byte_to_pair_f32 */
 #include "rocke/ir_internal.h" /* rocke_i_live, rocke_i_set_err */
 
 rocke_kernel_def_t* rocke_build_decode_gemv_matmul_nbits(

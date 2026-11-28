@@ -13,8 +13,10 @@ with three knobs:
 
 * The output type (``i8`` for the SmoothQuant default; ``fp8e4m3`` for
   the FP8-output variant; ``bf8e5m2`` for the e5m2-output variant).
-* The clamp range per output type (``[-127, 127]``, ``[-448, 448]``,
-  ``[-57344, 57344]``).
+* The clamp range per output type: ``[-127, 127]`` for i8, and for fp8 /
+  bf8 the largest finite value of the encoding the target converts to
+  (:func:`~rocke.helpers.fp8_encoding.fp8_element_format`: 240 / 57344 for
+  gfx942's FNUZ, 448 / 57344 for OCP).
 * Whether the rounding is round-to-nearest-even (default) or stochastic
   (a v2 follow-on).
 
@@ -22,24 +24,48 @@ This module exposes the small set of helpers every quantised op needs:
 
 * :class:`QDType` — the output dtype literal alias used in spec dataclasses.
 * :class:`LogicalQDType` — recognized types, including FP4/FP6 without scalar conversion.
-* :data:`QUANT_MAX_ABS` — clamp bound per output type (matches CK Tile's
-  ``ComputeDataType{127.0f}`` / ``448.0f`` / ``57344.0f`` literals).
 * :func:`quant_ir_type` — map a recognized dtype string to the IR :class:`Type`.
+* :func:`quant_max_abs` — that clamp bound for a dtype on a target.
+* :func:`validate_quant_out_dtype` — whether a quantizing kernel can write a
+  dtype on a target.
 * :func:`quantize_scalar_f32` — the one-element quant fast path
-  (``cvt_f32_to_<qd>(clamp(x * inv_scale, -max, max))``).
+  (``cvt_f32_to_<qd>(clamp(x * inv_scale, -max, max))``, NaN kept for
+  fp8 / bf8).
+* :func:`quantize_prescaled_f32` — the same clamp and conversion for a value
+  the caller has already scaled.
 * :func:`dequantize_scalar_to_f32` — the dual; auto-dispatches on the
   input value's IR type.
 
+Dynamic scales: a kernel that derives its scale from the data does not bound
+an infinite scaled value (``x * smscale`` in SmoothQuant and MoE-SmoothQuant,
+``x * gamma`` in add + RMSNorm + RDQuant, the f32 Hidden in the fused fp8
+MoE), whatever the clamp does:
+
+* SmoothQuant, MoE-SmoothQuant and the fused fp8 MoE: the ``amax`` is +inf,
+  so the stored scale is +inf and ``1 / scale`` is 0. The inf element becomes
+  ``inf * 0`` = NaN (-127 for i8) and every finite element 0, over the row
+  (the fused MoE: over the 128-column block, for every row of the M tile).
+  Dequantizing with the stored +inf scale gives NaN for all of them.
+* add + RMSNorm + RDQuant: ``1 / rms`` is 0, which multiplies every element
+  of the row, so again the inf element becomes NaN (-127 for i8) and the
+  finite ones 0, as long as ``1 / (eps_q / quant_max)`` is finite (an
+  ``eps_q / quant_max`` so small that its reciprocal is +inf makes every
+  element of the row NaN).
+
+``platform/dsl_docs/numerics/`` describes each dtype's NaN and infinity
+handling.
+
 Authoring style mirrors :mod:`rocke.helpers.io`: every helper takes
 the dtype as a *string* alias so call sites read naturally
-(``quantize_scalar_f32(b, v, inv_scale=inv, qdtype="i8")``), with
+(``quantize_scalar_f32(b, v, inv_scale=inv, qdtype="i8", arch=arch)``), with
 :func:`quant_ir_type` handling the canonicalisation.
 """
 
 from __future__ import annotations
 
-from typing import List, Literal, TypeAlias
+from typing import List, Literal, TypeAlias, get_args
 
+from ..core.arch import ArchTarget
 from ..core.ir import (
     BF8E5M2,
     F32,
@@ -52,19 +78,21 @@ from ..core.ir import (
     Value,
     dtype_to_ir_type,
 )
+from .fp8_encoding import fp8_element_format
 
 
 __all__ = [
     "LogicalQDType",
     "QDType",
-    "QUANT_MAX_ABS",
     "dequantize_scalar_to_f32",
     "ir_to_qdtype",
     "pack_quant_chunk_local_f32",
     "quant_ir_type",
     "quant_max_abs",
+    "quantize_prescaled_f32",
     "quantize_scalar_f32",
     "store_packed_chunk_local",
+    "validate_quant_out_dtype",
 ]
 
 
@@ -72,16 +100,9 @@ QDType: TypeAlias = Literal["i8", "fp8e4m3", "bf8e5m2"]
 LogicalQDType: TypeAlias = Literal[QDType, "fp4e2m1", "fp6e2m3", "fp6e3m2"]
 
 
-# Per-dtype clamp magnitude (the largest representable absolute value).
-# CK Tile's ``SmoothquantPipeline`` uses 127.0f for i8 and the
-# ``ck_tile::numeric<Q>::max()`` constants for fp8/bf8; we match
-# those exactly so a port of any CK Tile reference yields bit-identical
-# quantised tensors after rounding.
-QUANT_MAX_ABS = {
-    "i8": 127.0,
-    "fp8e4m3": 448.0,
-    "bf8e5m2": 57344.0,
-}
+# The i8 clamp magnitude: the symmetric ``[-127, 127]`` of CK Tile's
+# ``SmoothquantPipeline`` (``ComputeDataType{127.0f}``), not the i8 type's -128.
+_I8_MAX_ABS = 127.0
 
 
 # Common aliases the kernel-author surface accepts. ``"int8"`` and
@@ -145,16 +166,50 @@ def quant_ir_type(qdtype: str) -> Type:
     return dtype_to_ir_type(_QUANT_TYPE_ALIAS[qdtype])
 
 
-def quant_max_abs(qdtype: str) -> float:
-    """Saturating clamp magnitude (positive) for ``qdtype``.
+def quant_max_abs(qdtype: str, *, arch: str) -> float:
+    """Clamp magnitude (positive) of :func:`quantize_scalar_f32` and
+    :func:`quantize_prescaled_f32` for ``qdtype`` on ``arch``.
 
-    Returns the value used in
-    ``quantize_scalar_f32(x, inv_scale, qdtype)`` as the upper / lower
-    clamp bound: ``127`` for i8, ``448`` for fp8e4m3, ``57344`` for
-    bf8e5m2. Matches CK Tile's ``numeric<DType>::max()`` literals.
+    ``127`` for i8 (CK Tile's symmetric range). For fp8e4m3 / bf8e5m2, the
+    largest finite value of the encoding ``arch`` converts to
+    (:func:`~rocke.helpers.fp8_encoding.fp8_element_format`): 240 / 57344 for the
+    FNUZ encodings of gfx942, 448 / 57344 for the OCP ones of gfx950 and
+    gfx1250. Raises ``ValueError`` for an fp8 / bf8 dtype on a target with no
+    known encoding.
     """
     canon = _canon(qdtype)
-    return QUANT_MAX_ABS[canon]
+    if canon == "i8":
+        return _I8_MAX_ABS
+    return fp8_element_format(canon, arch).largest_value
+
+
+def validate_quant_out_dtype(out_dtype: str, arch: str) -> tuple[bool, str]:
+    """Whether a quantizing kernel can write ``out_dtype`` on ``arch``:
+    ``(True, "")``, else ``(False, reason)``.
+
+    ``out_dtype`` must be a canonical :data:`QDType` name (no aliases). An
+    fp8e4m3 / bf8e5m2 output needs the CDNA-only ``v_cvt_pk_{fp8,bf8}_f32``
+    conversion (an RDNA target has none, and selecting it would abort with an
+    uncatchable ``LLVM ERROR: Cannot select``) and a target with a known
+    encoding (:func:`quant_max_abs`). ``arch`` must be a known target. The C++
+    engine's twin is ``rocke_validate_quant_out_dtype``.
+    """
+    if out_dtype not in get_args(QDType):
+        return False, f"unsupported out_dtype {out_dtype!r}"
+    if out_dtype == "i8":
+        return True, ""
+    family = ArchTarget.from_gfx(arch).family
+    if family != "cdna":
+        return False, (
+            f"out_dtype {out_dtype!r} needs the CDNA-only "
+            f"v_cvt_pk_{{fp8,bf8}}_f32 conversion; {arch} (family "
+            f"{family!r}) has no fp8/bf8 pack op -- use out_dtype='i8'"
+        )
+    try:
+        quant_max_abs(out_dtype, arch=arch)
+    except ValueError as error:
+        return False, str(error)
+    return True, ""
 
 
 def ir_to_qdtype(t: Type) -> LogicalQDType:
@@ -170,34 +225,23 @@ def quantize_scalar_f32(
     *,
     inv_scale: Value,
     qdtype: str,
-    skip_clamp_on_pack: bool = False,
+    arch: str,
 ) -> Value:
-    """Quantise one f32 scalar to ``qdtype``.
-
-    Pipeline (single hardware path per output dtype):
-
-    .. code-block:: text
-
-        scaled  = x_f32 * inv_scale
-        clamped = clamp_f32(scaled, -QUANT_MAX_ABS, +QUANT_MAX_ABS)
-        result  = cvt_f32_to_<qdtype>(clamped)
-
-    The clamp is redundant for fp8/bf8 (the AMDGPU hardware already
-    saturates on conversion), but it's a cheap two-op ``v_med3_f32``
-    that keeps the f32 path interpretable in IR dumps. For i8 it sets
-    the output range: ``cvt_f32_to_i8_sat`` alone saturates to
-    ``[-128, 127]``, and the clamp narrows that to the symmetric
-    ``[-127, 127]`` of the CK Tile reference. (The i8 path does not use
-    ``v_cvt_pk_i16_i32``; that instruction does saturate, but to the
-    i16 range, so it would not bound an i8 result either.)
+    """Quantise one f32 scalar to ``qdtype`` as ``arch`` encodes it:
+    ``quantize_prescaled_f32(b, x_f32 * inv_scale, qdtype=qdtype, arch=arch)``.
 
     ``inv_scale`` is in the *natural* direction (``inv_scale = 1 / scale``
     where ``scale = amax / quant_max``). Pre-computing the reciprocal
     outside the inner loop is the same trick CK Tile uses; it amortises
     one ``v_rcp_f32`` over the whole row.
 
+    A scale the kernel derives from the data does not bound an infinite
+    scaled value (see "Dynamic scales" in the module docstring).
+
     Returns a value whose IR type is the quant dtype (i8 / fp8e4m3 /
-    bf8e5m2). Caller stores it via the standard ``global_store``.
+    bf8e5m2). Caller stores it via the standard ``global_store``. Raises
+    ``ValueError`` for an fp8 / bf8 dtype on a target with no known
+    encoding (:func:`quant_max_abs`).
     """
     if x_f32.type.name != "f32":
         raise ValueError(
@@ -207,28 +251,88 @@ def quantize_scalar_f32(
         raise ValueError(
             f"quantize_scalar_f32 expects f32 inv_scale, got {inv_scale.type.name}"
         )
+    # The bounds come before the multiply: IR value names follow op order,
+    # and both engines' quantizing kernels are blessed with this order.
+    canon, c_neg, c_pos = _quant_bounds(b, qdtype, arch=arch)
+    scaled = b.fmul(x_f32, inv_scale)
+    return _saturate_and_convert(b, scaled, canon=canon, c_neg=c_neg, c_pos=c_pos)
+
+
+def quantize_prescaled_f32(
+    b: IRBuilder,
+    scaled_f32: Value,
+    *,
+    qdtype: str,
+    arch: str,
+) -> Value:
+    """Convert one f32 scalar that is already scaled to ``qdtype`` as
+    ``arch`` encodes it, clamped to the dtype's range (NaN kept for fp8 /
+    bf8).
+
+    Pipeline (single hardware path per output dtype):
+
+    .. code-block:: text
+
+        clamped = clamp_f32(scaled_f32, -quant_max_abs, +quant_max_abs)
+        result  = cvt_f32_to_<qdtype>(scaled_f32 if isnan(scaled_f32) else clamped)
+
+    For fp8 / bf8 the clamp is what makes the conversion saturate: the
+    hardware conversion does not, so a value past the encoding's largest
+    finite value (and +-inf) would become NaN, or +-inf for OCP bf8. The
+    bound is that of ``arch``'s encoding (:func:`quant_max_abs`), so finite
+    values and +-inf convert to finite values. A NaN is converted as it is
+    and stays NaN (the encoding's NaN code); ``clamp_f32`` alone would turn
+    it into the negative bound.
+
+    For i8 the clamp sets the output range: ``cvt_f32_to_i8_sat`` alone
+    saturates to ``[-128, 127]``, and the clamp narrows that to the
+    symmetric ``[-127, 127]`` of the CK Tile reference. i8 has no NaN; a NaN
+    input gives -127. (The i8 path does not use ``v_cvt_pk_i16_i32``; that
+    instruction does saturate, but to the i16 range, so it would not bound
+    an i8 result either.)
+
+    Use it where the kernel scales the value some other way than
+    :func:`quantize_scalar_f32`'s multiply, for example by dividing by the
+    scale. Returns a value whose IR type is the quant dtype. Raises
+    ``ValueError`` for an fp8 / bf8 dtype on a target with no known
+    encoding (:func:`quant_max_abs`).
+    """
+    if scaled_f32.type.name != "f32":
+        raise ValueError(
+            f"quantize_prescaled_f32 expects f32 input, got {scaled_f32.type.name}"
+        )
+    canon, c_neg, c_pos = _quant_bounds(b, qdtype, arch=arch)
+    return _saturate_and_convert(b, scaled_f32, canon=canon, c_neg=c_neg, c_pos=c_pos)
+
+
+def _quant_bounds(
+    b: IRBuilder, qdtype: str, *, arch: str
+) -> tuple[QDType, Value, Value]:
+    """``(canon, -bound, +bound)``: the canonical name of ``qdtype`` and the
+    clamp bounds of :func:`quant_max_abs` as f32 constants (``+bound``
+    emitted first)."""
     canon = _canon(qdtype)
-    qmax = quant_max_abs(canon)
+    qmax = quant_max_abs(canon, arch=arch)
     c_pos = b.const_f32(qmax)
     c_neg = b.const_f32(-qmax)
-    scaled = b.fmul(x_f32, inv_scale)
-    # P55: when ``skip_clamp_on_pack`` is set and the target is fp8 /
-    # bf8, drop the explicit ``v_med3_f32`` clamp because the AMDGPU
-    # ``cvt.pk.fp8.f32`` / ``cvt.pk.bf8.f32`` instructions already
-    # saturate the input on conversion. For ``i8`` we keep the clamp:
-    # it gives the symmetric ``[-127, 127]`` range of the CK Tile
-    # reference, where ``cvt_f32_to_i8_sat`` alone would produce -128.
-    if skip_clamp_on_pack and canon in ("fp8e4m3", "bf8e5m2"):
-        if canon == "fp8e4m3":
-            return b.cvt_f32_to_fp8(scaled)
-        return b.cvt_f32_to_bf8(scaled)
-    clamped = b.clamp_f32(scaled, c_neg, c_pos)
+    return canon, c_neg, c_pos
+
+
+def _saturate_and_convert(
+    b: IRBuilder, scaled_f32: Value, *, canon: QDType, c_neg: Value, c_pos: Value
+) -> Value:
+    """The rule both quantize helpers share: clamp ``scaled_f32`` to
+    ``[c_neg, c_pos]`` and convert it to ``canon``, keeping a NaN for fp8 /
+    bf8 (see :func:`quantize_prescaled_f32`). The caller builds the bounds,
+    so it decides where they sit in the IR."""
+    clamped = b.clamp_f32(scaled_f32, c_neg, c_pos)
     if canon == "i8":
         return b.cvt_f32_to_i8_sat(clamped)
+    saturated = b.select(b.fcmp("uno", scaled_f32, scaled_f32), scaled_f32, clamped)
     if canon == "fp8e4m3":
-        return b.cvt_f32_to_fp8(clamped)
+        return b.cvt_f32_to_fp8(saturated)
     if canon == "bf8e5m2":
-        return b.cvt_f32_to_bf8(clamped)
+        return b.cvt_f32_to_bf8(saturated)
     raise ValueError(f"unreachable canon={canon!r}")
 
 
@@ -287,14 +391,16 @@ def pack_quant_chunk_local_f32(
     MoE-SmoothQuant instances.
 
     ``scaled_f32`` is the chunk of values **already multiplied by the
-    inverse quant scale** — i.e. ready for the dtype-specific saturating
-    cast. The packing routes are:
+    inverse quant scale**. The fp8 / bf8 routes apply no clamp, and the
+    conversion does not saturate (a value past the encoding's largest finite
+    value becomes NaN, or +-inf for OCP bf8), so the caller's scale must keep
+    the values within ``quant_max_abs(out_dtype, arch=...)``: the instances
+    derive it as ``amax / quant_max_abs``. The packing routes are:
 
     * For ``fp8e4m3`` / ``bf8e5m2`` with a 4-wide chunk we issue one
       packed ``v_cvt_pk_fp8_f32`` (resp. ``v_cvt_pk_bf8_f32``) via
       :func:`IRBuilder.cvt_pk_fp8_f32x4` / ``cvt_pk_bf8_f32x4``,
-      saving 3 scalar ``v_cvt_*_f32`` instructions and the redundant
-      ``clamp_f32`` (the hardware saturates on conversion).
+      saving 3 scalar ``v_cvt_*_f32`` instructions.
     * For ``i8`` (no packed cvt today) and ``VEC == 2`` chunks (no
       2-wide packed cvt), we emit per-element scalar
       ``cvt_f32_to_i8_sat`` (with the explicit ``[-127, 127]``
@@ -328,13 +434,13 @@ def pack_quant_chunk_local_f32(
             out = b.vec_concat(out, chunk)
         return out
 
-    # i8 path (or VEC=2 fp8/bf8): per-element saturating cast + vec_pack.
+    # i8 path (or VEC=2 fp8/bf8): per-element cast + vec_pack.
     qs: List[Value] = []
     for sf in scaled_f32:
         if out_dtype == "i8":
             qs.append(
                 b.cvt_f32_to_i8_sat(
-                    b.clamp_f32(sf, b.const_f32(-127.0), b.const_f32(127.0))
+                    b.clamp_f32(sf, b.const_f32(-_I8_MAX_ABS), b.const_f32(_I8_MAX_ABS))
                 )
             )
         elif out_dtype == "fp8e4m3":

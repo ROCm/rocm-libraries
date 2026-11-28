@@ -27,10 +27,11 @@ function(rocke_build_id_inputs out_var root_dir)
   # directory into rocke_library_core and rocke_library_engine, whose build_id()
   # reports this same ID, so their sources and recipe are hashed too. They are
   # hashed whenever the sibling tree is present, not only when
-  # ROCKE_BUILD_LIBRARY_CPP is on: online.py recomputes this ID from the tree
-  # alone and cannot see a cache option. Their pybind glue and host tests are
-  # left out, as cpp/bindings is above. A platform-only copy hashes nothing
-  # extra. Keep this mirrored in online.py.
+  # ROCKE_BUILD_LIBRARY_CPP is on: rocke/core/engine_provenance.py recomputes
+  # this ID from the tree alone and cannot see a cache option. Their pybind
+  # glue and host tests are left out, as cpp/bindings is above. A platform-only
+  # copy hashes nothing extra. Keep this mirrored in
+  # rocke/core/engine_provenance.py.
   get_filename_component(_rocke_library_cpp "${root_dir}/../library/cpp" ABSOLUTE)
   if(EXISTS "${_rocke_library_cpp}/CMakeLists.txt")
     file(GLOB_RECURSE _rocke_library
@@ -43,7 +44,8 @@ function(rocke_build_id_inputs out_var root_dir)
 
   # The engine's arch-domain table is generated from these at build time
   # (tools/gen_arch_domain_cpp.py), so they change what the engine does as
-  # surely as its sources do. Keep this list mirrored in online.py.
+  # surely as its sources do. Keep this list mirrored in
+  # rocke/core/engine_provenance.py.
   file(GLOB _rocke_arch_domain
        "${root_dir}/python/rocke/core/arch/data/intrinsic_arch_domain.*.json")
   list(APPEND _rocke_all ${_rocke_arch_domain}
@@ -51,8 +53,15 @@ function(rocke_build_id_inputs out_var root_dir)
        "${root_dir}/python/rocke/core/arch/domain.py"
        "${root_dir}/tools/gen_arch_domain_cpp.py")
 
+  # Likewise the engine's C++ keyword table (tools/gen_cxx_keywords_cpp.py).
+  # Keep this list mirrored in rocke/core/engine_provenance.py.
+  list(APPEND _rocke_all
+       "${root_dir}/python/rocke/core/cxx_keywords.py"
+       "${root_dir}/tools/gen_cxx_keywords_cpp.py")
+
   # Include the CLI frontend and the build recipes that select, stamp, compile,
-  # and link the two native artifacts. Keep this list mirrored in online.py.
+  # and link the two native artifacts. Keep this list mirrored in
+  # rocke/core/engine_provenance.py.
   foreach(_rocke_input
           "tests/portable_ir/replay_cli.cpp"
           "CMakeLists.txt"

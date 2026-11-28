@@ -69,6 +69,31 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_entry_guards.cp
                rocke_tiled_attention_entry_guards)
 endif()
 
+# The gfx942 tiled 2D builder's direct-from-HBM K and V knobs: the spec
+# refusals and the kernel-name token. The byte-identity gate only compares
+# specs both engines accept, so a refusal (or a knob dropped silently) is
+# invisible to it.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942_attention_tiled_2d_hbm_knobs.cpp")
+  add_executable(rocke_gfx942_attention_tiled_2d_hbm_knobs
+                 instances/gfx942_attention_tiled_2d_hbm_knobs.cpp)
+  target_link_libraries(rocke_gfx942_attention_tiled_2d_hbm_knobs PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_gfx942_attention_tiled_2d_hbm_knobs PRIVATE m)
+  endif()
+  add_test(NAME rocke_gfx942_attention_tiled_2d_hbm_knobs
+           COMMAND rocke_gfx942_attention_tiled_2d_hbm_knobs)
+  set_tests_properties(rocke_gfx942_attention_tiled_2d_hbm_knobs
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                                rocke_gfx942_attention_tiled_2d_hbm_knobs)
+  set_target_properties(rocke_gfx942_attention_tiled_2d_hbm_knobs
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_gfx942_attention_tiled_2d_hbm_knobs
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_gfx942_attention_tiled_2d_hbm_knobs)
+endif()
+
 # The three scalar-attention _lower_to_llvm wrappers take no target, so they
 # lower for a fixed one while the lowerer itself rejects a NULL arch. Nothing
 # else calls them, so this is the only thing that notices when they stop
@@ -141,6 +166,26 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gemm_universal_spec_guards.cpp"
                rocke_gemm_universal_spec_guards)
 endif()
 
+# Two spec refusals of the C++ engine with their reason strings (pooling bf16,
+# a multi-D GEMM whose D dtype is not the C dtype), which the byte-identity
+# gate cannot see because neither engine builds those specs.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/spec_refusal_guards.cpp")
+  add_executable(rocke_spec_refusal_guards instances/spec_refusal_guards.cpp)
+  target_link_libraries(rocke_spec_refusal_guards PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_spec_refusal_guards PRIVATE m)
+  endif()
+  add_test(NAME rocke_spec_refusal_guards COMMAND rocke_spec_refusal_guards)
+  set_tests_properties(rocke_spec_refusal_guards PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_spec_refusal_guards)
+  set_target_properties(rocke_spec_refusal_guards
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_spec_refusal_guards
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_spec_refusal_guards)
+endif()
+
 # The MX GEMM's C grid for an unset workgroup tile, which no Python caller
 # reaches.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/mx_gemm_host.cpp")
@@ -187,37 +232,51 @@ endif()
 # test_attention_dense_spec_vectors.py regenerates it and checks the Python
 # against it (library -> platform, the allowed direction). The file is embedded
 # into this binary at configure time so the installed test needs no data path.
-set(_rocke_dense_spec_vectors "${CMAKE_CURRENT_SOURCE_DIR}/golden/attention_dense_spec_vectors.json")
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp")
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rocke_dense_spec_vectors}")
-  file(READ "${_rocke_dense_spec_vectors}" _rocke_dense_spec_hex HEX)
-  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _rocke_dense_spec_bytes
-                       "${_rocke_dense_spec_hex}")
-  string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
-                       "\\1\n" _rocke_dense_spec_bytes "${_rocke_dense_spec_bytes}")
-  # configure_file rewrites the .inc only when the bytes change, so a
-  # reconfigure does not force a recompile.
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
-       "${_rocke_dense_spec_bytes}\n")
-  configure_file("${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc.tmp"
-                 "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_spec_vectors.inc"
-                 COPYONLY)
-  add_executable(rocke_attention_dense_spec instances/test_attention_dense_spec.cpp)
-  target_include_directories(rocke_attention_dense_spec
-                             PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-  target_link_libraries(rocke_attention_dense_spec PRIVATE rocke_core)
-  if(UNIX)
-    target_link_libraries(rocke_attention_dense_spec PRIVATE m)
+function(rocke_add_embedded_vectors_test name source json)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+    return()
   endif()
-  add_test(NAME rocke_attention_dense_spec COMMAND rocke_attention_dense_spec)
-  set_tests_properties(rocke_attention_dense_spec PROPERTIES LABELS "ckc;unit;host")
-  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_spec)
-  set_target_properties(rocke_attention_dense_spec
-                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
-  install(TARGETS rocke_attention_dense_spec
-          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
-  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
-               rocke_attention_dense_spec)
+  set(vectors "${CMAKE_CURRENT_SOURCE_DIR}/${json}")
+  get_filename_component(stem "${json}" NAME_WE)
+  set(generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  set(inc "${generated}/${stem}.inc")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${vectors}")
+  file(READ "${vectors}" hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${hex}")
+  string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
+                       "\\1\n" bytes "${bytes}")
+  # Only replace the included file when the bytes actually change.
+  file(WRITE "${inc}.tmp" "${bytes}\n")
+  configure_file("${inc}.tmp" "${inc}" COPYONLY)
+
+  add_executable(${name} "${source}")
+  target_include_directories(${name} PRIVATE "${generated}")
+  target_link_libraries(${name} PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(${name} PRIVATE m)
+  endif()
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(installed_name ${name})
+  set_target_properties(${name} PROPERTIES OUTPUT_NAME "${installed_name}")
+  install(TARGETS ${name} RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS ${name})
+endfunction()
+
+rocke_add_embedded_vectors_test(rocke_attention_dense_spec
+  instances/test_attention_dense_spec.cpp golden/attention_dense_spec_vectors.json)
+rocke_add_embedded_vectors_test(rocke_attention_dense_gfx950_spec
+  instances/test_attention_dense_gfx950_spec.cpp golden/attention_dense_gfx950_spec_vectors.json)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_sha256.cpp")
+  add_executable(rocke_sha256 instances/test_sha256.cpp)
+  target_link_libraries(rocke_sha256 PRIVATE rocke_core)
+  add_test(NAME rocke_sha256 COMMAND rocke_sha256)
+  set_tests_properties(rocke_sha256 PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_sha256)
+  set_target_properties(rocke_sha256 PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_sha256 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_sha256)
 endif()
 
 # RDNA split-KV WMMA decode host helpers (split count, pack groups, row

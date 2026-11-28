@@ -9,8 +9,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("torch")
-
 _BUILDER = (
     Path(__file__).resolve().parents[1]
     / "builders/gfx950/attention/prefill/attention_dense_prefill.py"

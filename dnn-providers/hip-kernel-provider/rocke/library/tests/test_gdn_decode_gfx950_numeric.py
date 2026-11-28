@@ -3,7 +3,7 @@
 
 """On-device numeric checks for the GDN decode kernel (gfx950).
 
-Compares the kernel against a whole-tensor fp32 reference that shares no
+Compares the kernel against a whole-array float64 reference that shares no
 algebra with it -- no tiling, no warp structure, no cross-lane reductions -- so
 agreement is evidence about the algorithm rather than a restatement of the
 implementation.
@@ -13,63 +13,83 @@ recurrent state in place; checking only the output would let a corrupted state
 write ship silently, because nothing reads the state back until the next decode
 step.
 
-These lanes need a real gfx950 and ROCm torch, so they are marked ``gpu`` and
-skipped elsewhere. The spec rules, emission and dispatch selection are covered
+These lanes need a real gfx950, so they are marked ``gpu`` and skipped
+elsewhere. The spec rules, emission and dispatch selection are covered
 by CPU-only tests so this family still contributes coverage without a device.
 """
 
 from __future__ import annotations
 
 import dataclasses as dc
+import gc
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.runtime.device_array import DeviceArray
+from rocke.tests.gpu import probe_device_arch, skip_without_device_memory
+from rocke.tests.lanes import arch_skip_reason
 
 ARCH = "gfx950"
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
 pytestmark = pytest.mark.gpu
 
-
-def _device_is_gfx950() -> bool:
-    # rocke's own query, not torch's: `hip_module.get_device_arch` goes through
-    # hipDeviceGetAttribute and already strips the feature flags, returning
-    # "gfx950" rather than "gfx950:sramecc+:xnack-". Asking torch would mean a
-    # substring test against torch's formatting of the same string.
-    if not torch.cuda.is_available():
-        return False
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch() == ARCH
-    except Exception:
-        return False
-
-
 requires_gfx950 = pytest.mark.skipif(
-    not _device_is_gfx950(), reason=f"needs a {ARCH} device"
+    probe_device_arch()[0] != ARCH,
+    reason=arch_skip_reason(("gfx950",), f"needs a {ARCH} device"),
 )
 
 
 @pytest.fixture(scope="module")
 def harness():
-    from builders.gfx950.gdn.gdn_decode import TOL, check, gate, gate_launch, launch
-    from builders.gfx950.gdn.gdn_decode import launcher_for, make_inputs, prepare
-    from builders.gfx950.gdn.gdn_decode import ref_fp32, reference, run_values
+    from builders.gfx950.gdn.gdn_decode import (
+        TOL,
+        check,
+        drain,
+        gate,
+        gate_launch,
+        input_dtypes,
+        launch,
+        launcher_for,
+        make_inputs,
+        prepare,
+        read_back,
+        ref_decode_step,
+        reference,
+        run_values,
+    )
 
     return {
         "TOL": TOL,
         "check": check,
+        "drain": drain,
         "gate": gate,
         "gate_launch": gate_launch,
+        "input_dtypes": input_dtypes,
         "launch": launch,
         "launcher_for": launcher_for,
         "make_inputs": make_inputs,
         "prepare": prepare,
-        "ref_fp32": ref_fp32,
+        "read_back": read_back,
+        "ref_decode_step": ref_decode_step,
         "reference": reference,
         "run_values": run_values,
     }
+
+
+def _launched(harness, spec, inp, batch, launcher=None, launch_cfg=None):
+    """Prepare ``inp``, launch once (``launch_cfg`` overrides the driver's
+    geometry), drain, and return the arrays the launch wrote, on the host."""
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](
+        launcher or harness["launcher_for"](spec), values, launch_cfg or cfg
+    )
+    harness["drain"]()
+    return harness["read_back"](spec, values)
+
+
+def _same_bits(got, want):
+    return np.array_equal(got.view(np.uint8), want.view(np.uint8))
 
 
 @requires_gfx950
@@ -92,38 +112,36 @@ def test_the_tolerance_gate_can_actually_fail(harness):
     batch = 4
     inp = harness["make_inputs"](spec, batch)
     ref = harness["reference"](spec, inp)
-    written = inp["write_indices"].long()
-    values = {
-        "out": ref[0].to(torch.bfloat16),
-        "state": inp["state"].clone(),
-    }
-    values["state"][written] = ref[1].to(inp["state"].dtype)
+    written = inp["write_indices"]
+    values = {"out": storage.encode(ref[0], "bf16"), "state": inp["state"].copy()}
+    values["state"][written] = storage.encode(ref[1], "bf16")
     gate = harness["gate"]
     assert gate(spec, inp, values, ref).passed, "the exact launch must pass"
 
-    bad_out = dict(values, out=values["out"].clone())
-    bad_out["out"].view(-1)[0] += 1.0
+    def plus_one(array, index):
+        """``array`` with 1.0 added at ``index`` (an element or a slot)."""
+        out = array.copy()
+        out[index] = storage.encode(storage.decode(array[index], "bf16") + 1.0, "bf16")
+        return out
+
+    bad_out = dict(values, out=plus_one(values["out"], (0, 0, 0, 0)))
     assert not gate(spec, inp, bad_out, ref).passed, "a wrong output slipped through"
 
-    bad_state = dict(values, state=values["state"].clone())
-    bad_state["state"][written[0]] += 1.0
+    bad_state = dict(values, state=plus_one(values["state"], written[0]))
     assert not gate(spec, inp, bad_state, ref).passed, "a wrong state slipped through"
 
     # One ulp in a slot the kernel was not told to write (the first spare
     # slot). The pool must be deeper than the write set, or there is no such
     # slot and the spill check would be vacuous.
-    untouched = torch.ones(
-        inp["state"].shape[0], dtype=torch.bool, device=written.device
-    )
+    untouched = np.ones(inp["state"].shape[0], dtype=bool)
     untouched[written] = False
     assert untouched.any(), (
         "make_inputs must leave spare pool pages, or the misplaced-write "
         "detector in the gate has nothing to compare"
     )
-    spare = int(untouched.nonzero()[0])
-    spilled = dict(values, state=values["state"].clone())
-    bits = spilled["state"][spare].view(-1).view(torch.int16)
-    bits[0] ^= 1  # the lowest mantissa bit of one element
+    spare = int(np.flatnonzero(untouched)[0])
+    spilled = dict(values, state=values["state"].copy())
+    spilled["state"][spare].reshape(-1)[0] ^= 1  # the lowest mantissa bit
     verdict = gate(spec, inp, spilled, ref)
     assert verdict.spill and not verdict.passed, "a misplaced write slipped through"
 
@@ -147,15 +165,25 @@ def test_simple_reference_path_matches(harness):
     assert verdict.passed, verdict
 
 
-def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
-    """Compile and launch one dispatch result, including state-pool safety.
+def _problem(harness, result, batch):
+    """``(inputs, reference)`` of one request at ``batch``. Every configuration
+    a request dispatches takes the same inputs and has the same answer, so its
+    candidates share one (as the sweep's gate does)."""
+    spec = result.spec.kernel_spec
+    inputs = harness["make_inputs"](spec, batch)
+    return inputs, harness["reference"](spec, inputs)
+
+
+def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers, problem):
+    """Compile and launch one dispatch result on ``problem`` (:func:`_problem`
+    of its request), including state-pool safety.
 
     ``launchers`` caches by ``compile_key``: the binary depends on arch, ABI and
     spec only, so every batch that selects the same spec reuses one compile.
     Only the launch grid changes with batch.
     """
     from rocke.helpers.compile import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     spec = result.spec.kernel_spec
     key = result.kernel_id.compile_key
@@ -166,18 +194,14 @@ def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
             kernel_name=artifact.kernel_name,
             signature=result.signature,
         )
-    launcher = launchers[key]
-    inputs = harness["make_inputs"](spec, batch)
-    values, _ = harness["prepare"](spec, inputs, batch)
+    inputs, reference = problem
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
-    with no_fence():
-        launcher(values, config=cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inputs, batch, launchers[key], cfg)
     # A pool with no spare slot would make the gate's spill check vacuous.
     assert (
-        values["state"].shape[0] > inputs["write_indices"].numel()
+        values["state"].shape[0] > inputs["write_indices"].size
     ), f"spec_id={result.candidate.spec_id}: no spare state slot"
-    verdict = harness["gate"](spec, inputs, values, harness["reference"](spec, inputs))
+    verdict = harness["gate"](spec, inputs, values, reference)
     assert (
         verdict.passed
     ), f"batch {batch} spec_id={result.candidate.spec_id}: {verdict}"
@@ -208,11 +232,14 @@ def test_all_registry_candidates_are_correct(harness, request):
             assert len(results) == 1, f"unknown or illegal spec ID {selected_id!r}"
         else:
             assert len(results) == 54
+        problem = _problem(harness, results[0], batch)
         for result in results:
             owners.setdefault(result.kernel_id.compile_key, set()).add(
                 result.candidate.spec_id
             )
-            _assert_dispatch_result_matches_fp32(harness, result, batch, launchers)
+            _assert_dispatch_result_matches_fp32(
+                harness, result, batch, launchers, problem
+            )
     # One compile per spec, shared by every batch; the key must not merge specs.
     # Checked per key over every batch seen, so it does not depend on each batch
     # returning the same candidate set.
@@ -231,16 +258,18 @@ def test_all_d64_registry_candidates_are_correct(harness):
         GdnDecodeRequest(batch=1, arch=ARCH, head_k_dim=64, head_v_dim=64)
     )
     assert len(results) == 20
+    problem = _problem(harness, results[0], 1)
     for result in results:
-        _assert_dispatch_result_matches_fp32(harness, result, batch=1, launchers={})
+        _assert_dispatch_result_matches_fp32(harness, result, 1, {}, problem)
 
 
 @requires_gfx950
 def test_dispatcher_auto_smoke(harness):
     """Compile and launch only through the dispatcher-auto DispatchResult."""
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
     from rocke.helpers.compile import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
     batch = 16
     result = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH))
@@ -252,13 +281,10 @@ def test_dispatcher_auto_smoke(harness):
     )
     spec = result.spec.kernel_spec
     inputs = harness["make_inputs"](spec, batch)
-    values, _ = harness["prepare"](spec, inputs, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
-    with no_fence():
-        launcher(values, config=cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inputs, batch, launcher, cfg)
     assert (
-        values["state"].shape[0] > inputs["write_indices"].numel()
+        values["state"].shape[0] > inputs["write_indices"].size
     ), "no spare state slot: the gate's spill check would be vacuous"
     verdict = harness["gate"](spec, inputs, values, harness["reference"](spec, inputs))
     assert verdict.passed, verdict
@@ -280,14 +306,11 @@ def test_padding_lanes_are_skipped_and_leave_state_untouched(harness):
     inp["read_indices"][1::2] = -1
     inp["write_indices"][1::2] = -1
 
-    before = inp["state"].clone()
-    values, cfg = harness["prepare"](spec, inp, batch)
-    harness["launch"](harness["launcher_for"](spec), values, cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inp, batch)
 
-    inactive = torch.arange(1, batch, 2, device=values["state"].device)
-    assert torch.equal(
-        values["state"][inactive], before[inactive]
+    inactive = np.arange(1, batch, 2)
+    assert _same_bits(
+        values["state"][inactive], inp["state"][inactive]
     ), "state of an inactive (negative-index) sequence was modified"
 
 
@@ -303,16 +326,16 @@ def test_mismatched_skip_index_leaves_write_page_untouched(harness):
     target = int(inp["write_indices"][lane])
     inp["read_indices"][lane] = -1
 
-    before = inp["state"].clone()
-    values, cfg = harness["prepare"](spec, inp, batch)
-    harness["launch"](harness["launcher_for"](spec), values, cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inp, batch)
 
-    assert torch.equal(
-        values["state"][target], before[target]
+    assert _same_bits(
+        values["state"][target], inp["state"][target]
     ), "a mismatched skip lane modified its write page"
 
 
+# Its state pool takes most of a small device's memory, so it runs with no
+# other test process on the device (rocke.tests.ctest_workers).
+@pytest.mark.rocke_run_alone
 @requires_gfx950
 def test_large_pool_crosses_the_i32_offset_boundary(harness):
     """A pool deep enough that ``slot * S_POOL`` overflows a signed i32 must
@@ -323,6 +346,9 @@ def test_large_pool_crosses_the_i32_offset_boundary(harness):
     pointer by a 64-bit byte offset, so both the read and the rank-1 write land
     in the intended slot rather than a wrapped-around one. A read-only fix would
     pass ``out`` yet corrupt a different slot, so the state write is checked too.
+    The pool (4 GiB of bf16) lives on the device once and on the host twice
+    (the input and the read-back); a device without room for it skips the test
+    (``skip_without_device_memory``).
     """
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
@@ -331,36 +357,35 @@ def test_large_pool_crosses_the_i32_offset_boundary(harness):
     s_pool = hv * dv * dk
     slot = (1 << 31) // s_pool  # first slot whose element base overflows i32
     pool_depth = slot + 1
-    # state pool + its in-place clone in prepare(), 2 bytes/elem, plus slack.
-    need = pool_depth * s_pool * 2 * 3
-    free, _ = torch.cuda.mem_get_info()
-    if free < need:
-        pytest.skip(f"needs ~{need >> 30} GiB device memory for the boundary pool")
+    pool_bytes = pool_depth * s_pool * storage.host_dtype(spec.state_dtype).itemsize
+    skip_without_device_memory(pool_bytes, "the i32 offset boundary pool")
 
     batch = 1
     inp = harness["make_inputs"](spec, batch)
-    dev, dtype = inp["state"].device, inp["state"].dtype
-    inp["state"] = torch.zeros(pool_depth, hv, dv, dk, device=dev, dtype=dtype)
-    inp["state"][slot] = torch.randn(hv, dv, dk, device=dev, dtype=dtype) * 0.01
+    rng = np.random.default_rng(1)
+    inp["state"] = np.zeros((pool_depth, hv, dv, dk), dtype=inp["state"].dtype)
+    inp["state"][slot] = storage.encode(
+        rng.standard_normal((hv, dv, dk)) * 0.01, "bf16"
+    )
     inp["read_indices"][:] = slot
     inp["write_indices"][:] = slot
 
     # Reference from a 1-slot pool holding the same active state: identical math,
-    # tiny memory (avoids a full-pool fp32 copy of the multi-GiB pool).
+    # tiny memory (avoids a full-pool float64 copy of the multi-GiB pool).
     ref_inp = dict(inp)
-    ref_inp["state"] = inp["state"][slot : slot + 1].contiguous()
-    ref_inp["read_indices"] = torch.zeros(batch, dtype=torch.int32, device=dev)
-    ref_out, ref_state = harness["ref_fp32"](spec, ref_inp)
+    ref_inp["state"] = inp["state"][slot : slot + 1].copy()
+    ref_inp["read_indices"] = np.zeros(batch, dtype=np.int32)
+    ref_out, ref_state = harness["ref_decode_step"](spec, ref_inp)
 
-    values, cfg = harness["prepare"](spec, inp, batch)
-    harness["launch"](harness["launcher_for"](spec), values, cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inp, batch)
 
     # Inline: the reference comes from a 1-slot pool and the pool is several
     # GiB, so the shared gate's whole-pool untouched compare is not affordable.
     # Both comparisons fail on NaN.
-    out_err = (values["out"].float() - ref_out).abs().max().item()
-    state_err = (values["state"].float()[slot] - ref_state[0]).abs().max().item()
+    out_err = np.abs(storage.decode(values["out"], "bf16") - ref_out).max()
+    state_err = np.abs(
+        storage.decode(values["state"][slot], "bf16") - ref_state[0]
+    ).max()
     assert (
         out_err <= harness["TOL"] and state_err <= harness["TOL"]
     ), f"i32 offset overflow at slot {slot}: out={out_err:.3e} state={state_err:.3e}"
@@ -461,9 +486,10 @@ def test_end_to_end_through_the_dispatch_result(harness):
     dispatcher's launch contract and the kernel it selected shows up as wrong
     numbers rather than passing unnoticed.
     """
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
     from rocke.helpers.compile import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
     batch = 16
     result = dispatch_gdn_decode(GdnDecodeRequest(batch=batch, arch=ARCH))
@@ -477,11 +503,8 @@ def test_end_to_end_through_the_dispatch_result(harness):
 
     spec = result.spec.kernel_spec
     inp = harness["make_inputs"](spec, batch)
-    values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
-    with no_fence():
-        launcher(values, config=cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inp, batch, launcher, cfg)
 
     verdict = harness["gate"](spec, inp, values, harness["reference"](spec, inp))
     assert (
@@ -535,9 +558,10 @@ def _launch_dispatched(harness, result, batch, launchers, relative_state=False):
     state, and every untouched page of both pools against the fp32 reference
     (``relative_state`` as for :func:`_check_dispatched_launch`).
     """
-    from builders.gfx950.gdn.gdn_decode import out_error, ref_conv_state_after
     from rocke.helpers.compile import compile_kernel
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    from builders.gfx950.gdn.gdn_decode import out_error, ref_conv_state_after
 
     tol = harness["TOL"]
     spec = result.spec.kernel_spec
@@ -551,16 +575,12 @@ def _launch_dispatched(harness, result, batch, launchers, relative_state=False):
             kernel_name=artifact.kernel_name,
             signature=result.signature,
         )
-    launcher = launchers[key]
     inp = harness["make_inputs"](spec, batch)
-    values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
-    with no_fence():
-        launcher(values, config=cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inp, batch, launchers[key], cfg)
 
-    written = inp["write_indices"].long()
-    untouched = torch.ones(inp["state"].shape[0], dtype=torch.bool, device="cuda")
+    written = inp["write_indices"]
+    untouched = np.ones(inp["state"].shape[0], dtype=bool)
     untouched[written] = False
     assert untouched.any()
     if not relative_state:
@@ -570,20 +590,21 @@ def _launch_dispatched(harness, result, batch, launchers, relative_state=False):
     # Inline for ``relative_state``: the shared gate's state error is absolute
     # and cannot take the error relative to ``max(1, |ref|)``. Every comparison
     # is written so a NaN fails.
-    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    ref_out, ref_state = harness["ref_decode_step"](spec, inp)
     pools = [("state", ref_state)]
     if spec.fuse_conv:
         pools.append(("conv_state", ref_conv_state_after(spec, inp)))
     out_err = out_error(spec, values["out"], ref_out)
     assert out_err <= tol, (spec.kernel_name(), batch, out_err)
+    dtypes = harness["input_dtypes"](spec)
     for name, want in pools:
-        # prepare() cloned each pool, so inp[name] is the pre-launch copy.
-        diff = (values[name].float()[written] - want).abs()
+        # The launch ran on device copies, so inp[name] is the pre-launch pool.
+        diff = np.abs(storage.decode(values[name], dtypes[name])[written] - want)
         if name == "state":
-            diff = diff / want.abs().clamp(min=1.0)
-        err = diff.max().item()
+            diff = diff / np.maximum(np.abs(want), 1.0)
+        err = diff.max()
         assert err <= tol, (spec.kernel_name(), batch, name, err)
-        assert torch.equal(values[name][untouched], inp[name][untouched]), name
+        assert _same_bits(values[name][untouched], inp[name][untouched]), name
 
 
 def _pinned_samples(results):
@@ -848,18 +869,15 @@ def test_mismatched_write_skip_leaves_state_untouched(harness):
     inp = harness["make_inputs"](spec, batch)
     skipped_write = int(inp["write_indices"][lane])
     inp["write_indices"][lane] = -1
-    before = inp["state"].clone()
-    values, cfg = harness["prepare"](spec, inp, batch)
-    harness["launch"](harness["launcher_for"](spec), values, cfg)
-    torch.cuda.synchronize()
+    values = _launched(harness, spec, inp, batch)
     # Inline: a skipped lane leaves its write page untouched, which the shared
     # gate (it assumes every lane writes) cannot express.
-    active_writes = inp["write_indices"][inp["write_indices"] >= 0].long()
-    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+    active_writes = inp["write_indices"][inp["write_indices"] >= 0]
+    untouched = np.ones(values["state"].shape[0], dtype=bool)
     untouched[active_writes] = False
     assert untouched[skipped_write]
-    assert torch.equal(values["state"][untouched], before[untouched])
-    assert torch.equal(values["out"][lane], torch.zeros_like(values["out"][lane]))
+    assert _same_bits(values["state"][untouched], inp["state"][untouched])
+    assert not values["out"][lane].any()  # all-zero bits: +0.0 everywhere
 
 
 @requires_gfx950
@@ -868,8 +886,8 @@ def test_paged_reorder_matches_reference(harness):
 
     spec, batch = GdnDecodeSpec(), 16
     inp = harness["make_inputs"](spec, batch)
-    inp["read_indices"] = inp["read_indices"].flip(0).contiguous()
-    inp["write_indices"] = inp["write_indices"].roll(3).contiguous()
+    inp["read_indices"] = inp["read_indices"][::-1].copy()
+    inp["write_indices"] = np.roll(inp["write_indices"], 3)
     verdict = harness["gate_launch"](spec, inp, batch)
     assert verdict.passed, verdict
 
@@ -880,13 +898,13 @@ def test_two_step_continuation(harness):
 
     spec, batch = GdnDecodeSpec(), 16
     inp = harness["make_inputs"](spec, batch)
-    inp["write_indices"] = inp["read_indices"].clone()
+    inp["write_indices"] = inp["read_indices"].copy()
     launcher = harness["launcher_for"](spec)
     for _ in range(2):
         values = harness["run_values"](spec, inp, launcher, batch)
         verdict = harness["gate"](spec, inp, values, harness["reference"](spec, inp))
         assert verdict.passed, verdict
-        inp = dict(inp, state=values["state"].clone())
+        inp = dict(inp, state=values["state"])
 
 
 @requires_gfx950
@@ -902,28 +920,29 @@ def test_state_reset_is_bit_exact(harness):
         values = harness["run_values"](spec, inp, launcher, batch)
         verdict = harness["gate"](spec, inp, values, ref)
         assert verdict.passed, verdict
-        outputs.append((values["out"].clone(), values["state"].clone()))
+        outputs.append((values["out"], values["state"]))
     # Bitwise equality between two launches: the shared gate is a tolerance
     # check and cannot express it.
-    assert torch.equal(outputs[0][0], outputs[1][0])
-    assert torch.equal(outputs[0][1], outputs[1][1])
+    assert _same_bits(outputs[0][0], outputs[1][0])
+    assert _same_bits(outputs[0][1], outputs[1][1])
 
 
 @requires_gfx950
 def test_repeated_checks_do_not_retain_device_memory(harness):
-    """`launch` enqueues under ``no_fence()``, which keeps every launch's tensors
-    alive until the stream is released. A caller that only synchronizes keeps
-    them all: a full tile sweep ran the device out of memory that way. After
-    ``check`` returns, nothing it launched may still be holding device memory.
-    """
-    import torch
+    """`launch` enqueues under ``no_fence()``, which keeps every launch's device
+    arrays alive until the stream is released. A caller that only synchronizes
+    keeps them all: a full tile sweep ran the device out of memory that way.
+    After ``check`` returns, no device array it allocated may still be alive
+    (each one owns its device memory)."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
+    def live_device_arrays():
+        gc.collect()
+        return sum(isinstance(obj, DeviceArray) for obj in gc.get_objects())
+
     spec = GdnDecodeSpec()
-    harness["check"](spec, 64)  # compile and allocator warm-up
-    torch.cuda.empty_cache()
-    baseline = torch.cuda.memory_allocated()
+    harness["check"](spec, 64)  # compile warm-up
+    baseline = live_device_arrays()
     for _ in range(5):
         harness["check"](spec, 64)
-    torch.cuda.empty_cache()
-    assert torch.cuda.memory_allocated() <= baseline
+    assert live_device_arrays() <= baseline

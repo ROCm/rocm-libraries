@@ -26,9 +26,12 @@ from rocke.helpers.tiling.coalescing_probe import (
     line_bytes_for,
     report_for_transaction,
 )
+from rocke.helpers.tiling.emit import planned_global_access_units
 from rocke.helpers.tiling.tiling_recorder import PipelineTransaction, record_build
 from rocke.helpers.tiling.transforms import interleave_idx
 from rocke.tests.arch_marks import arch_specific
+
+from ._copy_kernels import CopyCase, copy_kernel
 
 
 def _native_c():
@@ -84,15 +87,16 @@ def test_gate_report_hard_fails_on_underwidth():
         (64, 1),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )
     assert rep.ideal_vw_elems == 4
     good = "global_store_dwordx4 v[0:3], v4, s[0:1]\n" * 16
-    _r, hist, note = gate_report(rep, good, space="global")  # matches ideal -> passes
+    _r, hist, note = gate_report(rep, good)  # matches ideal -> passes
     assert hist == {4: 16} and "consistent" in note
     bad = "global_store_dwordx2 v[0:1], v4, s[0:1]\n" * 32
     with pytest.raises(AssertionError, match="ASM does not back"):
-        gate_report(rep, bad, space="global")
+        gate_report(rep, bad)
 
 
 def test_gate_report_raises_when_asm_lacks_the_access():
@@ -103,10 +107,11 @@ def test_gate_report_raises_when_asm_lacks_the_access():
         (64, 1),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )
     with pytest.raises(AssertionError, match="ASM shows NO"):
-        gate_report(rep, "s_nop 0\n", space="global")
+        gate_report(rep, "s_nop 0\n")
 
 
 def _gemm_operand_loads():
@@ -189,3 +194,27 @@ def test_report_takes_the_element_width_from_the_dtype(dtype_name, bits):
         _load_transaction(dtype_name), arch="gfx942", dims=("M", "K")
     )
     assert report.dtype_bits == bits
+
+
+@pytest.mark.parametrize(
+    "row_stride", [256, 257], ids=["aligned_row_stride", "odd_row_stride"]
+)
+def test_global_report_reaches_the_planned_width_whatever_the_row_alignment(
+    row_stride: int,
+):
+    # Each lane copies four rows of an 8-element f16 run (one 16-byte access per row). With an odd
+    # row stride most rows start mid-vector; a global access needs no alignment, so the report must
+    # still model one access of the planned width per row -- the width the backend reaches -- not
+    # a split into narrower aligned pieces.
+    case = CopyCase(
+        "coalescing_probe_copy", F16, run=8, rows_per_lane=4, row_stride=row_stride
+    )
+    (_kernel, tile, window), pipeline = record_build(copy_kernel, case)
+    planned = planned_global_access_units(tile, window)
+    for transaction in pipeline.transactions:
+        report = report_for_transaction(transaction, arch="gfx942", dims=("R", "C"))
+        widths = [instruction.vw_elems for instruction in report.per_instruction]
+        assert widths == [planned] * (tile.register_count // planned), (
+            f"global {transaction.kind} with row stride {row_stride}: modelled widths {widths}, "
+            f"planned {planned} per access"
+        )

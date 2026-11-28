@@ -12,8 +12,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_diff
 from rocke.core.lower_llvm import LLVM_FLAVORS
+from rocke.tests.arch_marks import arch_specific
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the emitter family gfx950_block_scaled_gemm uses scaled MFMA, which exists on gfx950 only",
+)
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_scaled_mfma_batch_reenters_and_terminates(monkeypatch, flavor):
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
@@ -27,7 +32,7 @@ def test_scaled_mfma_batch_reenters_and_terminates(monkeypatch, flavor):
     )
     assert first.output_sha == repeated.output_sha
     assert first.output_sha != last.output_sha
-    assert run_diff._is_end_emission(ended)
+    assert run_diff.is_end_emission(ended)
 
     # Compare the in-process batch with the original single-config CLI path.
     process = subprocess.run(
@@ -37,7 +42,7 @@ def test_scaled_mfma_batch_reenters_and_terminates(monkeypatch, flavor):
             "0",
             "ll",
         ],
-        env=run_diff._python_emitter_env(run_diff.PARITY),
+        env=run_diff.python_emitter_env(run_diff.PARITY),
         capture_output=True,
         check=True,
         timeout=run_diff.TIMEOUT,

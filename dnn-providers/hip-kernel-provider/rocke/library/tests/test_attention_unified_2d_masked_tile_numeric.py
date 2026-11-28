@@ -36,24 +36,24 @@ import math
 
 import numpy as np
 import pytest
-
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _gfx942_4warp_route,
     _tiled_spec_from_problem,
-    run_unified_attention_torch,
 )
-from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.lanes import skip_needing_arch
 
-from ._attention_device_array import DeviceArray
+from ._attention_paged_reference import paged_attention_reference, round_to_half
+from ._attention_tiled_launch import launch_tiled_one_sequence
 
+_ARCHES = ("gfx942", "gfx950")
 _ARCH = get_device_arch()
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
-        _ARCH not in ("gfx942", "gfx950"),
-        reason=f"needs a gfx942 or gfx950 GPU, found {_ARCH}",
+        _ARCH not in _ARCHES,
+        reason=f"needs a {' or '.join(_ARCHES)} GPU, found {_ARCH}",
     ),
 ]
 
@@ -94,21 +94,9 @@ _HEAD_SIZES = [64, 128, 256]
 _PAGE_SIZES = [16, 64]
 
 
-@pytest.fixture(scope="module")
-def rt():
-    from rocke.runtime.hip_module import Runtime
-
-    return Runtime()
-
-
-def _encode(x, dtype):
-    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
-    x = np.asarray(x, dtype=np.float32)
-    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
-
-
-def _decode(x, dtype):
-    return x.astype(np.float32) if dtype == "fp16" else bf16_to_f32(x)
+_SEQUENCE_LEN = 256
+# The KV pages _paged_cache allocates beyond those the sequence needs.
+_SPARE_PAGES = 3
 
 
 def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
@@ -127,8 +115,9 @@ def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
     )
 
 
-def _branch_spec(problem, branch, bs, arch):
-    """The tuning spec that pins ``branch`` of the epilogue on ``arch``."""
+def _canonical_branch_spec(problem, branch, bs, arch):
+    """``(spec, why, spec_id, knobs)``: the tuning spec that pins ``branch`` of
+    the epilogue on ``arch``, or ``None`` and the reason the rules refuse it."""
     from dispatch.attention.unified_rules import canonicalize_tuning_spec
 
     if arch == "gfx942":
@@ -144,8 +133,28 @@ def _branch_spec(problem, branch, bs, arch):
     variant = next(v for v in variants if v.spec_id == spec_id)
     knobs = {"use_transposed_scalar_state": True} if branch.endswith("_s1") else {}
     spec, why = canonicalize_tuning_spec(problem, variant, knobs)
+    return spec, why, spec_id, knobs
+
+
+def _admitting_arches(problem, branch, bs):
+    """The arches whose tuning rules take ``branch`` for ``problem``."""
+    return tuple(
+        arch
+        for arch in _ARCHES
+        if _canonical_branch_spec(problem, branch, bs, arch)[0] is not None
+    )
+
+
+def _branch_spec(problem, branch, bs, arch):
+    """The tuning spec that pins ``branch`` of the epilogue on ``arch``."""
+    spec, why, spec_id, knobs = _canonical_branch_spec(problem, branch, bs, arch)
     if spec is None and problem.head_size == 256:
-        pytest.skip(f"{spec_id} {knobs} does not take D256 here: {why}")
+        # Only gfx950's LDS holds D256 tiles, so elsewhere a D256 case waits
+        # for gfx950. _masked_tile_cases leaves out the D256 cases no arch takes.
+        skip_needing_arch(
+            _admitting_arches(problem, branch, bs),
+            reason=f"{spec_id} {knobs} does not take D256 here: {why}",
+        )
     assert spec is not None, f"{spec_id} {knobs}: {why}"
     return spec
 
@@ -173,84 +182,55 @@ def _rows_with_masked_leading_tile(kernel_spec, q_len):
     return rows
 
 
-def _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs):
+def _reference(q, k_cache, v_cache, kv_len, block_table, scale):
     """FP32 O for one sequence, bottom-right causal + sliding window, from
     float32 arrays of the uploaded values."""
-    q_len, _, d = q.shape
-    nblk = (kv_len + bs - 1) // bs
-    blocks = block_table[0, :nblk]
-    k = k_cache[blocks].reshape(-1, _HKV, d)[:kv_len]
-    v = v_cache[blocks].reshape(-1, _HKV, d)[:kv_len]
-    k = np.repeat(k.transpose(1, 0, 2), _HQ // _HKV, axis=0)
-    v = np.repeat(v.transpose(1, 0, 2), _HQ // _HKV, axis=0)
-    s = np.matmul(q.transpose(1, 0, 2), k.transpose(0, 2, 1)) * np.float32(scale)
-    p = np.arange(q_len).reshape(-1, 1)
-    kk = np.arange(kv_len).reshape(1, -1)
-    diag = p + (kv_len - q_len)
-    visible = (kk <= diag) & (diag - kk < _WINDOW)
-    # Every row sees at least its diagonal key, so no row is all -inf.
-    s = np.where(visible, s, -np.inf)
-    e = np.exp(s - s.max(axis=-1, keepdims=True))
-    probs = e / e.sum(axis=-1, keepdims=True)
-    return np.matmul(probs, v).transpose(1, 0, 2)
-
-
-def _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype):
-    """Run the tiled 2D path on one sequence; ``q``/``k_cache``/``v_cache`` are
-    float32 arrays of values exact in ``dtype``. Returns O as float32."""
-    q_len, kv_len = problem.total_q, problem.max_seqlen_k
-    host_q = _encode(q, dtype)
-    # Every byte 0xFF is NaN in fp16 and bf16: an element the kernel skips
-    # fails the checks instead of passing on stale memory.
-    out_host = np.empty_like(host_q)
-    out_host.view(np.uint8)[...] = 0xFF
-    out = DeviceArray(rt, out_host)
-    run_unified_attention_torch(
-        problem=problem,
-        q=DeviceArray(rt, host_q),
-        k=DeviceArray(rt, _encode(k_cache, dtype)),
-        v=DeviceArray(rt, _encode(v_cache, dtype)),
-        out=out,
-        cu_seqlens_q=DeviceArray(rt, np.array([0, q_len], dtype=np.int32)),
-        seqused_k=DeviceArray(rt, np.array([kv_len], dtype=np.int32)),
-        softmax_scale=scale,
-        block_table=DeviceArray(rt, block_table),
-        softcap=0.0,
-        backend="tiled",
-        tuning_spec=spec,
+    return paged_attention_reference(
+        q, k_cache, v_cache, kv_len, block_table[0], scale, sliding_window=_WINDOW
     )
-    return _decode(out.read(), dtype)
+
+
+def _kv_pages(kv_len, bs):
+    """The KV pages a sequence of ``kv_len`` keys fills at page size ``bs``."""
+    return (kv_len + bs - 1) // bs
+
+
+def _cache_pages(kv_len, bs):
+    """The pages of the cache ``_paged_cache`` allocates: the sequence's and
+    ``_SPARE_PAGES`` more."""
+    return _kv_pages(kv_len, bs) + _SPARE_PAGES
 
 
 def _paged_cache(rng, kv_len, bs, head_size, dtype, k_value=None):
-    """K/V caches (float32 values exact in ``dtype``) with three spare pages and
-    a shuffled block table. K is ``k_value`` everywhere, or randn if None."""
-    max_blocks = (kv_len + bs - 1) // bs
-    num_blocks = max_blocks + 3
+    """K/V caches (float32 values exact in ``dtype``) with ``_SPARE_PAGES``
+    spare pages and a shuffled block table. K is ``k_value`` everywhere, or
+    randn if None."""
+    max_blocks = _kv_pages(kv_len, bs)
+    num_blocks = _cache_pages(kv_len, bs)
     shape = (num_blocks, bs, _HKV, head_size)
     if k_value is None:
-        k_cache = _decode(_encode(rng.standard_normal(shape), dtype), dtype)
+        k_cache = round_to_half(rng.standard_normal(shape), dtype)
     else:
         k_cache = np.full(shape, k_value, dtype=np.float32)
-    v_cache = _decode(_encode(rng.standard_normal(shape), dtype), dtype)
+    v_cache = round_to_half(rng.standard_normal(shape), dtype)
     perm = rng.permutation(num_blocks)[:max_blocks]
     block_table = perm.reshape(1, max_blocks).astype(np.int32)
     return k_cache, v_cache, block_table, num_blocks
 
 
-def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
+def _run_and_check(dtype, score, bs, head_size, spec_for):
     """Run one sequence where every visible score is ``score`` and check O.
 
     ``spec_for(problem)`` returns the tuning spec to pin, or ``None`` for the
     production auto route.
     """
-    q_len = kv_len = 256
+    q_len = kv_len = _SEQUENCE_LEN
     rng = np.random.default_rng(0)
     scale = 1.0 / math.sqrt(head_size)
     # Every visible score equals `score`: q = a, k = b with a * b * D * scale = score.
     a = 1.0 if dtype == "fp16" else 4.0
     # Rounded to ``dtype``, the value the kernel reads.
-    b = _decode(_encode([score / (a * head_size * scale)], dtype), dtype)[0]
+    b = round_to_half([score / (a * head_size * scale)], dtype)[0]
     q = np.full((q_len, _HQ, head_size), a, dtype=np.float32)
     k_cache, v_cache, block_table, num_blocks = _paged_cache(
         rng, kv_len, bs, head_size, dtype, k_value=b
@@ -266,8 +246,10 @@ def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
     assert _rows_with_masked_leading_tile(
         kernel_spec, q_len
     ), "geometry no longer gives any row a fully masked leading tile"
-    out = _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype)
-    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
+    out = launch_tiled_one_sequence(
+        problem, spec, q, k_cache, v_cache, block_table, scale, dtype
+    )
+    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale)
 
     assert np.isfinite(out).all(), "non-finite O"
     # Every row sees at least one key, so a collapsed row has |O| ~ 0 while the
@@ -280,15 +262,31 @@ def _run_and_check(rt, dtype, score, bs, head_size, spec_for):
     )
 
 
-@pytest.mark.parametrize("head_size", _HEAD_SIZES)
-@pytest.mark.parametrize("bs", _PAGE_SIZES)
-@pytest.mark.parametrize("dtype,score", _SCORES)
-@pytest.mark.parametrize("branch", _BRANCHES)
-def test_masked_leading_tile_keeps_rows_with_keys(
-    rt, branch, dtype, score, bs, head_size
-):
+def _masked_tile_cases():
+    """``(branch, dtype, score, bs, head_size)`` of each case. A D256 case
+    that no arch's tuning rules take is left out rather than skipped, since no
+    lane could run it."""
+    cases = []
+    for branch in _BRANCHES:
+        for dtype, score in _SCORES:
+            for bs in _PAGE_SIZES:
+                for head_size in _HEAD_SIZES:
+                    problem = _problem(
+                        dtype,
+                        _SEQUENCE_LEN,
+                        _SEQUENCE_LEN,
+                        _cache_pages(_SEQUENCE_LEN, bs),
+                        bs,
+                        head_size,
+                    )
+                    if head_size != 256 or _admitting_arches(problem, branch, bs):
+                        cases.append((branch, dtype, score, bs, head_size))
+    return cases
+
+
+@pytest.mark.parametrize("branch,dtype,score,bs,head_size", _masked_tile_cases())
+def test_masked_leading_tile_keeps_rows_with_keys(branch, dtype, score, bs, head_size):
     _run_and_check(
-        rt,
         dtype,
         score,
         bs,
@@ -297,14 +295,14 @@ def test_masked_leading_tile_keeps_rows_with_keys(
     )
 
 
-def test_masked_leading_tile_auto_route_d64_bf16(rt):
+def test_masked_leading_tile_auto_route_d64_bf16():
     # No tuning spec: the production route. At D64 bf16 with a sliding window it
     # is the default builder with several warps per CTA (gfx942: 4 warps, tile
     # 16; gfx950: 2 warps, tile 64), not the gfx942 4-warp GQA kernel.
     problem = _problem("bf16", 256, 256, 256 // 16 + 3, 16, 64)
     assert _gfx942_4warp_route(problem, _ARCH) is None
     assert _tiled_spec_from_problem(problem, _ARCH).num_warps > 1
-    _run_and_check(rt, "bf16", -200.0, 16, 64, lambda p: None)
+    _run_and_check("bf16", -200.0, 16, 64, lambda p: None)
 
 
 _NAN_ROW, _NAN_HEAD = 100, 5
@@ -312,7 +310,7 @@ _NAN_ROW, _NAN_HEAD = 100, 5
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("branch", _BRANCHES)
-def test_nan_query_row_reaches_output(rt, branch, dtype):
+def test_nan_query_row_reaches_output(branch, dtype):
     """A NaN in one query row must give NaN O for that (row, head) only.
 
     The NaN scores make the row's softmax sum ``l`` NaN. The epilogue's keyless
@@ -323,7 +321,7 @@ def test_nan_query_row_reaches_output(rt, branch, dtype):
     q_len = kv_len = 256
     rng = np.random.default_rng(0)
     scale = 1.0 / math.sqrt(head_size)
-    q = _decode(_encode(rng.standard_normal((q_len, _HQ, head_size)), dtype), dtype)
+    q = round_to_half(rng.standard_normal((q_len, _HQ, head_size)), dtype)
     q[_NAN_ROW, _NAN_HEAD] = np.nan
     k_cache, v_cache, block_table, num_blocks = _paged_cache(
         rng, kv_len, bs, head_size, dtype
@@ -331,8 +329,10 @@ def test_nan_query_row_reaches_output(rt, branch, dtype):
 
     problem = _problem(dtype, q_len, kv_len, num_blocks, bs, head_size)
     spec = _branch_spec(problem, branch, bs, _ARCH)
-    out = _launch(rt, problem, spec, q, k_cache, v_cache, block_table, scale, dtype)
-    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale, bs)
+    out = launch_tiled_one_sequence(
+        problem, spec, q, k_cache, v_cache, block_table, scale, dtype
+    )
+    o_ref = _reference(q, k_cache, v_cache, kv_len, block_table, scale)
 
     assert np.isnan(out[_NAN_ROW, _NAN_HEAD]).all(), "NaN row was hidden"
     nan_slot = np.zeros((q_len, _HQ), dtype=bool)

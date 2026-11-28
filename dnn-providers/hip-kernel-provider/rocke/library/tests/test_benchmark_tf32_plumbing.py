@@ -19,6 +19,7 @@ import itertools
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 from rocke.core.arch import ArchTarget
 
@@ -417,15 +418,15 @@ def test_json_file_cases_carry_a_direction(tmp_path, monkeypatch):
 
 
 def test_verify_tol_table():
-    assert big._verify_tol("fp16", "gfx950") == 5e-2
-    assert big._verify_tol("bf16", "gfx942") == 5e-2
-    assert big._verify_tol("fp32", "gfx950") == 1e-3
+    assert big.verify_tol("fp16", "gfx950") == 5e-2
+    assert big.verify_tol("bf16", "gfx942") == 5e-2
+    assert big.verify_tol("fp32", "gfx950") == 1e-3
     # gfx950 emulates TF32 (bf16x3), gfx942 encodes XF32 natively.
-    assert big._verify_tol("tf32", "gfx950") == 1e-4
-    assert big._verify_tol("tf32", "gfx942") == 2**-8
+    assert big.verify_tol("tf32", "gfx950") == 1e-4
+    assert big.verify_tol("tf32", "gfx942") == 2**-8
     # The atom decides when it is known.
-    assert big._verify_tol("tf32", "gfx942", "mfma_f32_32x32x16_xf32") == 1e-4
-    assert big._verify_tol("tf32", "gfx950", "mfma_f32_16x16x8_xf32") == 2**-8
+    assert big.verify_tol("tf32", "gfx942", "mfma_f32_32x32x16_xf32") == 1e-4
+    assert big.verify_tol("tf32", "gfx950", "mfma_f32_16x16x8_xf32") == 2**-8
     # One pair of TF32 bounds for both sweeps.
     from benchmarks.common.direct_kernel_sweep import DIRECT_VERIFY_TOL
     from benchmarks.common.tf32_verify import TF32_VERIFY_TOL
@@ -480,69 +481,22 @@ def test_rank_results_never_ranks_a_failed_kernel():
     assert [r.kernel_name for r in ranked] == ["b", "a"] and not failed
 
 
-def test_conv_reference_pins_ieee_and_restores():
-    torch = pytest.importorskip("torch")
-    from builders.common.conv_reference import ieee_fp32
-
-    # Every conv backend with the per-operator API: the GPU one and oneDNN,
-    # which serves the CPU references.
-    convs = [
-        c
-        for c in (
-            getattr(torch.backends.cudnn, "conv", None),
-            getattr(getattr(torch.backends, "mkldnn", None), "conv", None),
-        )
-        if c is not None and hasattr(c, "fp32_precision")
-    ]
-    if convs:
-        before = [c.fp32_precision for c in convs]
-        with ieee_fp32():
-            assert [c.fp32_precision for c in convs] == ["ieee"] * len(convs)
-        assert [c.fp32_precision for c in convs] == before
-    else:
-        before = torch.backends.cudnn.allow_tf32
-        with ieee_fp32():
-            assert torch.backends.cudnn.allow_tf32 is False
-        assert torch.backends.cudnn.allow_tf32 == before
-
-
-def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
-    """A torch without the per-operator API (< 2.9) gets the legacy flag only:
-    the helper must not touch an attribute that version lacks."""
-    pytest.importorskip("torch")
-    from builders.common import conv_reference
-
-    class _Cudnn:
-        allow_tf32 = True
-
-    class _Backends:
-        cudnn = _Cudnn()
-
-    monkeypatch.setattr(conv_reference.torch, "backends", _Backends())
-    with conv_reference.ieee_fp32():
-        assert _Backends.cudnn.allow_tf32 is False
-    assert _Backends.cudnn.allow_tf32 is True
-
-
 def test_tf32_reference_rules_follow_the_catalog():
     """One home for the TF32 test rules: native XF32 (gfx942) masks the low 13
     mantissa bits and gets the 1e-3 bound; the BF16x3 emulation (gfx950) and
     any non-tf32 dtype see the full payload."""
-    torch = pytest.importorskip("torch")
     from builders.common.conv_reference import (
         TF32_REFERENCE_TOL,
         tf32_reference_inputs,
         tf32_reference_tol,
     )
 
-    x = torch.tensor([1.0 + 2**-20, -3.14159], dtype=torch.float32)
+    x = np.array([1.0 + 2**-20, -3.14159], dtype=np.float32)
     masked = tf32_reference_inputs(x, "gfx942")
-    assert torch.equal(
-        masked.view(torch.int32) & 0x1FFF, torch.zeros(2, dtype=torch.int32)
-    )
-    assert masked[0].item() == 1.0
-    assert torch.equal(tf32_reference_inputs(x, "gfx950"), x)
-    assert torch.equal(tf32_reference_inputs(x, "gfx942", "fp32"), x)
+    np.testing.assert_array_equal(masked.view(np.uint32) & 0x1FFF, [0, 0])
+    assert masked[0] == 1.0
+    np.testing.assert_array_equal(tf32_reference_inputs(x, "gfx950"), x)
+    np.testing.assert_array_equal(tf32_reference_inputs(x, "gfx942", "fp32"), x)
     assert tf32_reference_tol("gfx942") == TF32_REFERENCE_TOL["native"] == 1e-3
     assert tf32_reference_tol("gfx950") == TF32_REFERENCE_TOL["emulated"] == 1e-4
 

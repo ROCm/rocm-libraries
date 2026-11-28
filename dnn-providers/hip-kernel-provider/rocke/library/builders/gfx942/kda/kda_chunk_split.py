@@ -32,8 +32,13 @@ _RK = os.path.abspath(os.path.join(_HERE, "../../../.."))
 sys.path.insert(0, _RK + "/platform/python")
 sys.path.insert(0, _RK + "/library")
 
-import torch  # noqa: E402
+import kda_chunk_prep as prep_mod  # noqa: E402
+from kda_chunk_fused import PartitionedLaunch, reference  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
+from rocke.numeric import storage  # noqa: E402
+from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
 
+from builders.common.kda_host import dense_inputs, initial_state, score  # noqa: E402
 from kernels.gfx942.kda_chunkwise import (  # noqa: E402
     KdaChunkPrepSpec,
     KdaChunkScanSpec,
@@ -43,17 +48,6 @@ from kernels.gfx942.kda_chunkwise import (  # noqa: E402
     is_valid_spec,
     kda_chunk_scan_grid,
     kda_chunk_scan_signature,
-)
-from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.runtime import KernelLauncher, LaunchConfig, time_launches  # noqa: E402
-
-import kda_chunk_prep as prep_mod  # noqa: E402
-from kda_chunk_fused import (  # noqa: E402
-    _pack_initial_state,
-    _pack_v_partitions,
-    _unpack_outputs,
-    make_inputs,
-    ref_token_serial,
 )
 
 _LAUNCHER_CACHE: dict = {}
@@ -94,11 +88,10 @@ def prep_spec_of(spec: KdaChunkScanSpec) -> KdaChunkPrepSpec:
     )
 
 
-def run_scan(spec, ws, v, o, ht, bh, nc, h0=None, stream=None):
-    """Launch the scan over tiles already materialized by the prep kernel."""
+def run_scan(spec, ws, v, o, ht, bh, nc, h0=None, stream=0):
+    """Launch the scan over tiles already materialized by the prep kernel, on
+    ``stream`` (0: the default stream)."""
     launcher = make_launcher(spec)
-    if stream is None:
-        stream = torch.cuda.current_stream().cuda_stream
     cfg = LaunchConfig(
         grid=kda_chunk_scan_grid(spec, bh),
         block=(spec.tile.block_size, 1, 1),
@@ -139,32 +132,27 @@ def run_split(spec, q, k, g, beta, v, o, ws, ht, scale, bh, nc, h0=None):
 
 
 def launch_packed(spec, q, k, v, g, beta, h0=None):
-    """Run dense ``[B,H,T,D]`` inputs through gfx942 V partitions."""
-    B, H, T, DK = q.shape
-    DV = v.shape[-1]
-    C = spec.tile.chunk
-    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(spec, q, k, v, g, beta)
-    nt = BH * parts * NC
-    ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec))
-    o = torch.empty(nt, C * spec.head_v, dtype=torch.bfloat16, device=q.device)
-    ht = torch.zeros(BH * parts, spec.head_v, DK, dtype=torch.float32, device=q.device)
-    h0t = _pack_initial_state(spec, h0, parts)
+    """Run dense host ``[B,H,T,D]`` inputs through gfx942 V partitions, prep
+    then scan; returns host ``(o [B,H,T,DV] bf16 bits, final state
+    [B,H,DK,DV] fp32)``."""
+    run = PartitionedLaunch(spec, q, k, v, g, beta, h0)
+    ws = prep_mod.alloc_tiles(run.streams * run.packed.nc, prep_spec_of(spec))
     run_split(
         spec,
-        qf,
-        kf,
-        gf,
-        bf,
-        vf,
-        o,
+        run.q,
+        run.k,
+        run.g,
+        run.beta,
+        run.v,
+        run.o,
         ws,
-        ht,
-        DK**-0.5,
-        BH * parts,
-        NC,
-        h0=h0t,
+        run.ht,
+        run.head_k**-0.5,
+        run.streams,
+        run.packed.nc,
+        h0=run.h0,
     )
-    return _unpack_outputs(spec, o, ht, B, H, T, DV, NC, parts)
+    return run.results()
 
 
 def check(
@@ -179,32 +167,15 @@ def check(
     logical_head_v=128,
 ):
     DK, DV = spec.head_k, logical_head_v
-    q, k, v, g, beta = make_inputs(B, H, T, DK, DV, gate_low)
-    h0 = None
-    if with_h0:
-        gen = torch.Generator(device="cuda").manual_seed(7)
-        h0 = 0.1 * torch.randn(
-            B, H, DK, DV, dtype=torch.float32, device="cuda", generator=gen
-        )
+    q, k, v, g, beta = dense_inputs(B, H, T, DK, DV, gate_low=gate_low)
+    h0 = initial_state(B, H, DK, DV) if with_h0 else None
     o_got, ht_got = launch_packed(spec, q, k, v, g, beta, h0=h0)
-    torch.cuda.synchronize()
-    o_ref, s_ref = ref_token_serial(q, k, v, g, beta, DK**-0.5, h0=h0)
-
-    worst = 0.0
-    for name, got, ref in (("out", o_got, o_ref), ("final_state", ht_got, s_ref)):
-        d = (got.double() - ref).abs().max().item()
-        den = max(ref.abs().max().item(), 1e-30)
-        rel = d / den
-        worst = max(worst, rel)
-        if verbose:
-            print(
-                f"  {name:12s} max_abs={d:.3e} rel={rel:.3e} "
-                f"ref_absmax={den:.3e} finite={bool(torch.isfinite(got).all())}"
-            )
-    verdict = "PASS" if worst <= tol else "FAIL"
-    if verbose:
-        print(f"  -> worst rel {worst:.3e}  tol {tol:.1e}  {verdict}")
-    return worst
+    o_ref, s_ref = reference(q, k, v, g, beta, DK**-0.5, h0=h0)
+    pairs = (
+        ("out", storage.decode(o_got, "bf16"), o_ref),
+        ("final_state", ht_got, s_ref),
+    )
+    return score(pairs, tol, verbose=verbose)
 
 
 def bench(
@@ -224,20 +195,18 @@ def bench(
     serial chain whose only lever is occupancy.
     """
     DK, DV = spec.head_k, logical_head_v
-    q, k, v, g, beta = make_inputs(B, H, T, DK, DV)
+    run = PartitionedLaunch(spec, *dense_inputs(B, H, T, DK, DV))
     C = spec.tile.chunk
-    qf, kf, vf, gf, bf, BH, NC, parts = _pack_v_partitions(spec, q, k, v, g, beta)
-    nt = BH * parts * NC
+    nc = run.packed.nc
+    nt = run.streams * nc
     ws = prep_mod.alloc_tiles(nt, prep_spec_of(spec))
-    o = torch.empty(nt, C * spec.head_v, dtype=torch.bfloat16, device="cuda")
-    ht = torch.zeros(BH * parts, spec.head_v, DK, dtype=torch.float32, device="cuda")
     scale = DK**-0.5
 
     def do_prep():
-        prep_mod.run_prep(prep_spec_of(spec), qf, kf, gf, bf, ws, scale)
+        prep_mod.run_prep(prep_spec_of(spec), run.q, run.k, run.g, run.beta, ws, scale)
 
     def do_scan():
-        run_scan(spec, ws, vf, o, ht, BH * parts, NC)
+        run_scan(spec, ws, run.v, run.o, run.ht, run.streams, nc)
 
     def do_both():
         do_prep()

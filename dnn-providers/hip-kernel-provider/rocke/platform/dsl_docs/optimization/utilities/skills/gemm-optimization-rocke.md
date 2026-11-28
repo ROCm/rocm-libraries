@@ -14,7 +14,7 @@ allowed-tools: Read Edit Bash Grep Glob Agent
 # GEMM Optimization Guide (CK DSL)
 
 Comprehensive guide to writing and optimizing high-performance GEMM kernels in
-CK DSL on AMD CDNA GPUs (MI300X gfx942, MI350 gfx950).
+CK DSL on AMD CDNA GPUs (gfx942, gfx950).
 
 Based on the CK DSL `instances/gemm.py` framework.
 
@@ -363,11 +363,11 @@ spec = GemmSpec(
 
 ### 7.2 Architecture Differences
 
-**gfx942 (MI300X)**:
+**gfx942**:
 - Async copy granularity: 4 bytes (dword)
 - Requires multiple DMA ops for large transfers
 
-**gfx950 (MI350/MI355X)**:
+**gfx950**:
 - Async copy granularity: 16 bytes (dwordx4)
 - More efficient bulk transfers
 
@@ -425,7 +425,7 @@ On CDNA (256 arch_vgpr + 256 accum_vgpr per SIMD):
 flops = 2 * M * N * K                    # Each FMA = 2 FLOPs
 tflops = flops / (latency_us / 1e6) / 1e12
 
-# Theoretical peak (gfx942 MI300X, single GCD):
+# Theoretical peak (gfx942, single GCD):
 #   FP16/BF16: ~653 TFLOPS (mfma_f32_16x16x16)
 #   FP8:       ~1306 TFLOPS (mfma_f32_16x16x32)
 #   INT8:      ~1306 TOPS
@@ -440,7 +440,7 @@ bytes_moved = (M * K * elem_bytes)     # A matrix
 
 tbps = bytes_moved / 1e12 / (latency_us / 1e6)
 
-# HBM bandwidth (gfx942 MI300X): ~5.2 TB/s theoretical
+# HBM bandwidth (gfx942): ~5.2 TB/s theoretical
 ```
 
 ### 9.3 Roofline Analysis
@@ -787,8 +787,8 @@ bandwidth = 100.7 MB / 0.264 ms = 381 GB/s (7% of 5.2 TB/s peak)
 
 ## 17. See Also
 
-- `.claude/OPTIMIZATION_RUNBOOK.md` Section 7.1-7.2 - MFMA instruction details
-- `.claude/OPTIMIZATION_RUNBOOK.md` Section 8 - Pipeline theory
+- `dsl_docs/optimization/optimization_runbook.md` Section 7.1-7.2 - MFMA instruction details
+- `dsl_docs/optimization/optimization_runbook.md` Section 8 - Pipeline theory
 - `/empirical-case-studies` - Real-world performance data
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis

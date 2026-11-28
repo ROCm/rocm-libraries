@@ -171,6 +171,36 @@ class OperatorRequest:
         return frozenset()
 
 
+class _LastRequestNormalized:
+    """``request.normalized()`` of the request object asked last.
+
+    A dispatch asks every registered candidate about one request object in
+    turn, and each :meth:`Capability.check` reads the request's normalized
+    payload, which a family builds with ``dataclasses.asdict``; the memo builds
+    it once for all of them. Requests are frozen, so the payload of one
+    request object never changes. The memo is keyed on the object, not on
+    equality: two requests can compare equal (``batch=1`` and ``batch=True``)
+    and still normalize differently.
+
+    One slot, replaced as a whole, so threads that dispatch different
+    requests at once only recompute a payload.
+    """
+
+    def __init__(self) -> None:
+        self._last: tuple[OperatorRequest, Mapping[str, Any]] | None = None
+
+    def __call__(self, request: OperatorRequest) -> Mapping[str, Any]:
+        last = self._last
+        if last is not None and last[0] is request:
+            return last[1]
+        normalized = request.normalized()
+        self._last = (request, normalized)
+        return normalized
+
+
+_normalized_of = _LastRequestNormalized()
+
+
 @dataclass(frozen=True)
 class ShapeRange:
     """One bound, applied to a dimension or broadcast across a set of them.
@@ -299,7 +329,7 @@ class Capability:
         return frozenset(names)
 
     def check(self, request: OperatorRequest) -> Tuple[bool, str]:
-        normalized = request.normalized()
+        normalized = _normalized_of(request)
 
         def canonical(field: str) -> str:
             value = normalized.get(field, getattr(request, field, ""))

@@ -13,9 +13,10 @@ For setup and the most common flags in context, see
 
 | Variable | Values (default) | Purpose |
 |---|---|---|
-| `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
+| `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if no shared `librocke` is found); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (auto) | Select a qualified compiler lane for emitted LLVM IR. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, 23 to `llvm23`, and 24 to `llvm24`. A newer compiler or unavailable evidence raises instead of silently inheriting the latest lane. Explicit selection supports offline emission but does not bypass runtime compiler validation. LLVM24 retains LLVM23's datalayout and target-op surface but uses addrspace(15) for named-barrier pointer declarations and calls. |
-| `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
+| `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when the C++ engine cannot lower a kernel or is not found. |
+| `ROCKE_ONLINE_LIB` | path \| `none` (unset) | The shared engine (`librocke`) the `cpp` backend and the portable-IR tooling load; a named path that does not exist is an error. Unset: the one installed beside the `rocke` package. `none`: no shared engine. The name is historical (it began as the portable-IR library). |
 | `ROCKE_ARCH_DOMAIN` | `error` \| `warn` \| `off` (**warn**) | What both engines do when a kernel demands an intrinsic the committed arch-domain table (`python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json`) says the target cannot lower. Each qualified lane has its own measured column; the LLVM24 column was produced by its matching compiler toolchain. `error` refuses the lowering with `ArchDomainError` unless the cell is waived in `arch_domain_waivers.json`; `warn` reports it as `ArchDomainWarning` and keeps lowering; `off` skips the lookup. Case and surrounding whitespace are ignored; any other value raises. The C++ engine reads it too, and refuses in `error` mode with the same message. See [`../../../TESTING.md`](../../../TESTING.md), the arch-domain gate. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
@@ -55,7 +56,7 @@ For setup and the most common flags in context, see
 | `ROCKE_CI_RUN_DIR` | Out-of-tree directory for local/cluster CI runs (keeps build products off the source tree). |
 | `ROCKE_EXPLICIT_GATE_RUN` / `ROCKE_EXPLICIT_GATE_PARTIAL` | Internal explicit-gate launcher contract. The source runner and installed CTest entries set these to attest that a non-discovered gate was selected intentionally and whether it is a focused diagnostic rather than a complete verdict. Do not set them to make an ordinary pytest invocation report complete coverage. |
 | `ROCKE_EXPLICIT_GATE_PREFLIGHT` / `ROCKE_EXPLICIT_GATE_SENTINEL` | Internal explicit-gate process contract. Preflight uses the first only in its isolated probe; the launcher supplies the second as a temporary pytest-session attestation path. They are not user-facing gate selectors. |
-| `ROCKE_COUNTED_ISA_OPTIONAL` | Internal counted-compiler gate policy: `1` lets a developer run report `INCOMPLETE` when the qualified reference toolchain is unavailable; installed required coverage sets `0`. |
+| `ROCKE_COUNTED_ISA_OPTIONAL` | Internal counted-compiler gate policy: `1` turns a preflight failure (a toolchain query that fails, a comgr without a gate arch, no `llvm-objdump`) into a skip (exit 77) that a developer run reports as `INCOMPLETE`; installed required coverage sets `0`. A compiler other than the gate's reference toolchain skips either way, until AICK-3320. |
 | `ROCKE_ISA_INSPECT_PROBE` | Explicit path to the staged ISA inspection helper used by installed counted-compiler tests. CTest supplies it so relocated tests do not reach back into the source tree. |
 | `ROCKE_ROOT` | Override the detected repository root. |
 | `ROCKE_REMOTE_HOST` / `ROCKE_REMOTE_USER` / `ROCKE_REMOTE_KEY` / `ROCKE_REMOTE_STAGE` | Multi-arch remote-test orchestrator: SSH host/user/key and the staging dir. |
@@ -63,6 +64,22 @@ For setup and the most common flags in context, see
 | `ROCKE_DOCKER_IMAGE` / `ROCKE_DOCKER_EXTRA_FLAGS` | Container image and extra flags for containerized runs. |
 | `ROCM_PATH` | ROCm install prefix override (when not `/opt/rocm`). |
 | `LLVM_OBJDUMP` / `LLVM_READELF` | Paths to the LLVM tools the ISA/resource probes shell out to. |
+
+## Asset locators
+
+`rocke.assets` finds the trees outside the `rocke` package through these
+overrides. The installed test payload sets them
+(`rocke.tests.staged_payload.point_locators_at_staged_payload`) because it has
+no source checkout; a developer working in a checkout rarely needs them.
+
+| Variable | Overrides (default) |
+|---|---|
+| `ROCKE_PLATFORM_ROOT` | `platform_root()`: the `rocke/platform` source root (the checkout's `platform/`). |
+| `ROCKE_LIBRARY_ROOT` | `library_root()`: the `rocke/library` source root (`platform/../library`). |
+| `ROCKE_DSL_DOCS` | `dsl_docs_dir()`: the `dsl_docs` tree (`platform/dsl_docs`). |
+| `ROCKE_PLATFORM_TOOLS_DIR` | `platform_tools_dir()`: the platform `tools` tree (`platform/tools`). |
+| `ROCKE_PLATFORM_INSTANCES_DIR` | `platform_instances_dir()`: the platform instance-test tree, home of the IR parity harness (`platform/tests/instances`). |
+| `ROCKE_PLATFORM_PARITY_DIR` | `platform_parity_dir()`: the parity-emitter tree, home of `_emit_common.py` (the `parity` directory of `platform_instances_dir()`). |
 
 ## External compiler runtime
 
@@ -96,7 +113,7 @@ here: the `ATOM_USE_DSL_GEMM` / `ATOM_USE_DSL_ATTENTION` / `ATOM_DSL_GEMM_MAX_M`
 / `ATOM_DSL_GEMM_DEBUG` torch.compile-routing flags live in
 `examples/gfx950/qwen3_30b_a3b/README.md`, and `AITER_PATH` (an external-baseline
 checkout) is documented in the example READMEs that use it (e.g.
-`examples/gfx950/attention/README.md`, `examples/gfx950/moe/README.md`).
+`library/builders/gfx950/attention/README.md`, `examples/gfx950/moe/README.md`).
 
 ## Experimental kernel-development knobs (off by default)
 
@@ -187,3 +204,20 @@ and a kernel that needs an option the loaded compiler lacks raises
 contract and the table are in `rocke.runtime.compiler_options`;
 `tools/gen_compiler_options.py` measures it, and the CTest
 `rocke_compiler_options_reproducibility` re-measures the loaded compiler's column.
+
+**Tests.** A test uses the compiler this discovery loads on the host it runs
+on (`ROCKE_COMGR_LIB` when set, else the search in
+[`BUILD.md`](../../BUILD.md#runtime-finding-rocm-libamd_comgr--libamdhip64);
+the setup guide names the ROCm release,
+[Recommended stack](../development/setup_guide.md#1-recommended-stack)), and
+asks that compiler what it can do (`loaded_compiler_info()`,
+`rocke.tests.comgr.require_comgr_target`). It pins no LLVM flavor and no ROCm
+release and decides nothing on the comgr's ROCm release. It does not import
+torch: once torch is imported, discovery follows torch's bundled libraries, so
+a test that still imports torch (one on the no-torch allowlist, until its use
+goes) may load torch's comgr. A test that cannot hold on some compilers has a
+record in `rocke.tests.pending_lanes` (a measured budget or a quarantine names
+the compilers), with a ticket and an expiry, and nowhere else.
+`rocke_toolchain_pins_check` and `rocke_no_torch_check` hold the tree to this
+(see the "No toolchain pins" and "No torch" properties in
+[`TESTING.md`](../../../TESTING.md)).

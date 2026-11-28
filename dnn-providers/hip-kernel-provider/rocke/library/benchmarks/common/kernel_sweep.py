@@ -371,7 +371,7 @@ def _emit_worker(payload):
 
 def _compile_worker(payload):
     """Phase 2 worker: compile one binary. Returns ``(key, hsaco, name, error)``."""
-    from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+    from rocke.helpers.compile import compile_comgr_input
 
     build, job, arch, dtype, key = payload
     try:
@@ -380,12 +380,7 @@ def _compile_worker(payload):
             # The emitter is deterministic; a different key here means the
             # sources changed between the two phases.
             raise RuntimeError("kernel IR changed between emit and compile")
-        hsaco, _ = build_hsaco_from_llvm_ir(
-            comgr_input.llvm_text,
-            isa=comgr_input.isa,
-            options=list(comgr_input.options),
-            fresh_process=comgr_input.fresh_process,
-        )
+        hsaco = compile_comgr_input(comgr_input)
         return key, hsaco, comgr_input.kernel_name, None
     except Exception as exc:  # noqa: BLE001 - reported per binary, never fatal
         return key, None, None, f"{type(exc).__name__}: {exc}"

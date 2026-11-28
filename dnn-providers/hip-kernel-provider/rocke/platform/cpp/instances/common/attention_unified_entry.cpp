@@ -333,7 +333,7 @@ rocke_status_t
     rocke_signature_builder_scalar(&sb, "softcap", "f32");
     rocke_signature_builder_scalar(&sb, "num_seqs", "i32");
     rocke_signature_builder_scalar(&sb, "block_table_stride", "i32");
-    /* include_qq_bias_stride=False => no qq_bias_stride_0 tail scalar */
+    /* include_qq_bias_stride=False => no qq_bias_stride0 tail scalar */
 
     return rocke_signature_builder_build(&sb, out_items, out_count);
 }

@@ -131,14 +131,34 @@ def test_from_mma_default_renders_canonical_not_the_configured_style():
     )  # NOT the configured style
 
 
+def test_a_memory_shade_without_its_space_is_refused():
+    mma = _mma()
+    with pytest.raises(ValueError, match="AND memory_space"):
+        lr.LogicalTileComponent(
+            dist=mma.a_layout,
+            dims=("M", "K"),
+            mode="thread_tile",
+            addr_fn=lambda m, k: m * 16 + k,
+            dtype_bits=16,
+        )
+    fwd_map = {(lane, 0): (lane, 0) for lane in range(64)}
+    with pytest.raises(ValueError, match="shade_addr given without shade_space"):
+        lr.WaveStrip.from_fwd_map(
+            fwd_map, dims=("M", "K"), shade_addr=lambda m, k: m * 16 + k
+        )
+
+
 @pytest.mark.usefixtures("requires_matplotlib")
 def test_logical_view_modes(tmp_path):
     mma = _mma()
     base = dict(dist=mma.a_layout, dims=("M", "K"), row_coord=0, label_coords="logical")
     addr = lambda m, k: m * 16 + k
     a = lr.LogicalTileComponent(**base, mode="layout", atom=(8, 8))
-    # a memory-transaction shade needs the memory order (addr_fn) AND dtype_bits (the b128 cap) -- no assumption.
-    b = lr.LogicalTileComponent(**base, mode="thread_tile", addr_fn=addr, dtype_bits=16)
+    # a memory-transaction shade needs the memory order (addr_fn), dtype_bits (the b128 cap) AND the memory
+    # space (the alignment rule) -- no assumption.
+    b = lr.LogicalTileComponent(
+        **base, mode="thread_tile", addr_fn=addr, dtype_bits=16, memory_space="global"
+    )
     # layout defaults preserve current behaviour (no mode) -> single default group, no auto shade.
     plain = lr.LogicalTileComponent(**base)
     assert plain.groups == () and plain.shade_map is None
@@ -161,6 +181,7 @@ def test_render_coalescing_address_space(tmp_path):
         (64, 1),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )  # fused
     m = analyze_coalescing(
@@ -169,6 +190,7 @@ def test_render_coalescing_address_space(tmp_path):
         (1, 256),
         32,
         direction="store",
+        space="global",
         line_bytes=128,
     )  # scattered
     assert n.fully_coalesced and not m.fully_coalesced

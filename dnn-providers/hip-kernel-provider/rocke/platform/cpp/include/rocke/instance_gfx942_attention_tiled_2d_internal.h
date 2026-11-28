@@ -132,6 +132,7 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     bool REGISTER_PV, TRANSPOSED_QK_32X32;
     bool CONFLICT_FREE_V, CONFLICT_FREE_V_STORE, K_SINGLE_BUF;
     bool K_SLICED_RING, K_SLICED_LDSSEQ, USE_IGLP_OPT, USE_GLOBAL_LOAD_LDS_K;
+    bool K_HBM_DIRECT; /* spec.use_k_hbm_direct: QK reads K from global memory */
     bool USE_QK_PV_SCHED_GROUP_BARRIER;
     /* env-var diagnostic switches (os.environ reads, lines 1218-1235) */
     bool CFV_SCALAR_READ, CFV_STORE_SCALAR_LOAD, CFV_STORE_SCATTER;
@@ -211,10 +212,9 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     const rocke_type_t* K_LDS_DTYPE;
     const rocke_type_t* V_LDS_DTYPE;
     const rocke_type_t* P_LDS_DTYPE;
-    int Q_BYTES;
     int K_SLICE_HD, K_SLICE_SLOTS;
     bool K_SLICED_ACTIVE;
-    int K_LDS_ELEM_BYTES, K_BUF_BYTES, K_BUFS, K_TOTAL_BYTES;
+    int K_BUF_BYTES;
     bool Q_DIRECT_GLOBAL, Q_ALIAS_K, Q_USES_DUAL_SLOT;
     int V_BUFS;
     /* V_lds bank-deconflict swizzle */
@@ -385,6 +385,15 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                         const rocke_attention_tiled_2d_spec_t* spec,
                                         const char* arch);
 
+/* The tiled 2D build without the gfx942 spec checks: the body of
+ * rocke_build_unified_attention_2d_tiled_scalar, which runs
+ * rocke_attention_tiled_2d_spec_validate first. Only for a caller that checks
+ * the spec under its own rules first, which is the gfx950 fastKV register-P
+ * build: its spec carries gfx950 knobs the gfx942 checks refuse. Returns the
+ * kernel, or NULL with b's sticky error set. */
+rocke_kernel_def_t* rocke_gfx942_attn2d_build_without_spec_checks(
+    rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch);
+
 /* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / build section.
  *
@@ -477,12 +486,14 @@ void rocke_gfx942_attn2d_issue_k(rocke_gfx942_attn2d_build_ctx_t* ctx,
 void rocke_gfx942_attn2d_issue_v(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
                                  rocke_value_t* buf_idx);
-/* _read_k8_mfma_operand: per-lane K8 MFMA B operand for the 32x32x8 path. */
+/* _read_k8_mfma_operand: the per-lane K operand (`frag` elements of row k_row
+ * from head-dim offset k_off) of the transposed-x8 QK MFMA, from K_lds slot
+ * buf_idx, or from the K cache of ctx->kv_tile_iv under use_k_hbm_direct. */
 rocke_value_t* rocke_gfx942_attn2d_read_k8_mfma_operand(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                                        rocke_value_t* kv_tile_idx,
                                                         rocke_value_t* buf_idx,
-                                                        int k_iter,
-                                                        int n_tile);
+                                                        rocke_value_t* k_row,
+                                                        rocke_value_t* k_off,
+                                                        int frag);
 
 /* _tile_page_ptrs: base pointers of the tile's pages (i64 K/V addressing); an
  * arena-owned array of N_BLOCKS_PER_TILE values, or NULL on out of memory. */

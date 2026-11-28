@@ -95,7 +95,7 @@ class GenPipeline(WinogradPipeline):
         return out
 
 
-def k3_sweep(pipe, prob, cands, args, ref, y_t):
+def k3_sweep(pipe, prob, cands, args, ref):
     from rocke.runtime import time_launches
     from benchmarks.common import winograd_k3_wmma as K3W
 
@@ -106,7 +106,7 @@ def k3_sweep(pipe, prob, cands, args, ref, y_t):
         pipe.set_k3_run(run)
         pipe.poison()
         pipe.run_once()
-        err, _ = verify_error(pipe.read_y(y_t), ref)
+        err, _ = verify_error(pipe.read_y(), ref)
         return err
 
     def time_fn(run):
@@ -168,18 +168,18 @@ def run_case(problem, io_dtype, variant, args, arch, ref_cache):
     print(f"  K3 candidates built: {len(cands)}/{len(configs)}", flush=True)
     if not cands:
         return None
-    x_t, w_t, y_t = make_inputs(problem, io_dtype, seed=args.seed)
+    x, w = make_inputs(problem, io_dtype, seed=args.seed)
     ref = None
     if args.verify:
         key = (problem, io_dtype)
         if key not in ref_cache:
-            ref_cache[key] = reference(x_t, w_t, problem, io_dtype)
+            ref_cache[key] = reference(x, w, problem, io_dtype)
         ref = ref_cache[key]
     pipe.alloc()
     try:
-        pipe.upload(x_t, w_t)
+        pipe.upload(x, w)
         pipe.make_launchers(transforms)
-        best = k3_sweep(pipe, prob, cands, args, ref, y_t)
+        best = k3_sweep(pipe, prob, cands, args, ref)
         if best is None:
             print("  no K3 plan passed", file=sys.stderr)
             return None
@@ -189,7 +189,7 @@ def run_case(problem, io_dtype, variant, args, arch, ref_cache):
         if args.verify:
             pipe.poison()
             pipe.run_once()
-            err, l2 = verify_error(pipe.read_y(y_t), ref)
+            err, l2 = verify_error(pipe.read_y(), ref)
         out = []
         for rep in range(args.repeats):
             # Rule 9: cool down before each repeat, total first, short loops.
@@ -252,8 +252,6 @@ def main(argv=None) -> int:
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--arch", default=None)
     args = ap.parse_args(argv)
-
-    import torch  # noqa: F401 -- claim the HIP context first
 
     from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
     from rocke.runtime.hip_module import get_device_arch

@@ -227,19 +227,6 @@ static void fh_sched_group_pin_mfma_step(rocke_gfx942_attn2d_build_ctx_t* ctx,
     rocke_b_sched_group_barrier(ctx->b, ROCKE_SCHED_MFMA, mfma_count, sgid);
 }
 
-/* _read_k8_mfma_operand(buf, k_row, k_off, frag) for the non-fp8 path (Python
- * 3415-3416): b.smem_load_vN(K_lds, buf, k_row, k_off, dtype, n=frag). frag is
- * 8 for the K=16 (32x32x16) atom, 4 for the K=8 (32x32x8) atom (gfx942). */
-static rocke_value_t* fh_read_k8_mfma_operand_frag(rocke_gfx942_attn2d_build_ctx_t* ctx,
-                                                   rocke_value_t* buf,
-                                                   rocke_value_t* k_row,
-                                                   rocke_value_t* k_off,
-                                                   int frag)
-{
-    rocke_value_t* idx[3] = {buf, k_row, k_off};
-    return rocke_b_smem_load_vN(ctx->b, ctx->K_lds, idx, 3, ctx->dtype, frag);
-}
-
 /* _apply_softcap(b, s, softcap) == apply_softcap_log2 (line 140). */
 static rocke_value_t* fh_apply_softcap(rocke_gfx942_attn2d_build_ctx_t* ctx, rocke_value_t* s)
 {
@@ -500,8 +487,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                     = rocke_b_add(b,
                                   k_off_base,
                                   rocke_b_mul(b, lane_half, rocke_b_const_i32(b, TQK_HALF_STRIDE)));
-                rocke_value_t* A_k_t
-                    = fh_read_k8_mfma_operand_frag(ctx, ctx->cur_buf, k_row_t, k_off_t, TQK_FRAG);
+                rocke_value_t* A_k_t = rocke_gfx942_attn2d_read_k8_mfma_operand(
+                    ctx, ctx->cur_buf, k_row_t, k_off_t, TQK_FRAG);
                 rocke_value_t* B_q_t = ctx->q32_regs[k];
                 if(ctx->USE_MFMA_32X32X8)
                     acc32 = fh_mfma_32x32x8(ctx, A_k_t, B_q_t, acc32);
@@ -535,7 +522,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                         b,
                         k_off_base,
                         rocke_b_mul(b, lane_half, rocke_b_const_i32(b, TQK_HALF_STRIDE)));
-                    rocke_value_t* A_k_t = fh_read_k8_mfma_operand_frag(
+                    rocke_value_t* A_k_t = rocke_gfx942_attn2d_read_k8_mfma_operand(
                         ctx, ctx->nxt_buf_v, k_row_t, k_off_t, TQK_FRAG);
                     rocke_value_t* B_q_t = ctx->q32_regs[k];
                     if(ctx->USE_MFMA_32X32X8)

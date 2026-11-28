@@ -1,4 +1,4 @@
-"""Dense flash-attention prefill kernel for gfx950 (MI355X).
+"""Dense flash-attention prefill kernel for gfx950.
 
 Productized from the ``flash_dense_dualwave_swp`` experiment
 (``kernels/gfx950/experiments/flash_dense_dualwave_swp/``). This is the shippable
@@ -28,7 +28,7 @@ step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
     slab-padded K/V layouts. IGLP-1 owns the wide-path loop schedule and
     K-major PV traversal keeps it at zero spill.
 
-Measured on MI355X (bf16, D=128, causal, 128/8 GQA, Sq=8192, 0 spill, err ~1.46e-3
+Measured on gfx950 (bf16, D=128, causal, 128/8 GQA, Sq=8192, 0 spill, err ~1.46e-3
 vs SDPA). Absolute TFLOPS swing +/-25-30% with auto-clock, so only SAME-SESSION
 ratios are load-bearing; one representative session, each number pinned to its
 config (grid / decode / V-pad / lazy):
@@ -76,8 +76,8 @@ The mask is the cuDNN band ``(left = sliding_window, right = right_bound)`` on t
   outputs zeros. Bottom-right alignment (``causal_bottom_right``) is plain causal only.
 
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
-staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
-the experiment's ``plan.md`` for their measured results.
+staging, score truncation, PV V-prefetch) are intentionally NOT carried over; their
+measured results are in the experiment's plan, which is not in the tree.
 """
 
 import hashlib
@@ -93,7 +93,7 @@ from rocke.helpers.attention import (
     dequant_fp8x8_to_dtype,
 )
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
-from rocke.helpers.spec import align_up as _align_up
+from rocke.helpers.spec import align_up as _align_up, require_bool_fields
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
@@ -102,6 +102,7 @@ from kernels.common.attention_dense_spec import (
     check_dense_spec_preflight,
     require_fp8_kv_scale,
     require_ocp_fp8_kv,
+    validate_dense_sinks,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -142,7 +143,6 @@ from kernels.common._lse_store import (
     validate_varlen_keys,
     zero_keyless_row,
 )
-from kernels.common._spec_checks import require_bool
 
 LOG2E = 1.4426950408889634
 
@@ -231,8 +231,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     kv_segments: int = field(default=1, kw_only=True)
     # KV-cache storage format. None keeps KV at the compute dtype; "fp8e4m3"
     # reads 1-byte fp8 KV and dequants to dtype in the loader (Q stays dtype).
-    # Lives here, not on the shared spec: only this arch's loader decodes fp8,
-    # and the shared spec is the one the C++ engine mirrors.
+    # Lives here, not on the shared spec: only this arch's loader decodes fp8.
     kv_storage_dtype: str | None = field(default=None, kw_only=True)
 
     @property
@@ -348,7 +347,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 f"kv_storage_dtype must be None or one of "
                 f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
             )
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
@@ -1698,8 +1697,8 @@ def build_attention_dense(
             _rs_ctr[0] += 1
             tg = _rs_ctr[0]
             trips = b.select(skip, b.const_i32(0), b.const_i32(1))
-            rs_args = [(f"ro{dt}_{tg}", o_acc[dt]) for dt in range(D_TILES)]
-            rs_args.append((f"rl_{tg}", l_i))
+            rs_args = [(f"ro{dt}_rs{tg}", o_acc[dt]) for dt in range(D_TILES)]
+            rs_args.append((f"rl_rs{tg}", l_i))
             rs = b.scf_for_iter(
                 b.const_i32(0), trips, b.const_i32(1), rs_args, iv_name=f"rs{tg}"
             )
@@ -2818,8 +2817,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 _rs_ctr[0] += 1
                 tg = _rs_ctr[0]
                 trips = b.select(skip, b.const_i32(0), b.const_i32(1))
-                rs_args = [(f"ro{dt}_{tg}", o_acc[dt]) for dt in range(D_TILES)]
-                rs_args.append((f"rl_{tg}", l_i))
+                rs_args = [(f"ro{dt}_rs{tg}", o_acc[dt]) for dt in range(D_TILES)]
+                rs_args.append((f"rl_rs{tg}", l_i))
                 rs = b.scf_for_iter(
                     b.const_i32(0), trips, b.const_i32(1), rs_args, iv_name=f"rs{tg}"
                 )
@@ -3264,17 +3263,19 @@ def run_attention_dense_torch(
     lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
-    kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
-    tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
+    kernel on caller-owned device arrays: torch tensors or
+    :class:`rocke.runtime.device_array.DeviceArray`, anything
+    :func:`~rocke.runtime.device_array.array_info` describes (scratch, when the spec
+    needs it, is allocated of the same kind as ``q``). ``q``/``k``/``v``/``out`` are
+    dense contiguous arrays ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v);
+    ``scale`` is the
     softmax scale (1/sqrt(D)) and is supported in ``[2**-64, 2**4]`` (the
     ordinary kernel takes the row max on unscaled scores and folds the scale
     into an fma; see the scale-range note above ``_EMPTY_ROW_MAX_GRID``). A NaN
     or infinite scale raises ``ValueError``; a finite scale outside the range
     raises ``NotImplementedError``. Returns ``out``.
-    torch is imported lazily by the launcher — this module stays torch-free at
-    import time.
 
-    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
+    ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` array
     on the same GPU, separate from every input and output. Its layout is
     [B, Hq, Sq, 1], or [total_query_tokens, Hq, 1] for packed varlen. The kernel
     writes natural-log softmax normalization while still returning ``out``.
@@ -3341,21 +3342,7 @@ def run_attention_dense_torch(
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
     validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
-    if not spec.use_sinks and sinks is not None:
-        raise ValueError("sinks provided but spec.use_sinks is False")
-    if spec.use_sinks:
-        if sinks is None:
-            raise ValueError("spec.use_sinks=True requires sinks that are not None")
-        if sinks.shape != (spec.num_query_heads,):
-            raise ValueError(
-                f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
-            )
-        if sinks.dtype != q.dtype:
-            raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
-        if not sinks.is_contiguous():
-            raise ValueError("sinks must be contiguous")
-        if not sinks.is_cuda:
-            raise ValueError("sinks must be a CUDA tensor")
+    validate_dense_sinks(spec, q, sinks)
 
     if spec.varlen and not spec.emit_lse and validate_varlen:
         validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv)
@@ -3412,7 +3399,7 @@ def run_attention_dense_torch(
     if spec.emit_lse:
         vals["lse_ptr"] = lse
     if spec.kv_segments > 1:
-        workspace = allocate_segment_workspace(spec, q.device)
+        workspace = allocate_segment_workspace(spec, like=q)
         vals.update(workspace)
     launcher(
         vals,

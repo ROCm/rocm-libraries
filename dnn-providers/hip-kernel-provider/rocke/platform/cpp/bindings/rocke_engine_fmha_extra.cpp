@@ -23,10 +23,8 @@
  *                         segment-then-reduce concatenation, exactly as the
  *                         standalone emitter prints them.
  *
- * fused_moe_e2e is handled in a separate translation unit
- * (rocke_engine_fused_moe_e2e.cpp): its internal header drags in the
- * moe_gemm_fused / tensor_view headers, whose rocke_tensor_descriptor tag clashes
- * with the transforms.h definition pulled in by _fmha_common.h here.
+ * fused_moe_e2e is bound from its own translation unit
+ * (rocke_engine_fused_moe_e2e.cpp).
  */
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>

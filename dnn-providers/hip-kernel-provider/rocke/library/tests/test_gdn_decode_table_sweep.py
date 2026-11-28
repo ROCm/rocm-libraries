@@ -9,6 +9,8 @@ so selection, ordering and aggregation are checked exactly.
 
 from __future__ import annotations
 
+import copy
+import functools
 import itertools
 import json
 import math
@@ -18,12 +20,13 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
+from rocke.dispatch.core import PinRefused
 
-from ._gdn_gate_support import BAD_VERDICTS
 from benchmarks.gfx950.gdn import decode_table_sweep as sweep
 from dispatch.gdn import dispatch_gdn_decode
 from dispatch.gdn.gate_rules import Gate
-from rocke.dispatch.core import PinRefused
+
+from ._gdn_gate_support import BAD_VERDICTS
 
 SHAPE = sweep.Shape("gdn", "plain", "bf16", 16, 32, 128, 1)
 
@@ -591,6 +594,12 @@ def test_auto_key_is_the_dispatchers_own_case():
 
 # ---------------------------------------------------------------- files
 def _rows():
+    """Four timed rows of SHAPE's production walk, a fresh copy per call."""
+    return copy.deepcopy(_shape_rows())
+
+
+@functools.cache
+def _shape_rows():
     auto, configs = sweep.shape_configs(SHAPE, sweep.options())
     meta = dict(_META, sha="abc", device="gfx950", arch="gfx950")
     out = []
@@ -757,6 +766,7 @@ def test_shape_entries_refuse_conflicting_or_empty_keys():
             sweep.expand_entry(dict(base, **bad))
 
 
+@pytest.mark.rocke_shard_cost(3)
 def test_tuning_ids_the_walk_does_not_list_are_an_error(capsys):
     production = sweep.shape_configs(SHAPE, sweep.options())[1]
     listed = {r.spec.tuning_id for r in production}
@@ -778,6 +788,7 @@ def test_tuning_ids_the_walk_does_not_list_are_an_error(capsys):
     assert "typo_id" in capsys.readouterr().out
 
 
+@pytest.mark.rocke_shard_cost(2)
 def test_list_only_lists_both_row_load_orders_on_single_wave_fused_tiles(capsys):
     """``row_loads``: a single-wave fuse_conv tile lists each knob set at each
     waves_per_eu value in auto's order and in the other one ("late" with
@@ -885,22 +896,22 @@ def test_the_gate_rejects_a_kernel_that_reads_its_write_slot(monkeypatch):
     """The sweep gates on disjoint read / write slots. A kernel that reads its
     state from the write slot computes the right answer when the slots are the
     same (the in-place inputs timing uses), so only disjoint slots catch it."""
-    torch = pytest.importorskip("torch")
+    from rocke.numeric import storage
+
     from builders.gfx950.gdn import gdn_decode as g
 
     def reads_write_slot(spec, inp, launcher, batch):
         out, state, _ = g.reference(spec, dict(inp, read_indices=inp["write_indices"]))
-        values = {"out": out.to(torch.bfloat16), "state": inp["state"].clone()}
-        values["state"][inp["write_indices"].long()] = state.to(values["state"].dtype)
+        values = {"out": storage.encode(out, "bf16"), "state": inp["state"].copy()}
+        state_type = g.input_dtypes(spec)["state"]
+        values["state"][inp["write_indices"]] = storage.encode(state, state_type)
         return values
 
     def not_timed(*args):
         raise AssertionError("a configuration that failed the gate was timed")
 
     driver = SimpleNamespace(
-        make_inputs=lambda spec, batch, seed, disjoint_writes: g.make_inputs(
-            spec, batch, seed=seed, device="cpu", disjoint_writes=disjoint_writes
-        ),
+        make_inputs=g.make_inputs,
         reference=g.reference,
         gate=g.gate,
         touched_bytes=g.touched_bytes,
@@ -917,7 +928,7 @@ def test_the_gate_rejects_a_kernel_that_reads_its_write_slot(monkeypatch):
     assert row["status"] == "fail", row
     # The blind spot this closes: on in-place slots the same kernel passes.
     spec = auto.spec.kernel_spec
-    inp = g.make_inputs(spec, 1, device="cpu", disjoint_writes=False)
+    inp = g.make_inputs(spec, 1, disjoint_writes=False)
     values = reads_write_slot(spec, inp, None, 1)
     assert g.gate(spec, inp, values, g.reference(spec, inp)).passed
 

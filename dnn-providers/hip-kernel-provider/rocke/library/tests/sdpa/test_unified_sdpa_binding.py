@@ -18,8 +18,9 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
-torch = pytest.importorskip("torch")
+torch = import_or_skip_until("torch", TICKET)
 
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
@@ -194,7 +195,7 @@ def test_float_seq_len_is_refused_not_truncated():
     tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["seq_len_q"] = torch.tensor([1.5, 1.0], dtype=torch.float32)
     tensors["seq_len_kv"] = torch.tensor([16, 16], dtype=torch.int32)
-    with pytest.raises(ValueError, match="seq_len_q must be torch.int32"):
+    with pytest.raises(ValueError, match="seq_len_q must be i32"):
         sdpa_unified_bind(req, tensors)
 
 
@@ -231,7 +232,7 @@ def test_ragged_offsets_of_another_dtype_are_refused(offsets, dtype):
     tensors["ragged_offset_k"] = torch.tensor([0, 4, 8], dtype=torch.int32)
     _LaunchPlan(req, dict(tensors))  # int32 offsets bind
     tensors["ragged_offset_q"] = torch.tensor(offsets, dtype=dtype)
-    with pytest.raises(ValueError, match="q: ragged offsets must be torch.int32"):
+    with pytest.raises(ValueError, match="q: ragged offsets must be i32"):
         _LaunchPlan(req, tensors)
 
 
@@ -325,7 +326,7 @@ def test_seq_len_of_another_integer_dtype_is_refused():
     tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["seq_len_q"] = torch.tensor([1, 1], dtype=torch.int64)
     tensors["seq_len_kv"] = torch.tensor([16, 16], dtype=torch.int32)
-    with pytest.raises(ValueError, match="seq_len_q must be torch.int32"):
+    with pytest.raises(ValueError, match="seq_len_q must be i32"):
         _LaunchPlan(req, tensors)
 
 
@@ -334,7 +335,7 @@ def test_stats_of_another_dtype_are_refused():
     req = replace(make_request(d=64), stats=packed((2, 4, 8, 1), "fp32"))
     tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["stats"] = torch.zeros(req.stats.dims, dtype=torch.float16)
-    with pytest.raises(ValueError, match="stats must be torch.float32"):
+    with pytest.raises(ValueError, match="stats must be fp32"):
         _LaunchPlan(req, tensors)
 
 

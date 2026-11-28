@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Warp-specialized producer/consumer 3-stage GEMM pipeline (``wsp3``).
 
-A warp-specialized producer/consumer GEMM for gfx950 / MI355X (CDNA4), built to
+A warp-specialized producer/consumer GEMM for gfx950 (CDNA4), built to
 push square fp16 GEMM past the ceiling that the standard
 ``mem``/``compv3``/``compv4`` pipelines (and CK-Tile's own comp_v4 example)
-top out at. Full design + phased plan in
-``rocke/_wsp3/BUILD_SPEC.md``.
+top out at.
 
 Architecture:
   * 12 warps / 768 threads, ``launch_bounds(768, 2)``.

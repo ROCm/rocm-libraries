@@ -16,6 +16,7 @@ from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.tests.gpu import run_on_device
+from rocke.tests.ieee_compare import assert_ieee_identical
 from rocke.tests.ir_validity import assert_target_accepts
 
 
@@ -158,22 +159,7 @@ def _edge_value_kernel():
     return b.kernel
 
 
-def _assert_ieee_identical(
-    actual, expected, *, nan_bits_exact=False, zero_sign_exact=True
-):
-    """Bit-exact, except where IEEE 754 leaves the result's bits open: the sign and
-    payload of a NaN an arithmetic op produces, and the sign of the zero maxNum returns
-    for operands that compare equal."""
-    bits = np.dtype(f"u{actual.itemsize}")
-    is_nan = np.isnan(expected)
-    np.testing.assert_array_equal(np.isnan(actual), is_nan)
-    exact = ~is_nan if not nan_bits_exact else np.ones_like(is_nan)
-    if not zero_sign_exact:
-        exact &= expected != 0
-        np.testing.assert_array_equal(actual[expected == 0], 0)
-    np.testing.assert_array_equal(actual.view(bits)[exact], expected.view(bits)[exact])
-
-
+@pytest.mark.gpu
 def test_f64_arithmetic_and_conversions_are_exact_on_edge_values_on_gpu():
     x = _VALUES
     y = x[::-1].copy()
@@ -195,7 +181,7 @@ def test_f64_arithmetic_and_conversions_are_exact_on_edge_values_on_gpu():
     run_on_device(_edge_value_kernel(), buffers, len(x), _EVERY_ARCH)
 
     for name, want in expected.items():
-        _assert_ieee_identical(
+        assert_ieee_identical(
             buffers[name],
             want,
             # A copy and a sign flip move bits, so even a NaN comes back exactly.

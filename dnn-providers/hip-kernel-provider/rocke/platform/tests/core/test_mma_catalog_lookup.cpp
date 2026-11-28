@@ -240,6 +240,9 @@ static const char* const order_gfx90a[] = {
     "mfma_i32_16x16x16_i8",
     "mfma_i32_32x32x8_i8",
     "mfma_f64_16x16x4_f64",
+    "mfma_f64_4x4x4_f64",
+    "mfma_f32_4x4x4_f16",
+    "mfma_f32_4x4x4_bf16",
 };
 static const char* const order_gfx942[] = {
     "mfma_f32_16x16x8_xf32",     "mfma_f32_32x32x4_xf32",     "mfma_f32_16x16x4_f32",
@@ -248,7 +251,8 @@ static const char* const order_gfx942[] = {
     "mfma_f32_32x32x8_bf16",     "mfma_f32_16x16x32_fp8",     "mfma_f32_32x32x16_fp8",
     "mfma_f32_16x16x32_bf8",     "mfma_f32_32x32x16_bf8",     "mfma_i32_16x16x32_i8",
     "mfma_i32_32x32x16_i8",      "mfma_f32_16x16x32_fp8_bf8", "mfma_f32_16x16x32_bf8_fp8",
-    "mfma_f32_32x32x16_fp8_bf8", "mfma_f32_32x32x16_bf8_fp8",
+    "mfma_f32_32x32x16_fp8_bf8", "mfma_f32_32x32x16_bf8_fp8", "mfma_f32_4x4x4_f16",
+    "mfma_f32_4x4x4_bf16",
 };
 static const char* const order_gfx950[] = {
     "mfma_gfx950_f32_32x32x64_fp8_fp8_scale_e8m0_e8m0_k32",
@@ -293,6 +297,7 @@ static const char* const order_gfx950[] = {
     "mfma_i32_16x16x32_i8",
     "mfma_i32_32x32x16_i8",
     "mfma_f64_16x16x4_f64",
+    "mfma_f64_4x4x4_f64",
     "mfma_f32_16x16x32_fp8_bf8",
     "mfma_f32_16x16x32_bf8_fp8",
     "mfma_f32_32x32x16_fp8_bf8",
@@ -301,6 +306,8 @@ static const char* const order_gfx950[] = {
     "mfma_i32_32x32x32_i8",
     "mfma_f32_16x16x32_xf32",
     "mfma_f32_32x32x16_xf32",
+    "mfma_f32_4x4x4_f16",
+    "mfma_f32_4x4x4_bf16",
     "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e2m3",
     "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp6e3m2",
     "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1",
@@ -1648,20 +1655,21 @@ static int test_unscaled_wmma_values()
         const rocke_type_t* matrix_elem;
         int matrix_width;
         const rocke_type_t* accum_elem;
+        bool hip_lowers; /* the HIP lowering has the atom (Python has a handler) */
     };
     const Case cases[] = {
-        {"gfx1151", "wmma_i32_16x16x16_iu8", rocke_i32(), 4, rocke_i32()},
-        {"gfx1151", "wmma_i32_16x16x16_iu4", rocke_i32(), 2, rocke_i32()},
-        {"gfx1151", "wmma_f32_16x16x16_f16", rocke_f16(), 16, rocke_f32()},
-        {"gfx1151", "wmma_f32_16x16x16_bf16", rocke_bf16(), 16, rocke_f32()},
-        {"gfx1201", "wmma_gfx12_f32_16x16x16_f16", rocke_f16(), 8, rocke_f32()},
-        {"gfx1201", "wmma_gfx12_f32_16x16x16_bf16", rocke_bf16(), 8, rocke_f32()},
-        {"gfx1250", "wmma_gfx1250_f32_16x16x32_f16", rocke_f16(), 16, rocke_f32()},
-        {"gfx1250", "wmma_gfx1250_f32_16x16x32_bf16", rocke_bf16(), 16, rocke_f32()},
-        {"gfx1250", "wmma_gfx1250_f32_16x16x64_fp8_fp8", rocke_i32(), 8, rocke_f32()},
-        {"gfx1250", "wmma_gfx1250_f32_16x16x64_fp8_bf8", rocke_i32(), 8, rocke_f32()},
-        {"gfx1250", "wmma_gfx1250_f32_16x16x64_bf8_fp8", rocke_i32(), 8, rocke_f32()},
-        {"gfx1250", "wmma_gfx1250_f32_16x16x64_bf8_bf8", rocke_i32(), 8, rocke_f32()},
+        {"gfx1151", "wmma_i32_16x16x16_iu8", rocke_i32(), 4, rocke_i32(), true},
+        {"gfx1151", "wmma_i32_16x16x16_iu4", rocke_i32(), 2, rocke_i32(), true},
+        {"gfx1151", "wmma_f32_16x16x16_f16", rocke_f16(), 16, rocke_f32(), true},
+        {"gfx1151", "wmma_f32_16x16x16_bf16", rocke_bf16(), 16, rocke_f32(), false},
+        {"gfx1201", "wmma_gfx12_f32_16x16x16_f16", rocke_f16(), 8, rocke_f32(), true},
+        {"gfx1201", "wmma_gfx12_f32_16x16x16_bf16", rocke_bf16(), 8, rocke_f32(), false},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x32_f16", rocke_f16(), 16, rocke_f32(), true},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x32_bf16", rocke_bf16(), 16, rocke_f32(), true},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_fp8_fp8", rocke_i32(), 8, rocke_f32(), true},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_fp8_bf8", rocke_i32(), 8, rocke_f32(), true},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_bf8_fp8", rocke_i32(), 8, rocke_f32(), true},
+        {"gfx1250", "wmma_gfx1250_f32_16x16x64_bf8_bf8", rocke_i32(), 8, rocke_f32(), true},
     };
     for(const auto& spec : cases)
         for(int variant = 0; variant < 23; ++variant)
@@ -1802,12 +1810,12 @@ static int test_unscaled_wmma_values()
             }
             if(variant == 14)
             {
-                // These operations have no native HIP handler yet.
                 rocke_strbuf_t hip;
                 CHECK(rocke_strbuf_init(&hip, 0) == 0);
                 rocke_lower_hip_opts_t opts = {};
                 opts.arch = spec.arch;
-                CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_ERR_NOTIMPL);
+                CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip)
+                      == (spec.hip_lowers ? ROCKE_OK : ROCKE_ERR_NOTIMPL));
                 rocke_strbuf_free(&hip);
             }
             rocke_ir_builder_free(&b);

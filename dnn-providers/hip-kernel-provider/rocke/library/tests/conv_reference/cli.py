@@ -10,12 +10,12 @@ downloads dependencies, generates independent answers, or promotes a baseline.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 
-from reference_common.cli import Metric, ReferenceOperation, TorchReference
+from reference_common.cli import Metric, ReferenceOperation
 
 from . import architectures, contract
 from .contract import normalized_distance, reference_scale
@@ -27,19 +27,6 @@ def _frozen_scale(reference: np.ndarray) -> dict[str, Any]:
 
 def _distance(left: np.ndarray, right: np.ndarray, entry: Mapping[str, Any]) -> float:
     return normalized_distance(left, right, entry["reference_scale"])
-
-
-def _prepare_torch(device: str, architecture: str) -> Callable[..., dict]:
-    import torch  # noqa: F401 - fail before starting qualification if unavailable.
-
-    from .torch_reference import cross_check
-
-    def check(case, inputs, reference, baseline, parameters):
-        return cross_check(
-            case, inputs, reference, baseline, parameters["reference_scale"]
-        )
-
-    return check
 
 
 OPERATION = ReferenceOperation(
@@ -55,11 +42,6 @@ OPERATION = ReferenceOperation(
     },
     metric=Metric(
         name="normalized_error_upper", distance=_distance, parameters=_frozen_scale
-    ),
-    torch=TorchReference(
-        devices=("cpu",),
-        help="also qualify against CPU Torch float64/float32 conv2d (requires Torch)",
-        prepare=_prepare_torch,
     ),
 )
 qualify = OPERATION.qualify

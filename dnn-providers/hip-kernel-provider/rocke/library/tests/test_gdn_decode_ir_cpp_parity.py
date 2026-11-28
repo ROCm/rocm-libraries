@@ -5,8 +5,8 @@
 GDN decode is a Python-only family: its spec and emitter have no C++ twin, and
 ``platform/tools/check_byte_identity.py`` runs no GDN case. The C++ engine
 still lowers every GDN kernel a caller builds (any kernel goes through the
-serialized-IR seam, ``rocke_engine.lower_serialized_ir``), so the two engines'
-lowering of this family's IR must agree. The family golden
+serialized-IR seam, ``rocke.core.native_engine.lower_serialized_ir``), so the
+two engines' lowering of this family's IR must agree. The family golden
 (``test_gdn_decode_golden.py``) pins the *Python* lowering only; this file is
 the other half for the same case set and every golden LLVM flavor: the C++
 engine must produce byte-identical LLVM IR.
@@ -24,6 +24,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from rocke.core import native_engine
+from rocke.tests.engines import native_engine_or_skip
 
 _TESTS = str(Path(__file__).resolve().parent)
 if _TESTS not in sys.path:
@@ -35,17 +37,15 @@ _ARCH = "gfx950"
 
 
 def _engine():
-    expected = os.environ.get("ROCKE_BACKEND") in ("cpp", "both")
-    try:
-        import rocke_engine
-    except ImportError as e:
-        if expected:
+    if os.environ.get("ROCKE_BACKEND") in ("cpp", "both"):
+        try:
+            native_engine.require_native_lowering()
+        except native_engine.SharedEngineNotFound as e:
             pytest.fail(
                 f"ROCKE_BACKEND={os.environ['ROCKE_BACKEND']} expects the C++ "
-                f"engine, but rocke_engine is not importable: {e}"
+                f"engine, but it is not found: {e}"
             )
-        pytest.skip(f"rocke_engine extension not built/importable: {e}")
-    return rocke_engine
+    return native_engine_or_skip()
 
 
 def test_gdn_decode_ir_cpp_python_byte_identity():
@@ -60,14 +60,15 @@ def test_gdn_decode_ir_cpp_python_byte_identity():
     recorded = set(json.loads(golden._GOLDEN.read_text())["flavors"]["llvm20"]["cases"])
     assert set(cases) == recorded, sorted(set(cases) ^ recorded)
 
+    # Building is most of the cost, so each kernel is built and serialized once
+    # and lowered at every flavor.
     mismatches, compared = [], 0
-    for flavor in GOLDEN_FLAVORS:
-        for case_id, build in cases.items():
-            kernel = build()
+    for case_id, build in cases.items():
+        kernel = build()
+        serialized = serialize(kernel)
+        for flavor in GOLDEN_FLAVORS:
             py = _lower_kernel_to_llvm_python(kernel, arch=_ARCH, llvm_flavor=flavor)
-            cpp = engine.lower_serialized_ir(
-                serialize(kernel), arch=_ARCH, flavor=flavor
-            )
+            cpp = engine.lower_serialized_ir(serialized, arch=_ARCH, flavor=flavor)
             compared += 1
             if cpp != py:
                 mismatches.append(f"{flavor}/{case_id}")

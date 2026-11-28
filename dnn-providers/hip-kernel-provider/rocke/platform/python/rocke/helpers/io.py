@@ -300,9 +300,11 @@ def pack_quant_chunk_f32(
     * ``"bf8e5m2"`` / ``"bf8"`` — :meth:`IRBuilder.cvt_pk_bf8_f32x4`
     * ``"i8"`` — :meth:`IRBuilder.cvt_pk_i8_f32x4` (P09)
 
-    The caller still owns the scale-multiply + clamp prelude (see
-    :func:`rocke.helpers.quant.quantize_scalar_f32`); this helper
-    only does the packed cvt over a chunk of 4 f32 scalars.
+    This helper only does the packed cvt over a chunk of 4 f32 scalars and
+    applies no clamp: the caller owns the bound. For fp8 / bf8 it keeps the
+    values within ``quant_max_abs(qdtype, arch=...)``, as the conversions do
+    not saturate (:mod:`rocke.helpers.fp8_encoding`); for i8 it keeps them
+    within the i32 range and not NaN, which the conversion does not define.
     """
     if len(chunk_f32) != 4:
         raise ValueError(

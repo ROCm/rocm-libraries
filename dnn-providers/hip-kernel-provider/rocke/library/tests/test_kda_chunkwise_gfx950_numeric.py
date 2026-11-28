@@ -5,7 +5,7 @@
 
 Two references, deliberately independent of each other and of the kernels:
 
-- The six per-chunk tiles are checked against a float64 torch oracle that
+- The six per-chunk tiles are checked against a float64 oracle that
   builds them from the pairwise exponent *difference*, with no midpoint
   factoring -- so it never forms the overflowing ``Gamma_i / Gamma_j`` the
   kernel is designed around, and agreement is a check of that factoring rather
@@ -24,24 +24,17 @@ Every test is marked ``gpu`` and skipped off a gfx950. Select with
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
+from rocke.numeric import storage
+from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import arch_skip_reason
 
-torch = pytest.importorskip("torch", reason="ROCm torch required")
-
-
-def _gpu_ready():
-    """True only on a gfx950 box with ROCm torch.
-
-    Gate on ``gcnArchName`` (the ISA target), NOT the marketing name.
-    """
-    if not torch.cuda.is_available():
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return "gfx950" in arch
-
+from builders.common.kda_host import dense_inputs, worst_relative_error
 
 requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
+    probe_device_arch()[0] != "gfx950",
+    reason=arch_skip_reason(("gfx950",), "needs a gfx950 GPU"),
 )
 
 pytestmark = [pytest.mark.gpu, requires_gfx950_gpu]
@@ -59,7 +52,6 @@ TOL = 3e-2
 def test_prep_tiles_match_float64_oracle(gate_low):
     """All six per-chunk tiles, over enough chunks to cover every code path."""
     from builders.gfx950.kda import kda_chunk_prep as prep
-
     from kernels.gfx950.kda_chunkwise import KdaChunkPrepSpec
 
     spec = KdaChunkPrepSpec()
@@ -70,7 +62,6 @@ def test_prep_tiles_match_float64_oracle(gate_low):
 def test_split_path_matches_token_serial(gate_low):
     """rocke prep + rocke scan, against the token-serial recurrence."""
     from builders.gfx950.kda import kda_chunk_split as split
-
     from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec
 
     worst = split.check(KdaChunkScanSpec(), 2, 4, 256, gate_low=gate_low, verbose=False)
@@ -86,7 +77,6 @@ def test_fused_path_matches_token_serial(gate_low):
     change the arithmetic.
     """
     from builders.gfx950.kda import kda_chunk_fused as fused
-
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec
 
     worst = fused.check(
@@ -127,7 +117,6 @@ def test_subtiled_fused_path_matches_token_serial(gate_low):
     chunk-wide atom never exercises.
     """
     from builders.gfx950.kda import kda_chunk_fused as fused
-
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
     spec = KdaChunkFusedSpec(tile=KdaTileSpec(block_size=512, scan_atom_m=16))
@@ -145,26 +134,23 @@ def test_subtiled_and_chunk_wide_fused_agree_to_one_ulp():
     real indexing error in the retiled products would show up here as a large
     difference on many elements, which no oracle tolerance would localize.
     """
-    import torch
-
     from builders.gfx950.kda import kda_chunk_fused as fused
-
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
     B, H, T = 2, 4, 256
     wide = KdaChunkFusedSpec(tile=KdaTileSpec())
     sub = KdaChunkFusedSpec(tile=KdaTileSpec(block_size=512, scan_atom_m=16))
-    q, k, v, g, beta = fused.make_inputs(B, H, T, wide.head_k, wide.head_v)
+    q, k, v, g, beta = dense_inputs(B, H, T, wide.head_k, wide.head_v)
     o_w, ht_w = fused.launch_packed(wide, q, k, v, g, beta)
     o_s, ht_s = fused.launch_packed(sub, q, k, v, g, beta)
-    torch.cuda.synchronize()
 
     # One bf16 ULP is 2^-8 relative; allow half that against the tile's peak
     # magnitude, which is far tighter than the 3e-2 oracle tolerance.
     for name, a, b in (("output", o_w, o_s), ("final state", ht_w, ht_s)):
-        diff = (a.float() - b.float()).abs().max().item()
-        scale = a.float().abs().max().item()
-        frac = (a != b).float().mean().item()
+        a, b = _values(a), _values(b)
+        diff = np.abs(a - b).max()
+        scale = np.abs(a).max()
+        frac = (a != b).mean()
         assert diff <= 2e-3 * scale, (
             f"{name} differs by {diff:.3e} ({diff / scale:.3e} of peak), "
             "more than rounding: the retiled indexing is wrong"
@@ -190,10 +176,7 @@ def test_input_prefetch_is_bitwise_identical(tile_kw):
     appearing on the first launch: the buffers have to already hold a previous
     run's data. Hence the repeat.
     """
-    import torch
-
     from builders.gfx950.kda import kda_chunk_fused as fused
-
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
     B, H, T = 2, 4, 256
@@ -203,17 +186,16 @@ def test_input_prefetch_is_bitwise_identical(tile_kw):
     base = KdaChunkFusedSpec(tile=tile, prefetch_inputs=False)
     pf = KdaChunkFusedSpec(tile=tile, prefetch_inputs=True)
     assert base.kernel_name() != pf.kernel_name()
-    q, k, v, g, beta = fused.make_inputs(B, H, T, base.head_k, base.head_v)
+    q, k, v, g, beta = dense_inputs(B, H, T, base.head_k, base.head_v)
 
     for it in range(3):
         o_b, ht_b = fused.launch_packed(base, q, k, v, g, beta)
         o_p, ht_p = fused.launch_packed(pf, q, k, v, g, beta)
-        torch.cuda.synchronize()
-        assert torch.equal(o_b, o_p), (
+        assert _equal(o_b, o_p), (
             f"launch {it}: prefetched output differs from the in-phase staging; "
             "a chunk read inputs the hand-off had not published"
         )
-        assert torch.equal(ht_b, ht_p), f"launch {it}: final states diverge"
+        assert _equal(ht_b, ht_p), f"launch {it}: final states diverge"
 
 
 def test_fused_lds_overlay_is_bitwise_identical():
@@ -223,24 +205,20 @@ def test_fused_lds_overlay_is_bitwise_identical():
     the solve tiles are live and V survives into residual formation, so either
     one being placed in the reusable tile-only span quickly produces NaNs.
     """
-    import torch
-
     from builders.gfx950.kda import kda_chunk_fused as fused
-
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
     B, H, T = 2, 4, 256
     tile = KdaTileSpec(block_size=512, scan_atom_m=16)
     typed = KdaChunkFusedSpec(tile=tile, prefetch_inputs=False, overlay_lds=False)
     overlay = KdaChunkFusedSpec(tile=tile, prefetch_inputs=False, overlay_lds=True)
-    q, k, v, g, beta = fused.make_inputs(B, H, T, typed.head_k, typed.head_v)
+    q, k, v, g, beta = dense_inputs(B, H, T, typed.head_k, typed.head_v)
     o_t, ht_t = fused.launch_packed(typed, q, k, v, g, beta)
     o_o, ht_o = fused.launch_packed(overlay, q, k, v, g, beta)
-    torch.cuda.synchronize()
 
-    assert torch.isfinite(o_o).all() and torch.isfinite(ht_o).all()
-    assert torch.equal(o_t, o_o), "LDS overlay changed the fused output"
-    assert torch.equal(ht_t, ht_o), "LDS overlay changed the final state"
+    assert np.isfinite(_values(o_o)).all() and np.isfinite(ht_o).all()
+    assert _equal(o_t, o_o), "LDS overlay changed the fused output"
+    assert _equal(ht_t, ht_o), "LDS overlay changed the final state"
 
 
 def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
@@ -250,25 +228,22 @@ def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
     accumulation order changes and bitwise identity is not expected. Differences
     must remain last-bit effects rather than panel indexing errors.
     """
-    import torch
-
     from builders.gfx950.kda import kda_chunk_fused as fused
-
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
     B, H, T = 2, 4, 256
     common = dict(block_size=512, scan_atom_m=16)
     atom32 = KdaChunkFusedSpec(tile=KdaTileSpec(**common, tile_atom_m=32))
     panels16 = KdaChunkFusedSpec(tile=KdaTileSpec(**common, tile_atom_m=16))
-    q, k, v, g, beta = fused.make_inputs(B, H, T, atom32.head_k, atom32.head_v)
+    q, k, v, g, beta = dense_inputs(B, H, T, atom32.head_k, atom32.head_v)
     o_32, ht_32 = fused.launch_packed(atom32, q, k, v, g, beta)
     o_16, ht_16 = fused.launch_packed(panels16, q, k, v, g, beta)
-    torch.cuda.synchronize()
 
     for name, a, b in (("output", o_32, o_16), ("final state", ht_32, ht_16)):
-        diff = (a.float() - b.float()).abs().max().item()
-        scale = a.float().abs().max().item()
-        frac = (a != b).float().mean().item()
+        a, b = _values(a), _values(b)
+        diff = np.abs(a - b).max()
+        scale = np.abs(a).max()
+        frac = (a != b).mean()
         assert diff <= 2e-3 * scale, (
             f"{name} differs by {diff:.3e} ({diff / scale:.3e} of peak), "
             "more than atom accumulation order can explain"
@@ -281,7 +256,6 @@ def test_c32_tile_phase_16x16_panels_agree_to_one_ulp():
 def test_c16_fused_matches_token_serial_oracle():
     """Literal C=16 is a valid A/B even though it is not the throughput winner."""
     from builders.gfx950.kda import kda_chunk_fused as fused
-
     from kernels.gfx950.kda_chunkwise import KdaChunkFusedSpec, KdaTileSpec
 
     spec = KdaChunkFusedSpec(
@@ -304,11 +278,8 @@ def test_split_and_fused_agree_bitwise():
     difference here means the tile round trip through HBM lost something the
     LDS path kept, which no tolerance-based check would localize.
     """
-    import torch
-
     from builders.gfx950.kda import kda_chunk_fused as fused
     from builders.gfx950.kda import kda_chunk_split as split
-
     from kernels.gfx950.kda_chunkwise import (
         KdaChunkFusedSpec,
         KdaChunkScanSpec,
@@ -317,14 +288,13 @@ def test_split_and_fused_agree_bitwise():
 
     B, H, T = 2, 4, 256
     spec_s = KdaChunkScanSpec()
-    q, k, v, g, beta = fused.make_inputs(B, H, T, spec_s.head_k, spec_s.head_v)
+    q, k, v, g, beta = dense_inputs(B, H, T, spec_s.head_k, spec_s.head_v)
     o_s, ht_s = split.launch_packed(spec_s, q, k, v, g, beta)
     o_f, ht_f = fused.launch_packed(
         KdaChunkFusedSpec(tile=KdaTileSpec()), q, k, v, g, beta
     )
-    torch.cuda.synchronize()
-    assert torch.equal(o_s, o_f), "outputs diverge between the split and fused paths"
-    assert torch.equal(ht_s, ht_f), "final states diverge"
+    assert _equal(o_s, o_f), "outputs diverge between the split and fused paths"
+    assert _equal(ht_s, ht_f), "final states diverge"
 
 
 def test_scan_rejects_a_spec_it_cannot_emit():
@@ -333,50 +303,54 @@ def test_scan_rejects_a_spec_it_cannot_emit():
     Checked on the GPU lane too because this is the guard that stops a spec
     whose lane mapping has no valid emission from reaching the launcher.
     """
-    from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec
-
     from builders.gfx950.kda import kda_chunk_split as split
+    from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec
 
     with pytest.raises(ValueError, match="unsupported spec"):
         split.make_launcher(KdaChunkScanSpec(head_v=64))
 
 
 def _make_raw_inputs(B, H, T, DK, DV, gate_low=-0.5, seed=0):
-    import torch
-
-    gen = torch.Generator(device="cuda").manual_seed(seed)
-    kw = dict(device="cuda", generator=gen)
-    q = torch.randn(B, T, H, DK, dtype=torch.bfloat16, **kw)
-    k = torch.randn(B, T, H, DK, dtype=torch.bfloat16, **kw)
-    v = (torch.randn(B, T, H, DV, dtype=torch.float32, **kw) * 0.2).bfloat16()
-    g = (gate_low * torch.rand(B, T, H, DK, dtype=torch.float32, **kw)).bfloat16()
-    beta = torch.randn(B, T, H, dtype=torch.float32, **kw)
-    a_log = torch.randn(H, dtype=torch.float32, device="cuda", generator=gen) * 0.1
-    dt_bias = (
-        torch.randn(H * DK, dtype=torch.float32, device="cuda", generator=gen) * 0.01
-    )
+    """Raw token-major host inputs: un-normalised bf16 q/k and bf16 v, a bf16
+    per-channel gate logit, raw fp32 beta, fp32 a_log and dt_bias."""
+    rng = np.random.default_rng(seed)
+    q = storage.encode(rng.standard_normal((B, T, H, DK)), "bf16")
+    k = storage.encode(rng.standard_normal((B, T, H, DK)), "bf16")
+    v = storage.encode(0.2 * rng.standard_normal((B, T, H, DV)), "bf16")
+    g = storage.encode(gate_low * rng.random((B, T, H, DK)), "bf16")
+    beta = storage.encode(rng.standard_normal((B, T, H)), "fp32")
+    a_log = storage.encode(0.1 * rng.standard_normal(H), "fp32")
+    dt_bias = storage.encode(0.01 * rng.standard_normal(H * DK), "fp32")
     return q, k, v, g, beta, a_log, dt_bias
+
+
+def _values(stored):
+    """Host results as float64 values: bf16 bits are decoded, fp32 widened."""
+    if stored.dtype == np.uint16:
+        return storage.decode(stored, "bf16").astype(np.float64)
+    return stored.astype(np.float64)
+
+
+def _equal(a, b):
+    """Value equality, as the two launches must agree exactly."""
+    return np.array_equal(_values(a), _values(b))
 
 
 @pytest.mark.parametrize("gate_low", GATES)
 def test_raw_split_matches_aligned_oracle(gate_low):
     """Fused raw prep + token-major split scan vs the aligned float64 oracle."""
-    import torch
-
     from builders.gfx950.kda import kda_chunk_split as split
 
     B, H, T = 1, 4, 256
     scan, _ = split.aligned_split_specs(1)
-    q, k, v, g, beta, a_log, dt_bias = _make_raw_inputs(B, H, T, 128, 128, gate_low)
-    o_got, ht_got = split.launch_raw(scan, q, k, v, g, beta, a_log, dt_bias)
-    torch.cuda.synchronize()
-    o_ref, s_ref = split.ref_aligned_raw(q, k, v, g, beta, a_log, dt_bias, 128**-0.5)
-    o_ref = o_ref.permute(0, 2, 1, 3)
-    worst = max(
-        (o_got.double() - o_ref).abs().max().item()
-        / (o_ref.abs().max().item() + 1e-30),
-        (ht_got.double() - s_ref).abs().max().item()
-        / (s_ref.abs().max().item() + 1e-30),
+    raw = _make_raw_inputs(B, H, T, 128, 128, gate_low)
+    o_got, ht_got = split.launch_raw(scan, *raw)
+    o_ref, s_ref = split.ref_aligned_raw(scan, *raw, 128**-0.5)
+    worst = worst_relative_error(
+        (
+            ("out", np.swapaxes(_values(o_got), 1, 2), o_ref),
+            ("final_state", ht_got, s_ref),
+        )
     )
     assert worst <= TOL, f"gate {gate_low}: worst rel {worst:.3e}"
 
@@ -387,22 +361,20 @@ def test_raw_split_matches_aligned_oracle(gate_low):
 )
 def test_value_splits_agree_with_vs1(value_splits, block, scan_atom_m):
     """Every legal value_splits geometry must match the unsplit scan."""
-    import torch
-
     from builders.gfx950.kda import kda_chunk_split as split
-
     from kernels.gfx950.kda_chunkwise import KdaChunkScanSpec, KdaTileSpec
 
     B, H, T = 1, 4, 256
-    q, k, v, g, beta, a_log, dt_bias = _make_raw_inputs(B, H, T, 128, 128)
+    raw = _make_raw_inputs(B, H, T, 128, 128)
     base, _ = split.aligned_split_specs(1)
-    o0, ht0 = split.launch_raw(base, q, k, v, g, beta, a_log, dt_bias)
+    o0, ht0 = split.launch_raw(base, *raw)
     tile = KdaTileSpec(chunk=32, block_size=block, scan_atom_m=scan_atom_m)
     spec = KdaChunkScanSpec(tile=tile, value_splits=value_splits, token_major_io=True)
-    o1, ht1 = split.launch_raw(spec, q, k, v, g, beta, a_log, dt_bias)
-    torch.cuda.synchronize()
-    assert torch.allclose(o0.float(), o1.float(), rtol=0, atol=3e-2)
-    assert torch.allclose(ht0.float(), ht1.float(), rtol=0, atol=3e-2)
+    o1, ht1 = split.launch_raw(spec, *raw)
+    np.testing.assert_allclose(
+        _values(o0), _values(o1), rtol=0, atol=3e-2, equal_nan=False
+    )
+    np.testing.assert_allclose(ht0, ht1, rtol=0, atol=3e-2, equal_nan=False)
 
 
 def test_dispatched_specs_match_the_token_serial_oracle():
@@ -415,7 +387,6 @@ def test_dispatched_specs_match_the_token_serial_oracle():
     """
     from builders.gfx950.kda import kda_chunk_fused as fused
     from builders.gfx950.kda import kda_chunk_split as split
-
     from dispatch.kda import KdaRequest, dispatch_kda
 
     B, H, T = 2, 4, 256

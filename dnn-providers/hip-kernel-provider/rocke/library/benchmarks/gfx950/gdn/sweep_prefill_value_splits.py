@@ -39,14 +39,14 @@ import dataclasses
 import statistics
 import sys
 
-import torch
+from rocke.runtime.hip_module import Runtime, get_device_count
 
 from builders.gfx950.kda import gdn_prefill as gp
 from builders.gfx950.kda import kda_chunk_split as split_mod
-from kernels.gfx950.kda_chunkwise import is_valid_scan_spec
 
 # the shipped selector, so the sweep can print what dispatch WOULD pick
 from dispatch.gdn.prefill_gfx950 import value_splits_for
+from kernels.gfx950.kda_chunkwise import is_valid_scan_spec
 
 DK = DV = 128
 HV = 8  # value heads; BH = batch * HV
@@ -67,18 +67,22 @@ def _specs_for(value_splits: int, kv_group: int):
 
 def _time_us(fn) -> float:
     """Median device time per call, in microseconds."""
+    runtime = Runtime()
     for _ in range(WARMUP):
         fn()
-    torch.cuda.synchronize()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
+    runtime.sync()
+    start, end = runtime.event(), runtime.event()
     samples = []
-    for _ in range(ITERS):
-        start.record()
-        fn()
-        end.record()
-        end.synchronize()
-        samples.append(start.elapsed_time(end) * 1e3)  # ms -> us
+    try:
+        for _ in range(ITERS):
+            start.record(stream=0)
+            fn()
+            end.record(stream=0)
+            end.synchronize()
+            samples.append(start.elapsed_to(end) * 1e3)  # ms -> us
+    finally:
+        start.destroy()
+        end.destroy()
     return statistics.median(samples)
 
 
@@ -99,9 +103,8 @@ def sweep_bh(bh: int, seqlen: int):
         if rel > TOL:
             print(f"  BH={bh:4d} vs={vs}: FAIL rel={rel:.2e} (excluded)")
             continue
-        us = _time_us(
-            lambda s=scan, p=prep: gp.launch_gdn(s, p, q, k, v, a, beta, a_log, dt_bias)
-        )
+        launch = gp.GdnPrefillLaunch(scan, prep, q, k, v, a, beta, a_log, dt_bias)
+        us = _time_us(launch.run)
         rows.append((vs, us, rel))
         print(f"  BH={bh:4d} vs={vs}: {us:7.2f} us  rel={rel:.2e}")
     best = min(rows, key=lambda r: r[1])[0] if rows else None
@@ -142,7 +145,7 @@ def main() -> int:
     ap.add_argument("--bh", type=int, nargs="+", default=[64, 128, 256])
     ap.add_argument("--seqlen", type=int, default=1024)
     args = ap.parse_args()
-    if not torch.cuda.is_available():
+    if not get_device_count():
         print("no HIP device", file=sys.stderr)
         return 2
     table = {}

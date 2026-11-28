@@ -327,7 +327,7 @@ void case_quad_perm_hip()
     const std::string hip = lower_one_hip("qperm_hip", [](rocke_ir_builder_t* b) {
         rocke_b_quad_perm(b, rocke_b_const_i32(b, 1), 1, 0, 3, 2);
     });
-    EXPECT_IR(hip, "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)");
+    EXPECT_IR(hip, "__builtin_amdgcn_update_dpp(c_1, c_1, 177, 15, 15, 1)");
 }
 
 void expect_quad_perm_rejected(const char* name, bool use_f32, int p0, int p1, int p2, int p3)
@@ -532,12 +532,12 @@ void case_dpp_xor_hip()
         "dppx_hip_gfx9",
         [](rocke_ir_builder_t* b) { rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 7); },
         "gfx942");
-    EXPECT_IR(gfx9, "__builtin_amdgcn_update_dpp(c1, c1, 321, 15, 15, 1)");
+    EXPECT_IR(gfx9, "__builtin_amdgcn_update_dpp(c_1, c_1, 321, 15, 15, 1)");
     const std::string rdna = lower_one_hip(
         "dppx_hip_rdna",
         [](rocke_ir_builder_t* b) { rocke_b_warp_shuffle_xor_dpp(b, rocke_b_const_i32(b, 1), 7); },
         "gfx1201");
-    EXPECT_IR(rdna, "__builtin_amdgcn_update_dpp(c1, c1, 359, 15, 15, 1)");
+    EXPECT_IR(rdna, "__builtin_amdgcn_update_dpp(c_1, c_1, 359, 15, 15, 1)");
 }
 
 /* f32 goes through i32: bitcast, one dpp_xor, bitcast back. */

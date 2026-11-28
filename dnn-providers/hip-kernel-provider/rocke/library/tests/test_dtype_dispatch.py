@@ -15,7 +15,7 @@ Two test tiers:
     silently dropped ``dtype`` from ``transposed_problem``, so a bf16 dgrad
     spec emitted fp16 IR for the underlying fprop kernel.
 
-  Level 2 — Execution round-trip (GPU + torch required).
+  Level 2 — Execution round-trip (GPU required).
     Runs a minimal kernel (N=1, tiny spatial) with inputs crafted to
     distinguish fp16 from bf16 at the bit level:
 
@@ -24,32 +24,33 @@ Two test tiers:
 
     A kernel that internally reinterprets bf16 bits as fp16 (or vice-versa)
     computes a convolution with the *wrong* inputs and the result diverges
-    from the float32 reference by far more than the dtype tolerance.
+    from the float64 numpy reference by far more than the dtype tolerance.
 
 Run without GPU (IR only):
     PYTHONPATH=rocke/platform/python:rocke/library pytest \\
         rocke/library/tests/test_dtype_dispatch.py -k "ir"
 
 Run with GPU (all tests):
-    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+    PYTHONPATH=rocke/platform/python:rocke/library python -m pytest \\
         rocke/library/tests/test_dtype_dispatch.py
 """
 from __future__ import annotations
 
-import ctypes
-import importlib.util
 import unittest
 from dataclasses import dataclass, field
 from typing import Tuple
 
+import numpy as np
+from rocke.numeric import storage
+from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-
-if _HAS_TORCH:
-    import torch
-
-    torch.cuda.is_available()
+from ._direct_conv_numeric import (
+    direct_dgrad_reference,
+    direct_fwd_reference,
+    launch_direct_conv,
+    poisoned,
+)
 
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")
@@ -58,8 +59,6 @@ _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")
 def _skip_reason_gpu() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
-    if not _HAS_TORCH:
-        return "torch not importable"
     if not _IS_MFMA:
         return f"unsupported arch {GPU_ARCH!r} (need gfx942 or gfx950)"
     return ""
@@ -398,30 +397,10 @@ class TestImplicitGemmIRDtype(unittest.TestCase):
 # The relative error against the correct float32 reference is >> tolerance.
 
 
-def _u8(t):
-    import torch  # noqa: F401
-
-    return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
-
-
-def _conv_ref_f32(A_t, B_t, p_stride: int, p_pad: int, groups: int):
-    """Return NHWK float32 reference computed by torch.nn.functional.conv2d."""
-    import torch
-    import torch.nn.functional as F
-
-    A_f = A_t.float()
-    B_f = B_t.float()
-    A_nchw = A_f.permute(0, 3, 1, 2)
-    B_nchw = B_f.permute(0, 3, 1, 2)
-    out = F.conv2d(A_nchw, B_nchw, padding=p_pad, stride=p_stride, groups=groups)
-    return out.permute(0, 2, 3, 1).contiguous().cuda()
-
-
 def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
-    import torch
     from rocke import compile_kernel
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
+    from rocke.runtime.hip_module import HipError
+
     from kernels.common.conv_direct_grouped import (
         DirectConvProblem,
         DirectConvSpec,
@@ -429,9 +408,6 @@ def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
         direct_launch_geometry,
         is_valid_spec,
     )
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import HipError, Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     groups = 8
     N, H, W = 1, 8, 8
@@ -458,60 +434,32 @@ def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
     kernel = build_direct_conv(spec, arch=arch)
     artifact = compile_kernel(kernel, arch=arch)
 
-    td = torch.bfloat16 if dtype == "bf16" else torch.float16
-    torch.manual_seed(0)
-    A = torch.ones(N, H, W, groups * cpg, dtype=td).cuda()
-    B = torch.ones(groups * cpg, 3, 3, cpg, dtype=td).cuda()
-    D = torch.zeros(N, p.Ho, p.Wo, groups * cpg, dtype=td).cuda()
-
-    ref = _conv_ref_f32(A.cpu(), B.cpu(), p.stride, p.PAD, groups)
-
-    rt = Runtime()
-    A_dev = rt.alloc(A.nbytes)
-    rt.memcpy_h2d(A_dev, _u8(A), A.nbytes)
-    B_dev = rt.alloc(B.nbytes)
-    rt.memcpy_h2d(B_dev, _u8(B), B.nbytes)
-    D_dev = rt.alloc(D.nbytes)
-    rt.memset(D_dev, 0, D.nbytes)
-
-    # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype)
+    x = storage.encode(np.ones((N, H, W, groups * cpg)), dtype)
+    w = storage.encode(np.ones((groups * cpg, 3, 3, cpg)), dtype)
+    ref = direct_fwd_reference(p, storage.decode(x, dtype), storage.decode(w, dtype))
+    grid, block = direct_launch_geometry(spec)
     try:
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
+        y = launch_direct_conv(
+            artifact,
+            p,
+            (x, w),
+            # NaN-filled: an element left unwritten fails the comparison.
+            poisoned((N, p.Ho, p.Wo, groups * cpg), dtype, 0xFF),
+            grid=grid,
+            block=block,
         )
     except HipError as e:
-        for dev in (A_dev, B_dev, D_dev):
-            rt.free(dev)
-        return False, f"load failed: {e}"
-
-    grid, block = direct_launch_geometry(spec)
-    launcher(
-        ConvArgs.from_problem(p).to_launch_values(
-            int(A_dev), int(B_dev), int(D_dev), A.nbytes, B.nbytes, D.nbytes
-        ),
-        config=LaunchConfig(grid=grid, block=block, fence=True),
-    )
-
-    D_cpu = torch.empty_like(D.cpu())
-    rt.memcpy_d2h(_u8(D_cpu), D_dev, D.nbytes)
-    for dev in (A_dev, B_dev, D_dev):
-        rt.free(dev)
-    synchronize_and_release(0)
-
-    rel = float(
-        (D_cpu.float() - ref.float().cpu()).abs().max()
-        / ref.float().cpu().abs().max().clamp(min=1.0)
-    )
+        return False, f"launch failed: {e}"
+    out = storage.decode(y, dtype)
+    rel = peak_relative_error(out, ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL_FP16
     return (rel < tol), f"rel_err={rel:.3e} tol={tol:.1e}"
 
 
 def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
-    import torch
     from rocke import compile_kernel
-    from kernels.common.conv_abi import conv_direct_args_signature
-    from kernels.common.conv_args import ConvArgs
+    from rocke.runtime.hip_module import HipError
+
     from kernels.common.conv_direct_grouped import (
         DirectConvDgradSpec,
         DirectConvProblem,
@@ -519,9 +467,6 @@ def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
         direct_launch_geometry,
         is_valid_dgrad_spec,
     )
-    from rocke.runtime import synchronize_and_release
-    from rocke.runtime.hip_module import HipError, Runtime
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     groups = 8
     N, H, W = 1, 8, 8
@@ -549,63 +494,27 @@ def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
     kernel = build_direct_conv_dgrad(spec, arch=arch)
     artifact = compile_kernel(kernel, arch=arch)
 
-    td = torch.bfloat16 if dtype == "bf16" else torch.float16
-    torch.manual_seed(42)
     total_c = groups * cpg
     total_k = groups * kpg
-    dY = torch.ones(N, p.Ho, p.Wo, total_k, dtype=td).cuda()
-    Wt = torch.ones(total_k, 3, 3, cpg, dtype=td).cuda()
-    dX = torch.zeros(N, H, W, total_c, dtype=td).cuda()
-
-    dY_nchw = dY.float().permute(0, 3, 1, 2)
-    W_nchw = Wt.float().permute(0, 3, 1, 2)
-    h_base = (p.Ho - 1) * p.stride - 2 * p.PAD + p.KH
-    w_base = (p.Wo - 1) * p.stride - 2 * p.PAD + p.KW
-    ref_nchw = torch.nn.functional.conv_transpose2d(
-        dY_nchw,
-        W_nchw,
-        padding=p.PAD,
-        stride=p.stride,
-        groups=groups,
-        output_padding=(H - h_base, W - w_base),
-    )
-    ref = ref_nchw.permute(0, 2, 3, 1).contiguous()
-
-    rt = Runtime()
-    dY_dev = rt.alloc(dY.nbytes)
-    rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
-    W_dev = rt.alloc(Wt.nbytes)
-    rt.memcpy_h2d(W_dev, _u8(Wt), Wt.nbytes)
-    dX_dev = rt.alloc(dX.nbytes)
-    rt.memset(dX_dev, 0, dX.nbytes)
-
-    # Direct conv is AOT: the whole shape travels as kernargs.
-    sig = conv_direct_args_signature(dtype, direction="dgrad")
+    dy = storage.encode(np.ones((N, p.Ho, p.Wo, total_k)), dtype)
+    w = storage.encode(np.ones((total_k, 3, 3, cpg)), dtype)
+    ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
+    grid, block = direct_launch_geometry(spec)
     try:
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
+        dx = launch_direct_conv(
+            artifact,
+            p,
+            (dy, w),
+            # NaN-filled: an element left unwritten fails the comparison.
+            poisoned((N, H, W, total_c), dtype, 0xFF),
+            grid=grid,
+            block=block,
+            direction="dgrad",
         )
     except HipError as e:
-        for dev in (dY_dev, W_dev, dX_dev):
-            rt.free(dev)
-        return False, f"load failed: {e}"
-
-    grid, block = direct_launch_geometry(spec)
-    launcher(
-        ConvArgs.from_problem(p, direction="dgrad").to_launch_values(
-            int(dY_dev), int(W_dev), int(dX_dev), dY.nbytes, Wt.nbytes, dX.nbytes
-        ),
-        config=LaunchConfig(grid=grid, block=block, fence=True),
-    )
-
-    dX_cpu = torch.empty_like(dX.cpu())
-    rt.memcpy_d2h(_u8(dX_cpu), dX_dev, dX.nbytes)
-    for dev in (dY_dev, W_dev, dX_dev):
-        rt.free(dev)
-    synchronize_and_release(0)
-
-    scale = ref.float().abs().max().clamp(min=1.0)
-    rel = float((dX_cpu.float() - ref.float().cpu()).abs().max() / scale)
+        return False, f"launch failed: {e}"
+    out = storage.decode(dx, dtype)
+    rel = peak_relative_error(out, ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL_FP16
     return (rel < tol), f"rel_err={rel:.3e} tol={tol:.1e}"
 

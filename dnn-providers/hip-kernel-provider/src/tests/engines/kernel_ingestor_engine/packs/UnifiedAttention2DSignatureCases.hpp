@@ -38,7 +38,7 @@
  *
  * Each case is a function template over an `Arch`, which supplies
  *   - `static std::vector<KernelArgument> pythonAbi()`: the ABI the pack's rocKE builder
- *     declares;
+ *     declares, generated from rocKE at build time (RockeKernelSignatures.hpp);
  *   - `static std::string prepareFailureFor(const std::vector<KernelArgument>&)`: the message
  *     of what the pack's prepare() throws over its default graph and a descriptor recording
  *     the argument list (empty if it returned a prepared dispatch).
@@ -120,7 +120,7 @@ void refusesAnExtraTrailingArgument()
 template <typename Arch>
 void refusesTheFormWithoutTheTrailingStrides()
 {
-    // block_table_stride and qq_bias_stride_0 sit between num_seqs and the runtime shape
+    // block_table_stride and qq_bias_stride0 sit between num_seqs and the runtime shape
     // kernargs.
     auto signature = Arch::pythonAbi();
     signature.erase(signature.begin() + 16, signature.begin() + 18);

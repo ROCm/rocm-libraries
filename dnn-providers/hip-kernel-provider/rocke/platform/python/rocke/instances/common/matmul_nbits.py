@@ -4,8 +4,7 @@
 """``MatMulNBits`` gfx1151 instance: public surface + family dispatch.
 
 fp16-activation / packed-int4-weight matmul for the Qwen3.5-9B group-of-32
-workload. See ``dsl_docs/architecture/matmul_nbits_plan.md`` for the full plan
-and :mod:`rocke.instances.common._matmul_nbits_common` for the shared spec,
+workload. See :mod:`rocke.instances.common._matmul_nbits_common` for the shared spec,
 validator, signature, grid, and 64-row outer-loop helpers.
 
 Milestone 1 (this change) ships the spec and host-side helpers plus a
@@ -65,6 +64,11 @@ def is_valid_spec(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> Tuple[bool, str
         return False, (
             f"skinny_n is for narrow N (<= 64); N={spec.N} should use family='large_n'"
         )
+    # The optimized body (LDS-staged A, LDS epilogue) is written for gfx1201's
+    # WMMA fragment and accumulator layout; on gfx1151 it computes the wrong
+    # tile, so it is refused there.
+    if spec.optimized and arch != "gfx1201":
+        return False, f"optimized=True is built for gfx1201 only; got {arch}"
 
     return True, "ok"
 

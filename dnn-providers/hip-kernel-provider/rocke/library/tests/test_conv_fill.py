@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """conv_fill: the forward benchmarks' --fill data and --kernels-file lists."""
 
+import numpy as np
 import pytest
 
 from benchmarks.common import conv_fill
@@ -21,18 +22,22 @@ def test_modes_and_floor():
         conv_fill.set_mode("normal")
 
 
+def _in_range(values, lo, hi):
+    return values.min() >= lo and values.max() <= hi
+
+
 def test_fill_ranges():
-    torch = pytest.importorskip("torch")
-    g = torch.Generator().manual_seed(0)
-    x = conv_fill.fill_x(torch.empty(4096), generator=g)
-    assert x.min() >= -1.0 and x.max() <= 1.0 and x.min() < 0
+    rng = np.random.default_rng(0)
+    x = conv_fill.fill_x((4096,), rng)
+    assert x.dtype == np.float32 and x.shape == (4096,)
+    assert _in_range(x, -1.0, 1.0) and x.min() < 0
     conv_fill.set_mode("miopen")
-    x = conv_fill.fill_x(torch.empty(4096), generator=g)
-    assert x.min() >= 0.0 and x.max() <= 0.01
-    w = conv_fill.fill_w(torch.empty(4096), "fp16", generator=g)
-    assert w.min() >= -0.01 / 3 and w.max() <= 0.005
-    w = conv_fill.fill_w(torch.empty(4096), "bf16", generator=g)
-    assert w.min() >= -0.005 and w.max() <= 0.005
+    assert _in_range(conv_fill.fill_x((4096,), rng), 0.0, 0.01)
+    # fp16 weights are shifted positive (MIOpen's RanGenWeights<float16>).
+    w = conv_fill.fill_w((4096,), "fp16", rng)
+    assert _in_range(w, -0.01 / 3, 0.005) and w.max() > 0.01 / 3
+    w = conv_fill.fill_w((4096,), "bf16", rng)
+    assert _in_range(w, -0.005, 0.005) and w.min() < -0.01 / 3
 
 
 def test_ref_floor_is_forward_only():
@@ -110,69 +115,47 @@ def test_kernels_file_bare_label_matches_identity_label(tmp_path, direct):
         assert (label in conv_fill.kernels_for(m, "any")) is kept, entry
 
 
-class _FakeTensor:
-    def __init__(self, shape, dtype=None, value=None):
-        self.shape, self.dtype, self.value, self.range = shape, dtype, value, None
-
-    def uniform_(self, lo, hi, generator=None):
-        self.range = (lo, hi)
-        return self
-
-
-class _FakeTorch:
-    float16, bfloat16, float32 = "f16", "bf16", "f32"
-
-    @staticmethod
-    def empty(*shape, dtype=None):
-        return _FakeTensor(shape, dtype)
-
-    @staticmethod
-    def full(shape, value):
-        return _FakeTensor(tuple(shape), value=value)
-
-
 @pytest.mark.parametrize("mode", conv_fill.FILL_CHOICES)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-def test_fwd_operands_follow_fill(monkeypatch, mode, dtype):
+def test_fwd_operands_follow_fill(mode, dtype):
     """A forward benchmark's x / w follow --fill (U(-1, 1) by default)."""
-    import sys
-
-    monkeypatch.setitem(sys.modules, "torch", _FakeTorch)
     conv_fill.set_mode(mode)
-    x, w = conv_fill.fwd_operands((2, 5, 7, 8), (16, 3, 1, 1), dtype, "f16")
+    x, w = conv_fill.fwd_operands(
+        (2, 5, 7, 8), (16, 3, 1, 1), dtype, np.random.default_rng(0)
+    )
     assert x.shape == (2, 5, 7, 8) and w.shape == (16, 3, 1, 1)
-    assert x.dtype == w.dtype == "f16"
+    assert x.dtype == w.dtype == np.float32
     if mode == "uniform":
-        assert x.range == w.range == (-1.0, 1.0)
+        assert _in_range(x, -1.0, 1.0) and _in_range(w, -1.0, 1.0)
+        assert x.min() < -0.5 and w.min() < -0.5
     else:
-        assert x.range == (0.0, 0.01)
+        assert _in_range(x, 0.0, 0.01)
         lo = -0.01 / 3 if dtype == "fp16" else -0.005
-        assert w.range == pytest.approx((lo, 0.005))
-    x, _ = conv_fill.fwd_operands((1,), (1,), dtype)
-    assert x.dtype is None  # torch's default (fp32)
+        assert _in_range(w, lo, 0.005) and w.min() < 0
 
 
 @pytest.mark.parametrize("mode", conv_fill.FILL_CHOICES)
-def test_implicit_fwd_sweep_inputs_follow_fill(monkeypatch, mode):
+def test_implicit_fwd_sweep_inputs_follow_fill(mode):
     """The implicit-GEMM fwd sweep's A / B follow --fill; --debug-init wins."""
-    import sys
     import types
 
     from benchmarks.common import benchmark_implicit_gemm_conv as bi
 
-    monkeypatch.setitem(sys.modules, "torch", _FakeTorch)
     conv_fill.set_mode(mode)
     args = types.SimpleNamespace(debug_init=None)
-    a, b = bi._fwd_sweep_inputs((2, 5, 7, 8), (16, 3, 3, 8), "fp16", args)
+    rng = np.random.default_rng(0)
+    a, b = bi._fwd_sweep_inputs((2, 5, 7, 8), (16, 3, 3, 8), "fp16", args, rng)
     assert (a.shape, b.shape) == ((2, 5, 7, 8), (16, 3, 3, 8))
     if mode == "uniform":
-        assert a.range == b.range == (-1.0, 1.0)
+        assert _in_range(a, -1.0, 1.0) and _in_range(b, -1.0, 1.0)
+        assert a.min() < -0.5 and b.min() < -0.5
     else:
-        assert a.range == (0.0, 0.01)
-        assert b.range == pytest.approx((-0.01 / 3, 0.005))
+        assert _in_range(a, 0.0, 0.01)
+        assert _in_range(b, -0.01 / 3, 0.005) and b.max() > 0.01 / 3
     args.debug_init = 1.0
-    a, b = bi._fwd_sweep_inputs((2, 5, 7, 8), (16, 3, 3, 8), "fp16", args)
-    assert a.range is None and b.range is None and a.value == b.value == 1.0
+    a, b = bi._fwd_sweep_inputs((2, 5, 7, 8), (16, 3, 3, 8), "fp16", args, rng)
+    assert a.dtype == b.dtype == np.float32
+    assert (a == 1.0).all() and (b == 1.0).all()
 
 
 def _fills_through_conv_fill(fn, helper):
@@ -194,21 +177,20 @@ def test_implicit_fwd_sweep_fills_through_conv_fill():
 def test_direct_fwd_sweeps_fill_through_conv_fill():
     """Neither direct fwd sweep draws U(-1, 1) operands of its own; each
     verifies with the --fill floor."""
-    pytest.importorskip("torch")  # the module imports the torch reference
     from benchmarks.common import benchmark_direct_conv as bd
 
     for fn in (bd._run_depthwise_sweep, bd._run_sweep, bd._run_nongrouped_sweep):
         _fills_through_conv_fill(fn, "conv_fill.fwd_operands(")
 
 
-def test_uniform_inputs_unchanged():
-    """--fill uniform draws exactly what the sweeps drew before: x then w,
-    U(-1, 1), from the same seed."""
-    torch = pytest.importorskip("torch")
-
-    torch.manual_seed(42)
-    x, w = conv_fill.fwd_operands((2, 5, 7, 8), (16, 3, 1, 4), "bf16", torch.bfloat16)
-    torch.manual_seed(42)
-    x0 = torch.empty(2, 5, 7, 8, dtype=torch.bfloat16).uniform_(-1.0, 1.0)
-    w0 = torch.empty(16, 3, 1, 4, dtype=torch.bfloat16).uniform_(-1.0, 1.0)
-    assert torch.equal(x, x0) and torch.equal(w, w0)
+def test_uniform_inputs_draw_x_then_w():
+    """--fill uniform draws x then w, both U(-1, 1), from the caller's rng:
+    the same seed gives the same operands."""
+    x, w = conv_fill.fwd_operands(
+        (2, 5, 7, 8), (16, 3, 1, 4), "bf16", np.random.default_rng(42)
+    )
+    rng = np.random.default_rng(42)
+    x0 = rng.uniform(-1.0, 1.0, (2, 5, 7, 8)).astype(np.float32)
+    w0 = rng.uniform(-1.0, 1.0, (16, 3, 1, 4)).astype(np.float32)
+    np.testing.assert_array_equal(x, x0)
+    np.testing.assert_array_equal(w, w0)

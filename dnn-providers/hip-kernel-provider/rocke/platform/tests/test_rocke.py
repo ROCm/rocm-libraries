@@ -59,7 +59,7 @@ from rocke import (
     select_3d_config,
     use_2d_kernel,
 )
-from rocke.core.backend import _cpp_strict, resolve_backend
+from rocke.core.backend import cpp_strict, resolve_backend
 from rocke.helpers import (
     AsyncTileLoader,
     CoalescedTileLoader,
@@ -72,6 +72,19 @@ from rocke.helpers import (
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
+from rocke.tests.engines import (
+    available_engines,
+    hide_shared_engine,
+    native_engine_or_skip,
+    skip_without_cpp_engine,
+)
+from rocke.tests.lanes import (
+    BUILD_VARIANT,
+    TICKET,
+    import_or_skip_until,
+    skip_until,
+    skip_until_reason,
+)
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -100,7 +113,9 @@ try:  # torch is optional; gate torch-facing tests on its presence.
 except Exception:  # pragma: no cover - depends on the environment
     _HAVE_TORCH = False
 
-_requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
+_requires_torch = unittest.skipUnless(
+    _HAVE_TORCH, skip_until_reason(TICKET, reason="requires torch")
+)
 
 # A gfx950-only atom lowered for gfx942 raises `ArchDomainWarning`. Make it an
 # error so a covered-arch case cannot pass with an atom the arch lacks.
@@ -138,6 +153,19 @@ def _each_covered_arch(test):
             with self.subTest(arch=arch):
                 self.arch = arch
                 test(self)
+
+    return run
+
+
+def _needs_cpp_engine(test):
+    """Skip a test whose every case compares against the C++ engine as a whole
+    when the engine is not built, before its sweep, so it does not run a sweep
+    of cases that each skip (``rocke.tests.sweep_guard`` fails such a sweep)."""
+
+    @functools.wraps(test)
+    def run(self):
+        native_engine_or_skip()
+        test(self)
 
     return run
 
@@ -1879,15 +1907,14 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         even though the engine itself supported it.
         """
         from rocke.core import backend as backend_mod
+        from rocke.core import native_engine
         from rocke.core.lower_llvm import LLVM_FLAVORS
 
-        engine = type(
-            "_FakeEngine",
-            (),
-            {"lower_serialized_ir": staticmethod(lambda *a, **k: "lowered")},
-        )()
-        with patch.object(
-            backend_mod, "import_engine", lambda module="rocke_engine": engine
+        with (
+            patch.object(native_engine, "require_native_lowering", lambda: None),
+            patch.object(
+                native_engine, "lower_serialized_ir", lambda *a, **k: "lowered"
+            ),
         ):
             for flavor in LLVM_FLAVORS:
                 with self.subTest(flavor=flavor):
@@ -2060,16 +2087,18 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         """
         try:
             import rocke_engine
-        except ImportError:
-            self.skipTest("rocke_engine extension not built")
+        except ModuleNotFoundError:
+            skip_until(BUILD_VARIANT, reason="rocke_engine extension not built")
         from rocke.core.lower_llvm import LLVM_FLAVORS
 
         self.assertEqual(tuple(rocke_engine.llvm_flavors()), LLVM_FLAVORS)
 
 
-# Probe run in a child process: print the datalayout the Python resolver picks
-# for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
-# child because both engines retain the first successfully loaded COMGR.
+# Probe run in a child process: print what the Python resolver does for AUTO,
+# then what the C++ engine does for AUTO (flavor=""), one line each: the
+# datalayout it picks, or the error it refuses with when no COMGR can be found.
+# Must be a child because both engines retain the first successfully loaded
+# COMGR.
 _FLAVOR_AUTO_PROBE = """
 import sys
 from rocke.core.ir import IRBuilder
@@ -2077,15 +2106,26 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _datalayout_for_flavor, _resolve_llvm_flavor
 import rocke_engine
 
-b = IRBuilder("probe")
-b.kernel.attrs["max_workgroup_size"] = 64
-b.const_i32(1)
-cpp = rocke_engine.lower_serialized_ir(serialize(b.kernel), arch="gfx950", flavor="")
-cpp_dl = next(
-    ln.split('"')[1] for ln in cpp.splitlines() if ln.startswith("target datalayout")
-)
-print(_datalayout_for_flavor(_resolve_llvm_flavor()))
-print(cpp_dl)
+
+def outcome(resolve):
+    try:
+        return resolve()
+    except Exception as error:
+        return "refused: " + type(error).__name__ + ": " + " ".join(str(error).split())
+
+
+def cpp_datalayout():
+    b = IRBuilder("probe")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    b.const_i32(1)
+    cpp = rocke_engine.lower_serialized_ir(serialize(b.kernel), arch="gfx950", flavor="")
+    return next(
+        ln.split('"')[1] for ln in cpp.splitlines() if ln.startswith("target datalayout")
+    )
+
+
+print(outcome(lambda: _datalayout_for_flavor(_resolve_llvm_flavor())))
+print(outcome(cpp_datalayout))
 """
 
 
@@ -2154,23 +2194,24 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         return rocm
 
     def _assert_agree(self, env_overrides):
+        """Both engines pick the same datalayout, or refuse AUTO alike."""
         py_dl, cpp_dl = self._probe(env_overrides)
         self.assertEqual(
             py_dl,
             cpp_dl,
-            f"python and cpp AUTO flavor resolution disagree for {env_overrides}: "
-            f"python picked a datalayout the engine did not",
+            f"python and cpp AUTO flavor resolution disagree for {env_overrides}",
         )
         return py_dl
 
     def setUp(self):
         try:
             import rocke_engine  # noqa: F401
-        except ImportError:
-            self.skipTest("rocke_engine extension not built")
+        except ModuleNotFoundError:
+            skip_until(BUILD_VARIANT, reason="rocke_engine extension not built")
 
     def test_agree_on_the_bare_host(self):
-        """No env pointing anywhere: whatever this machine has, both must see it."""
+        """No env pointing anywhere: whatever this machine has, both must see
+        it; a machine with no COMGR outside ``$ROCM_PATH`` makes both refuse."""
         self._assert_agree({})
 
     def test_agree_when_rocm_path_names_an_older_install(self):
@@ -3561,7 +3602,9 @@ def _assert_engines_agree(test, kernel, python_ir, **kw):
             serialize(kernel), kw["arch"], kw.get("llvm_flavor")
         )
     except BackendError as e:
-        test.skipTest(f"C++ engine unavailable, cross-engine check not run: {e}")
+        skip_without_cpp_engine(
+            e, f"C++ engine unavailable, cross-engine check not run: {e}"
+        )
     if cpp_ir != python_ir:
         test.fail(
             f"python vs cpp engine disagree for kernel "
@@ -3827,6 +3870,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         # The raw immediate reaches the call verbatim (0x041F == 1055).
         self.assertIn("call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 1055)", ll)
 
+    @_needs_cpp_engine
     @_each_covered_arch
     def test_ds_swizzle_xor_encodes_swap_mode_offset(self):
         # offset = (xor_mask << 10) | 0x1F -> (2 << 10) | 31 == 2079 (0x081F).
@@ -3856,7 +3900,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
         hip = lower_kernel_to_hip(b.kernel)
         self.assertIn(
-            "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)",
+            "__builtin_amdgcn_update_dpp(c_1, c_1, 177, 15, 15, 1)",
             hip,
         )
 
@@ -3925,6 +3969,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         "i32 1, i32 1, i32 {}, i32 15, i32 15, i1 true)"
     )
 
+    @_needs_cpp_engine
     def test_warp_shuffle_xor_dpp_gfx9_encodings(self):
         """gfx9 CDNA has no ``row_xmask``: each mask with a register-only
         encoding lowers to it (quad_perm 1/2/3, row_half_mirror 7, row_ror:8,
@@ -3945,6 +3990,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                     )
 
     @arch_specific(("gfx1151", "gfx1201", "gfx1250"), reason=_RDNA_ONLY)
+    @_needs_cpp_engine
     def test_warp_shuffle_xor_dpp_row_xmask_targets_unchanged(self):
         """Targets with ``row_xmask`` (gfx11, gfx12, gfx1250) keep
         ``0x160 | mask`` for every mask, as before the gfx9 table existed."""
@@ -3960,6 +4006,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
     # ---- vop2_f32_dpp_xor (softmax row-reduce step) ----
     @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
+    @_needs_cpp_engine
     def test_vop2_f32_dpp_xor_is_update_dpp_then_fmax_or_fadd(self):
         """One reduce step is the in-row ``update.dpp`` shuffle (``row_xmask``
         on gfx1250) followed by ``maxnum`` / ``fadd`` -- never inline asm,
@@ -4018,7 +4065,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                 b.warp_shuffle_xor_dpp(b.const_i32(1), 7)
                 hip = lower_kernel_to_hip(b.kernel, arch=arch)
                 self.assertIn(
-                    f"__builtin_amdgcn_update_dpp(c1, c1, {want}, 15, 15, 1)", hip
+                    f"__builtin_amdgcn_update_dpp(c_1, c_1, {want}, 15, 15, 1)", hip
                 )
 
     @arch_specific(("gfx950",), reason=_SAME_IR)
@@ -4034,14 +4081,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         """A mask with no register-only encoding on gfx9 CDNA fails loudly in
         every lowerer, naming the supported masks and the LDS fallback; the
         same mask lowers on a ``row_xmask`` target."""
-        import importlib.util
-
         from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
         from rocke.core.ir_serialize import serialize
         from rocke.core.lower_hip import lower_kernel_to_hip
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-        have_cpp = importlib.util.find_spec("rocke_engine") is not None
+        have_cpp = "cpp" in available_engines()
         msg = r"no register-only DPP encoding on gfx942.*1, 2, 3, 7, 8 and 15.*warp_shuffle_xor"
         for mask in range(1, 16):
             if mask in DPP_XOR_CTRL_NO_ROW_XMASK:
@@ -4327,6 +4372,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
             b.mov_dpp8(b.const_i64(1), 0x11)
 
     # ---- wave_reduce ----
+    @_needs_cpp_engine
     @_each_covered_arch
     def test_wave_reduce_emits_typed_reduction_per_op(self):
         for reduce_op, ty in (
@@ -4368,6 +4414,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
     # ---- readlane / writelane ----
     @arch_specific(("gfx950",), reason=_SAME_IR)
+    @_needs_cpp_engine
     def test_readlane_emits_typed_call_with_i32_lane(self):
         for suffix, ty, mk in (
             ("i32", "i32", "const_i32"),
@@ -4480,6 +4527,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         self.assertIn("call i32 @llvm.amdgcn.alignbyte(i32 1, i32 2, i32 8)", ll)
 
     @arch_specific(("gfx950",), reason=_SAME_IR)
+    @_needs_cpp_engine
     def test_s_wqm_emits_width_matched_intrinsic(self):
         for suffix, ty, mk in (
             ("i32", "i32", "const_i32"),
@@ -4559,7 +4607,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.av_load_b128(p)
         # Permissive C++ mode falls back even when the native engine rejects IR.
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
+            RuntimeError if resolve_backend() == "cpp" and cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
@@ -4671,7 +4719,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
+            RuntimeError if resolve_backend() == "cpp" and cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
@@ -4769,23 +4817,22 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
 @pytest.mark.parametrize("strict", ["0", "1"])
 @pytest.mark.parametrize("op", ["av_load_b128", "s_prefetch_inst"])
-def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
-    """Exercise installed CI's missing-binding path even in a native dev build."""
-    import sys
-
+def test_lds_rejection_without_cpp_engine(monkeypatch, strict, op):
+    """Exercise the missing-engine path of an installed wheel even in a native
+    dev build."""
     from rocke.core.backend import BackendError
 
     monkeypatch.setenv("ROCKE_BACKEND", "cpp")
     monkeypatch.setenv("ROCKE_CPP_STRICT", strict)
-    monkeypatch.setitem(sys.modules, "rocke_engine", None)
-    b = IRBuilder("missing_binding_lds")
+    hide_shared_engine(monkeypatch)
+    b = IRBuilder("missing_engine_lds")
     p = b.param("p", PtrType(I32, "lds"), align=16)
     if op == "av_load_b128":
         b.av_load_b128(p)
     else:
         b.s_prefetch_inst(p, b.const_i32(64))
     if strict == "1":
-        error_type, message = BackendError, "rocke_engine.*not importable"
+        error_type, message = BackendError, r"the C\+\+ engine is not available"
     else:
         error_type, message = (
             TypeError,
@@ -4936,6 +4983,8 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
 
         arches = wired_arches()
         self.assertIn("gfx1250", arches)
+        # Without the engine no arch can be checked: skip the test as a whole.
+        native_engine_or_skip()
         for arch in arches:
             with self.subTest(arch=arch):
                 kernel = self._kernel()
@@ -4947,7 +4996,7 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
                 try:
                     cpp_ir = _lower_via_cpp_engine(serialize(kernel), arch, None)
                 except BackendError as e:
-                    self.skipTest(f"C++ engine unavailable: {e}")
+                    skip_without_cpp_engine(e, f"C++ engine unavailable: {e}")
                 self.assertEqual(
                     cpp_ir,
                     py_ir,
@@ -4975,7 +5024,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_matmul_bias_relu_scale(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -4994,7 +5043,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_matmul_only(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5007,7 +5056,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_explain_unsupported_graph(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5019,7 +5068,7 @@ class TestFusionPlanner(unittest.TestCase):
 
     @_requires_torch
     def test_compile_fn_exposes_plan_without_launching(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import compile_fn
 
         def fn(A, B, bias):
@@ -5478,20 +5527,20 @@ class TestExpandedEpilogueOps(unittest.TestCase):
     def test_residual_add_declares_param_and_lowers(self):
         from rocke.helpers import ResidualAdd
 
-        op = ResidualAdd(param_name="residual_0")
+        op = ResidualAdd(param_name="residual0")
         kernel, ll = self._build_epilogue_kernel(op)
         self.assertIn("resadd_f16", kernel.name)
         # The residual pointer must show up as a kernel param.
-        self.assertIn("residual_0", ll)
+        self.assertIn("residual0", ll)
 
     @arch_specific(("gfx950",), reason=_SAME_IR)
     def test_residual_mul_declares_param_and_lowers(self):
         from rocke.helpers import ResidualMul
 
-        op = ResidualMul(param_name="residual_mul_0")
+        op = ResidualMul(param_name="residual_mul0")
         kernel, ll = self._build_epilogue_kernel(op)
         self.assertIn("resmul_f16", kernel.name)
-        self.assertIn("residual_mul_0", ll)
+        self.assertIn("residual_mul0", ll)
 
 
 @_requires_torch
@@ -5499,7 +5548,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
     """Verify the new patterns in ``_PATTERN_TABLE`` match expected fns."""
 
     def test_explain_matmul_gelu(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5511,7 +5560,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], None)
 
     def test_explain_matmul_bias_silu(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -5526,7 +5575,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], "bias")
 
     def test_explain_matmul_with_residual(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias, residual):
@@ -5543,7 +5592,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(len(info["residual_arg_names"]), 1)
 
     def test_explain_pointwise_chain(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5555,7 +5604,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["a_arg_name"], "A")
 
     def test_explain_pointwise_binary_chain(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5570,7 +5619,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["unary_chain"], ("relu",))
 
     def test_explain_matmul_scale_clamp(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -5584,7 +5633,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         )
 
     def test_explain_rowwise_reduction_sum(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5596,7 +5645,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["reduce_op"], "sum")
 
     def test_explain_rowwise_reduction_mean(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -5978,7 +6027,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertEqual(args["N"], 128)
         self.assertEqual(args["K"], 64)
         self.assertIs(args["bias"], runtime_args["bias"])
-        self.assertIs(args["residual_0"], runtime_args["residual"])
+        self.assertIs(args["residual0"], runtime_args["residual"])
         # The grid is derived from the first candidate's tile, which the
         # autotuner selects against the launch device's MMA catalog (WMMA on
         # gfx11 wave32 picks a 32x32 first tile; a CDNA/no-GPU box picks a
@@ -6145,7 +6194,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
     @_requires_torch
     def test_materialize_with_fake_pool_binds_tensors(self):
         # Use the real WorkspacePool with a CPU "device" via torch.
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import materialize_plan
         from rocke.runtime.launcher import WorkspacePool
 
@@ -6168,7 +6217,7 @@ class TestValidationHarness(unittest.TestCase):
 
     @_requires_torch
     def test_benchmark_case_runs_torch_eager_baseline(self):
-        torch = pytest.importorskip("torch")
+        torch = import_or_skip_until("torch", TICKET)
         from rocke.helpers import BenchmarkCase, run_fusion_validation_matrix
 
         def ref_fn(x, y):
@@ -7520,32 +7569,6 @@ class TestTorchDtypeAndDeviceTensor(unittest.TestCase):
     """``torch_interop.torch_dtype`` / ``device_tensor``: the torch glue a
     library binding uses instead of importing torch itself."""
 
-    def test_torch_dtype_resolves_by_name(self):
-        import sys
-        from types import SimpleNamespace
-        from unittest import mock
-
-        from rocke.runtime.torch_interop import torch_dtype
-
-        fake = SimpleNamespace(int32="i32", float16="f16")
-        with mock.patch.dict(sys.modules, {"torch": fake}):
-            self.assertEqual(torch_dtype("int32"), "i32")
-            self.assertEqual(torch_dtype("float16"), "f16")
-            with self.assertRaisesRegex(ValueError, "no dtype 'int31'"):
-                torch_dtype("int31")
-
-    def test_device_tensor_passes_values_dtype_and_device(self):
-        import sys
-        from unittest import mock
-
-        from rocke.runtime.torch_interop import device_tensor
-
-        fake = mock.MagicMock()
-        with mock.patch.dict(sys.modules, {"torch": fake}):
-            out = device_tensor(range(3), dtype="i32", device="dev")
-        fake.tensor.assert_called_once_with([0, 1, 2], dtype="i32", device="dev")
-        self.assertIs(out, fake.tensor.return_value)
-
     def test_both_raise_when_torch_absent(self):
         import sys
         from unittest import mock
@@ -8498,8 +8521,7 @@ class TestMfmaGemm(unittest.TestCase):
         Phase-1 ``mfma_flatmm`` worker switched ``mfma_gemm`` /
         ``flatmm`` from the legacy ``16x16x16`` atom to the K-packed
         ``16x16x32`` (and the ``32x32x16`` hero for larger tiles) on
-        gfx950+ — see ``notes/instances/mfma_flatmm.md`` (1.33×–2.78×
-        speedup, bit-exact parity). The test now guards the *MFMA-ness*
+        gfx950+ (bit-exact parity). The test now guards the *MFMA-ness*
         of the kernel without pinning the atom shape.
         """
         from rocke.instances import MfmaGemmSpec, build_mfma_gemm

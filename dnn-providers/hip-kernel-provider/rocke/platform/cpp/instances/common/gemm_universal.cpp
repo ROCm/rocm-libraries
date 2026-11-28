@@ -1420,13 +1420,13 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             as[1] = rocke_stride_imm(1);
             bs[0] = rocke_stride_imm(ctx.lds_k);
             bs[1] = rocke_stride_imm(1);
-            rocke_tensor_descriptor_with_strides(&ctx.a_lds_desc, a2, as, 2, ctx.storage_dtype);
-            rocke_tensor_descriptor_with_strides(&ctx.b_lds_desc, b2, bs, 2, ctx.storage_dtype);
+            rocke_tv_tensor_descriptor_with_strides(&ctx.a_lds_desc, a2, as, 2, ctx.storage_dtype);
+            rocke_tv_tensor_descriptor_with_strides(&ctx.b_lds_desc, b2, bs, 2, ctx.storage_dtype);
         }
         else
         {
-            rocke_tensor_descriptor_packed(&ctx.a_lds_desc, a2, 2, ctx.storage_dtype);
-            rocke_tensor_descriptor_packed(&ctx.b_lds_desc, b2, 2, ctx.storage_dtype);
+            rocke_tv_tensor_descriptor_packed(&ctx.a_lds_desc, a2, 2, ctx.storage_dtype);
+            rocke_tv_tensor_descriptor_packed(&ctx.b_lds_desc, b2, 2, ctx.storage_dtype);
         }
         ctx.a_lds_view.base = ctx.A_smem;
         ctx.a_lds_view.desc = ctx.a_lds_desc;

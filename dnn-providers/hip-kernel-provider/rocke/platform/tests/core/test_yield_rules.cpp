@@ -10,7 +10,8 @@
  * its iter_args metadata names each carried value and its type (which the
  * loop's result shares), and its body yields only at its end, one value per
  * carried value, of its type, ending in that yield whenever the loop carries
- * any; a carried value or result with no type is refused rather than read.
+ * any; a carried value or result with no type is refused (a TypeError, as in
+ * an if/else) rather than read.
  *
  * Only the scf.yield that ends a branch of an if/else with results has its
  * values taken: a branch of an if/else without results holds no scf.yield, and
@@ -23,7 +24,9 @@
  * builder has no point where both branches are done, so it does not check the
  * branches: the verifier and the lowerings do, the LLVM lowering also in the
  * body of an unrolled loop of zero trips, which it does not lower, directly in
- * that body or in an scf.if there.
+ * that body or in an scf.if there. An scf.if has exactly one condition and one
+ * region, its then region (rocke_i_scf_if_error), refused otherwise before
+ * either is read.
  * tests/core/test_scf_if_else_results.py and tests/core/test_scf_for_yields.py
  * cover the Python engine and both engines' lowering texts;
  * tests/core/test_packed_only.py covers both builders' result-type order.
@@ -782,12 +785,16 @@ void a_loop_whose_iter_args_metadata_is_malformed_is_refused()
 /* A raw value (rocke_i_value_named given no type) has no type, and a raw op
  * given no result types leaves its results so. A loop whose init operand,
  * result or closing yield has no type is refused by the verifier and both
- * lowerings, with the Python engine's ValueError and text, before the missing
- * type is read. A raw value has no defining op either, so the verifier also
- * reports it out of scope; the lowerings meet the loop rule first. */
+ * lowerings, with the Python engine's TypeError (as an if/else value with no
+ * type is) and text, before the missing type is read; a closing yield with no
+ * type is refused in the body of an unrolled loop of zero trips too, which the
+ * LLVM lowering does not lower. A raw value has no defining op either, so the
+ * verifier also reports it out of scope; the lowerings meet the loop rule
+ * first. */
 void a_loop_value_with_no_type_is_refused()
 {
     const std::string out_of_scope = "operand '%untyped' used before definition / out of scope\n";
+    const std::string untyped_yield = "scf.for body yield 0 failed - type=None, expected i32";
     {
         Kernel k("loop_untyped_init");
         rocke_op_t* loop_op = nullptr;
@@ -804,7 +811,7 @@ void a_loop_value_with_no_type_is_refused()
         const std::string message
             = "scf.for init operand 0 failed - type=None, expected an IR type";
         check_refused_reporting(k,
-                                ROCKE_ERR_VALUE,
+                                ROCKE_ERR_TYPE,
                                 message,
                                 out_of_scope + message + "\n",
                                 "loop with an init operand with no type");
@@ -816,7 +823,7 @@ void a_loop_value_with_no_type_is_refused()
         rocke_b_ret(&k.b);
         loop_op->results[0]->type = nullptr;
         check_refused(k,
-                      ROCKE_ERR_VALUE,
+                      ROCKE_ERR_TYPE,
                       "scf.for result 0 failed - type=None, expected i32",
                       "loop with a result with no type");
     }
@@ -831,12 +838,37 @@ void a_loop_value_with_no_type_is_refused()
             },
             false);
         rocke_b_ret(&k.b);
-        const std::string message = "scf.for body yield 0 failed - type=None, expected i32";
         check_refused_reporting(k,
-                                ROCKE_ERR_VALUE,
-                                message,
-                                message + "\n" + out_of_scope,
+                                ROCKE_ERR_TYPE,
+                                untyped_yield,
+                                untyped_yield + "\n" + out_of_scope,
                                 "loop yield of a value with no type");
+    }
+    {
+        Kernel k("zero_trip_loop_untyped_yield");
+        k.build_carrying_loop(0, true, [&k](const rocke_for_t&) {
+            /* Names of its own: a nested loop cannot reuse the outer loop's. */
+            const rocke_iter_arg_t carry = {"x", k.lane};
+            const rocke_for_t inner = rocke_b_scf_for_iter(&k.b,
+                                                           rocke_b_const_i32(&k.b, 0),
+                                                           rocke_b_const_i32(&k.b, 2),
+                                                           rocke_b_const_i32(&k.b, 1),
+                                                           &carry,
+                                                           1,
+                                                           "j",
+                                                           false,
+                                                           true);
+            rocke_b_region_enter(&k.b, inner.body);
+            rocke_value_t* untyped = rocke_i_value_named(&k.b, "%untyped", nullptr);
+            rocke_b_scf_yield(&k.b, &untyped, 1);
+            rocke_b_region_leave(&k.b);
+        });
+        rocke_b_ret(&k.b);
+        check_refused_reporting(k,
+                                ROCKE_ERR_TYPE,
+                                untyped_yield,
+                                untyped_yield + "\n" + out_of_scope,
+                                "zero-trip loop, loop yield of a value with no type");
     }
 }
 
@@ -1058,6 +1090,163 @@ void an_if_else_with_missing_branches_is_refused()
     check_refused(k, ROCKE_ERR_VALUE, message, "missing branches");
 }
 
+/* The lowerings read only an scf.if's first region, so serialized IR with no
+ * then region, or with a second one that would be dropped unchecked, is
+ * refused: the parser reads it, and the verifier and both lowerings refuse the
+ * parsed scf.if. An scf.if made raw with no regions array has a NULL then
+ * region, which counts as missing, also in the body of an unrolled loop of
+ * zero trips, which the LLVM lowering does not lower. */
+void an_scf_if_without_exactly_one_then_region_is_refused()
+{
+    const std::string empty_then = "      region @then {\n      }\n";
+    const struct
+    {
+        std::string regions;
+        int count;
+    } cases[] = {{"", 0}, {empty_then + empty_then, 2}};
+    for(const auto& regions_case : cases)
+    {
+        Kernel built("if_regions");
+        rocke_if_t branch = rocke_b_scf_if(
+            &built.b, rocke_b_cmp_lt(&built.b, built.lane, rocke_b_const_i32(&built.b, 8)));
+        rocke_b_region_enter(&built.b, branch.then_region);
+        rocke_b_region_leave(&built.b);
+        rocke_b_ret(&built.b);
+        std::string text = built.serialized();
+        const size_t then_at = text.find(empty_then);
+        if(then_at == std::string::npos)
+        {
+            fprintf(
+                stderr, "FAIL: no empty then region in the serialized scf.if:\n%s\n", text.c_str());
+            std::exit(1);
+        }
+        text.replace(then_at, empty_then.size(), regions_case.regions);
+        Kernel parsed(Kernel::from_text{text});
+        const std::string count_text = std::to_string(regions_case.count);
+        const rocke_region_t* body = rocke_ir_builder_kernel(&parsed.b)->body;
+        int if_regions = -1;
+        for(int i = 0; i < body->num_ops; i++)
+        {
+            if(body->ops[i]->opcode == ROCKE_OP_SCF_IF)
+                if_regions = body->ops[i]->num_regions;
+        }
+        check(if_regions == regions_case.count,
+              "the parsed scf.if holds " + count_text + " regions");
+        check_refused(parsed,
+                      ROCKE_ERR_VALUE,
+                      "scf.if: expected 1 then region, got " + count_text,
+                      "scf.if with " + count_text + " regions");
+    }
+
+    const std::string null_then_message = "scf.if: expected 1 then region, got 0";
+    Kernel raw("if_null_then");
+    rocke_value_t* cond = rocke_b_cmp_lt(&raw.b, raw.lane, rocke_b_const_i32(&raw.b, 8));
+    const rocke_op_t* if_op = rocke_i_op(
+        &raw.b, ROCKE_OP_SCF_IF, &cond, 1, nullptr, 0, nullptr, nullptr, 1, "v", nullptr);
+    rocke_b_ret(&raw.b);
+    check(if_op != nullptr && if_op->num_regions == 1 && if_op->regions[0] == nullptr,
+          "raw scf.if should leave its then region NULL");
+    check_refused(raw, ROCKE_ERR_VALUE, null_then_message, "NULL then region");
+
+    Kernel zero_trip("zero_trip_if_null_then");
+    zero_trip.build_carrying_loop(0, true, [&zero_trip](const rocke_for_t& loop) {
+        rocke_value_t* loop_cond = rocke_b_cmp_lt(&zero_trip.b, loop.iv, zero_trip.lane);
+        rocke_i_op(&zero_trip.b,
+                   ROCKE_OP_SCF_IF,
+                   &loop_cond,
+                   1,
+                   nullptr,
+                   0,
+                   nullptr,
+                   nullptr,
+                   1,
+                   "v",
+                   nullptr);
+    });
+    rocke_b_ret(&zero_trip.b);
+    check_refused(zero_trip,
+                  ROCKE_ERR_VALUE,
+                  null_then_message,
+                  "NULL then region in an unrolled loop of zero trips");
+}
+
+/* The lowerings read an scf.if's one condition, so serialized IR with none or
+ * two is refused: the parser reads it, and the verifier and both lowerings
+ * refuse the parsed scf.if before reading the condition. An scf.if made raw
+ * with no condition is refused too, and one with none or two in the body of an
+ * unrolled loop of zero trips, which the LLVM lowering does not lower. */
+void an_scf_if_without_exactly_one_condition_is_refused()
+{
+    const std::string message = "scf.if expects exactly 1 condition operand";
+    for(const int count : {0, 2})
+    {
+        Kernel built("if_conditions");
+        rocke_value_t* cond = rocke_b_cmp_lt(&built.b, built.lane, rocke_b_const_i32(&built.b, 8));
+        rocke_if_t branch = rocke_b_scf_if(&built.b, cond);
+        rocke_b_region_enter(&built.b, branch.then_region);
+        rocke_b_region_leave(&built.b);
+        rocke_b_ret(&built.b);
+        std::string text = built.serialized();
+        const std::string cond_name = cond->name;
+        const std::string one_condition = "scf.if ( " + cond_name + " )";
+        const size_t condition_at = text.find(one_condition);
+        if(condition_at == std::string::npos)
+        {
+            fprintf(stderr, "FAIL: no one-condition scf.if in:\n%s\n", text.c_str());
+            std::exit(1);
+        }
+        const std::string conditions
+            = count == 0 ? "scf.if (  )" : "scf.if ( " + cond_name + ", " + cond_name + " )";
+        text.replace(condition_at, one_condition.size(), conditions);
+        Kernel parsed(Kernel::from_text{text});
+        const std::string count_text = std::to_string(count);
+        const rocke_region_t* body = rocke_ir_builder_kernel(&parsed.b)->body;
+        int if_conditions = -1;
+        for(int i = 0; i < body->num_ops; i++)
+        {
+            if(body->ops[i]->opcode == ROCKE_OP_SCF_IF)
+                if_conditions = body->ops[i]->num_operands;
+        }
+        check(if_conditions == count, "the parsed scf.if has " + count_text + " conditions");
+        check_refused(
+            parsed, ROCKE_ERR_VALUE, message, "scf.if with " + count_text + " conditions");
+    }
+
+    Kernel raw("if_no_condition");
+    rocke_region_t* then_region = rocke_i_new_region(&raw.b, "then");
+    rocke_i_op(
+        &raw.b, ROCKE_OP_SCF_IF, nullptr, 0, nullptr, 0, nullptr, &then_region, 1, "v", nullptr);
+    rocke_b_ret(&raw.b);
+    check_refused(raw, ROCKE_ERR_VALUE, message, "raw scf.if with no condition");
+
+    for(const int count : {0, 2})
+    {
+        Kernel zero_trip("zero_trip_if_conditions");
+        zero_trip.build_carrying_loop(0, true, [&zero_trip, count](const rocke_for_t& loop) {
+            rocke_value_t* loop_cond = rocke_b_cmp_lt(&zero_trip.b, loop.iv, zero_trip.lane);
+            rocke_value_t* conditions[] = {loop_cond, loop_cond};
+            rocke_region_t* loop_then = rocke_i_new_region(&zero_trip.b, "then");
+            rocke_i_op(&zero_trip.b,
+                       ROCKE_OP_SCF_IF,
+                       conditions,
+                       count,
+                       nullptr,
+                       0,
+                       nullptr,
+                       &loop_then,
+                       1,
+                       "v",
+                       nullptr);
+        });
+        rocke_b_ret(&zero_trip.b);
+        check_refused(zero_trip,
+                      ROCKE_ERR_VALUE,
+                      message,
+                      "scf.if with " + std::to_string(count)
+                          + " conditions in an unrolled loop of zero trips");
+    }
+}
+
 /* An if/else result or yielded value with no type is refused, as Python
  * refuses one, with a TypeError, before the missing type is read: by the C
  * builder given a NULL result type, and, past the builder, by the rule, the
@@ -1179,6 +1368,8 @@ int main()
     an_unrolled_loop_refuses_its_body_before_its_carried_types();
     well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
+    an_scf_if_without_exactly_one_then_region_is_refused();
+    an_scf_if_without_exactly_one_condition_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();
     an_if_else_value_with_no_type_is_refused();
     if(g_failures)

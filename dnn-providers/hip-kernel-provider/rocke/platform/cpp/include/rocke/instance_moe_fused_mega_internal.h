@@ -125,7 +125,7 @@ typedef struct rocke_moe_mega_build_ctx
     const rocke_type_t* storage_dtype; /* _storage_dtype(u_gu)          */
 
     /* =============================================================== *
-     * (1) kernel params (BUILD_SPEC Section 3.1) -- one Value per param.
+     * (1) kernel params -- one Value per param.
      *     A/WGate/WUp/WDown are REBOUND in the prologue to their per-expert byte
      *     base (the Python `WGate = _b_base(WGate, stride_b_gate)` shadowing);
      *     the fields below hold the CURRENT (post-rebind) Values, matching what

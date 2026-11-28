@@ -14,7 +14,7 @@ tools: Read,Edit,Bash,Grep,Glob,Agent
 # LDS Optimization (CK DSL)
 
 Diagnose and fix LDS (shared memory) performance issues in CK DSL kernels
-on AMD CDNA GPUs (MI300X/MI308/MI350).
+on AMD CDNA GPUs (gfx942 / gfx950).
 
 ---
 
@@ -33,7 +33,7 @@ Run `/kernel-trace-analysis` first. Apply this skill when the trace shows:
 
 ## LDS Architecture (Hardware Reference)
 
-### CDNA3 (gfx942 - MI300X)
+### CDNA3 (gfx942)
 
 - LDS size: **64 KB per CU**
 - LDS banks: **32 banks**, each **4 bytes wide**
@@ -41,7 +41,7 @@ Run `/kernel-trace-analysis` first. Apply this skill when the trace shows:
 - Peak throughput: **128 bytes/cycle**
 - LDS latency: **~20-40 cycles** (async, hidden if enough work between write and read)
 
-### CDNA4 (gfx950 - MI350/MI355X)
+### CDNA4 (gfx950)
 
 - LDS size: **160 KB per CU** (2.5× larger)
 - LDS banks: **64 banks**, each **4 bytes wide**
@@ -749,7 +749,7 @@ spec = GemmSpec(
 
 ## Architecture-Specific Recommendations
 
-### gfx942 (MI300X) - 64KB LDS
+### gfx942 - 64KB LDS
 
 **Strategy**: Minimize LDS usage, prefer XOR swizzle
 
@@ -767,7 +767,7 @@ spec = GemmSpec(
 - Try different tile shapes (e.g., 64×256×16 instead of 128×128×16)
 - Switch to async copy to reduce LDS pressure
 
-### gfx950 (MI350/MI355X) - 160KB LDS
+### gfx950 - 160KB LDS
 
 **Strategy**: Use padding swizzle for simplicity
 
@@ -857,7 +857,7 @@ From empirical measurements (ResNet50 conv3_1, gfx950):
 
 ## See Also
 
-- `.claude/OPTIMIZATION_RUNBOOK.md` Section 6.3-6.4 - LDS theory and swizzle patterns
+- `dsl_docs/optimization/optimization_runbook.md` Section 6.3-6.4 - LDS theory and swizzle patterns
 - `/empirical-case-studies` Case Study 2 - XOR vs Padding performance data (gfx950)
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis

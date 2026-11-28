@@ -57,9 +57,11 @@ _LIB_ROOT = str(Path(__file__).resolve().parent.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
+from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir_golden import (  # noqa: E402 -- library root pinned above
     GOLDEN_FLAVORS,
     check_golden_flavors,
+    drift_hint,
     golden_document,
     golden_main,
     lower_golden_case,
@@ -70,6 +72,8 @@ from rocke.core.ir_golden import check_golden as _check_golden  # noqa: E402
 from rocke.tests.arch_marks import arch_specific  # noqa: E402
 
 _GOLDEN = Path(__file__).resolve().parent / "golden" / "conv_representative_ir"
+# This corpus's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "conv"
 
 
 # The platform harness's lowering, (record, llvm), so
@@ -4972,8 +4976,15 @@ def pytest_generate_tests(metafunc):
     # One test per LLVM flavor, as the platform golden test does, so each
     # flavor gets its own timeout. A hook rather than a decorator keeps pytest
     # out of the --check / --write script path.
+    # Each flavor's check costs a few seconds; the cost mark lets the CI
+    # shards share them (rocke.tests.ctest_shard).
     if "flavor" in metafunc.fixturenames:
-        metafunc.parametrize("flavor", GOLDEN_FLAVORS)
+        import pytest
+
+        cost = pytest.mark.rocke_shard_cost(4)
+        metafunc.parametrize(
+            "flavor", [pytest.param(flavor, marks=cost) for flavor in GOLDEN_FLAVORS]
+        )
 
 
 def test_conv_ir_golden_holds_every_llvm_flavor():
@@ -4984,7 +4995,12 @@ def test_conv_ir_golden_holds_every_llvm_flavor():
     if not _GOLDEN.is_dir():
         pytest.skip("conv golden fixture missing; generate with --write")
     errors = check_golden_flavors(_GOLDEN)
-    assert not errors, "conv golden flavor set is wrong:\n  " + "\n  ".join(errors)
+    assert not errors, (
+        "conv golden flavor set is wrong:\n  "
+        + "\n  ".join(errors)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
+    )
 
 
 def test_conv_ir_matches_golden(flavor):
@@ -4993,11 +5009,17 @@ def test_conv_ir_matches_golden(flavor):
     if not _GOLDEN.is_dir():
         pytest.skip("conv golden fixture missing; generate with --write")
     drift = check_golden(_GOLDEN, flavor)
-    assert not drift, f"conv IR drift vs golden at {flavor}:\n  " + "\n  ".join(drift)
+    assert not drift, (
+        f"conv IR drift vs golden at {flavor}:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + drift_hint(_GOLDEN_NAME, drift)
+    )
 
 
 def main():
     golden_main(
+        golden_name=_GOLDEN_NAME,
         cases=cases,
         write_golden=write_golden,
         check_golden=check_golden,

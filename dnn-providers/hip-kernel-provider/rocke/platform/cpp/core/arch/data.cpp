@@ -1176,6 +1176,80 @@ static const rocke_ati_mma_frag_row_t* rocke_ati_mma_frag_row_for(const char* op
  * Rows name source descriptors and the independent result explicitly.
  */
 
+/* A batched MFMA 4x4x4 row (16 independent 4 x 4 x 4 blocks) without lane maps,
+ * as _MMA_FRAGMENT_INFO gives it no maps: four `ab` values of A and of B and
+ * four fp32 accumulator / result values per lane, wave64. */
+static constexpr rocke_mma_op_t mfma_4x4x4_row(const char* ab, const char* op_id)
+{
+    return rocke_mma_op_t{.family = "mma",
+                          .srcs = {{.dtype = ab,
+                                    .frag_len = 4,
+                                    .layout = NULL,
+                                    .scale_dtype = NULL,
+                                    .scale_block_size = ROCKE_MMA_SCALE_NONE,
+                                    .scale_frag_len = 0,
+                                    .scale_layout = NULL},
+                                   {.dtype = ab,
+                                    .frag_len = 4,
+                                    .layout = NULL,
+                                    .scale_dtype = NULL,
+                                    .scale_block_size = ROCKE_MMA_SCALE_NONE,
+                                    .scale_frag_len = 0,
+                                    .scale_layout = NULL},
+                                   {.dtype = "fp32",
+                                    .frag_len = 4,
+                                    .layout = NULL,
+                                    .scale_dtype = NULL,
+                                    .scale_block_size = ROCKE_MMA_SCALE_NONE,
+                                    .scale_frag_len = 0,
+                                    .scale_layout = NULL}},
+                          .dst = {.dtype = "fp32", .frag_len = 4, .layout = NULL},
+                          .m = 4,
+                          .n = 4,
+                          .k = 4,
+                          .op_id = op_id,
+                          .wave_size = 64,
+                          .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
+                          .emulation_physical_op_id = NULL};
+}
+
+/* The batched MFMA f64 4x4x4 row (four independent 4 x 4 x 4 blocks stacked
+ * along rows): one fp64 value of A, of B and of the accumulator / result per
+ * lane, wave64. Every target that lists the atom shares these lane maps. */
+static constexpr rocke_mma_op_t mfma_f64_4x4x4_row()
+{
+    return rocke_mma_op_t{.family = "mma",
+                          .srcs = {{.dtype = "fp64",
+                                    .frag_len = 1,
+                                    .layout = &lm_mfma_16x16x4_a,
+                                    .scale_dtype = NULL,
+                                    .scale_block_size = ROCKE_MMA_SCALE_NONE,
+                                    .scale_frag_len = 0,
+                                    .scale_layout = NULL},
+                                   {.dtype = "fp64",
+                                    .frag_len = 1,
+                                    .layout = &lm_mfma_4x4x4_f64_b,
+                                    .scale_dtype = NULL,
+                                    .scale_block_size = ROCKE_MMA_SCALE_NONE,
+                                    .scale_frag_len = 0,
+                                    .scale_layout = NULL},
+                                   {.dtype = "fp64",
+                                    .frag_len = 1,
+                                    .layout = &lm_mfma_4x4x4_f64_src2,
+                                    .scale_dtype = NULL,
+                                    .scale_block_size = ROCKE_MMA_SCALE_NONE,
+                                    .scale_frag_len = 0,
+                                    .scale_layout = NULL}},
+                          .dst = {.dtype = "fp64", .frag_len = 1, .layout = &lm_mfma_4x4x4_f64_dst},
+                          .m = 4,
+                          .n = 4,
+                          .k = 4,
+                          .op_id = "mfma_f64_4x4x4_f64",
+                          .wave_size = 64,
+                          .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
+                          .emulation_physical_op_id = NULL};
+}
+
 /* ----------------------------- gfx908 (CDNA1) ---------------------------- */
 /* wave64, 64 KB LDS, no async_lds, no fp8/bf8, f64 or _1k bf16 MFMA; separate
  * 256-entry VGPR and AGPR files. f32, f16, i8 and (without the _1k suffix)
@@ -1421,10 +1495,11 @@ static const rocke_mma_op_t k_mma_gfx908[] = {
      .wave_size = 64,
      .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
      .emulation_physical_op_id = NULL},
+    mfma_4x4x4_row("fp16", "mfma_f32_4x4x4_f16"),
 };
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
-/* MI200 (Aldebaran): wave64, 64 KB LDS, no async_lds, no fp8/bf8 native MFMA.
+/* gfx90a: wave64, 64 KB LDS, no async_lds, no fp8/bf8 native MFMA.
  * bf16 32x32x8 is hardware-supported (same MFMA atom dimensions as fp16 32x32x8;
  * bf16 arrived in CDNA2 with the same layout maps as fp16 for those shapes). */
 static const rocke_mma_op_t k_mma_gfx90a[] = {
@@ -1759,6 +1834,9 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
      .wave_size = 64,
      .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
      .emulation_physical_op_id = NULL},
+    mfma_f64_4x4x4_row(),
+    mfma_4x4x4_row("fp16", "mfma_f32_4x4x4_f16"),
+    mfma_4x4x4_row("bf16", "mfma_f32_4x4x4_bf16"),
 };
 
 /* ----------------------------- gfx942 (CDNA) ----------------------------- */
@@ -1914,36 +1992,7 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      .wave_size = 64,
      .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
      .emulation_physical_op_id = NULL},
-    {.family = "mma",
-     .srcs = {{.dtype = "fp64",
-               .frag_len = 1,
-               .layout = &lm_mfma_16x16x4_a,
-               .scale_dtype = NULL,
-               .scale_block_size = ROCKE_MMA_SCALE_NONE,
-               .scale_frag_len = 0,
-               .scale_layout = NULL},
-              {.dtype = "fp64",
-               .frag_len = 1,
-               .layout = &lm_mfma_4x4x4_f64_b,
-               .scale_dtype = NULL,
-               .scale_block_size = ROCKE_MMA_SCALE_NONE,
-               .scale_frag_len = 0,
-               .scale_layout = NULL},
-              {.dtype = "fp64",
-               .frag_len = 1,
-               .layout = &lm_mfma_4x4x4_f64_src2,
-               .scale_dtype = NULL,
-               .scale_block_size = ROCKE_MMA_SCALE_NONE,
-               .scale_frag_len = 0,
-               .scale_layout = NULL}},
-     .dst = {.dtype = "fp64", .frag_len = 1, .layout = &lm_mfma_4x4x4_f64_dst},
-     .m = 4,
-     .n = 4,
-     .k = 4,
-     .op_id = "mfma_f64_4x4x4_f64",
-     .wave_size = 64,
-     .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
-     .emulation_physical_op_id = NULL},
+    mfma_f64_4x4x4_row(),
     {.family = "mma",
      .srcs = {{.dtype = "fp16",
                .frag_len = 4,
@@ -2364,6 +2413,8 @@ static const rocke_mma_op_t k_mma_gfx942[] = {
      .wave_size = 64,
      .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
      .emulation_physical_op_id = NULL},
+    mfma_4x4x4_row("fp16", "mfma_f32_4x4x4_f16"),
+    mfma_4x4x4_row("bf16", "mfma_f32_4x4x4_bf16"),
 };
 
 /* ----------------------------- gfx950 (CDNA) ----------------------------- */
@@ -3683,6 +3734,7 @@ static constexpr rocke_mma_op_t k_mma_gfx950_listed[] = {
      .wave_size = 64,
      .emulation_recipe = ROCKE_MMA_EMULATION_NONE,
      .emulation_physical_op_id = NULL},
+    mfma_f64_4x4x4_row(),
     {.family = "mma",
      .srcs = {{.dtype = "fp8e4m3",
                .frag_len = 8,
@@ -3936,6 +3988,8 @@ static constexpr rocke_mma_op_t k_mma_gfx950_listed[] = {
      .wave_size = 64,
      .emulation_recipe = ROCKE_MMA_EMULATION_BF16X3,
      .emulation_physical_op_id = "mfma_f32_32x32x16_bf16"},
+    mfma_4x4x4_row("fp16", "mfma_f32_4x4x4_f16"),
+    mfma_4x4x4_row("bf16", "mfma_f32_4x4x4_bf16"),
 };
 
 /* gfx950 f8f6f4 operand maps: 32 values per lane in K runs of 16 (8-bit
@@ -5624,6 +5678,9 @@ static const rocke_ati_gemm_caps_t k_gemm_gfx1250 = {
     .wmma_cshuffle = true,
     .cshuffle_lds_aliased = true,
 };
+static const rocke_ati_gemm_caps_t k_gemm_gfx950 = {
+    .cshuffle_lds_aliased = true,
+};
 
 const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic, NULL, &k_gemm_rdna},
@@ -5643,7 +5700,7 @@ const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx908", &k_target_gfx908},
     {"gfx90a", &k_target_gfx90a},
     {"gfx942", &k_target_gfx942},
-    {"gfx950", &k_target_gfx950},
+    {"gfx950", &k_target_gfx950, NULL, &k_gemm_gfx950},
     {NULL, NULL}, /* terminator */
 };
 

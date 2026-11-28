@@ -27,13 +27,16 @@ from __future__ import annotations
 import enum
 import operator
 import os
+import re
 import sys
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from math import gcd as _gcd
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Optional
 
 from .arch import target as _arch
-from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
+from .cxx_keywords import CXX_KEYWORDS
+from .dtypes import UNSIGNED_INTEGER_DTYPES, DTypeCategory, dtype_info, dtype_names
 from .intexpr import IntExpr, relation_json
 from .param_facts import (
     FACT_WORDS,
@@ -308,6 +311,7 @@ _SMEM_VECTOR_ELEMENTS = (
     "i32",
     "tf32",
     "f64",
+    "i64",
     "fp8e4m3",
     "bf8e5m2",
     "i8",
@@ -320,6 +324,117 @@ def _require_smem_vector_element(access: str, elem_name: str) -> None:
         raise ValueError(
             f"{access} supports {' / '.join(_SMEM_VECTOR_ELEMENTS)}, got {elem_name}"
         )
+
+
+def _smem_store_lanes_error(
+    store: str, value_type: Type, width: int, width_param: str
+) -> str | None:
+    """The error for an LDS ``store`` of ``width`` elements whose value has
+    another lane count (a scalar has one), or None when they match.
+
+    The lowerings store the value as a ``width``-element vector, so a value of
+    any other lane count would be stored as a type it does not have. The
+    builder names the width ``n`` and serialized IR names it ``vec``
+    (``width_param``); the C++ engine (``rocke_i_smem_store_lanes_error``)
+    reports the same texts.
+    """
+    lanes = lane_count(value_type)
+    if lanes != width:
+        return f"{store} failed - lanes={lanes}, expected {width_param}={width}"
+    return None
+
+
+def _vec_width(op: Op) -> int | None:
+    """The ``vec`` attribute of the built LDS vector op ``op``, its width in
+    elements, or None when it has none or it is not a plain integer."""
+    width = op.attrs.get("vec")
+    if not isinstance(width, int) or isinstance(width, bool):
+        return None
+    return width
+
+
+def _smem_store_vN_op_error(op: Op) -> str | None:
+    """:func:`_smem_store_lanes_error` for a built ``tile.smem_store_vN`` op,
+    whose last operand is the stored value and whose ``vec`` attribute is its
+    width: serialized IR reaches the verifier and the lowerings without passing
+    the builder, so they all use this rule. An op without operands or without
+    an integer ``vec`` has no width to compare here (C++ engine:
+    ``rocke_i_smem_store_vN_op_error``)."""
+    width = _vec_width(op)
+    if not op.operands or width is None:
+        return None
+    return _smem_store_lanes_error(op.name, op.operands[-1].type, width, "vec")
+
+
+def _type_name_message(what: str, param: str, type_name: str, expected: str) -> str:
+    """The text of every refusal of an operand by its type that the IR rules
+    make: ``what`` failed because its ``param`` is ``type_name`` where
+    ``expected`` (prose) is required. Each such refusal is a ``TypeError``
+    (``ROCKE_ERR_TYPE``); the C++ engine's ``rocke_i_type_name_message``
+    writes the same text."""
+    return f"{what} failed - {param}={type_name!r}, expected {expected}"
+
+
+def _value_element_error(
+    access: str, value_type: object, value_index: int, expected: str
+) -> str | None:
+    """The error for an LDS store ``access`` whose value (operand
+    ``value_index``, of type ``value_type``) is not a scalar or vector of
+    ``expected`` elements, or None when it is. The store records, and
+    its lowerings emit, an access of ``expected`` elements, so the callers
+    raise it as a ``TypeError``. A value with no type is refused first, with
+    the operand rule's text (:func:`_untyped_value_message`), before its
+    element type is read. The C++ engine (``rocke_i_value_element_error``)
+    reports the same texts."""
+    untyped = _untyped_value_message(
+        value_type, f"{access} operand", value_index, "an IR type"
+    )
+    if untyped is not None:
+        return untyped
+    element = element_type(value_type).name
+    if element == expected:
+        return None
+    return _type_name_message(access, "value element type", element, expected)
+
+
+def _smem_store_vN_f32_error(
+    store: str,
+    value_type: object,
+    value_index: int,
+    width: int | None,
+    width_param: str,
+) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of an f32 epilogue LDS ``store``
+    (``smem_store_vN_f32``) of its operand ``value_index``, a value of type
+    ``value_type`` and ``width`` lanes, or None when it is sound: the value is
+    typed and holds f32 (:func:`_value_element_error`, a ``TypeError``) and
+    has ``width`` lanes
+    (:func:`_smem_store_lanes_error`, a ``ValueError``; not checked when
+    ``width`` is None). The builder names the width ``n`` and serialized IR
+    ``vec`` (``width_param``). The C++ engine
+    (``rocke_i_smem_store_vN_f32_error``) returns the matching status and text.
+    """
+    error = _value_element_error(store, value_type, value_index, "f32")
+    if error:
+        return TypeError(error)
+    if width is None:
+        return None
+    error = _smem_store_lanes_error(store, value_type, width, width_param)
+    return ValueError(error) if error else None
+
+
+def _smem_store_vN_f32_op_error(op: Op) -> TypeError | ValueError | None:
+    """:func:`_smem_store_vN_f32_error` for a built ``tile.smem_store_vN_f32``
+    op, whose last operand is the stored value and whose ``vec`` attribute is
+    its width. Serialized IR reaches the verifier and the lowerings without
+    passing the builder, so they all use this rule (C++ engine:
+    ``rocke_i_smem_store_vN_f32_op_error``)."""
+    if not op.operands:
+        return None
+    value_index = len(op.operands) - 1
+    return _smem_store_vN_f32_error(
+        op.name, op.operands[value_index].type, value_index, _vec_width(op), "vec"
+    )
 
 
 def _is_flag_ptr(t: "Type") -> bool:
@@ -335,45 +450,460 @@ def _is_flag_ptr(t: "Type") -> bool:
 # ``arith.cmp`` predicates: the signed orderings, equality, and one unsigned
 # ordering (``ult``, which reads both operands as unsigned at their width).
 _INT_CMP_PREDICATES = ("lt", "le", "gt", "ge", "eq", "ne", "ult")
+# The integer element types: the integers and ``i1``, the types LLVM's integer
+# ops (``icmp``, the bitwise ops and shifts) are defined on. ``arith.cmp`` and
+# ``vector.cmp`` compare them (floats compare with ``arith.fcmp``), and the
+# bitwise ops and shifts (_INTEGER_ELEMENT_OPS) take them. The C++ engine's
+# twin is ``rocke_i_is_integer_type_name``.
+_INTEGER_ELEMENT_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
+    DTypeCategory.PREDICATE
+)
+# The operand types ``arith.fcmp`` compares: the float types the IR computes in
+# (LLVM half, bfloat, float and double). fp8 and tf32 values are carried in
+# integer storage, so an fcmp of them would compare integers. The C++ engine's
+# twin is ``k_fcmp_operand_types``.
+_FCMP_OPERAND_TYPES = ("f16", "bf16", "f32", "f64")
+# ``vector.cmp`` predicates: the signed orderings and equality, lane by lane
+# (unsigned elements compare as unsigned). It has no unsigned form.
+_VECTOR_CMP_PREDICATES = ("lt", "le", "gt", "ge", "eq", "ne")
+# ``arith.fcmp`` predicates: the ordered compares, ``ord`` (neither operand is
+# NaN) and ``uno`` (either is).
+_FCMP_PREDICATES = ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno")
 # ``arith.add`` overflow flag: ``nsw`` (no signed wrap, the default when the
 # attr is absent) or ``nuw`` (no unsigned wrap).
 _INT_ADD_WRAPS = ("nsw", "nuw")
 
 
-def _int_add_wrap_error(wrap: Any, operand_type: str) -> Optional[str]:
-    """The error for an ``arith.add`` ``wrap`` attr on operands of type
-    ``operand_type`` (a type name), or None when it is valid.
+def _missing_attr_message(op_name: str, key: str) -> str:
+    """The refusal of an ``op_name`` op without its required attr ``key``. The
+    verifier's required-attr check and the compare rules report it; the C++
+    engine's ``rocke_i_missing_attr_message`` writes the same text."""
+    return f"op {op_name!r} missing required attr {key!r}"
 
-    Absent (None) means ``nsw``. ``nuw`` is ``add_nuw``'s form, so it takes the
-    builder's operands: i32 or i64. The verifier and both lowerings use it, and
-    the C++ engine reports the same texts.
+
+def _string_attr_error(
+    attrs: Mapping[str, Any],
+    op_name: str,
+    key: str,
+    allowed: Sequence[str],
+    not_a_string: str,
+    *,
+    required: bool = False,
+) -> str | None:
+    """The error for the string attr ``key`` of an ``op_name`` op with
+    ``attrs``, or None when it is one of ``allowed``, or absent and not
+    ``required``.
+
+    ``not_a_string`` is the error for a value of another kind. The C++ engine's
+    ``string_attr_error`` is its twin; the width rule of the unsigned forms
+    (``nuw``, ``ult``) is its callers'.
     """
-    if wrap is None:
-        return None
-    if not isinstance(wrap, str):
-        return "arith.add: wrap must be the string 'nsw' or 'nuw'"
-    if wrap not in _INT_ADD_WRAPS:
-        return f"arith.add: unknown wrap '{wrap}'"
-    if wrap == "nuw" and operand_type not in ("i32", "i64"):
-        return f"arith.add: wrap 'nuw' needs i32 or i64 operands, got {operand_type}"
+    if key not in attrs:
+        return _missing_attr_message(op_name, key) if required else None
+    value = attrs[key]
+    if not isinstance(value, str):
+        return not_a_string
+    if value not in allowed:
+        return f"{op_name}: unknown {key} '{value}'"
     return None
 
 
-def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
-    """The error for an ``arith.cmp`` ``pred`` attr on operands of type
-    ``operand_type`` (a type name), or None when it is valid.
-
-    Absent (None) means ``lt``. ``ult`` is ``cmp_ult``'s form, so it takes the
-    builder's operands: i32 or i64. The C++ verifier reports the same texts.
+def _unsigned_form_width_error(
+    attrs: Mapping[str, Any],
+    op_name: str,
+    key: str,
+    unsigned_value: str,
+    operand_type: str,
+) -> str | None:
+    """The error for the unsigned form ``unsigned_value`` of the string attr
+    ``key`` in an ``op_name`` op's ``attrs`` (``arith.add``'s ``nuw``,
+    ``arith.cmp``'s ``ult``) on operands of type ``operand_type`` (a type
+    name), or None: the unsigned forms take the builders' operands, i32 or
+    i64. The C++ engine's ``unsigned_form_width_error`` writes the same text.
     """
-    if pred is None:
+    if attrs.get(key) != unsigned_value or operand_type in ("i32", "i64"):
         return None
-    if not isinstance(pred, str):
-        return "arith.cmp: pred must be a string"
-    if pred not in _INT_CMP_PREDICATES:
-        return f"arith.cmp: unknown pred '{pred}'"
-    if pred == "ult" and operand_type not in ("i32", "i64"):
-        return f"arith.cmp: pred 'ult' needs i32 or i64 operands, got {operand_type}"
+    return (
+        f"{op_name}: {key} '{unsigned_value}' needs i32 or i64 operands, "
+        f"got {operand_type}"
+    )
+
+
+def _int_add_wrap_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
+    """The error for the ``wrap`` attr in an ``arith.add`` op's ``attrs`` on
+    operands of type ``operand_type`` (a type name), or None when it is valid.
+
+    Absent means ``nsw``. ``nuw`` is ``add_nuw``'s form, so it takes the
+    builder's operands: i32 or i64. The verifier and both lowerings use it, and
+    the C++ engine reports the same texts.
+    """
+    error = _string_attr_error(
+        attrs,
+        "arith.add",
+        "wrap",
+        _INT_ADD_WRAPS,
+        "arith.add: wrap must be the string 'nsw' or 'nuw'",
+    )
+    if error:
+        return error
+    return _unsigned_form_width_error(attrs, "arith.add", "wrap", "nuw", operand_type)
+
+
+def _int_cmp_pred_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
+    """The error for the ``pred`` attr in an ``arith.cmp`` op's ``attrs`` on
+    operands of type ``operand_type`` (a type name), or None when it is valid:
+    one of the ``arith.cmp`` predicates (required), and ``ult``, ``cmp_ult``'s
+    form, only on the builder's operands, i32 or i64."""
+    error = _string_attr_error(
+        attrs,
+        "arith.cmp",
+        "pred",
+        _INT_CMP_PREDICATES,
+        "arith.cmp: pred must be a string",
+        required=True,
+    )
+    if error:
+        return error
+    return _unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type)
+
+
+# The ordinal names of an op's operands, as the operand rule's texts spell
+# them (_operand_types_error). The C++ engine's twin is k_operand_ordinals.
+_OPERAND_ORDINALS = ("first", "second", "third")
+
+
+def _operand_types_error(op_name: str, operand_types: Sequence[Type]) -> str | None:
+    """The error for an ``op_name`` op whose operands, of ``operand_types``,
+    do not all have the first one's type, naming the first that differs, or
+    None when they agree.
+
+    The binary ops, the compares and the lane-wise FMA take operands of one
+    type: their lowerings emit every operand at the first one's type (LLVM
+    ``icmp i32``, ``lshr i64`` and so on), so an i32 and an i64 would lower to
+    IR the compiler rejects. The builders refuse it as a ``TypeError``, and the
+    verifier reports it and every lowering refuses it for IR that did not come
+    through them: the same-type binary ops and the lane-wise FMA through
+    :func:`_operand_types_op_error`, the compares through their rules
+    (:func:`_int_cmp_error`, :func:`_vector_cmp_error`, :func:`_fcmp_error`).
+    The rule refuses an operand with no type, with
+    :func:`_untyped_value_message`'s text, before it reads any operand's type
+    (a rule that its caller applies first may still read one). It takes at
+    most :data:`_OPERAND_ORDINALS` operands and refuses more. The C++
+    engine's ``rocke_i_operand_types_error`` writes the same texts.
+    """
+    if len(operand_types) > len(_OPERAND_ORDINALS):
+        return (
+            f"{op_name} operand rule failed - operands={len(operand_types)}, "
+            f"expected at most {len(_OPERAND_ORDINALS)}"
+        )
+    for index, operand_type in enumerate(operand_types):
+        error = _untyped_value_message(
+            operand_type, f"{op_name} operand", index, "an IR type"
+        )
+        if error is not None:
+            return error
+    first_type = operand_types[0]
+    for index, operand_type in enumerate(operand_types[1:], start=1):
+        if operand_type != first_type:
+            return _type_name_message(
+                op_name,
+                f"{_OPERAND_ORDINALS[index]} operand type",
+                operand_type.name,
+                f"the first operand's type {first_type.name!r}",
+            )
+    return None
+
+
+def _refuse_operand_types(op_name: str, operands: Sequence["Value"]) -> None:
+    """Raise ``TypeError`` with :func:`_operand_types_error`'s text when the
+    ``operands`` of an ``op_name`` op do not all have one type."""
+    error = _operand_types_error(op_name, [operand.type for operand in operands])
+    if error:
+        raise TypeError(error)
+
+
+def _vector_operand_error(op_name: str, operand_type: Type) -> str | None:
+    """The error for a lane-wise ``op_name`` op (``vector.and``, say) whose
+    first operand, of ``operand_type``, is not a vector, or None. The builders
+    refuse it as a ``TypeError``; the C++ engine's
+    ``rocke_i_vector_operand_error`` writes the same text."""
+    if isinstance(operand_type, VectorType):
+        return None
+    return _type_name_message(
+        op_name, "first operand type", operand_type.name, "a vector type"
+    )
+
+
+def _int_cmp_error(
+    attrs: Mapping[str, Any], lhs_type: Type, rhs_type: Type
+) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of an ``arith.cmp`` op with
+    ``attrs`` on operands of ``lhs_type`` and ``rhs_type``, or None when it is
+    valid.
+
+    Its ``pred`` follows :func:`_int_cmp_pred_error` (a ``ValueError``); then
+    its operands have one type (:func:`_operand_types_error`; a
+    ``TypeError``), an integer or i1 (:data:`_INTEGER_ELEMENT_TYPES`; a
+    ``TypeError``). The builders, the verifier, both lowerings and the constant
+    folder use it, and the C++ engine (``rocke_i_cmp_error``) returns the
+    matching status and text.
+    """
+    error = _int_cmp_pred_error(attrs, lhs_type.name)
+    if error:
+        return ValueError(error)
+    error = _operand_types_error("arith.cmp", (lhs_type, rhs_type))
+    if error:
+        return TypeError(error)
+    if lhs_type.name not in _INTEGER_ELEMENT_TYPES:
+        return TypeError(
+            _type_name_message(
+                "arith.cmp",
+                "operand type",
+                lhs_type.name,
+                "an integer or i1 type (compare floats with fcmp)",
+            )
+        )
+    return None
+
+
+# The binary ops whose two operands and result have one type. IRBuilder builds
+# them so; for IR that did not come through it, the verifier reports operands
+# of different types and every lowering refuses them
+# (:func:`_operand_types_op_error`). The C++ engine's twin is
+# ``rocke_i_is_same_type_binary_op``.
+_SAME_TYPE_BINARY_OPS = frozenset(
+    {
+        "arith.add",
+        "arith.sub",
+        "arith.mul",
+        "arith.div",
+        "arith.mod",
+        "arith.fadd",
+        "arith.fsub",
+        "arith.fmul",
+        "arith.fdiv",
+        "arith.fmax",
+        "arith.fmin",
+        "arith.and",
+        "arith.or",
+        "arith.smax",
+        "arith.smin",
+        "arith.umax",
+        "arith.umin",
+        "arith.xor",
+        "arith.shl",
+        "arith.lshr",
+        "vector.add",
+        "vector.sub",
+        "vector.mul",
+        "vector.and",
+        "vector.or",
+        "vector.shl",
+        "vector.lshr",
+        "vector.smax",
+        "vector.smin",
+        "vector.max",
+    }
+)
+
+
+def _same_type_operand_count(op_name: str) -> int | None:
+    """How many operands, all of one type, an ``op_name`` op takes: two for
+    one of :data:`_SAME_TYPE_BINARY_OPS`, three for the lane-wise FMA
+    (``vector.fma``), or None for any other op. The C++ engine's twin is
+    ``rocke_i_same_type_operand_count``."""
+    if op_name in _SAME_TYPE_BINARY_OPS:
+        return 2
+    if op_name == "vector.fma":
+        return 3
+    return None
+
+
+def _operand_types_op_error(op: Op) -> str | None:
+    """:func:`_operand_types_error` for a built op that takes operands of one
+    type (:func:`_same_type_operand_count`), with that many operands, or None.
+    The verifier reports it and every lowering refuses it as a ``TypeError``
+    before it lowers an op, for IR that did not come through IRBuilder (C++
+    engine: ``rocke_i_operand_types_op_error``)."""
+    operand_count = _same_type_operand_count(op.name)
+    if operand_count is None or len(op.operands) != operand_count:
+        return None
+    return _operand_types_error(op.name, [operand.type for operand in op.operands])
+
+
+# The compares: two operands of one type and one i1 (or i1-vector) result.
+# The C++ engine's twin is ``rocke_i_is_compare_op``.
+_COMPARE_OPS = frozenset({"arith.cmp", "arith.fcmp", "vector.cmp"})
+
+
+def _operand_arity_op_error(op: Op) -> str | None:
+    """The error for a built op that takes operands of one type
+    (:func:`_same_type_operand_count`), or is one of :data:`_COMPARE_OPS`
+    (two operands), without that many operands and one result, or None. The
+    verifier reports it, and every lowering and the constant folder check it
+    before they read an operand it counts, for IR that did not come through
+    IRBuilder (a ``ValueError``; C++ engine: ``rocke_i_operand_arity_op_error``,
+    same text)."""
+    expected = 2 if op.name in _COMPARE_OPS else _same_type_operand_count(op.name)
+    if expected is None:
+        return None
+    if len(op.operands) == expected and len(op.results) == 1:
+        return None
+    return (
+        f"{op.name} failed - operands / results={len(op.operands)} / "
+        f"{len(op.results)}, expected {expected} / 1"
+    )
+
+
+# The bitwise ops and shifts. LLVM defines ``and`` / ``or`` / ``xor`` / ``shl`` /
+# ``lshr`` on integers only, and ``arith.not`` lowers to an ``xor`` with all
+# ones, so their element type must be an integer or ``i1``
+# (_integer_element_error). The C++ engine's twin is
+# ``rocke_i_is_integer_element_op``.
+_INTEGER_ELEMENT_OPS = frozenset(
+    {
+        "arith.and",
+        "arith.or",
+        "arith.xor",
+        "arith.not",
+        "arith.shl",
+        "arith.lshr",
+        "vector.and",
+        "vector.or",
+        "vector.shl",
+        "vector.lshr",
+    }
+)
+
+
+def _integer_element_error(op_name: str, operand_type: Type) -> str | None:
+    """The error for ``op_name``, one of :data:`_INTEGER_ELEMENT_OPS`, on
+    operands of ``operand_type``, or None when its element type is an integer
+    or ``i1``.
+
+    A float operand would lower to IR the compiler rejects. IRBuilder refuses
+    it when the op is built (:func:`_refuse_non_integer`); for IR that did not
+    come through IRBuilder, the verifier reports it and every lowering refuses
+    it (:func:`_integer_element_op_error`). The C++ engine's
+    ``rocke_i_integer_element_error`` reports the same text.
+    """
+    element = element_type(operand_type)
+    if element.name in _INTEGER_ELEMENT_TYPES:
+        return None
+    return _type_name_message(
+        op_name, "element type", element.name, "an integer or i1 type"
+    )
+
+
+def _refuse_non_integer(op_name: str, operand_type: Type) -> None:
+    """Raise ``TypeError`` with :func:`_integer_element_error`'s text when
+    ``op_name``'s operands of ``operand_type`` are not integers or ``i1``."""
+    error = _integer_element_error(op_name, operand_type)
+    if error:
+        raise TypeError(error)
+
+
+def _integer_element_op_error(op: Op) -> str | None:
+    """:func:`_integer_element_error` for a built op that is one of
+    :data:`_INTEGER_ELEMENT_OPS`, on its first operand, or None. IRBuilder
+    refuses such an op when it is built; the verifier reports this and every
+    lowering refuses it as a ``TypeError`` before it lowers an op, for IR that
+    did not come through it (C++ engine: ``rocke_i_integer_element_op_error``,
+    same text)."""
+    if op.name not in _INTEGER_ELEMENT_OPS or not op.operands:
+        return None
+    return _integer_element_error(op.name, op.operands[0].type)
+
+
+def _operand_rules_error(op: Op) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of a built op that breaks one of
+    the shared operand rules (arity, integer element, operand types), or None,
+    with the rules applied in one order.
+
+    The arity rule comes first (:func:`_operand_arity_op_error`; a
+    ``ValueError``), as the other rules read the operands it counts; then the
+    integer-element rule (:func:`_integer_element_op_error`) and the operand
+    rule (:func:`_operand_types_op_error`), each a ``TypeError``, in that order,
+    as IRBuilder checks them. Every lowering raises it before it lowers an op,
+    for IR that did not come through IRBuilder, and the constant folder does
+    not fold an op it refuses. The C++ engine's ``rocke_i_operand_rules_error``
+    returns the matching status and text.
+    """
+    arity_error = _operand_arity_op_error(op)
+    if arity_error:
+        return ValueError(arity_error)
+    operand_error = _integer_element_op_error(op) or _operand_types_op_error(op)
+    return TypeError(operand_error) if operand_error else None
+
+
+def _vector_cmp_error(
+    attrs: Mapping[str, Any], lhs_type: Type, rhs_type: Type
+) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of a ``vector.cmp`` op with
+    ``attrs`` on operands of ``lhs_type`` and ``rhs_type``, or None when it is
+    valid.
+
+    Its ``pred`` is absent (``lt``) or one of the ``vector.cmp`` predicates (a
+    ``ValueError``); then its operands have one type
+    (:func:`_operand_types_error`; a ``TypeError``), whose lanes are integers
+    or i1, as it lowers to ``icmp`` (:func:`_integer_element_error`; a
+    ``TypeError``). The builder, the verifier and both lowerings use it, and
+    the C++ engine (``rocke_i_vector_cmp_error``) returns the matching status
+    and text. A TF32 vector meets the TF32 rule first in the verifier and the
+    lowerings, which check it before any op rule.
+    """
+    error = _string_attr_error(
+        attrs,
+        "vector.cmp",
+        "pred",
+        _VECTOR_CMP_PREDICATES,
+        "vector.cmp: pred must be a string",
+    )
+    if error:
+        return ValueError(error)
+    error = _operand_types_error("vector.cmp", (lhs_type, rhs_type)) or (
+        _integer_element_error("vector.cmp", lhs_type)
+    )
+    return TypeError(error) if error else None
+
+
+def _fcmp_error(
+    attrs: Mapping[str, Any], lhs_type: Type, rhs_type: Type
+) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of an ``arith.fcmp`` op with
+    ``attrs`` on operands of ``lhs_type`` and ``rhs_type``, or None when it is
+    valid.
+
+    Its ``pred`` is one of the ``arith.fcmp`` predicates and is required (a
+    ``ValueError``); then its operands have one type
+    (:func:`_operand_types_error`; a ``TypeError``), one of
+    :data:`_FCMP_OPERAND_TYPES` (a ``TypeError``). The builder, the verifier
+    and both lowerings use it, and the C++ engine (``rocke_i_fcmp_error``)
+    returns the matching status and text.
+    """
+    error = _string_attr_error(
+        attrs,
+        "arith.fcmp",
+        "pred",
+        _FCMP_PREDICATES,
+        "arith.fcmp: pred must be a string",
+        required=True,
+    )
+    if error:
+        return ValueError(error)
+    error = _operand_types_error("arith.fcmp", (lhs_type, rhs_type))
+    if error:
+        return TypeError(error)
+    if lhs_type.name not in _FCMP_OPERAND_TYPES:
+        return TypeError(
+            _type_name_message(
+                "arith.fcmp",
+                "operand type",
+                lhs_type.name,
+                f"{', '.join(_FCMP_OPERAND_TYPES[:-1])} or {_FCMP_OPERAND_TYPES[-1]} "
+                "(compare integers with cmp)",
+            )
+        )
     return None
 
 
@@ -581,19 +1111,6 @@ def param_fact_errors(params: Sequence[Param], index: int) -> list[str]:
     )
 
 
-def _check_unsigned_int_operands(op_name: str, a: "Value", b: "Value") -> None:
-    """Refuse operands an unsigned integer op cannot take.
-
-    Both lowerings read the operands as ``uint32_t`` / ``uint64_t`` by width,
-    so the operands are two i32 or two i64 values.
-    """
-    if a.type != b.type or a.type.name not in ("i32", "i64"):
-        raise ValueError(
-            f"{op_name} expects two i32 or two i64 operands, got "
-            f"{a.type.name} / {b.type.name}"
-        )
-
-
 def _check_flag_ptr(op_name: str, ptr: "Value") -> None:
     if not _is_flag_ptr(ptr.type):
         raise ValueError(f"{op_name} expects a global i32 pointer, got {ptr.type.name}")
@@ -615,15 +1132,82 @@ def is_packed_only(t: "Type") -> bool:
     return elem is not None and elem.name in _PACKED_ONLY_SCALARS
 
 
+def _packed_only_value_error(op_name: str, value_type: Type) -> str | None:
+    """The error for an ``op_name`` result or parameter of type ``value_type``
+    whose elements are packed-only (:func:`is_packed_only`), or None. Its
+    callers refuse it as a ``TypeError``."""
+    if not is_packed_only(value_type):
+        return None
+    element = (
+        value_type.elem
+        if isinstance(value_type, (VectorType, SmemType))
+        else value_type
+    )
+    return (
+        f"{op_name}: {element.name} values travel packed in 32-bit words and have "
+        "no scalar or vector form -- keep them in i32 storage and unpack "
+        "explicitly"
+    )
+
+
 def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
-    """Refuse an ``op_name`` result or parameter of type ``t`` whose elements
-    are packed-only (:func:`is_packed_only`)."""
-    if is_packed_only(t):
-        elem = t.elem if isinstance(t, (VectorType, SmemType)) else t
-        raise TypeError(
-            f"{op_name}: {elem.name} values travel packed in 32-bit words and have "
-            "no scalar or vector form -- keep them in i32 storage and unpack "
-            "explicitly"
+    """Raise ``TypeError`` with :func:`_packed_only_value_error`'s text for
+    an ``op_name`` result or parameter of type ``t`` whose elements are
+    packed-only."""
+    error = _packed_only_value_error(op_name, t)
+    if error is not None:
+        raise TypeError(error)
+
+
+# Value names. The builder names every value it makes "%<hint>_<n>": the hint the
+# op chose, then "_", then a counter that never repeats inside one builder. The
+# counter is always the digits after the last "_", so two builder names are equal
+# only when their hints and counters are both equal: %cz16_5 and %cz1_65 cannot
+# meet the way %cz165 could. The names an author picks (kernel parameters, loop
+# induction variables, loop-carried values) must therefore not end in "_" and
+# digits, or one could spell a builder name. The HIP lowering prints value names
+# unchanged, as C++ identifiers, so they must also be identifiers and must not be
+# C++ keywords (rocke.core.cxx_keywords); a builder name always ends in "_" and
+# digits, so it is never a keyword. Other names the HIP output already uses (its
+# type names such as uint32_t, builtins such as threadIdx, names C++ reserves
+# such as __x) are not refused here. The rule binds the names given to the
+# builder; the IR text parsers read the names they are given.
+
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ENDS_IN_COUNTER = re.compile(r".*_[0-9]+")
+
+
+def _refuse_value_name_hint(hint: str) -> None:
+    """Refuse an empty name hint or one that starts with a digit: a value name
+    must read as a hint and then its counter, and the HIP lowering prints it as
+    a C identifier."""
+    if not hint or hint[0] in "0123456789":
+        raise ValueError(
+            f"value name hint '{hint}' must be non-empty and must not start with "
+            "a digit"
+        )
+
+
+def _refuse_declared_name(what: str, name: str) -> None:
+    """Refuse an author-chosen value name (``what`` says which kind) that is not
+    an identifier, that is a C++ keyword, or that ends in ``_<digits>``, which
+    is reserved for the values the builder names."""
+    if not _IDENTIFIER.fullmatch(name):
+        raise ValueError(
+            f"{what} name '{name}' is not an identifier: use letters, digits and "
+            "'_', not starting with a digit"
+        )
+    if name in CXX_KEYWORDS:
+        raise ValueError(
+            f"{what} name '{name}' is a C++ keyword, and the HIP lowering prints "
+            "value names as C++ identifiers; choose another name"
+        )
+    if _ENDS_IN_COUNTER.fullmatch(name):
+        raise ValueError(
+            f"{what} name '{name}' ends in '_' and digits, the form the builder "
+            "gives the values it names; choose a name that does not end in "
+            "'_<digits>'"
         )
 
 
@@ -704,12 +1288,24 @@ def _sync_attr(op: "Op", key: str, allowed: Sequence[str]) -> str:
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
 # numbering stays byte-identical. Most atoms used "acc"; a handful used distinct
 # hints that must be preserved verbatim.
-_MMA_RESULT_HINT: Dict[str, str] = {
+_MMA_RESULT_HINT: dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_f32_16x16x128_fp4fp6fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
 }
+
+
+# An MMA op may also be named for its atom, ``tile.<op_id>``: the legacy
+# ISA-named form the lowerers' hand-written MMA handlers answer to.
+_NAMED_MMA_PREFIXES = ("tile.mfma_", "tile.wmma_")
+
+
+def named_mma_op_id(op_name: str) -> str | None:
+    """The op_id of an MMA op named ``tile.<op_id>``, or None for any other op."""
+    if op_name.startswith(_NAMED_MMA_PREFIXES):
+        return op_name.removeprefix("tile.")
+    return None
 
 
 def _check_u16(op: str, field: str, value: int) -> int:
@@ -736,10 +1332,17 @@ def _check_u32(op: str, field: str, value: int) -> int:
     return v
 
 
+def fits_i32(value: int) -> bool:
+    """Whether ``value`` is a signed ``i32``: -2147483648 to 2147483647. LLVM reads
+    an ``i32`` literal outside that range as another number, and an ``nsw`` result
+    outside it is poison."""
+    return -(1 << 31) <= value < (1 << 31)
+
+
 def _check_i32(op: str, field: str, value: int) -> int:
     """Range-check a signed byte offset carried by an LLVM ``i32``."""
     v = int(value)
-    if not -(1 << 31) <= v < (1 << 31):
+    if not fits_i32(v):
         raise ValueError(
             f"{op} {field} must fit a signed i32 (-2147483648..2147483647), got {v}"
         )
@@ -787,7 +1390,7 @@ MAX_CLUSTER_DIM = 15
 MAX_CLUSTER_WORKGROUPS = 16
 
 
-def check_cluster_dims(value: object) -> Tuple[int, int, int]:
+def check_cluster_dims(value: object) -> tuple[int, int, int]:
     """Validate a kernel ``cluster_dims`` attr and return it as ``(x, y, z)``.
 
     Accepts a list or tuple (the serializer round-trips tuples as lists). The
@@ -850,7 +1453,7 @@ TDM_PAD_INTERVAL_MAX = 7
 TDM_PAD_AMOUNT_MAX = 127
 
 
-def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> Tuple[int, int]:
+def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> tuple[int, int]:
     """Encode an LDS row pad as :meth:`IRBuilder.tdm_descriptor_2d`'s
     ``(pad_interval, pad_amount)``.
 
@@ -922,6 +1525,35 @@ def _mma_dst_dtype(op_id: str) -> str:
     return _arch._op_id_dst_dtype().get(op_id, "fp32")
 
 
+def _mma_result_vector(dtype: str, frag_len: int) -> VectorType:
+    """The ``tile.mma`` result type of ``frag_len`` ``dtype`` elements.
+
+    Raises ValueError, prefixed "MMA destination dtype: ", for a dtype the IR
+    cannot represent.
+    """
+    try:
+        element = dtype_to_ir_type(dtype)
+    except ValueError as exc:
+        raise ValueError(f"MMA destination dtype: {exc}") from exc
+    return VectorType(element, frag_len)
+
+
+def mma_result_type(op_id: str) -> VectorType:
+    """The result type the arch catalog gives the MMA atom ``op_id``.
+
+    Its length is the destination fragment length and its element the
+    destination dtype, FP32 when the catalog's dtype table
+    (``_op_id_dst_dtype``) has no entry for ``op_id``. It is the type
+    :meth:`IRBuilder.mma` gives the result of a bare ``op_id``, and the
+    accumulator and result type a fixed-signature MFMA instruction takes
+    (:func:`rocke.core.mfma.validate_mfma`). Raises ValueError for an op_id
+    with no fragment length or a dtype the IR cannot represent. The C++
+    engine's twin is ``rocke_i_mma_result_type`` (``ir_internal.h``).
+    """
+    frag_len = _mma_dst_frag_len(op_id)
+    return _mma_result_vector(_mma_dst_dtype(op_id), frag_len)
+
+
 @dataclass(frozen=True)
 class VectorType(Type):
     elem: Type
@@ -947,7 +1579,7 @@ class PtrType(Type):
 @dataclass(frozen=True)
 class SmemType(Type):
     elem: Type
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
     # When True, the smem-pool packer must give this allocation its own
     # byte range (never reuse another allocation's slot, and never be reused).
     # Used by the cshuffle "no-alias" mode so the C tile does not overlap the
@@ -1038,12 +1670,15 @@ def smem_vector_access_align(smem_type: Type, lanes: int, elem: Type) -> int:
     into LDS tile type ``smem_type``: :func:`vector_access_align`, bounded by
     what every row start of the tile guarantees.
 
-    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
-    ``lanes``, so the address advances by the innermost dimension per row.
-    When that dimension is not a multiple of ``lanes`` -- which is exactly what
-    a bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
-    the natural boundary. ``gcd(lanes, innermost)`` elements is what every row
-    start guarantees; outer strides are products that include the innermost
+    An LDS tile is indexed ``(..., row, col)`` with ``col`` at a byte offset
+    that is a multiple of the access width (``lanes`` ``elem`` values), so the
+    address advances by one row of the tile's own elements per row. When that
+    row is not a multiple of the access width -- which is exactly what a
+    bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
+    the natural boundary. The gcd of the access width and the row, in bytes, is
+    what every row start guarantees: ``gcd(lanes, innermost)`` elements when
+    the tile holds ``elem`` (the f32 epilogue ops also access tiles of other
+    elements). Outer strides are products that include the innermost
     dimension, so they never bind tighter. A type with no shape (or a
     non-positive innermost dimension) gives no row bound.
 
@@ -1057,7 +1692,8 @@ def smem_vector_access_align(smem_type: Type, lanes: int, elem: Type) -> int:
     innermost = int(shape[-1]) if shape else 0
     if innermost <= 0:
         return natural
-    return min(natural, _gcd(int(lanes), innermost) * type_bytes(elem))
+    row_bytes = innermost * type_bytes(smem_type.elem)
+    return min(natural, _gcd(int(lanes) * type_bytes(elem), row_bytes))
 
 
 def _checked_align(op_name: str, value: object) -> int:
@@ -1567,7 +2203,7 @@ _LOOP_EARLY_YIELD_ERROR = (
 
 # The ops whose regions take the scf.yield ops directly in them: an scf.for
 # carries its body's yield into the next trip, and an scf.if_else applies its own
-# rule (_if_else_yields) to its branches. Every other region, the kernel body
+# rule (_if_else_error) to its branches. Every other region, the kernel body
 # and an scf.if branch among them, passes a yield on to nothing.
 _YIELD_OWNING_OPS = ("scf.for", "scf.if_else")
 
@@ -1605,17 +2241,61 @@ def _orphan_yield(ops: Sequence[Op]) -> Op | None:
     return None
 
 
-def _scf_for_region_error(op: Op) -> str | None:
-    """The refusal for the ``scf.for`` ``op`` when it does not hold exactly one
-    region, its body, or None when it does.
+def _single_region_error(op: Op, region_role: str) -> str | None:
+    """The refusal for ``op`` when it does not hold exactly one region, its
+    ``region_role`` region (``"body"``, ``"then"``), or None when it does.
 
-    The loop rule and the lowerings read only the first region, so a second one
-    would be dropped unchecked, yields included. The verifier checks this
-    before it reads the body; :func:`_scf_for_error` checks it first.
+    The rule and the lowerings of a one-region op read only that region, so a
+    second one would be dropped unchecked and a missing one cannot be read.
+    Serialized IR can hold any region count, so the verifier and every
+    lowering check this before they read the region, in both engines
+    (``single_region_error``).
     """
     if len(op.regions) != 1:
-        return f"scf.for: expected 1 body region, got {len(op.regions)}"
+        return f"{op.name}: expected 1 {region_role} region, got {len(op.regions)}"
     return None
+
+
+def _scf_for_region_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when it does not hold exactly one
+    region, its body, or None when it does (:func:`_single_region_error`).
+
+    The verifier checks this before it reads the body; :func:`_scf_for_error`
+    checks it first.
+    """
+    return _single_region_error(op, "body")
+
+
+def _scf_if_condition_error(op: Op) -> str | None:
+    """The refusal for the ``scf.if`` ``op`` when it does not have exactly one
+    condition operand, or None when it does (``rocke_i_scf_if_condition_error``
+    in the C++ engine, same text). The verifier reports it beside the region
+    rule; :func:`_scf_if_error` checks it first.
+    """
+    if len(op.operands) != 1:
+        return "scf.if expects exactly 1 condition operand"
+    return None
+
+
+def _scf_if_region_error(op: Op) -> str | None:
+    """The refusal for the ``scf.if`` ``op`` when it does not hold exactly one
+    region, its then region, or None when it does
+    (:func:`_single_region_error`; ``rocke_i_scf_if_region_error`` in the C++
+    engine). An ``scf.if`` has no else region (``scf.if_else`` has one).
+    """
+    return _single_region_error(op, "then")
+
+
+def _scf_if_error(op: Op) -> str | None:
+    """The refusal for the ``scf.if`` ``op``, or None when it has exactly one
+    condition (:func:`_scf_if_condition_error`) and one then region
+    (:func:`_scf_if_region_error`), checked in that order.
+
+    Serialized IR can hold any operand or region count, so every lowering of
+    ``scf.if`` checks this before it reads the condition or the region, in
+    both engines (``rocke_i_scf_if_error``).
+    """
+    return _scf_if_condition_error(op) or _scf_if_region_error(op)
 
 
 def _scf_for_carried_count_error(op: Op) -> str | None:
@@ -1653,48 +2333,50 @@ def _untyped_value_message(
 
     The builders and the IR parser type every value, but a value built or
     edited by hand can lack a type. The loop rule (:func:`_scf_for_error`) and
-    the if/else rule (:func:`_if_else_yields`) check each value with it before
-    they read its type's name; the loop rule reports it as a ``ValueError``,
-    as every loop refusal is, and the if/else rule as a ``TypeError``, as its
-    builder refuses a result type. The C++ engine (``untyped_value_message``
-    in ``cpp/core/ir/ir_flow.cpp``) writes the same text, spelling its missing
-    type ``None``.
+    the if/else rule (:func:`_if_else_error`) check each value with it before
+    they read its type's name, and both report it as a ``TypeError`` (a missing
+    type is the wrong kind of object), as the if/else builder refuses a result
+    type; the operand rule (:func:`_operand_types_error`) checks each operand
+    with it too. The C++ engine (``rocke_i_untyped_value_message``) writes the
+    same text, spelling its missing type ``None``, with ``ROCKE_ERR_TYPE``.
     """
     if isinstance(value_type, Type):
         return None
     return f"{what} {index} failed - type={value_type!r}, expected {expected}"
 
 
-def _scf_for_metadata_entry_error(op: Op) -> str | None:
-    """The refusal for the ``scf.for`` ``op`` when an ``iter_args`` metadata
-    entry does not describe its carried value, or None when every entry does.
+def _scf_for_metadata_entry_error(op: Op) -> ValueError | TypeError | None:
+    """The refusal for the ``scf.for`` ``op``, for its caller to raise, when an
+    ``iter_args`` metadata entry does not describe its carried value, or None
+    when every entry does.
 
     The counts of carried values agree (:func:`_scf_for_carried_count_error`).
     Entry ``i`` is a map whose ``name`` is a non-empty string and whose
     ``type`` names the type of init operand ``i``; result ``i`` has that type
     too. An entry with no type name gets the IR parser's refusal
     (:func:`_untyped_loop_value_message`), so a loop gets one text whichever
-    of the two meets it first. An init operand or result with no type is
-    refused (:func:`_untyped_value_message`) before its type is read.
+    of the two meets it first. An init operand or result with no type is a
+    ``TypeError`` (:func:`_untyped_value_message`), returned before its type is
+    read; every other refusal is a ``ValueError``.
     """
     for index, (entry, init, result) in enumerate(
         zip(op.attrs.get("iter_args", []), op.operands[3:], op.results)
     ):
         if not isinstance(entry, dict):
-            return f"scf.for iter_arg {index} metadata must be a map"
+            return ValueError(f"scf.for iter_arg {index} metadata must be a map")
         name = entry.get("name")
         if not isinstance(name, str) or not name:
-            return f"scf.for iter_arg {index} metadata has no name"
+            return ValueError(f"scf.for iter_arg {index} metadata has no name")
         type_name = entry.get("type")
         if not isinstance(type_name, str):
-            return _untyped_loop_value_message(name)
+            return ValueError(_untyped_loop_value_message(name))
         error = _untyped_value_message(
             init.type, "scf.for init operand", index, "an IR type"
         )
         if error is not None:
-            return error
+            return TypeError(error)
         if type_name != init.type.name:
-            return (
+            return ValueError(
                 f"scf.for iter_arg {name} metadata type '{type_name}' "
                 f"does not match init type '{init.type.name}'"
             )
@@ -1702,42 +2384,43 @@ def _scf_for_metadata_entry_error(op: Op) -> str | None:
             result.type, "scf.for result", index, init.type.name
         )
         if error is not None:
-            return error
+            return TypeError(error)
         if result.type != init.type:
-            return (
+            return ValueError(
                 f"scf.for result type '{result.type.name}' does not match "
                 f"iter_arg {name} type '{init.type.name}'"
             )
     return None
 
 
-def _scf_for_yield_error(op: Op) -> str | None:
+def _scf_for_yield_error(op: Op) -> ValueError | TypeError | None:
     """The refusal for the ``scf.yield`` ops directly in the body of the
-    ``scf.for`` ``op``, whose carried-value counts agree
-    (:func:`_scf_for_carried_count_error`), or None when they are sound.
+    ``scf.for`` ``op``, for its caller to raise, whose carried-value counts
+    agree (:func:`_scf_for_carried_count_error`), or None when they are sound.
 
     The loop takes its carried values from the one ``scf.yield`` that ends its
     body, so the body yields only at its end; it ends in a yield of one value
     per init operand, of that operand's type, whenever the loop carries any. A
     loop that carries none may end in an empty yield or in none. A yielded
-    value with no type is refused (:func:`_untyped_value_message`) before its
-    type is read. The loop holds one body region (:func:`_scf_for_region_error`).
+    value with no type is a ``TypeError`` (:func:`_untyped_value_message`),
+    returned before its type is read; every other refusal is a ``ValueError``.
+    The loop holds one body region (:func:`_scf_for_region_error`).
     """
     body_ops = op.regions[0].ops
     carried = op.operands[3:]
     count = len(carried)
     if any(body_op.name == "scf.yield" for body_op in body_ops[:-1]):
-        return _LOOP_EARLY_YIELD_ERROR
+        return ValueError(_LOOP_EARLY_YIELD_ERROR)
     if not body_ops or body_ops[-1].name != "scf.yield":
         if not count:
             return None
-        return (
+        return ValueError(
             f"scf.for carries {count} values, so its body must end in scf.yield "
             f"of {count} values"
         )
     yielded = body_ops[-1].operands
     if len(yielded) != count:
-        return (
+        return ValueError(
             f"scf.for carries {count} values, but its body yields {len(yielded)} values"
         )
     for index, (init, value) in enumerate(zip(carried, yielded)):
@@ -1745,17 +2428,18 @@ def _scf_for_yield_error(op: Op) -> str | None:
             value.type, "scf.for body yield", index, init.type.name
         )
         if error is not None:
-            return error
+            return TypeError(error)
         if value.type != init.type:
-            return (
+            return ValueError(
                 f"scf.for iter_arg {index} is {init.type.name}, but its body "
                 f"yields {value.type.name}"
             )
     return None
 
 
-def _scf_for_error(op: Op) -> str | None:
-    """The refusal for the ``scf.for`` ``op``, or None when the loop is sound.
+def _scf_for_error(op: Op) -> ValueError | TypeError | None:
+    """The refusal for the ``scf.for`` ``op``, for its caller to raise, or None
+    when the loop is sound.
 
     A loop holds exactly one region, its body
     (:func:`_scf_for_region_error`); its counts of carried values agree
@@ -1767,82 +2451,95 @@ def _scf_for_error(op: Op) -> str | None:
     region that takes no yields (an ``scf.if`` in the body, say;
     :data:`_ORPHAN_YIELD_ERROR`). It accepts any operand count and refuses any
     region count but one, as serialized IR reaches the verifier and the
-    lowerings without passing the builder. The verifier and every lowering of
-    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``).
+    lowerings without passing the builder. A value with no type is a
+    ``TypeError``, as in an if/else (:func:`_untyped_value_message`); every
+    other refusal is a ``ValueError``, so the sub-rules that cannot meet a
+    missing type return only its text. The verifier and every lowering of
+    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``, which
+    returns the matching status).
     """
     error = _scf_for_region_error(op)
     if error is not None:
-        return error
+        return ValueError(error)
     error = _scf_for_carried_count_error(op)
     if error is not None:
-        return error
-    error = _scf_for_metadata_entry_error(op)
-    if error is not None:
-        return error
+        return ValueError(error)
+    refusal = _scf_for_metadata_entry_error(op)
+    if refusal is not None:
+        return refusal
     error = _scf_for_carried_descriptor_error(op)
     if error is not None:
-        return error
-    error = _scf_for_yield_error(op)
-    if error is not None:
-        return error
+        return ValueError(error)
+    refusal = _scf_for_yield_error(op)
+    if refusal is not None:
+        return refusal
     body = op.regions[0]
     if any(_nested_orphan_yield(body_op) is not None for body_op in body.ops):
-        return _ORPHAN_YIELD_ERROR
+        return ValueError(_ORPHAN_YIELD_ERROR)
     return None
 
 
 def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
-    """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`) and every
-    ``scf.if_else`` (:func:`_if_else_yields`) among ``ops`` and nested in them.
+    """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`), every
+    ``scf.if`` (:func:`_scf_if_error`) and every ``scf.if_else``
+    (:func:`_if_else_error`) among ``ops`` and nested in them.
 
     A lowering calls it on a loop body it does not lower (an unrolled loop of
-    zero trips), so that body's malformed loop or if/else is refused as it is
-    wherever the body is lowered; the C++ engine's
+    zero trips), so that body's malformed loop, scf.if or if/else is refused as
+    it is wherever the body is lowered; the C++ engine's
     ``rocke_i_check_control_flow`` is its twin.
     """
     for op in ops:
         if op.name == "scf.for":
-            error = _scf_for_error(op)
+            refusal = _scf_for_error(op)
+            if refusal is not None:
+                raise refusal
+        elif op.name == "scf.if":
+            error = _scf_if_error(op)
             if error is not None:
                 raise ValueError(error)
         elif op.name == "scf.if_else":
-            _if_else_yields(op)
+            refusal = _if_else_error(op)
+            if refusal is not None:
+                raise refusal
         for region in op.regions:
             _refuse_malformed_control_flow(region.ops)
 
 
-def _refuse_if_else_result_type(index: int, result_type: object) -> None:
-    """Refuse an ``scf.if_else`` result ``index`` of type ``result_type`` that
-    an if/else cannot carry.
+def _if_else_result_type_error(
+    index: int, result_type: object
+) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of an ``scf.if_else`` result
+    ``index`` of type ``result_type`` that an if/else cannot carry, or None.
 
     A result needs a type (:func:`_untyped_value_message`, ``TypeError``);
     this comes first, so no later rule reads a missing type. A packed-only type has
-    no value form (:func:`_refuse_packed_only_value`, ``TypeError``). An LDS
+    no value form (:func:`_packed_only_value_error`, ``TypeError``). An LDS
     allocation is a name the lowerings resolve to its base, not a value:
     neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
     one (``ValueError``). The packed-only rule comes before the LDS rule, so an
     LDS tile of i4 gets its ``TypeError``. The builder and
-    :func:`_if_else_yields` use this rule, and the C++ engine
+    :func:`_if_else_error` use this rule, and the C++ engine
     (``rocke_i_check_if_else_result_type``) reports the same type and text.
     """
     error = _untyped_value_message(
         result_type, "scf.if_else result", index, "an IR type"
-    )
+    ) or _packed_only_value_error("scf.if_else", result_type)
     if error is not None:
-        raise TypeError(error)
-    _refuse_packed_only_value("scf.if_else", result_type)
+        return TypeError(error)
     if isinstance(result_type, SmemType):
-        raise ValueError(
+        return ValueError(
             f"scf.if_else result {index} is an LDS allocation, which an if/else "
             "cannot carry; allocate before the if/else and yield an offset into "
             "the allocation instead"
         )
+    return None
 
 
-def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
-    """The ``scf.yield`` that ends branch ``branch`` (0 then, 1 else) of the
-    ``scf.if_else`` ``op``, whose condition and branch counts
-    :func:`_if_else_yields` has checked; None when ``op`` has no results.
+def _if_else_branch_yield_error(op: Op, branch: int) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of branch ``branch`` (0 then, 1
+    else) of the ``scf.if_else`` ``op``, whose condition and branch counts
+    :func:`_if_else_error` has checked, or None when it is sound.
 
     Only the ``scf.yield`` that ends a branch of an if/else with results has
     its values taken, so a branch holds no other ``scf.yield``, directly or in
@@ -1852,7 +2549,7 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
     one value per result, of the result's type, and never a buffer descriptor
     (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
     (HIP) that holds a result can hold the lowered descriptor. A yielded value
-    with no type (:func:`_untyped_value_message`) is a ``TypeError``, raised
+    with no type (:func:`_untyped_value_message`) is a ``TypeError``, returned
     before any rule reads its type; every other refusal is a ``ValueError``.
     """
     name = _IF_ELSE_BRANCHES[branch]
@@ -1860,30 +2557,30 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
     region = op.regions[branch]
     if not count:
         if _orphan_yield(region.ops) is not None:
-            raise ValueError(
+            return ValueError(
                 f"scf.if_else has no results, so its {name} branch cannot "
                 "contain scf.yield"
             )
         return None
     if not region.ops or region.ops[-1].name != "scf.yield":
-        raise ValueError(
+        return ValueError(
             f"scf.if_else has {count} results, so its {name} branch must end in "
             f"scf.yield of {count} values"
         )
     if _orphan_yield(region.ops[:-1]) is not None:
-        raise ValueError(
+        return ValueError(
             f"scf.if_else has {count} results, so its {name} branch must yield "
             "only at its end"
         )
     yld = region.ops[-1]
     if len(yld.operands) != count:
-        raise ValueError(
+        return ValueError(
             f"scf.if_else has {count} results, but its {name} branch yields "
             f"{len(yld.operands)} values"
         )
     for index, (result, value) in enumerate(zip(op.results, yld.operands)):
         if _is_buffer_descriptor(value):
-            raise ValueError(
+            return ValueError(
                 f"scf.if_else result {index}: its {name} branch yields a buffer "
                 "descriptor, which an if/else cannot carry; yield the values the "
                 "descriptor is built from and build it after the if/else"
@@ -1892,35 +2589,54 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
             value.type, f"scf.if_else {name} branch yield", index, result.type.name
         )
         if error is not None:
-            raise TypeError(error)
+            return TypeError(error)
         if value.type != result.type:
-            raise ValueError(
+            return ValueError(
                 f"scf.if_else result {index} is {result.type.name}, but its {name} "
                 f"branch yields {value.type.name}"
             )
-    return yld
+    return None
 
 
-def _if_else_yields(op: Op) -> tuple[Op | None, Op | None]:
-    """The ``scf.yield`` that ends the then and the else branch of the
-    ``scf.if_else`` ``op``; both None when ``op`` has no results.
+def _if_else_error(op: Op) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of the ``scf.if_else`` ``op``, or
+    None when it is sound.
 
     Every ``scf.if_else`` has one condition and two branches, and each result
-    is a type an if/else can carry (:func:`_refuse_if_else_result_type`); each
-    branch then follows :func:`_if_else_branch_yield`. The builder, the
+    is a type an if/else can carry (:func:`_if_else_result_type_error`); each
+    branch then follows :func:`_if_else_branch_yield_error`. The builder, the
     verifier and every lowering refuse anything else with these types and
     texts, in both engines (``rocke_i_if_else_yields``). The counts are checked
     first, as serialized IR reaches the verifier and the lowerings without
     passing the builder.
     """
     if len(op.operands) != 1 or len(op.regions) != 2:
-        raise ValueError(
+        return ValueError(
             f"scf.if_else: expected 1 condition / 2 branches, got "
             f"{len(op.operands)} / {len(op.regions)}"
         )
     for index, result in enumerate(op.results):
-        _refuse_if_else_result_type(index, result.type)
-    return _if_else_branch_yield(op, 0), _if_else_branch_yield(op, 1)
+        refusal = _if_else_result_type_error(index, result.type)
+        if refusal is not None:
+            return refusal
+    for branch in range(len(_IF_ELSE_BRANCHES)):
+        refusal = _if_else_branch_yield_error(op, branch)
+        if refusal is not None:
+            return refusal
+    return None
+
+
+def _if_else_yields(op: Op) -> tuple[Op | None, Op | None]:
+    """The ``scf.yield`` that ends the then and the else branch of the
+    ``scf.if_else`` ``op``; both None when ``op`` has no results. Raises the
+    refusal of :func:`_if_else_error` first, so the lowerings read only a
+    sound if/else."""
+    refusal = _if_else_error(op)
+    if refusal is not None:
+        raise refusal
+    if not op.results:
+        return None, None
+    return op.regions[0].ops[-1], op.regions[1].ops[-1]
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -1950,10 +2666,10 @@ class Value:
 @dataclass
 class Op:
     name: str
-    operands: List[Value] = field(default_factory=list)
-    results: List[Value] = field(default_factory=list)
-    attrs: Dict[str, Any] = field(default_factory=dict)
-    regions: List["Region"] = field(default_factory=list)
+    operands: list[Value] = field(default_factory=list)
+    results: list[Value] = field(default_factory=list)
+    attrs: dict[str, Any] = field(default_factory=dict)
+    regions: list["Region"] = field(default_factory=list)
     loc: Optional[str] = None
 
     @property
@@ -1972,14 +2688,14 @@ class Op:
 @dataclass
 class Region:
     label: str
-    ops: List[Op] = field(default_factory=list)
+    ops: list[Op] = field(default_factory=list)
 
 
 @dataclass
 class Param:
     name: str
     type: Type
-    attrs: Dict[str, Any] = field(default_factory=dict)
+    attrs: dict[str, Any] = field(default_factory=dict)
     # The kernel's parameters declared before this one, the only ones a
     # relation in ``attrs`` may name. Set wherever a Param is declared
     # (``IRBuilder.param``, ``ir_serialize.parse``).
@@ -1989,9 +2705,9 @@ class Param:
 @dataclass
 class KernelDef:
     name: str
-    params: List[Param]
+    params: list[Param]
     body: Region
-    attrs: Dict[str, Any] = field(default_factory=dict)
+    attrs: dict[str, Any] = field(default_factory=dict)
 
     @property
     def max_workgroup_size(self) -> int:
@@ -2011,7 +2727,7 @@ class KernelDef:
         return int(self.attrs.get("max_workgroup_size", 256))
 
     @property
-    def cluster_dims(self) -> Optional[Tuple[int, int, int]]:
+    def cluster_dims(self) -> Optional[tuple[int, int, int]]:
         """The gfx1250 workgroup-cluster shape ``(x, y, z)`` the kernel must be
         launched with, or ``None`` for a kernel without one."""
         value = self.attrs.get("cluster_dims")
@@ -2049,9 +2765,9 @@ _STDLIB_DIR = os.path.dirname(os.path.abspath(os.__file__))
 # only there so a pathological recursion cannot produce unbounded metadata.
 _MAX_LOC_FRAMES = 16
 
-_ABSPATH: Dict[str, str] = {}
-_FRAME_ROLE: Dict[str, str] = {}  # abs path -> "core" | "runner" | "user"
-_CODE_POSITIONS: Dict[Any, List[Any]] = {}
+_ABSPATH: dict[str, str] = {}
+_FRAME_ROLE: dict[str, str] = {}  # abs path -> "core" | "runner" | "user"
+_CODE_POSITIONS: dict[Any, list[Any]] = {}
 
 # Frames are joined innermost-first; each is "<abs path>:<line>:<column>:<func>".
 # Packing the whole chain into the existing ``Op.loc`` string keeps the IR schema
@@ -2073,7 +2789,7 @@ def join_loc(frame_texts: Sequence[str]) -> str:
     )
 
 
-def split_loc(loc: str) -> List[str]:
+def split_loc(loc: str) -> list[str]:
     """Split an ``Op.loc`` on unescaped ``;`` and unescape each frame.
 
     A loc written without escaping (no ``;`` in any path) is unchanged, so
@@ -2082,8 +2798,8 @@ def split_loc(loc: str) -> List[str]:
     kept as a literal.
     """
 
-    parts: List[str] = []
-    buf: List[str] = []
+    parts: list[str] = []
+    buf: list[str] = []
     i = 0
     n = len(loc)
     while i < n:
@@ -2200,7 +2916,7 @@ def current_source_loc() -> Optional[str]:
     locations a trace viewer can resolve later.
     """
 
-    frames: List[str] = []
+    frames: list[str] = []
     frame = sys._getframe()
     while frame is not None and len(frames) < _MAX_LOC_FRAMES:
         filename = frame.f_code.co_filename
@@ -2439,9 +3155,9 @@ class IRBuilder:
         # emission of every other kernel.
         self.fence_barriers: Optional[str] = None
         self._counter = 0
-        self._region_stack: List[Region] = []
-        self._params: List[Param] = []
-        self._param_values: Dict[str, Value] = {}
+        self._region_stack: list[Region] = []
+        self._params: list[Param] = []
+        self._param_values: dict[str, Value] = {}
         self.kernel = KernelDef(
             name=kernel_name,
             params=self._params,
@@ -2460,8 +3176,11 @@ class IRBuilder:
     # ----- naming -----
 
     def _fresh(self, prefix: str = "v") -> str:
+        """A new value name, ``%<prefix>_<n>`` (the "Value names" note above
+        says why the ``_`` is always there)."""
+        _refuse_value_name_hint(prefix)
         self._counter += 1
-        return f"%{prefix}{self._counter}"
+        return f"%{prefix}_{self._counter}"
 
     # ----- region management -----
 
@@ -2544,6 +3263,7 @@ class IRBuilder:
         state (a word on the wrong type, two lower bounds, a bound computed in
         the kernel) is a ``ValueError``.
         """
+        _refuse_declared_name("kernel parameter", name)
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
         _refuse_packed_only_value("param", t)
@@ -2654,12 +3374,48 @@ class IRBuilder:
 
     # ----- generic op builder -----
 
+    def _binary_op(
+        self,
+        op_name: str,
+        lhs: Value,
+        rhs: Value,
+        result_name_hint: str,
+        attrs: dict[str, Any] | None = None,
+    ) -> Value:
+        """The result, of their type, of one ``op_name`` (one of
+        :data:`_SAME_TYPE_BINARY_OPS`) of ``lhs`` and ``rhs``.
+
+        Raises ``ValueError`` for an ``arith.add`` whose ``wrap`` in
+        ``attrs`` its first operand's type cannot take
+        (:func:`_int_add_wrap_error`), as a compare's pred is checked before
+        its operands; then ``TypeError`` for a bitwise op or shift
+        (:data:`_INTEGER_ELEMENT_OPS`) whose operands are not integers or
+        ``i1`` (:func:`_integer_element_error`), and for operands of different
+        types (:func:`_operand_types_error`), checked in that order. The C++
+        engine's ``rocke_i_binop`` is its twin (``rocke_b_add_nuw`` applies the
+        ``wrap`` rule itself).
+        """
+        if op_name == "arith.add" and attrs:
+            wrap_error = _int_add_wrap_error(attrs, lhs.type.name)
+            if wrap_error:
+                raise ValueError(wrap_error)
+        if op_name in _INTEGER_ELEMENT_OPS:
+            _refuse_non_integer(op_name, lhs.type)
+        _refuse_operand_types(op_name, (lhs, rhs))
+        return self._op(
+            op_name,
+            [lhs, rhs],
+            [lhs.type],
+            attrs=attrs,
+            result_name_hint=result_name_hint,
+        ).result
+
     def _op(
         self,
         name: str,
         operands: Sequence[Value] = (),
         result_types: Sequence[Type] = (),
-        attrs: Optional[Dict[str, Any]] = None,
+        attrs: Optional[dict[str, Any]] = None,
         regions: Optional[Sequence[Region]] = None,
         result_name_hint: str = "v",
         loc: Optional[str] = None,
@@ -2719,7 +3475,7 @@ class IRBuilder:
         return op.result
 
     def add(self, a: Value, b: Value) -> Value:
-        return self._op("arith.add", [a, b], [a.type], result_name_hint="add").result
+        return self._binary_op("arith.add", a, b, "add")
 
     def add_nuw(self, a: Value, b: Value) -> Value:
         """Integer ``a + b`` that the caller knows does not wrap as unsigned.
@@ -2727,36 +3483,35 @@ class IRBuilder:
         Lowers to ``add nuw`` (plain :meth:`add` is ``add nsw``). Use it for a
         sum of non-negative values that may pass the signed maximum but never
         the unsigned one, where ``nsw`` would make LLVM treat the result as
-        poison. Operands are two i32 or two i64 values.
+        poison. Operands are two i32 or two i64 values: the ``nuw`` rule
+        refuses any other width (``ValueError``), then the operand rule two
+        types (``TypeError``), as for :meth:`cmp_ult`.
         """
-        _check_unsigned_int_operands("add_nuw", a, b)
-        return self._op(
-            "arith.add", [a, b], [a.type], attrs={"wrap": "nuw"}, result_name_hint="add"
-        ).result
+        return self._binary_op("arith.add", a, b, "add", attrs={"wrap": "nuw"})
 
     def sub(self, a: Value, b: Value) -> Value:
-        return self._op("arith.sub", [a, b], [a.type], result_name_hint="sub").result
+        return self._binary_op("arith.sub", a, b, "sub")
 
     def mul(self, a: Value, b: Value) -> Value:
-        return self._op("arith.mul", [a, b], [a.type], result_name_hint="mul").result
+        return self._binary_op("arith.mul", a, b, "mul")
 
     def div(self, a: Value, b: Value) -> Value:
-        return self._op("arith.div", [a, b], [a.type], result_name_hint="div").result
+        return self._binary_op("arith.div", a, b, "div")
 
     def mod(self, a: Value, b: Value) -> Value:
-        return self._op("arith.mod", [a, b], [a.type], result_name_hint="mod").result
+        return self._binary_op("arith.mod", a, b, "mod")
 
     def fadd(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fadd", [a, b], [a.type], result_name_hint="fadd").result
+        return self._binary_op("arith.fadd", a, b, "fadd")
 
     def fsub(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fsub", [a, b], [a.type], result_name_hint="fsub").result
+        return self._binary_op("arith.fsub", a, b, "fsub")
 
     def fmul(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fmul", [a, b], [a.type], result_name_hint="fmul").result
+        return self._binary_op("arith.fmul", a, b, "fmul")
 
     def fdiv(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fdiv", [a, b], [a.type], result_name_hint="fdiv").result
+        return self._binary_op("arith.fdiv", a, b, "fdiv")
 
     def fneg(self, a: Value) -> Value:
         return self._op("arith.fneg", [a], [a.type], result_name_hint="fneg").result
@@ -2850,45 +3605,43 @@ class IRBuilder:
         ).result
 
     def cmp_lt(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "lt"}, result_name_hint="lt"
-        ).result
+        return self._int_cmp("lt", a, b)
 
     def cmp_le(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "le"}, result_name_hint="le"
-        ).result
+        return self._int_cmp("le", a, b)
 
     def cmp_gt(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "gt"}, result_name_hint="gt"
-        ).result
+        return self._int_cmp("gt", a, b)
 
     def cmp_ge(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "ge"}, result_name_hint="ge"
-        ).result
+        return self._int_cmp("ge", a, b)
 
     def cmp_eq(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "eq"}, result_name_hint="eq"
-        ).result
+        return self._int_cmp("eq", a, b)
 
     def cmp_ne(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "ne"}, result_name_hint="ne"
-        ).result
+        return self._int_cmp("ne", a, b)
 
     def cmp_ult(self, a: Value, b: Value) -> Value:
         """Unsigned ``a < b`` (``icmp ult``): both operands read as unsigned.
 
         A negative value reads as a large unsigned one, so ``cmp_ult(x, n)``
         with ``n >= 0`` is ``0 <= x < n`` in one compare. Operands are two
-        i32 or two i64 values.
+        i32 or two i64 values: the ``ult`` rule refuses any other width
+        (``ValueError``) and the operand rule two types (``TypeError``).
         """
-        _check_unsigned_int_operands("cmp_ult", a, b)
+        return self._int_cmp("ult", a, b)
+
+    def _int_cmp(self, pred: str, a: Value, b: Value) -> Value:
+        """An ``arith.cmp`` of ``a`` and ``b`` by ``pred``; refuses what
+        ``_int_cmp_error`` refuses (operands of different types, or a float
+        operand, say: TypeError)."""
+        attrs = {"pred": pred}
+        refusal = _int_cmp_error(attrs, a.type, b.type)
+        if refusal:
+            raise refusal
         return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "ult"}, result_name_hint="ult"
+            "arith.cmp", [a, b], [I1], attrs=attrs, result_name_hint=pred
         ).result
 
     def _assume_range(
@@ -2920,7 +3673,7 @@ class IRBuilder:
         """
         if v.type not in (I32, I64):
             raise ValueError(f"_assume_range: v must be i32 or i64, got {v.type.name}")
-        attrs: Dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
+        attrs: dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
         operands = [v]
         for word, end, plus in (("ge", ge, ge_plus), ("lt", lt, lt_plus)):
             if isinstance(end, Value):
@@ -3094,17 +3847,22 @@ class IRBuilder:
         )
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
-        if pred not in ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno"):
-            raise ValueError(f"unsupported fcmp predicate {pred!r}")
+        """An ``arith.fcmp`` of ``a`` and ``b`` by ``pred``; refuses what
+        ``_fcmp_error`` refuses (an unknown pred: ValueError; operands of
+        different types, or an integer operand: TypeError)."""
+        attrs = {"pred": pred}
+        refusal = _fcmp_error(attrs, a.type, b.type)
+        if refusal:
+            raise refusal
         return self._op(
-            "arith.fcmp", [a, b], [I1], attrs={"pred": pred}, result_name_hint="fcmp"
+            "arith.fcmp", [a, b], [I1], attrs=attrs, result_name_hint="fcmp"
         ).result
 
     def fmax(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fmax", [a, b], [a.type], result_name_hint="fmax").result
+        return self._binary_op("arith.fmax", a, b, "fmax")
 
     def fmin(self, a: Value, b: Value) -> Value:
-        return self._op("arith.fmin", [a, b], [a.type], result_name_hint="fmin").result
+        return self._binary_op("arith.fmin", a, b, "fmin")
 
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
@@ -3177,45 +3935,59 @@ class IRBuilder:
         return self._op("math.tanh", [a], [a.type], result_name_hint="tanh").result
 
     def land(self, a: Value, b: Value) -> Value:
-        """Bit-and (used for i1 conjunction and i32 masks)."""
-        return self._op("arith.and", [a, b], [a.type], result_name_hint="and").result
+        """Bit-and (used for i1 conjunction and i32 masks). Raises
+        ``TypeError`` unless ``a`` and ``b`` are integers or ``i1`` of one
+        type."""
+        return self._binary_op("arith.and", a, b, "and")
 
     def lor(self, a: Value, b: Value) -> Value:
-        return self._op("arith.or", [a, b], [a.type], result_name_hint="or").result
+        """Bit-or. Raises ``TypeError`` unless ``a`` and ``b`` are integers or
+        ``i1`` of one type."""
+        return self._binary_op("arith.or", a, b, "or")
 
     def lnot(self, a: Value) -> Value:
-        """Bitwise-NOT. For an i1 input this is the logical negation."""
+        """Bitwise-NOT. For an i1 input this is the logical negation. Raises
+        ``TypeError`` unless ``a`` is an integer or ``i1``: it lowers to an
+        ``xor`` with all ones."""
+        _refuse_non_integer("arith.not", a.type)
         return self._op("arith.not", [a], [a.type], result_name_hint="not").result
 
     def smax(self, a: Value, b: Value) -> Value:
         """Signed maximum; an unsigned operand is refused (use :meth:`umax`)."""
         _refuse_unsigned("smax", a.type, "umax")
         _refuse_unsigned("smax", b.type, "umax")
-        return self._op("arith.smax", [a, b], [a.type], result_name_hint="smax").result
+        return self._binary_op("arith.smax", a, b, "smax")
 
     def smin(self, a: Value, b: Value) -> Value:
         """Signed minimum; an unsigned operand is refused (use :meth:`umin`)."""
         _refuse_unsigned("smin", a.type, "umin")
         _refuse_unsigned("smin", b.type, "umin")
-        return self._op("arith.smin", [a, b], [a.type], result_name_hint="smin").result
+        return self._binary_op("arith.smin", a, b, "smin")
 
-    def _require_unsigned_pair(self, op_name: str, a: Value, b: Value) -> None:
-        scalar = not isinstance(a.type, VectorType)
-        if not (scalar and _is_unsigned(a.type) and a.type == b.type):
-            raise ValueError(
-                f"{op_name} expects two operands of one unsigned integer type, "
-                f"got {a.type.name} and {b.type.name}"
+    def _unsigned_min_max(self, op_name: str, a: Value, b: Value) -> Value:
+        """One ``op_name`` (``arith.umax`` or ``arith.umin``) of two operands
+        of one unsigned integer scalar type. Raises ``TypeError`` for operands
+        of two types (:func:`_operand_types_error`), then for a type that is
+        not an unsigned integer scalar. The C++ engine's ``unsigned_min_max``
+        is its twin."""
+        _refuse_operand_types(op_name, (a, b))
+        if isinstance(a.type, VectorType) or not _is_unsigned(a.type):
+            raise TypeError(
+                _type_name_message(
+                    op_name, "operand type", a.type.name, "an unsigned integer scalar"
+                )
             )
+        return self._op(
+            op_name, [a, b], [a.type], result_name_hint=op_name.removeprefix("arith.")
+        ).result
 
     def umax(self, a: Value, b: Value) -> Value:
         """Unsigned maximum of two u8 values. Lowers to ``llvm.umax``."""
-        self._require_unsigned_pair("umax", a, b)
-        return self._op("arith.umax", [a, b], [a.type], result_name_hint="umax").result
+        return self._unsigned_min_max("arith.umax", a, b)
 
     def umin(self, a: Value, b: Value) -> Value:
         """Unsigned minimum of two u8 values. Lowers to ``llvm.umin``."""
-        self._require_unsigned_pair("umin", a, b)
-        return self._op("arith.umin", [a, b], [a.type], result_name_hint="umin").result
+        return self._unsigned_min_max("arith.umin", a, b)
 
     def zext(self, v: Value, target: Type) -> Value:
         return self._op("arith.zext", [v], [target], result_name_hint="zx").result
@@ -3663,23 +4435,26 @@ class IRBuilder:
         return self.fmin(hi, self.fmax(lo, v))
 
     def xor(self, a: Value, b_v: Value) -> Value:
-        """Bitwise XOR. Same type for both operands."""
-        return self._op("arith.xor", [a, b_v], [a.type], result_name_hint="xor").result
+        """Bitwise XOR. Raises ``TypeError`` unless ``a`` and ``b_v`` are
+        integers or ``i1`` of one type."""
+        return self._binary_op("arith.xor", a, b_v, "xor")
 
     def shl(self, a: Value, b_v: Value) -> Value:
         """Logical left shift ``a << b_v``. Lowers to LLVM ``shl``.
         AMDGPU folds constant shifts into ``v_lshlrev_b32`` with the
-        immediate baked in.
+        immediate baked in. Raises ``TypeError`` unless ``a`` and ``b_v`` are
+        integers or ``i1`` of one type.
         """
-        return self._op("arith.shl", [a, b_v], [a.type], result_name_hint="shl").result
+        return self._binary_op("arith.shl", a, b_v, "shl")
 
     def lshr(self, a: Value, b_v: Value) -> Value:
         """Logical right shift ``a >> b_v`` (zero-fill). Lowers to
         LLVM ``lshr``; AMDGPU folds to ``v_lshrrev_b{32,64}``.
+
+        Raises ``TypeError`` unless ``a`` and ``b_v`` are integers or ``i1``
+        of one type: LLVM's ``lshr`` takes two integers of one width.
         """
-        return self._op(
-            "arith.lshr", [a, b_v], [a.type], result_name_hint="lshr"
-        ).result
+        return self._binary_op("arith.lshr", a, b_v, "lshr")
 
     def umul_hi_i32(self, a: Value, b_v: Value) -> Value:
         """Unsigned high 32 bits of an i32 * i32 product.
@@ -4262,15 +5037,19 @@ class IRBuilder:
         ).result
 
     def vector_binary(self, op_name: str, a: Value, b: Value) -> Value:
-        """Lane-wise ``vector.<op_name>`` of two matching vectors. The signed ops
-        (``smax``, ``smin``) refuse an unsigned element type."""
-        if not isinstance(a.type, VectorType) or a.type != b.type:
-            raise ValueError("vector_binary expects matching vector operands")
+        """Lane-wise ``vector.<op_name>`` of two vectors of one type. A first
+        operand that is not a vector is a ``TypeError``. The signed ops
+        (``smax``, ``smin``) refuse an unsigned element type, and the bitwise
+        ops and shifts (:data:`_INTEGER_ELEMENT_OPS`) one that is not an integer
+        or ``i1`` (``TypeError``); then a second operand of another type is a
+        ``TypeError`` (:func:`_operand_types_error`). The rules every binary op
+        shares are :meth:`_binary_op`'s, which builds the op."""
+        vector_error = _vector_operand_error(f"vector.{op_name}", a.type)
+        if vector_error:
+            raise TypeError(vector_error)
         if op_name in ("smax", "smin"):
             _refuse_unsigned(f"vector_{op_name}", a.type)
-        return self._op(
-            f"vector.{op_name}", [a, b], [a.type], result_name_hint=f"v{op_name}"
-        ).result
+        return self._binary_op(f"vector.{op_name}", a, b, f"v{op_name}")
 
     def vector_add(self, a: Value, b: Value) -> Value:
         return self.vector_binary("add", a, b)
@@ -4308,10 +5087,17 @@ class IRBuilder:
         Lowers to ``llvm.fmuladd.v<N>x<elem>`` so the AMDGPU
         MachineCombiner picks ``v_pk_fma_f32`` / ``v_fma_f32`` chains
         without relying on the scheduler proving ``contract``
-        semantics on a separate ``vector.mul`` + ``vector.add`` pair.
+        semantics on a separate ``vector.mul`` + ``vector.add`` pair. A first
+        operand that is not a vector, or operands of more than one type, is a
+        ``TypeError`` (:func:`_vector_operand_error`,
+        :func:`_operand_types_error`). For IR that did not come through it,
+        the verifier reports operands of more than one type, or other than
+        three, and every lowering refuses them (:func:`_operand_rules_error`).
         """
-        if not (isinstance(a.type, VectorType) and a.type == b.type == c.type):
-            raise ValueError("vector_fma expects three matching vector operands")
+        vector_error = _vector_operand_error("vector.fma", a.type)
+        if vector_error:
+            raise TypeError(vector_error)
+        _refuse_operand_types("vector.fma", (a, b, c))
         return self._op(
             "vector.fma", [a, b, c], [a.type], result_name_hint="vfma"
         ).result
@@ -4360,13 +5146,22 @@ class IRBuilder:
         ).result
 
     def vector_cmp(self, pred: str, a: Value, b: Value) -> Value:
-        if not isinstance(a.type, VectorType) or a.type != b.type:
-            raise ValueError("vector_cmp expects matching vector operands")
+        """A lane-by-lane compare of ``a`` and ``b`` by ``pred``. A first
+        operand that is not a vector is a ``TypeError``; then it refuses what
+        ``_vector_cmp_error`` refuses (an unknown pred: ValueError; operands of
+        different types, or lanes that are not integers or i1: TypeError)."""
+        vector_error = _vector_operand_error("vector.cmp", a.type)
+        if vector_error:
+            raise TypeError(vector_error)
+        attrs = {"pred": pred}
+        refusal = _vector_cmp_error(attrs, a.type, b.type)
+        if refusal:
+            raise refusal
         return self._op(
             "vector.cmp",
             [a, b],
             [VectorType(I1, a.type.count)],
-            attrs={"pred": pred},
+            attrs=attrs,
             result_name_hint=f"vcmp_{pred}",
         ).result
 
@@ -4400,6 +5195,16 @@ class IRBuilder:
     def smem_store_f16(
         self, smem: Value, indices: Sequence[Value], value: Value
     ) -> None:
+        """Store ``value``, which holds f16, whole at ``indices`` of ``smem``.
+
+        A value with no type or of any other element type is refused with
+        TypeError: the op records ``elem_type`` f16.
+        """
+        element_error = _value_element_error(
+            "smem_store_f16", value.type, len(indices) + 1, "f16"
+        )
+        if element_error:
+            raise TypeError(element_error)
         self._op(
             "tile.smem_store",
             [smem, *indices, value],
@@ -4431,10 +5236,14 @@ class IRBuilder:
         every row start of a padded tile guarantees) and claims it, capped at
         the 16-byte pool alignment (``lower_llvm.SMEM_POOL_ALIGN``): the
         indices must address an element whose byte offset in the allocation is
-        a multiple of that claim. The LLVM lowering aligns the allocation's base to it. An
-        ``n=1`` store of a vector value stores it whole and claims only
-        element alignment.
+        a multiple of that claim. The LLVM lowering aligns the allocation's base to it.
+
+        The value has ``n`` lanes (a scalar or a one-lane vector for ``n=1``);
+        any other lane count is refused with ValueError.
         """
+        lanes_error = _smem_store_lanes_error("smem_store_vN", value.type, n, "n")
+        if lanes_error:
+            raise ValueError(lanes_error)
         if n == 1:
             # Single-element store; route through the scalar `tile.smem_store`.
             self._op(
@@ -4443,13 +5252,11 @@ class IRBuilder:
                 attrs={"rank": len(indices), "elem_type": value.type.name},
             )
             return
-        if not isinstance(value.type, VectorType):
-            raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
         _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             allowed_n = (2, 4, 8, 16)
-        elif elem_name == "f64":
+        elif elem_name in ("f64", "i64"):
             allowed_n = (2,)
         else:
             allowed_n = (2, 4, 8)
@@ -4489,8 +5296,8 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64,
-        ``n in {1, 2}``) element types; loads exactly N elements. In addition to
+        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64 /
+        i64, ``n in {1, 2}``) element types; loads exactly N elements. In addition to
         power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
         or three words), using element alignment. The target and alignment
         determine instruction selection.
@@ -4506,7 +5313,7 @@ class IRBuilder:
             allowed_n = (1, 2, 4, 8, 12, 16)
         elif dtype.name in ("f16", "bf16", "i16"):
             allowed_n = (1, 2, 4, 6, 8)
-        elif dtype.name == "f64":
+        elif dtype.name in ("f64", "i64"):
             allowed_n = (1, 2)
         else:
             allowed_n = (1, 2, 3, 4, 8)
@@ -4534,7 +5341,7 @@ class IRBuilder:
         b: Value,
         c: Value,
         *extra: Value,
-        attrs: Optional[Dict[str, Any]] = None,
+        attrs: Optional[dict[str, Any]] = None,
     ) -> Value:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
@@ -4593,16 +5400,9 @@ class IRBuilder:
             dst_dtype = op.dst.dtype
             if not isinstance(dst_dtype, str):
                 raise ValueError("MMA destination dtype must name an IR scalar type")
-            try:
-                dst_elem = dtype_to_ir_type(dst_dtype)
-            except ValueError as exc:
-                raise ValueError(f"MMA destination dtype: {exc}") from exc
+            result_type = _mma_result_vector(dst_dtype, dst_frag_len)
         else:
-            dst_frag_len = _mma_dst_frag_len(op_id)
-            try:
-                dst_elem = dtype_to_ir_type(_mma_dst_dtype(op_id))
-            except ValueError as exc:
-                raise ValueError(f"MMA destination dtype: {exc}") from exc
+            result_type = mma_result_type(op_id)
 
         hint = (
             "mxacc"
@@ -4612,7 +5412,7 @@ class IRBuilder:
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(dst_elem, dst_frag_len)],
+            [result_type],
             attrs={"op_id": op_id, **(attrs or {})},
             result_name_hint=hint,
         ).result
@@ -5038,7 +5838,7 @@ class IRBuilder:
 
     def _f8f6f4_16x16x128_attrs(
         self, a: Value, b: Value, a_format: str, b_format: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check the formats and operand widths; return the op attributes.
 
         The attributes are empty for the default formats, so existing serialized
@@ -5088,7 +5888,7 @@ class IRBuilder:
     def smem_store_distributed(
         self,
         smem: Value,
-        layout_attrs: Dict[str, Any],
+        layout_attrs: dict[str, Any],
         values: Value,
     ) -> None:
         """CShuffle-style distributed LDS store (P42).
@@ -5307,11 +6107,9 @@ class IRBuilder:
         each 16-lane row-group (the standard MFMA-16x16x32 softmax
         reduction pattern), prefer :meth:`ds_swizzle_xor` which uses the
         FFT-mode swizzle and is one LDS instruction vs ds_bpermute's
-        2 instructions (vgpr address compute + ds_bpermute). Measured on
-        the long-prefill ``bf16 n=16 q=1000 k=1050`` workload: ds_swizzle
-        cut the inner-loop ds-unit ops from 64 → 16 and shaved 30+ µs
-        per call. See the ISA op-by-op comparison in
-        ``ck/dsl/unified_attention_results.md``.
+        2 instructions (vgpr address compute + ds_bpermute). On the
+        long-prefill ``bf16 n=16 q=1000 k=1050`` workload, ds_swizzle
+        cuts the inner-loop ds-unit ops from 64 to 16.
         """
         if addr.type.name != "i32" or data.type.name != "i32":
             raise ValueError("ds_bpermute requires i32 addr + i32 data")
@@ -6176,9 +6974,6 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 4)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
-            # "dtr" prefix (not "tr...digits") so the fresh-name counter can never
-            # collide with an arith.trunc result ("tr"+id): e.g. trunc id 16631
-            # and tr16 id 631 both stringify to "tr16631".
             result_name_hint="dtr16",
         ).result
 
@@ -6310,7 +7105,7 @@ class IRBuilder:
 
     # ----- scheduler / synchronisation hints -----
 
-    def _barrier_attrs(self, fence: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _barrier_attrs(self, fence: Optional[str]) -> Optional[dict[str, Any]]:
         mode = self.fence_barriers if fence is None else fence
         if mode in (None, "none"):
             return None
@@ -6848,20 +7643,22 @@ class IRBuilder:
             )
         if lds_addr.type is not I64 and lds_addr.type is not I32:
             raise TypeError(f"{name} lds_addr must be i64 or i32, got {lds_addr.type}")
-        for field, value in (
+        for operand_name, value in (
             ("tensor_dim0", tensor_dim0),
             ("tensor_dim1", tensor_dim1),
             ("row_stride", row_stride),
         ):
-            self._check_i32_value(name, field, value)
+            self._check_i32_value(name, operand_name, value)
         data_size = {1: 0, 2: 1, 4: 2, 8: 3}.get(elem_bytes)
         if data_size is None:
             raise ValueError(
                 f"{name} elem_bytes must be 1, 2, 4, or 8 (got {elem_bytes})"
             )
-        for field, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
+        for operand_name, value in (("tile_dim0", tile_dim0), ("tile_dim1", tile_dim1)):
             if not 1 <= value <= 0xFFFF:
-                raise ValueError(f"{name} {field} must be in 1..65535 (got {value})")
+                raise ValueError(
+                    f"{name} {operand_name} must be in 1..65535 (got {value})"
+                )
         if not 0 <= workgroup_mask <= 0xFFFF:
             raise ValueError(
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
@@ -6920,12 +7717,18 @@ class IRBuilder:
     def iglp_opt(self, level: int = 0) -> None:
         """`__builtin_amdgcn_iglp_opt(level)`.
 
-        Asks the AMDGPU post-RA scheduler to apply a canned instruction
-        interleaving for the enclosing loop (MFMA / ds_read / ds_write /
-        VMEM). ``level`` selects the pattern (0 = GEMM MFMA-interleave,
-        1 = attention-style). Placed once at the top of the main loop body;
-        it owns the loop schedule, so manual ``sched_barrier`` /
-        ``sched_group_barrier`` hints should be suppressed when it is used.
+        Asks the AMDGPU scheduler to apply a canned instruction interleaving
+        (MFMA / ds_read / ds_write / VMEM) to the scheduling region it sits
+        in. ``level`` selects LLVM's strategy (0 = ``MFMASmallGemmOpt``,
+        1 = ``MFMASmallGemmSingleWaveOpt``). Placed once at the top of the
+        main loop body; it owns the loop schedule, so manual
+        ``sched_barrier`` / ``sched_group_barrier`` hints should be
+        suppressed when it is used.
+
+        Level 1 needs ROCm 7.11 or newer, the 10.x releases included (LLVM
+        commit 576e1affab35): older compilers run out of memory on a region
+        with fewer than 4 LDS reads. See known issue 8 in
+        ``dsl_docs/architecture/gfx_support_audit.md``.
         """
         self._op("tile.iglp_opt", attrs={"level": int(level)})
 
@@ -7456,8 +8259,19 @@ class IRBuilder:
     def smem_store_vN_f32(
         self, smem: Value, indices: Sequence[Value], value: Value, n: int
     ) -> None:
+        """Store ``value``, ``n`` f32 lanes (n in {1, 2, 4}; a scalar for
+        ``n=1``), at ``indices`` of ``smem``. The tile may hold any element type:
+        ``indices`` address it in its own elements, and the alignment claim is
+        bounded by its row starts in bytes. A value with no type or one that
+        does not hold f32 is refused with TypeError, a value of another lane
+        count with ValueError."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_store_vN_f32 n must be 1, 2, or 4 (got {n})")
+        refusal = _smem_store_vN_f32_error(
+            "smem_store_vN_f32", value.type, len(indices) + 1, n, "n"
+        )
+        if refusal:
+            raise refusal
         self._op(
             "tile.smem_store_vN_f32",
             [smem, *indices, value],
@@ -7465,6 +8279,8 @@ class IRBuilder:
         )
 
     def smem_load_vN_f32(self, smem: Value, *indices, n: int = 0) -> Value:
+        """Load ``n`` f32 lanes (n in {1, 2, 4}) at ``indices`` of ``smem``.
+        The tile may hold any element type, as for :meth:`smem_store_vN_f32`."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_load_vN_f32 n must be 1, 2, or 4 (got {n})")
         if not indices:
@@ -7613,7 +8429,7 @@ class IRBuilder:
         """
         if idx is None:
             idx = self.const_i32(0)
-        attrs: Dict[str, Any] = {}
+        attrs: dict[str, Any] = {}
         if align is not None:
             attrs["align"] = _checked_align("memref.global_store_typed", align)
         self._op("memref.global_store_typed", [ptr, idx, value], attrs=attrs)
@@ -7678,6 +8494,7 @@ class IRBuilder:
     # ----- control flow -----
 
     def scf_for(self, lower: Value, upper: Value, step: Value, iv_name: str = "k0"):
+        _refuse_declared_name("loop induction variable", iv_name)
         self._refuse_taken_loop_names([f"%{iv_name}"])
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
@@ -7696,7 +8513,7 @@ class IRBuilder:
         lower: Value,
         upper: Value,
         step: Value,
-        iter_args: Sequence[Tuple[str, Value]],
+        iter_args: Sequence[tuple[str, Value]],
         iv_name: str = "k0",
         unroll: bool = False,
         elide_trailing_barrier: bool = True,
@@ -7719,19 +8536,24 @@ class IRBuilder:
         No init may be a buffer descriptor (see
         :func:`_loop_carried_descriptor_message`), and no name may be taken by
         another value of this loop or of a loop it is nested in (see
-        :func:`_reused_loop_name_message`).
+        :func:`_reused_loop_name_message`). Each name must be an identifier
+        that is not a C++ keyword and does not end in ``_<digits>`` (see the
+        "Value names" note).
         """
         for index, (_, init) in enumerate(iter_args):
             if _is_buffer_descriptor(init):
                 raise ValueError(_loop_carried_descriptor_message(index))
+        _refuse_declared_name("loop induction variable", iv_name)
+        for arg_name, _ in iter_args:
+            _refuse_declared_name("loop-carried value", arg_name)
         self._refuse_taken_loop_names(
             [f"%{iv_name}"] + [f"%{arg_name}" for arg_name, _ in iter_args]
         )
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
-        iter_vars: List[Value] = []
-        iter_inits: List[Value] = []
-        iter_meta: List[Dict[str, Any]] = []
+        iter_vars: list[Value] = []
+        iter_inits: list[Value] = []
+        iter_meta: list[dict[str, Any]] = []
         for arg_name, init in iter_args:
             v = Value(name=f"%{arg_name}", type=init.type)
             iter_vars.append(v)
@@ -7871,7 +8693,9 @@ class IRBuilder:
         a branch of an if/else without results that holds an ``scf_yield``.
         """
         for index, result_type in enumerate(result_types):
-            _refuse_if_else_result_type(index, result_type)
+            refusal = _if_else_result_type_error(index, result_type)
+            if refusal is not None:
+                raise refusal
         results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
@@ -8029,7 +8853,7 @@ class _ForBuilder:
         op: Op,
         iv: Value,
         body: Region,
-        iter_vars: List[Value],
+        iter_vars: list[Value],
     ) -> None:
         self._parent = parent
         self.op = op
@@ -8047,7 +8871,7 @@ class _ForBuilder:
         self._parent.pop_region()
 
     @property
-    def results(self) -> List[Value]:
+    def results(self) -> list[Value]:
         return list(self.op.results)
 
 
@@ -8113,9 +8937,11 @@ class _IfElseBuilder:
         # The regions were already popped by their own context managers. Once
         # both branches are built, refuse one that does not yield the results.
         if exc_type is None:
-            _if_else_yields(self.op)
+            refusal = _if_else_error(self.op)
+            if refusal is not None:
+                raise refusal
 
     @property
-    def results(self) -> List[Value]:
+    def results(self) -> list[Value]:
         """The values the branch that ran yields, one per result type."""
         return list(self.op.results)

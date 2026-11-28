@@ -29,6 +29,7 @@
  * attrs must not be mutated.
  */
 #include "rocke/tf32_internal.h"
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -37,10 +38,12 @@
 #include "rocke/arch_target.h" /* arch catalog lookup for the arch seam guard */
 #include "rocke/arena.h"
 #include "rocke/error.hpp" /* ckc::Error boundary translation */
+#include "rocke/float_format.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/lower_llvm_internal.h" /* rocke_ll_backend_for: the ISA backend facts */
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
 
@@ -331,13 +334,20 @@ const char* rocke_h_require_unsigned_int_type(rocke_h_lowerer_t* lw,
         }
         if(used < sizeof names)
             snprintf(names + used, sizeof names - used, ")");
+        char what[ROCKE_ERR_MSG_CAP];
+        char expected[ROCKE_ERR_MSG_CAP];
+        char message[ROCKE_ERR_MSG_CAP];
+        snprintf(what, sizeof what, "HIP lowering of %s", op_name);
+        snprintf(expected, sizeof expected, "an integer type, one of %s", names);
         rocke_h_fail(lw,
                      ROCKE_ERR_TYPE,
-                     "HIP lowering of %s failed - element type='%s', expected an integer "
-                     "type, one of %s",
-                     op_name,
-                     ir_type_name ? ir_type_name : "(null)",
-                     names);
+                     "%s",
+                     rocke_i_type_name_message(what,
+                                               "element type",
+                                               ir_type_name ? ir_type_name : "(null)",
+                                               expected,
+                                               message,
+                                               sizeof message));
     }
     return spelling;
 }
@@ -441,6 +451,10 @@ const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
             {
                 return "f64x";
             }
+            if(strcmp(ir_scalar_name, "i64") == 0)
+            {
+                return "i64x";
+            }
             if(strcmp(ir_scalar_name, "i32") == 0 || strcmp(ir_scalar_name, "tf32") == 0)
             {
                 return "i32x";
@@ -480,8 +494,9 @@ static bool rocke_h_scalar_in_vec_map(const char* name, bool full_map)
         return false;
     }
     return strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0 || strcmp(name, "f64") == 0
-           || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0 || strcmp(name, "i8") == 0
-           || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0;
+           || strcmp(name, "i64") == 0 || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0
+           || strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0
+           || strcmp(name, "bf8e5m2") == 0;
 }
 
 const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
@@ -553,16 +568,13 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
         }
         else
         {
-            /* full 8-entry map; fp8/bf8 fold to i8x as in Python. */
+            /* full map; fp8/bf8 fold to i8x as in Python. */
             pfx = rocke_h_vec_prefix(elem, /*full_map=*/true);
             /* vec_prefix falls back to "f16x" for unknown elems, but the
              * Python code only emits the listed elems and otherwise falls
-             * through to the KeyError. Detect the listed set explicitly so an
-             * unknown vector elem is an error rather than silently "f16x". */
-            if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
-               && strcmp(elem, "tf32") != 0 && strcmp(elem, "f64") != 0 && strcmp(elem, "i32") != 0
-               && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
-               && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
+             * through to the KeyError. Check the mapped set so an unknown
+             * vector elem is an error rather than silently "f16x". */
+            if(!rocke_h_scalar_in_vec_map(elem, /*full_map=*/true))
             {
                 /* Python falls through to the scalar map, which refuses the
                  * vector type by its own name. */
@@ -591,57 +603,55 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 
 /* ============================== literals ============================= */
 
-const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
+/* Python _hip_float_literal(val, c_type, suffix): the C++ literal text for a
+ * float constant of C type `c_type`, copied into the lowerer's arena. repr()
+ * has no C++ spelling for nan and the infinities, so those become the
+ * <math.h> macros cast to `c_type`; finite values are repr(val) + `suffix`. */
+static const char*
+    h_hip_float_literal(rocke_h_lowerer_t* lw, double val, const char* c_type, const char* suffix)
 {
+    rocke_strbuf_t text;
     char* out;
     if(!lw || !lw->b)
     {
         return "";
     }
+    if(rocke_strbuf_init(&text, 32) != 0)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "float literal: out of memory");
+        return "";
+    }
     if(isnan(val))
     {
-        out = rocke_arena_strdup(&lw->b->arena, "((float)NAN)");
-        return out ? out : "";
+        rocke_strbuf_appendf(&text, "((%s)NAN)", c_type);
     }
-    if(isinf(val))
+    else if(isinf(val))
     {
-        out = rocke_arena_strdup(&lw->b->arena,
-                                 val < 0 ? "((float)-INFINITY)" : "((float)INFINITY)");
-        return out ? out : "";
+        rocke_strbuf_appendf(&text, "((%s)%sINFINITY)", c_type, val < 0 ? "-" : "");
     }
-    /* NOTE(port): Python emits repr(float)+"f"; %g is a close approximation but
-     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
-    out = rocke_arena_printf(&lw->b->arena, "%gf", val);
-    return out ? out : "";
+    else
+    {
+        rocke_append_python_float_repr(&text, val);
+        rocke_strbuf_append(&text, suffix);
+    }
+    out = text.oom ? NULL : rocke_arena_strdup(&lw->b->arena, rocke_strbuf_cstr(&text));
+    rocke_strbuf_free(&text);
+    if(!out)
+    {
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "float literal: out of memory");
+        return "";
+    }
+    return out;
+}
+
+const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
+{
+    return h_hip_float_literal(lw, val, "float", "f");
 }
 
 const char* rocke_h_f64_literal(rocke_h_lowerer_t* lw, double val)
 {
-    char* out;
-    if(!lw || !lw->b)
-    {
-        return "";
-    }
-    if(isnan(val))
-    {
-        out = rocke_arena_strdup(&lw->b->arena, "((double)NAN)");
-        return out ? out : "";
-    }
-    if(isinf(val))
-    {
-        out = rocke_arena_strdup(&lw->b->arena,
-                                 val < 0 ? "((double)-INFINITY)" : "((double)INFINITY)");
-        return out ? out : "";
-    }
-    if(val == 0.0 && signbit(val))
-    {
-        out = rocke_arena_strdup(&lw->b->arena, "-0.0");
-        return out ? out : "";
-    }
-    /* NOTE(port): Python emits repr(float); %.17g is a close approximation but
-     * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
-    out = rocke_arena_printf(&lw->b->arena, "%.17g", val);
-    return out ? out : "";
+    return h_hip_float_literal(lw, val, "double", "");
 }
 
 /* ============================== waitcnt encoders ===================== */
@@ -675,8 +685,18 @@ int rocke_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt)
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10);
 }
 
-int rocke_h_encode_waitcnt(const rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt)
+int rocke_h_encode_waitcnt(rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt)
 {
+    if(lw && lw->arch.waitcnt_family == ROCKE_HIP_WAITCNT_NONE)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_NOTIMPL,
+                     "s_waitcnt is not available on %s: the target replaced it with split "
+                     "wait counters, which the HIP lowering does not emit; lower through "
+                     "the LLVM path",
+                     lw->arch.gfx);
+        return 0;
+    }
     if(lw && lw->arch.waitcnt_family == ROCKE_HIP_WAITCNT_GFX11)
     {
         return rocke_h_encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt);
@@ -686,26 +706,50 @@ int rocke_h_encode_waitcnt(const rocke_h_lowerer_t* lw, int vmcnt, int expcnt, i
 
 /* ============================== arch gates =========================== */
 
-rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id)
+const rocke_mma_op_t* rocke_h_require_wmma_atom(rocke_h_lowerer_t* lw, const char* op_id)
 {
     if(!rocke_h_live(lw))
     {
-        return lw ? lw->status : ROCKE_ERR_NOTIMPL;
+        return NULL;
     }
-    /* NOTE(port): Python keys off the ArchTarget MMA catalog (mma.by_op_id);
-     * that catalog is not ported, so we use lw->arch.has_wmma. */
-    if(!lw->arch.has_wmma)
+    /* Python _require_wmma_arch: admitted on any target whose MMA catalog lists
+     * the atom, never by the target's name. */
+    const rocke_arch_target_t* target
+        = lw->arch.gfx ? rocke_arch_target_from_gfx(lw->arch.gfx) : NULL;
+    const rocke_mma_op_t* atom
+        = target && op_id ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
+    if(atom)
     {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_NOTIMPL,
-                            "WMMA op '%s' is not available on %s "
-                            "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
-                            "The MFMA atoms are the matrix path on CDNA.",
-                            op_id ? op_id : "(null)",
-                            lw->arch.gfx ? lw->arch.gfx : "(unknown)",
-                            lw->arch.family ? lw->arch.family : "cdna");
+        return atom;
     }
-    return ROCKE_OK;
+    /* Not listed: refuse, naming the target's family. */
+    char family[16] = "(UNKNOWN)";
+    if(target)
+    {
+        size_t length = 0;
+        for(; target->family[length] && length + 1 < sizeof(family); ++length)
+        {
+            family[length] = (char)toupper((unsigned char)target->family[length]);
+        }
+        family[length] = '\0';
+    }
+    rocke_h_fail(lw,
+                 ROCKE_ERR_NOTIMPL,
+                 "WMMA op '%s' is not available on %s "
+                 "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
+                 "The MFMA atoms are the matrix path on CDNA.",
+                 op_id ? op_id : "(null)",
+                 lw->arch.gfx ? lw->arch.gfx : "(unknown)",
+                 family); /* [[noreturn]] */
+}
+
+rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id)
+{
+    if(rocke_h_require_wmma_atom(lw, op_id))
+    {
+        return ROCKE_OK;
+    }
+    return lw ? lw->status : ROCKE_ERR_NOTIMPL;
 }
 
 rocke_status_t rocke_h_require_ds_read_tr(rocke_h_lowerer_t* lw, const char* op_id)
@@ -929,6 +973,11 @@ rocke_status_t rocke_h_lower_op(rocke_h_lowerer_t* lw, const rocke_op_t* op)
     const char* tf32_error = rocke_tf32_op_error(op);
     if(tf32_error)
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
+    char operand_error[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t operand_status
+        = rocke_i_operand_rules_error(op, operand_error, sizeof operand_error);
+    if(operand_status != ROCKE_OK)
+        return rocke_h_fail(lw, operand_status, "%s", operand_error);
     fn = rocke_h_dispatch(op->opcode);
     if(!fn)
     {
@@ -975,8 +1024,6 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
     a.gfx = "gfx950";
     a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
     a.has_ds_read_tr = true;
-    a.has_wmma = false;
-    a.family = "cdna";
 
     if(!gfx)
     {
@@ -988,36 +1035,38 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
         a.gfx = "gfx950";
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = true;
-        a.has_wmma = false;
-        a.family = "cdna";
     }
     else if(strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx940") == 0 || strcmp(gfx, "gfx90a") == 0
             || strcmp(gfx, "gfx908") == 0)
     {
-        /* CDNA, but no ds_read_*_tr_* and no WMMA. */
+        /* CDNA, but no ds_read_*_tr_*. */
         a.gfx = gfx;
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = false;
-        a.has_wmma = false;
-        a.family = "cdna";
     }
     else if(strncmp(gfx, "gfx11", 5) == 0)
     {
-        /* RDNA3: contiguous waitcnt, WMMA, no ds_read_tr. */
+        /* RDNA3: contiguous waitcnt, no ds_read_tr. */
         a.gfx = gfx;
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
-        a.has_wmma = true;
-        a.family = "rdna";
     }
     else if(strncmp(gfx, "gfx12", 5) == 0)
     {
-        /* RDNA4: contiguous waitcnt family, WMMA. */
+        /* RDNA4: contiguous waitcnt family. */
         a.gfx = gfx;
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
-        a.has_wmma = true;
-        a.family = "rdna";
+    }
+    /* Python _encode_waitcnt asks the ISA backend: a target whose backend does
+     * not emit the monolithic s_waitcnt (gfx1250) has no immediate to encode. */
+    {
+        rocke_status_t st = ROCKE_OK;
+        const ckc::rocke_ll_isa_backend_t* backend = ckc::rocke_ll_backend_for(gfx, &st);
+        if(backend && !backend->emits_legacy_s_waitcnt)
+        {
+            a.waitcnt_family = ROCKE_HIP_WAITCNT_NONE;
+        }
     }
     /* Anything unrecognised keeps the gfx950 default facts (per the header).
      * rocke_lower_kernel_to_hip rejects such a string before it gets here, so

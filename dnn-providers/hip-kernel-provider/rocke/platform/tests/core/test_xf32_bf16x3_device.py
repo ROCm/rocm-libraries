@@ -50,10 +50,15 @@ import os
 import subprocess
 import unittest
 
+import pytest
+from rocke.tests.arch_marks import arch_specific
+from rocke.tests.lanes import arch_skip_reason
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+pytestmark = pytest.mark.gpu
 
 _ARCH = "gfx950"
 _REQUIRE_ENV = "ROCKE_REQUIRE_GFX950"
@@ -152,6 +157,10 @@ def _select(env: dict, index: int) -> dict:
     return dict(env, HIP_VISIBLE_DEVICES=str(index))
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the device test runs the gfx950 bf16x3 emulation; gfx942 uses native xf32 MFMA",
+)
 class TestBf16x3OnDevice(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -178,7 +187,7 @@ class TestBf16x3OnDevice(unittest.TestCase):
             reason = f"no visible {_ARCH} device (visible: {seen})"
         if env.get(_REQUIRE_ENV) == "1":
             raise AssertionError(f"{_REQUIRE_ENV}=1, but {reason}")
-        raise unittest.SkipTest(reason)
+        raise unittest.SkipTest(arch_skip_reason((_ARCH,), reason))
 
     def test_the_expansion_is_faithful_and_accurate_on_device(self):
         # --require-device: the probe above saw a gfx950 and this process

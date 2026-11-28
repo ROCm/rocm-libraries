@@ -31,6 +31,7 @@ from rocke.helpers.magic_division import (
     do_magic_division,
     do_magic_division_dynamic,
 )
+from rocke.tests.engines import native_engine_or_skip
 
 FLAVORS = LLVM_FLAVORS
 DIVIDENDS = (2**30 - 1, 2**30, 1_610_612_736, 2**31 - 1)
@@ -92,7 +93,7 @@ def test_the_sum_is_a_no_unsigned_wrap_add(kernel):
     "kernel", [_static_kernel(3), _dynamic_kernel()], ids=["static", "dynamic"]
 )
 def test_both_engines_emit_the_same_text(kernel):
-    native = pytest.importorskip("rocke_engine")
+    native = native_engine_or_skip()
     ir = serialize(kernel)
     for flavor in FLAVORS:
         python_text = _lower_kernel_to_llvm_python(
@@ -106,17 +107,6 @@ def test_both_engines_emit_the_same_text(kernel):
 # --------------------------------------------------------------------------
 # GPU values
 # --------------------------------------------------------------------------
-
-
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
 
 
 def _run(arch, kernel, inputs):
@@ -156,12 +146,13 @@ def _run(arch, kernel, inputs):
 
 @pytest.fixture(scope="module")
 def gpu_arch():
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     return arch
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("divisor", DIVISORS)
 def test_static_quotients_match_numpy(gpu_arch, divisor):
     dividends = np.array(DIVIDENDS, dtype=np.int32)
@@ -169,6 +160,7 @@ def test_static_quotients_match_numpy(gpu_arch, divisor):
     np.testing.assert_array_equal(got, dividends // divisor)
 
 
+@pytest.mark.gpu
 def test_dynamic_quotients_match_numpy(gpu_arch):
     cases = [(n, d) for d in DIVISORS for n in DIVIDENDS]
     dividends = np.array([n for n, _ in cases], dtype=np.int32)

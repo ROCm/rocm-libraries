@@ -23,13 +23,10 @@
  * The gfx950_attention_tiled_3d prefix is carried on EVERY symbol/macro to avoid
  * clashing with the same-named common/ and gfx942 ports (the gfx942 sibling
  * exports rocke_build_unified_attention_3d_tiled_gfx942; the shared common/
- * attention_unified files carry their own scalars). The spec STRUCT TAGS
+ * attention_unified files carry their own scalars). The spec structs
  * (rocke_unified_attention_3d_tiled_spec_t / rocke_unified_attention_reduce_tiled_spec_t)
- * are the SAME PODs the gfx942 3D header declares: the two arch ports share the
- * identical frozen dataclass shape, so this header guards its struct/enum/default
- * definitions behind the gfx942 header's include-guard tokens (see the
- * "SHARED SPEC POD" note below) and only ever DECLARES the gfx950 build/lower
- * entries. Including BOTH the gfx942 and gfx950 3D headers in one TU is legal.
+ * and their _default functions are shared with the gfx942 port and live in
+ * rocke/instance_attention_tiled_3d_spec.h.
  *
  * GFX950 VS GFX942 DIFFERENCE (the only structural divergence; everything else
  * is a byte-faithful copy of the gfx942 3D shape):
@@ -118,6 +115,7 @@
 #include <stddef.h>
 
 #include "rocke/arena.h"
+#include "rocke/instance_attention_tiled_3d_spec.h" /* the shared spec PODs */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t, rocke_kernel_def_t, rocke_type_t */
 #include "rocke/lower_llvm.h" /* rocke_llvm_flavor_t, rocke_status_t                              */
 
@@ -139,98 +137,6 @@ extern "C" {
 #define ROCKE_GFX950_ATTN_TILED_3D_THREADS 64
 /* rcp(ln2) folded into the score (exp2 domain). */
 #define ROCKE_GFX950_ATTN_TILED_3D_RCP_LN2 1.4426950408889634
-
-/* ====================================================================== *
- * SHARED SPEC POD.
- *
- * UnifiedAttention3DTiledSpec / UnifiedAttentionReduceTiledSpec are the
- * IDENTICAL frozen dataclasses the gfx942 3D port already mirrors as
- * rocke_unified_attention_3d_tiled_spec_t / rocke_unified_attention_reduce_tiled_spec_t.
- * To allow including BOTH 3D headers in one TU, the struct/enum/default
- * declarations below are skipped when the gfx942 3D header has already provided
- * them (it defines ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_H). When this header is
- * used standalone (gfx950 only), it provides the canonical declarations itself.
- * The semantics, field order, and defaults are byte-identical across the two.
- * ====================================================================== */
-#ifndef ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_H
-
-/* ------------------------------------------------------- segment-kernel spec */
-typedef struct rocke_unified_attention_3d_tiled_spec
-{
-    /* ---- required (no Python default) ---- */
-    int head_size; /* 64 / 128 / 256                                   */
-    int block_size; /* 16 / 32 / 64                                     */
-    int num_query_heads;
-    int num_kv_heads;
-    const char* dtype; /* "fp16" or "bf16"                                 */
-    bool use_sinks;
-    int sliding_window; /* 0 == disabled                                    */
-    bool has_softcap;
-    int num_segments;
-
-    /* ---- defaulted ---- */
-    bool use_alibi; /* False */
-    bool use_qq_bias; /* False */
-    int num_seqs; /* 0 */
-
-    bool has_waves_per_eu; /* Optional[int] None */
-    int waves_per_eu;
-
-    const char* kv_storage_dtype; /* Optional[str] None ("fp8e4m3") */
-
-    bool has_tile_size_override; /* Optional[int] None (KV tile in tokens) */
-    int tile_size_override;
-
-    bool use_invariant_hoist; /* False (gfx942-only knob; ignored on gfx950) */
-    bool use_wide_kv_load; /* False (gfx942-only knob; ignored on gfx950) */
-    /* 64-bit paged-KV addressing for caches > 2 GiB. When set, the per-block
-     * byte base (physical_block * block_stride) is folded into a 64-bit buffer
-     * base (a wave-uniform per-block make_buffer_rsrc) and only the within-block
-     * byte offset stays in the i32 buffer voffset -- mirrors the 2D tiled
-     * kernel's use_i64_kv_addr. Default false => byte-identical small-cache
-     * build. */
-    bool use_i64_kv_addr; /* False */
-    /* All-decode launch grid: seq_idx = block_id_x, one query block per
-     * sequence, no binary search (legal only when every sequence has one query
-     * token; the launcher sizes grid x to num_seqs). */
-    bool use_decode_grid; /* False */
-    /* Cache policy of the K/V copies ("all", "global", "stream", "nt";
-     * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
-     * "stream"; fp8 K/V keeps "all". */
-    const char* kv_cache_policy; /* "all" */
-    /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row.
-     * Implemented for fp16/bf16 K/V, which can be extended. */
-    bool use_kv_lds_swizzle; /* False */
-    /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
-     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
-     * can be extended. */
-    bool use_wave_page_id_load; /* False */
-    /* gfx950 emit_lse (False, kw_only): the packaged module's reduce writes LSE.
-     * The segment IR is unchanged; its kernel name gains a trailing "lse". */
-    bool emit_lse;
-} rocke_unified_attention_3d_tiled_spec_t;
-
-rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);
-
-/* ------------------------------------------------------- reduce-kernel spec */
-typedef struct rocke_unified_attention_reduce_tiled_spec
-{
-    int head_size;
-    int num_query_heads;
-    int num_kv_heads;
-    const char* dtype; /* "fp16" or "bf16" */
-    int num_segments;
-
-    bool has_waves_per_eu; /* Optional[int] None */
-    int waves_per_eu;
-    /* emit_lse (False): add a trailing lse_ptr param and write the FP32 natural-log
-     * LSE [total_q, num_query_heads, 1]; kernel name gains a trailing "lse". */
-    bool emit_lse;
-} rocke_unified_attention_reduce_tiled_spec_t;
-
-rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled_spec_default(void);
-
-#endif /* !ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_H (shared spec POD) */
 
 /* ============================================================ *
  * Coverage gate -- supports_tiled_3d(...)

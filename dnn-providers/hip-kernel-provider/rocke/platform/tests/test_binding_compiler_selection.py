@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -89,7 +90,7 @@ assert lower_llvm._datalayout_for_flavor("llvm20") in explicit
 
 
 def test_python_bindings_use_the_compiling_library(tmp_path):
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BUILD_VARIANT)
     if sys.platform != "linux" or not shutil.which("cc"):
         pytest.skip("ELF loader fixtures require Linux and a C compiler")
     source = "void LLVMGetVersion(unsigned*a,unsigned*b,unsigned*c){*a=%d;*b=0;*c=0;}"
@@ -212,12 +213,14 @@ except ComgrError as exc:
 else:
     raise AssertionError("MFMA compiler failure did not precede native build")
 
-# Serialized input validation must not depend on compiler availability.
-for text, message in (("", "empty IR input"), ("not serialized IR", "parse failed")):
+# With an explicit flavor, serialized input is validated without a compiler;
+# with none, the flavor is resolved first (the next blocks) and its failure is
+# what propagates.
+for text, message in (("", "empty IR input"), ("not serialized IR", "bad header")):
     try:
-        rocke_engine.lower_serialized_ir(text, arch="gfx950")
+        rocke_engine.lower_serialized_ir(text, arch="gfx950", flavor="llvm20")
     except ComgrError:
-        raise AssertionError("compiler lookup preceded serialized-input rejection")
+        raise AssertionError("an explicit flavor queried the compiler")
     except RuntimeError as exc:
         assert message in str(exc)
     else:
@@ -249,7 +252,7 @@ assert rocke_engine.lower_serialized_ir(ir, arch="gfx950", flavor="llvm24")
 
 
 def test_binding_resolver_failure_preserves_error_contract():
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BUILD_VARIANT)
     result = subprocess.run(
         rocke_python_command("-c", CLEANUP_PROBE, interpreter_flags=("-B",)),
         env=rocke_subprocess_env(
@@ -264,7 +267,7 @@ def test_binding_resolver_failure_preserves_error_contract():
 
 
 def test_resolver_failure_releases_binding_builders(tmp_path):
-    pytest.importorskip("rocke_engine")
+    import_or_skip_until("rocke_engine", BUILD_VARIANT)
     valgrind = shutil.which("valgrind")
     if sys.platform != "linux" or not valgrind:
         pytest.skip("builder leak detection requires Linux and Valgrind")
