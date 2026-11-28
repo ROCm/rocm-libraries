@@ -3,6 +3,23 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+
+* Equilibration of general matrices
+    * GEEQU, GEEQUB
+    * GEEQU_64, GEEQUB_64
+
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
 ### Optimized
