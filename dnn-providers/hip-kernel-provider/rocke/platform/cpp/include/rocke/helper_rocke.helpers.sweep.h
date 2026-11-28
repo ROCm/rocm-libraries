@@ -195,6 +195,87 @@ void rocke_pass2_row_chunks(rocke_ir_builder_t* b,
                             rocke_value_t* const* cached_f32,
                             int num_cached_f32);
 
+/* ------------------------------------------------- sweep_row_chunks_dynamic */
+
+/* Runtime-trip-count analogue of rocke_sweep_row_chunks: ``length`` is a
+ * runtime SSA row-length Value (not a compile-time elems_per_thread), so the
+ * main vectorized sweep becomes a genuine scf.for (rocke_b_scf_for_iter)
+ * whose trip count is length / (block_size*vec), loop-carrying
+ * ``iter_args``/``iter_vars`` instead of the Python-side (C-side, for
+ * sweep_row_chunks) accumulation across an unrolled host loop.
+ *
+ * ``body(n_off, x_scalars, iter_vars, num_iter_vars, new_iter_vals, user)``
+ * is called once per iteration; it must fill ``new_iter_vals`` with one new
+ * value per iter_args entry, which the helper scf_yields.
+ *
+ * Returns final_iter_vals/num_iter_vals (the loop's results,
+ * arena-owned) plus main_elems_per_row (trip_count*block_size*vec) and tail
+ * (length - main_elems_per_row) as runtime Values -- the caller's own masked
+ * scalar-tail loop consumes those two the same way the compile-time HW tail
+ * in batchnorm2d/layernorm2d already does.
+ *
+ * No per-chunk cache (unlike sweep_row_chunks's cache=true): a runtime trip
+ * count can't back a cache array sized at build time.
+ */
+typedef void (*rocke_sweep_row_dynamic_body_fn)(rocke_ir_builder_t* b,
+                                                rocke_value_t* n_off,
+                                                rocke_value_t* const* x_scalars,
+                                                int vec,
+                                                rocke_value_t* const* iter_vars,
+                                                int num_iter_vars,
+                                                rocke_value_t** new_iter_vals,
+                                                void* user);
+
+typedef struct rocke_sweep_dynamic_result
+{
+    rocke_value_t** final_iter_vals; /* arena-owned, length num_iter_vals */
+    int num_iter_vals;
+    rocke_value_t* main_elems_per_row;
+    rocke_value_t* tail;
+} rocke_sweep_dynamic_result_t;
+
+rocke_sweep_dynamic_result_t
+    rocke_sweep_row_chunks_dynamic(rocke_ir_builder_t* b,
+                                   const rocke_tile_window_t* tile,
+                                   rocke_value_t* tid,
+                                   int block_size,
+                                   int vec,
+                                   rocke_value_t* length,
+                                   const rocke_iter_arg_t* iter_args,
+                                   int num_iter_args,
+                                   rocke_value_t* row,
+                                   rocke_sweep_row_dynamic_body_fn body,
+                                   void* user,
+                                   const char* iv_name /* NULL=>"k0" */);
+
+/* ------------------------------------------------- pass2_row_chunks_dynamic */
+
+/* Runtime-trip-count write-back sweep, the store-side counterpart of
+ * rocke_sweep_row_chunks_dynamic. ``trip_count``/``main_elems_per_row`` are
+ * the same Values rocke_sweep_row_chunks_dynamic returned for this row. The
+ * loop carries nothing (pure store side effect), so it is a plain scf.for
+ * (rocke_b_scf_for), not scf_for_iter. ``body(n_off, out, vec, user)`` must
+ * fill ``out`` with exactly ``vec`` f32 scalars to store back; the caller is
+ * responsible for re-loading any input it needs (no cache).
+ */
+typedef void (*rocke_pass2_row_dynamic_body_fn)(rocke_ir_builder_t* b,
+                                                rocke_value_t* n_off,
+                                                rocke_value_t** out,
+                                                int vec,
+                                                void* user);
+
+void rocke_pass2_row_chunks_dynamic(rocke_ir_builder_t* b,
+                                    const rocke_tile_window_t* tile,
+                                    rocke_value_t* tid,
+                                    int block_size,
+                                    int vec,
+                                    rocke_value_t* main_elems_per_row,
+                                    rocke_value_t* trip_count,
+                                    rocke_value_t* row,
+                                    rocke_pass2_row_dynamic_body_fn body,
+                                    void* user,
+                                    const char* iv_name /* NULL=>"k0" */);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

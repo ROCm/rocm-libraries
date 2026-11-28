@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
-from ...helpers.io import io_ir_type, store_scalar_from_f32
+from ...helpers.io import io_ir_type, load_scalar_as_f32, store_scalar_from_f32
 from ...helpers.reduction import (
     REGISTER_TILE_MAX_ELEMS_PER_THREAD,
     row_norm_needs_two_pass,
@@ -57,7 +57,12 @@ from ...helpers.spec import (
     kernel_name_join,
     validate_io,
 )
-from ...helpers.sweep import pass2_row_chunks, sweep_row_chunks
+from ...helpers.sweep import (
+    pass2_row_chunks,
+    pass2_row_chunks_dynamic,
+    sweep_row_chunks,
+    sweep_row_chunks_dynamic,
+)
 from ...helpers.tensor_view import (
     make_global_view,
     make_lds_view,
@@ -71,7 +76,21 @@ DType = Literal["f16", "bf16"]
 
 @dataclass(frozen=True)
 class LayerNorm2DSpec:
-    """One LayerNorm2D forward instance."""
+    """One LayerNorm2D forward instance.
+
+    ``dynamic=False`` (the default) is the original, compile-time-shaped
+    kernel: ``n_per_block`` is the exact row width this build is
+    specialized to, byte-identical to the pre-AOT-generic emission.
+
+    ``dynamic=True`` builds an AOT-generic kernel instead: the row width
+    becomes the runtime ``N`` kernarg (``cols`` in the docstrings below),
+    read and used in the IR rather than left dead. ``n_per_block`` is then
+    reinterpreted as a *capacity* -- the largest row width this build's
+    register tiling supports -- and the caller/dispatcher must only launch
+    it against requests with ``cols <= n_per_block``; the kernel itself has
+    no way to check that at runtime. See :func:`build_layernorm2d`'s
+    dynamic branch.
+    """
 
     n_per_block: int
     block_size: int = 256
@@ -79,6 +98,7 @@ class LayerNorm2DSpec:
     dtype: DType = "f16"
     save_mean_invstd: bool = False
     wave_size: int = 64
+    dynamic: bool = False
     name: str = "rocke_layernorm2d_fwd"
 
     @property
@@ -92,7 +112,7 @@ class LayerNorm2DSpec:
             f"N{self.n_per_block}",
             f"b{self.block_size}",
             f"v{self.vec}",
-            flags={"smv": self.save_mean_invstd},
+            flags={"smv": self.save_mean_invstd, "dyn": self.dynamic},
         )
 
 
@@ -121,25 +141,39 @@ def is_valid_spec(spec: LayerNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
     except KeyError as e:
         return False, str(e)
 
-    # Cap ``elems_per_thread`` only when the cached single-pass path would
-    # be used; the two-pass path streams X twice and carries no per-row
-    # register cache, so it is not bounded by the VGPR budget.
-    cap = (
-        None
-        if row_norm_needs_two_pass(spec.elems_per_thread)
-        else REGISTER_TILE_MAX_ELEMS_PER_THREAD
-    )
-    ok, why = validate_io(
-        IOSpecRule(
-            dtype=spec.dtype,
-            block_size=spec.block_size,
-            vec=spec.vec,
-            n_per_block=spec.n_per_block,
-            max_elems_per_thread=cap,
+    if spec.dynamic:
+        # The dynamic (AOT-generic) body always streams X twice (no
+        # per-row register cache -- a runtime trip count can't back one
+        # sized at build time, see build_layernorm2d's dynamic branch), so
+        # it carries no VGPR cap, and ``n_per_block`` is a capacity, not
+        # the real row width, so its exact-divisibility check doesn't
+        # apply: the actual runtime ``cols`` is masked-tail-safe for any
+        # value, not just one that divides ``block_size*vec``.
+        ok, why = validate_io(
+            IOSpecRule(dtype=spec.dtype, block_size=spec.block_size, vec=spec.vec)
         )
-    )
-    if not ok:
-        return False, why
+        if not ok:
+            return False, why
+    else:
+        # Cap ``elems_per_thread`` only when the cached single-pass path would
+        # be used; the two-pass path streams X twice and carries no per-row
+        # register cache, so it is not bounded by the VGPR budget.
+        cap = (
+            None
+            if row_norm_needs_two_pass(spec.elems_per_thread)
+            else REGISTER_TILE_MAX_ELEMS_PER_THREAD
+        )
+        ok, why = validate_io(
+            IOSpecRule(
+                dtype=spec.dtype,
+                block_size=spec.block_size,
+                vec=spec.vec,
+                n_per_block=spec.n_per_block,
+                max_elems_per_thread=cap,
+            )
+        )
+        if not ok:
+            return False, why
 
     if spec.block_size > target.max_threads_per_block:
         return False, (
@@ -167,10 +201,18 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
          M: i32, N: i32, eps: f32)``
 
     Grid layout: ``grid_x = M``, ``block = (block_size, 1, 1)``.
+
+    ``spec.dynamic=True`` builds the AOT-generic variant instead (see
+    :func:`_build_layernorm2d_dynamic`): one compiled binary serves any
+    runtime row width up to ``spec.n_per_block`` (now a capacity), rather
+    than being specialized to an exact ``N``.
     """
     ok, why = is_valid_spec(spec)
     if not ok:
         raise ValueError(f"invalid layernorm2d spec: {why}")
+
+    if spec.dynamic:
+        return _build_layernorm2d_dynamic(spec)
 
     io_ty = io_ir_type(spec.dtype)
     BS, VEC, N = spec.block_size, spec.vec, spec.n_per_block
@@ -343,6 +385,157 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
         body=pass2_body,
         cached_f32=sweep_res.cached,
     )
+
+    return b.kernel
+
+
+def _build_layernorm2d_dynamic(spec: LayerNorm2DSpec) -> KernelDef:
+    """AOT-generic LayerNorm2D: one compiled binary serves any runtime row
+    width ``cols`` (the real ``N`` kernarg), up to ``spec.n_per_block``'s
+    capacity.
+
+    The main vectorized sweep is a genuine runtime-trip-count loop
+    (:func:`rocke.helpers.sweep.sweep_row_chunks_dynamic` /
+    ``pass2_row_chunks_dynamic``, built on ``scf.for``); the remainder
+    (``cols`` mod ``block_size*vec``, which the main loop's runtime trip
+    count leaves uncovered) is a ``vec``-wide, Python-unrolled *masked*
+    scalar tail -- exactly :func:`build_layernorm2d`'s own compile-time-HW
+    tail idiom (``batchnorm2d.py`` uses the identical shape), just with
+    the bound (``cols``) a runtime Value instead of a Python int. Always
+    streams X twice: a runtime trip count can't back the static path's
+    per-thread register cache, so pass 2 re-reads X from HBM rather than
+    reusing a build-time-sized cache array.
+    """
+    io_ty = io_ir_type(spec.dtype)
+    BS, VEC = spec.block_size, spec.vec
+    cap = spec.n_per_block  # capacity; only used to size the dummy view shape
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Gamma = b.param(
+        "Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Beta = b.param(
+        "Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Y = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
+    if spec.save_mean_invstd:
+        Mean = b.param("Mean", PtrType(io_ty, "global"), noalias=True, writeonly=True)
+        InvStd = b.param(
+            "InvStd", PtrType(io_ty, "global"), noalias=True, writeonly=True
+        )
+    _ = b.param("M", I32)  # noqa: F841 - row count; already dynamic via grid size
+    cols = b.param("N", I32)
+    eps = b.param("eps", F32)
+
+    tid = b.thread_id_x()
+    row = b.block_id_x()
+
+    # Row stride is the runtime ``cols`` (not a compile-time shape): the
+    # engine's TensorDescriptor already accepts an SSA Value stride (see
+    # helpers/tensor_view.py), so addressing just works once the stride is
+    # a Value instead of an int. ``shape=`` only sizes the (unused for
+    # addressing) descriptor rank/capacity bookkeeping.
+    x_view = make_global_view(X, shape=(1, cap), dtype=io_ty, strides=(cols, 1))
+    y_view = make_global_view(Y, shape=(1, cap), dtype=io_ty, strides=(cols, 1))
+    g_view = make_global_view(Gamma, shape=(cap,), dtype=io_ty)
+    b_view = make_global_view(Beta, shape=(cap,), dtype=io_ty)
+    x_tile = make_tile_window(x_view, lengths=(1, 1), origin=(row, b.const_i32(0)))
+    y_tile = make_tile_window(y_view, lengths=(1, 1), origin=(row, b.const_i32(0)))
+
+    lds_mean = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_mean").base
+    lds_m2 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_m2").base
+    lds_count = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_count").base
+
+    # --- Pass 1: runtime-trip-count sweep + masked scalar tail ----------
+    def pass1_body(_n_off, x_scalars, iter_vars):
+        sum_p, sumsq_p = iter_vars
+        sq_scalars = [b.fmul(xi, xi) for xi in x_scalars]
+        sum_p = b.fadd(sum_p, tree_reduce(b, b.fadd, list(x_scalars)))
+        sumsq_p = b.fadd(sumsq_p, tree_reduce(b, b.fadd, sq_scalars))
+        return [sum_p, sumsq_p]
+
+    (sum_p, sumsq_p), main_elems, _tail = sweep_row_chunks_dynamic(
+        b,
+        x_tile,
+        tid=tid,
+        block_size=BS,
+        vec=VEC,
+        length=cols,
+        iter_args=[("sum_p", b.const_f32(0.0)), ("sumsq_p", b.const_f32(0.0))],
+        body=pass1_body,
+    )
+
+    tail_count_p = b.const_f32(0.0)
+    for tc in range(VEC):
+        idx_col = b.add(b.add(main_elems, b.const_i32(tc * BS)), tid)
+        valid = b.cmp_lt(idx_col, cols)
+        idx_safe = b.smin(idx_col, b.sub(cols, b.const_i32(1)))
+        flat = b.add(b.mul(row, cols), idx_safe)
+        x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+        x_masked = b.select(valid, x_raw, b.const_f32(0.0))
+        valid_f = b.select(valid, b.const_f32(1.0), b.const_f32(0.0))
+        sum_p = b.fadd(sum_p, x_masked)
+        sumsq_p = b.fadd(sumsq_p, b.fmul(x_masked, x_masked))
+        tail_count_p = b.fadd(tail_count_p, valid_f)
+
+    # ``main_elems`` is the TOTAL row elements the main loop covers (all BS
+    # threads' share, matching the ``main_elems_per_row`` naming in
+    # build_batchnorm2d's compile-time tail); dividing by BS gives back
+    # THIS thread's own main-loop count (the Welford count is per-thread).
+    main_per_thread = b.div(main_elems, b.const_i32(BS))
+    count_p = b.fadd(b.sitofp_f32(main_per_thread), tail_count_p)
+    inv_count_p = b.fdiv(b.const_f32(1.0), count_p)
+    mean_p = b.fmul(sum_p, inv_count_p)
+    m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
+
+    mean, var = welford_block_reduce_stable(
+        b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid, block_size=BS
+    )
+    inv_std = b.rsqrt(b.fadd(var, eps))
+
+    if spec.save_mean_invstd:
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            store_scalar_from_f32(b, Mean, row, mean, dtype=spec.dtype)
+            store_scalar_from_f32(b, InvStd, row, inv_std, dtype=spec.dtype)
+
+    # --- Pass 2: runtime-trip-count write-back + masked (scf_if) tail ----
+    def pass2_body(n_off):
+        x_scalars = x_tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
+        gv = g_view.load_vec_as_f32(b, [n_off], n=VEC)
+        bv = b_view.load_vec_as_f32(b, [n_off], n=VEC)
+        return [
+            b.fadd(
+                b.fmul(b.fsub(x_scalars[i], mean), b.fmul(inv_std, gv[i])),
+                bv[i],
+            )
+            for i in range(VEC)
+        ]
+
+    trip_count = b.div(cols, b.const_i32(BS * VEC))
+    pass2_row_chunks_dynamic(
+        b,
+        y_tile,
+        tid=tid,
+        block_size=BS,
+        vec=VEC,
+        main_elems_per_row=main_elems,
+        trip_count=trip_count,
+        body=pass2_body,
+    )
+
+    for tc in range(VEC):
+        idx_col = b.add(b.add(main_elems, b.const_i32(tc * BS)), tid)
+        valid = b.cmp_lt(idx_col, cols)
+        with b.scf_if(valid):
+            flat = b.add(b.mul(row, cols), idx_col)
+            x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+            gv = g_view.load_vec_as_f32(b, [idx_col], n=1)
+            bv = b_view.load_vec_as_f32(b, [idx_col], n=1)
+            y_val = b.fadd(b.fmul(b.fsub(x_raw, mean), b.fmul(inv_std, gv[0])), bv[0])
+            store_scalar_from_f32(b, Y, flat, y_val, dtype=spec.dtype)
 
     return b.kernel
 

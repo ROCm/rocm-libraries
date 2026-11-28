@@ -25,6 +25,7 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 | `reduce2d` | ✅ | ✅ | ✅ |
 | `rmsnorm2d` | ✅ | ✅ | ✅ |
 | `layernorm2d` | ✅ | ✅ | ✅ |
+| `batchnorm2d` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_bf16` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_rdquant` | ✅ | ✅ | ✅ |
 | `smoothquant` | ✅ | ✅ | ✅ |
@@ -269,6 +270,170 @@ parity runs on the matching device and is not implied by the ✅ here.
   `log2(wave_size)` shuffle stages, so a `wave_size=64` build issues a
   lane-mask-32 shuffle that is invalid on wave32 hardware and silently
   corrupts the result.
+- **`batchnorm2d`** is a new family (own dispatch family, NCHW layout, one CTA
+  per channel — see `platform/dsl_docs/instances/batchnorm2d.md`). Its Python/C++
+  byte-identity parity (`batchnorm2d_emit.py`/`.c`) is GREEN at all 4 LLVM
+  flavors, its dispatch tests pass, and its GPU-numeric differential cases
+  (`differential/numeric.py::BATCHNORM_CONFIGS`, both training and inference,
+  both dtypes) are GREEN on gfx950 (max_rel ≤ 1.1e-2, well inside the
+  `rtol=2e-1` tolerance; training mode's in-place `RunningMean`/`RunningVar`
+  EMA update also verified against a non-trivial prior).
+  - **`channels_per_block`** (default `1`, byte-identical when `1`) is a
+    default-off grid lever: `>1` groups multiple channels into one CTA,
+    processed sequentially, shrinking the grid (`C // channels_per_block`
+    CTAs). Implemented + byte-identity-verified (16 parity configs, all 4
+    LLVM flavors) + GPU-numeric-verified (including training-mode LDS reuse
+    across channels within one CTA). Measured on gfx950 against the two
+    known-weak shapes (`n16c256h16w16`, `n16c256h32w32`, both train/infer):
+    **every `channels_per_block>1` value measured slower than `=1`**,
+    monotonically so (e.g. `cpb=32` ran ~12x slower, `cpb=2` ~1.3-1.7x
+    slower) — shrinking the grid does not help here, so the dispatcher never
+    auto-selects it (lowest priority, reachable only by pinning `spec_id`).
+    The weak shapes' actual bottleneck is still open; this lever is real,
+    correct infrastructure that did not pan out for the cases it targeted.
+  - **`n_groups`** (default `1`, byte-identical when `1`) is a default-off
+    thread-decomposition lever, supporting both `training=False` and
+    `training=True`: `>1` splits one CTA's `block_size` threads into
+    `n_groups` sub-groups of `block_size // n_groups` threads, each sweeping
+    a *different* `N` sample's `H*W` row concurrently instead of every
+    thread sweeping the same row one sample at a time — mirroring MIOpen's
+    spatial-batchnorm thread mapping (threads split across both the spatial
+    and batch dimensions). Targets shapes whose `H*W` is small enough to
+    structurally cap `block_size` well below what the hardware can usefully
+    run. A masked scalar tail (same idiom as the `n_groups=1` HW tail below,
+    scoped to `hw_threads = block_size // n_groups` instead of
+    `block_size`) means `H*W` no longer needs to divide `hw_threads * vec`
+    exactly either, reaching shapes (e.g. `7x7=49`) no power-of-two
+    `hw_threads` can tile exactly. Implemented in both engines
+    (byte-identity-verified: 3 new parity configs, all 4 LLVM flavors, see
+    `batchnorm2d_emit.py`/`.c` configs 16-18) + GPU-numeric-verified
+    (`differential/numeric.py::BATCHNORM_CONFIGS`, `ng=2`/`ng=4`, both
+    dtypes, including combined with `channels_per_block>1`) + dispatch-wired
+    as a new candidate axis (default/auto-selected priority stays at
+    `n_groups=1`, same pattern as `channels_per_block`). Measured on gfx950,
+    staged protocol, against the actual dispatcher-selected `n_groups=1`
+    candidate vs. every registered `n_groups>1` candidate for the same
+    shape: **no measurable win on the originally-targeted weak shape**
+    (`n16c256h16w16`, inference, both dtypes — every candidate landed at the
+    ~0.0058ms measurement floor, indistinguishable from the default), nor on
+    its small-grid variant (`n16c16h16w16`) or the larger-`H*W` neighbors
+    (`n16c256h32w32`, `n32c64h32w32`, `n16c128h32w32` — at most ~1.01-1.08x,
+    within noise, with several `n_groups>1` candidates measurably *worse*).
+    The lever **does** produce a real win when `N` is large enough to give
+    each thread sub-group multiple `og` outer-loop iterations to amortize
+    the decomposition over: `n64c256h16w16` (same `C`/`H`/`W`, `N` bumped
+    from 16 to 64) measured ~1.27x faster (`0.00836ms` default →
+    `0.00656ms` at `n_groups=4`). Like `channels_per_block`, this is correct,
+    GPU-numeric-verified infrastructure that does not pan out for the
+    narrow shape it was built to target — the original weak case's
+    bottleneck remains open — but it is a real, measured win for
+    large-`N`/small-`H*W` shapes, left registered as an opt-in lever
+    (reachable by pinning `spec_id`, e.g. `batchnorm_b256_v4_ng4`).
+
+    Since adding the masked tail above, this lever also now reaches the
+    *training*, non-exactly-dividing small-`H*W` shapes that motivated the
+    HW scalar tail in the first place (real conv feature maps whose `H*W`
+    has no power-of-two divisor, e.g. `14x14=196`, `7x7=49`) — the
+    `n_groups=1` path alone still falls into its own all-scalar tail for
+    these, which trails MIOpen. Not yet measured against the best
+    pre-existing candidate for these shapes (only against the dispatcher's
+    naive default, which overstates the win) -- see the follow-up measurement
+    task before citing a number here.
+  - **`fast_reduce`** (default `false`, byte-identical when `false`) is a
+    default-off, **training-only** (`training=False` + `fast_reduce=True` is
+    rejected by `is_valid_spec`) reduction-shape lever: replaces the flat
+    `block_size`-wide LDS Welford tree
+    (`welford_block_reduce_stable`; 9 barriers / 3 LDS buffers for
+    `block_size=256`) with a wave-shuffle-first reduction
+    (`welford_block_reduce_stable_wave_prologue`): a butterfly-shuffle merge
+    of the `(mean, M2, count)` triple inside each wavefront (no LDS, no
+    barrier) followed by a small cross-warp LDS merge (`num_warps` slots, 1
+    barrier) — mirroring MIOpen's `shfl_interleaved_reduction_welford` +
+    `lds_reduce2_welford` spatial-batchnorm reduction shape, investigated
+    after `channels_per_block` and `n_groups` both failed to close the
+    `n16c256h16w16` gap against MIOpen. Implemented in both engines
+    (byte-identity-verified: 3 new parity configs covering the single-wave
+    trivial path, the cross-warp path, and composition with
+    `channels_per_block`, all 4 LLVM flavors, see `batchnorm2d_emit.py`/`.c`
+    configs 19-21) + GPU-numeric-verified
+    (`differential/numeric.py::BATCHNORM_CONFIGS`, both dtypes, both the
+    single-wave and cross-warp shapes) + dispatch-wired as a new candidate
+    axis (default/auto-selected priority stays at `fast_reduce=false`, same
+    pattern as `channels_per_block`/`n_groups`). Staged-protocol measurement
+    on gfx950 against the dispatcher-selected training candidate for the
+    same `(block_size, vec)` found a reproducible, small win on every
+    training shape tested, with no regression observed on any shape tried --
+    still left as an opt-in lever (reachable by pinning `spec_id`, e.g.
+    `batchnorm_b128_v2_fr`) rather than promoted to the auto-selected
+    default, pending a wider shape sweep.
+  - **HW scalar tail** (`n_groups=1` only; always on, no spec flag): the row
+    sweep no longer requires `H*W` to be divisible by `block_size * vec`.
+    Real conv feature maps (`56x56`, `24x24`, `14x14`, ...) have no
+    power-of-two divisor large enough to satisfy that old requirement, so
+    `is_valid_spec` used to reject every registered candidate for them --
+    the op was simply unusable on these shapes. The vectorized main sweep is
+    unchanged; the remainder (`< block_size * vec` elements) is handled by a
+    small scalar pass per row. Pass 1's reduction contribution is
+    branch-free (masked via `select`, not a guarded branch, since an
+    out-of-range lane's zeroed contribution is harmless to a sum/count);
+    pass 2's write-back uses a real guarded branch (a masked/clamped store
+    would let multiple out-of-range lanes race to write the same element).
+    Implemented in both engines (byte-identity-verified: 7 new parity
+    configs spanning training/inference, `N>1`, `channels_per_block>1`, and
+    `fast_reduce`, all 4 LLVM flavors, see `batchnorm2d_emit.py`/`.c` configs
+    22-28) and dispatch-tested (`combos()`/`batchnorm_sweep_space` non-empty
+    for `14x14`/`24x24`/`56x56`). The dispatcher's default candidate
+    ranking now also accounts for whether a given `(block_size, vec)` would
+    need this tail for the request's actual `H*W`, so an exact-fit `vec`
+    still outranks a wider `vec` that would only "work" via the tail, inside
+    the same `(channels_per_block, n_groups, fast_reduce)` priority tier --
+    without this, relaxing the old hard divisibility check would have let
+    dispatch regress already-exact-fit shapes toward a needlessly
+    tail-heavy candidate. `n_groups>1` now shares this same masked-tail
+    support, scoped to `hw_threads = block_size // n_groups` (see the
+    `n_groups` entry above).
+  - **Cross-CTA spatial-split reduction** (new, standalone -- not wired
+    into `dispatch_batchnorm`): a two-kernel, workspace-based design
+    targeting the opposite gap from the tail -- large-`H*W`/small-`C`
+    shapes (e.g. `N=1,C=16,H=640,W=640`) where one CTA per channel leaves
+    most of the device idle (as few as 16 CTAs on gfx950's 256 CUs) and
+    there is no axis to split one channel's spatial reduction across more
+    CTAs. Unlike GEMM split-K (plain float accumulation, composes under a
+    single atomic add), a Welford `(mean, M2, count)` triple does not
+    compose under atomics, so this needs two kernels, not an epilogue
+    tweak: `build_batchnorm2d_reduce_partial` (one CTA per
+    `(channel-group, spatial split)`, writes a partial `(mean, M2, count)`
+    to a caller-owned workspace, every read masked via `select`/`smin`) and
+    `build_batchnorm2d_combine_apply` (one CTA per channel-group, merges
+    that channel's `split_hw` partials with the SAME
+    `welford_block_reduce_stable`/`_wave_prologue` primitive the
+    single-kernel path's reduction already uses, then performs the normal
+    pass-2 normalize+write, including the HW scalar tail above).
+    Implemented in both engines, byte-identity-verified (18 new parity
+    configs across both kernels, `N>1`, `channels_per_block>1`,
+    `fast_reduce`, and a non-divisible-by-`split_hw` shape, all 4 LLVM
+    flavors, see `batchnorm2d_split_emit.py`/`.c`). The split-Welford merge
+    math was also independently cross-checked against a direct batch
+    mean/variance computation in plain numpy (not GPU execution) and found
+    numerically identical to float64 precision. **Deliberately not wired
+    into `dispatch_batchnorm`/`KernelCandidate`**: that abstraction assumes
+    one candidate = one kernel launch with no inter-kernel workspace
+    contract, and extending it to a multi-kernel candidate is a bigger,
+    cross-family change than this feature's scope -- callers build and
+    launch the two kernels directly, in order, sharing one `Workspace`
+    buffer sized by `batchnorm2d_split_workspace_floats`. Training-only (no
+    batch reduction to split in inference); does not support
+    `save_mean_invstd`. **Not GPU-verified this round**: no GPU-numeric
+    test harness was added for this two-kernel-launch-plus-workspace shape
+    (the existing single-kernel-launch harness in `differential/numeric.py`
+    does not fit it without its own orchestration logic, which needs a live
+    GPU to validate rather than write blind), and it is **not
+    dispatch- or benchmark-measured** -- this is infrastructure proven
+    correct by construction (byte-identity in both engines + an independent
+    numpy cross-check of the split-Welford merge math against a direct
+    batch mean/variance) and ready for a GPU-available follow-up to add
+    GPU-numeric coverage, wire up an example two-launch orchestration, and
+    measure against the single-kernel path on the shapes it targets.
 - **`add_rmsnorm2d_rdquant` on gfx1151 (RDNA):** only `out_dtype="i8"` is
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA

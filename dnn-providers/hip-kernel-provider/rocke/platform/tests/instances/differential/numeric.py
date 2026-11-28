@@ -1159,6 +1159,356 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
 
 
 # ---------------------------------------------------------------------
+# BatchNorm2D lane (its own family: one-CTA-per-channel, not one-CTA-per-row)
+# ---------------------------------------------------------------------
+# Unlike the ROW_CONFIGS families above (grid = (M,1,1) over an (M,N) tensor),
+# batchnorm2d's grid is (C,1,1) over an (N,C,H,W) tensor -- it reduces across
+# N*H*W *per channel*, not within a row -- so it gets its own config shape and
+# runner rather than being shoehorned into RowCfg.
+#
+# Tolerance: same Welford-then-divide-by-inv_std shape as layernorm2d (a
+# single reciprocal-sqrt's relative error dominates), so it reuses
+# layernorm2d's (looser) rtol/atol rather than the tighter elementwise table.
+@dataclass(frozen=True)
+class BatchNormCfg:
+    name: str
+    n: int
+    c: int
+    h: int
+    w: int
+    dtype: str  # "f16" | "bf16"
+    training: bool = True
+    block_size: int = 64
+    vec: int = 4
+    momentum: float = 0.1
+    channels_per_block: int = 1
+    n_groups: int = 1
+    fast_reduce: bool = False
+
+
+# H*W no longer needs to be divisible by block_size*vec for n_groups=1 (the
+# in-kernel scalar tail handles the remainder -- see
+# rocke.instances.common.batchnorm2d's "HW scalar tail" docs); most shapes
+# below still use an exact-fit H*W=256 (block_size=64, vec=4), and the
+# "_hwtail" configs near the end deliberately pick a non-divisible H*W to
+# exercise that path. n_groups>1 (the spatial-split lever) now shares the
+# same masked-tail support, scoped to hw_threads = block_size // n_groups
+# instead of block_size -- the "_ng{N}_hwtail" configs near the end pick a
+# non-divisible H*W (7x7=49, 14x14=196) that no power-of-two hw_threads
+# can tile exactly, to exercise that path.
+BATCHNORM_CONFIGS: List[BatchNormCfg] = [
+    BatchNormCfg("bn_train_f16_2x64x16x16", 2, 64, 16, 16, "f16", training=True),
+    BatchNormCfg("bn_train_bf16_2x64x16x16", 2, 64, 16, 16, "bf16", training=True),
+    BatchNormCfg("bn_infer_f16_2x64x16x16", 2, 64, 16, 16, "f16", training=False),
+    BatchNormCfg("bn_infer_bf16_2x64x16x16", 2, 64, 16, 16, "bf16", training=False),
+    BatchNormCfg("bn_train_f16_4x128x8x32", 4, 128, 8, 32, "f16", training=True),
+    BatchNormCfg("bn_infer_bf16_4x128x8x32", 4, 128, 8, 32, "bf16", training=False),
+    # --- channels_per_block > 1 lever: fewer, bigger CTAs, same math ---
+    BatchNormCfg(
+        "bn_train_f16_2x64x16x16_cpb2", 2, 64, 16, 16, "f16",
+        training=True, channels_per_block=2,
+    ),
+    BatchNormCfg(
+        "bn_infer_bf16_2x64x16x16_cpb4", 2, 64, 16, 16, "bf16",
+        training=False, channels_per_block=4,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_4x128x8x32_cpb8", 4, 128, 8, 32, "bf16",
+        training=True, channels_per_block=8,
+    ),
+    # --- n_groups > 1 lever, training=False: N and H*W split across the
+    # CTA's threads simultaneously (mirrors MIOpen's spatial thread
+    # mapping) ---
+    BatchNormCfg(
+        "bn_infer_f16_4x32x16x16_ng2", 4, 32, 16, 16, "f16",
+        training=False, block_size=256, vec=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_infer_bf16_4x32x16x16_ng4", 4, 32, 16, 16, "bf16",
+        training=False, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_infer_f16_4x64x16x16_cpb2_ng2", 4, 64, 16, 16, "f16",
+        training=False, block_size=256, vec=2, channels_per_block=2, n_groups=2,
+    ),
+    # --- n_groups > 1 lever, training=True: each thread accumulates its own
+    # Welford partial over its (og, tid_within_row) slice, merged via the
+    # same welford_block_reduce_stable/_wave_prologue call the n_groups==1
+    # path uses -- always reloads X (no register cache) across pass 1/2 ---
+    BatchNormCfg(
+        "bn_train_f16_4x32x16x16_ng2", 4, 32, 16, 16, "f16",
+        training=True, block_size=256, vec=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_4x32x16x16_ng4", 4, 32, 16, 16, "bf16",
+        training=True, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x64x16x16_cpb2_ng2", 4, 64, 16, 16, "f16",
+        training=True, block_size=256, vec=2, channels_per_block=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x32x16x16_ng2_fr", 4, 32, 16, 16, "f16",
+        training=True, block_size=128, vec=2, n_groups=2, fast_reduce=True,
+    ),
+    # --- fast_reduce lever: training-only, wave-shuffle-first Welford merge
+    # instead of the flat block_size-wide LDS tree ---
+    BatchNormCfg(
+        "bn_train_f16_16x256x16x16_fr", 16, 256, 16, 16, "f16",
+        training=True, block_size=128, vec=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_16x256x16x16_fr", 16, 256, 16, 16, "bf16",
+        training=True, block_size=128, vec=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_2x64x16x16_fr_sw", 2, 64, 16, 16, "f16",
+        training=True, block_size=64, vec=4, fast_reduce=True,
+    ),
+    # --- HW scalar tail: real CNN feature maps whose H*W has no divisor
+    # large enough to satisfy the old hard n_per_block % (block_size*vec)
+    # == 0 requirement (14x14=196, 24x24=576, 56x56=3136) ---
+    BatchNormCfg(
+        "bn_train_f16_1x16x14x14_hwtail", 1, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2,
+    ),
+    BatchNormCfg(
+        "bn_infer_f16_1x16x14x14_hwtail", 1, 16, 14, 14, "f16",
+        training=False, block_size=64, vec=2,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_1x480x24x24_hwtail", 1, 480, 24, 24, "bf16",
+        training=True, block_size=128, vec=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_1x144x56x56_hwtail", 1, 144, 56, 56, "f16",
+        training=True, block_size=256, vec=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_1x16x14x14_hwtail_cpb2", 1, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2, channels_per_block=2,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_1x16x14x14_hwtail_fr", 1, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_2x16x14x14_hwtail", 2, 16, 14, 14, "f16",
+        training=True, block_size=64, vec=2,
+    ),
+    # --- n_groups > 1 masked tail: HW does not divide hw_threads*vec
+    # exactly (7x7=49 pure tail, 14x14=196 mixed main+tail) ---
+    BatchNormCfg(
+        "bn_train_f16_4x4x7x7_ng4_hwtail", 4, 4, 7, 7, "f16",
+        training=True, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x4x14x14_ng4_hwtail", 4, 4, 14, 14, "f16",
+        training=True, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_infer_f16_4x4x7x7_ng4_hwtail", 4, 4, 7, 7, "f16",
+        training=False, block_size=256, vec=2, n_groups=4,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x4x7x7_cpb2_ng2_hwtail", 4, 4, 7, 7, "f16",
+        training=True, block_size=256, vec=2, channels_per_block=2, n_groups=2,
+    ),
+    BatchNormCfg(
+        "bn_train_f16_4x4x7x7_ng2_hwtail_fr", 4, 4, 7, 7, "f16",
+        training=True, block_size=128, vec=2, n_groups=2, fast_reduce=True,
+    ),
+    BatchNormCfg(
+        "bn_train_bf16_4x4x7x7_ng4_hwtail", 4, 4, 7, 7, "bf16",
+        training=True, block_size=256, vec=2, n_groups=4,
+    ),
+]
+
+_BATCHNORM_TOL = Tol(rtol=2e-1, atol=1e-1)
+
+
+def run_batchnorm_config(cfg: BatchNormCfg, arch: str = "gfx950") -> NumericResult:
+    """Build+launch one batchnorm2d instance, compare vs a torch reference.
+
+    Training mode also checks the updated RunningMean/RunningVar against the
+    expected EMA update -- the kernel writes those in place, same buffers
+    passed in as inputs.
+    """
+    import torch
+
+    from rocke.core.arch import ArchTarget as _ArchTarget
+    from rocke.helpers.compile import compile_kernel
+    from rocke.instances.common.batchnorm2d import (
+        BatchNorm2DSpec,
+        batchnorm2d_grid,
+        batchnorm2d_signature,
+        build_batchnorm2d,
+        is_valid_spec,
+    )
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    tol_key = _ELEM_TOL_KEY.get(cfg.dtype, cfg.dtype)
+    res = NumericResult(
+        family="batchnorm2d",
+        name=cfg.name,
+        status="GREEN",
+        dtype=tol_key,
+        shape=(cfg.n, cfg.c, cfg.h, cfg.w),
+    )
+    tol = _BATCHNORM_TOL
+    res.rtol, res.atol = tol.rtol, tol.atol
+
+    td = _torch_dtype(torch, tol_key)
+    eps = 1e-5
+    _wave = _ArchTarget.from_gfx(arch).wave_size
+
+    spec = BatchNorm2DSpec(
+        n=cfg.n,
+        c=cfg.c,
+        h=cfg.h,
+        w=cfg.w,
+        block_size=cfg.block_size,
+        vec=cfg.vec,
+        dtype=cfg.dtype,
+        training=cfg.training,
+        channels_per_block=cfg.channels_per_block,
+        n_groups=cfg.n_groups,
+        fast_reduce=cfg.fast_reduce,
+        wave_size=_wave,
+    )
+    ok, reason = is_valid_spec(spec, arch=arch)
+    if not ok:
+        res.status = "REJECTED"
+        res.detail = f"is_valid_spec: {reason}"
+        return res
+
+    try:
+        kern = build_batchnorm2d(spec)
+        art = compile_kernel(kern, arch=arch)
+    except Exception as e:  # noqa: BLE001
+        res.status = "BUILD_FAIL"
+        res.detail = f"build/compile raised: {e}"
+        return res
+    res.extra["kernel_name"] = art.kernel_name
+    res.extra["hsaco_bytes"] = art.hsaco_bytes
+
+    # --- deterministic inputs + torch reference (f32) ---
+    torch.manual_seed(0xC0FFEE)
+    rd = _ref_dtype(torch, td)
+    X = (
+        torch.randn((cfg.n, cfg.c, cfg.h, cfg.w), device="cuda", dtype=rd) * 0.5
+    ).to(td)
+    x_ref = X.to(rd)
+    Gamma = (
+        torch.randn((cfg.c,), device="cuda", dtype=torch.float32) * 0.1 + 1.0
+    ).to(td)
+    Beta = (torch.randn((cfg.c,), device="cuda", dtype=torch.float32) * 0.1).to(td)
+    Y = torch.zeros((cfg.n, cfg.c, cfg.h, cfg.w), device="cuda", dtype=td)
+
+    # RunningMean/RunningVar are always f32 buffers. Training mode starts
+    # from an arbitrary prior (not zeros/ones -- that would hide an EMA bug
+    # where the kernel just stored the batch stat verbatim) and the kernel
+    # updates them in place; inference mode supplies them as pure inputs.
+    if cfg.training:
+        running_mean_in = (
+            torch.randn((cfg.c,), device="cuda", dtype=torch.float32) * 0.3
+        )
+        running_var_in = (
+            torch.rand((cfg.c,), device="cuda", dtype=torch.float32) * 0.5 + 0.75
+        )
+    else:
+        running_mean_in = (
+            torch.randn((cfg.c,), device="cuda", dtype=torch.float32) * 0.2
+        )
+        running_var_in = (
+            torch.rand((cfg.c,), device="cuda", dtype=torch.float32) * 0.5 + 0.5
+        )
+    RunningMean = running_mean_in.clone()
+    RunningVar = running_var_in.clone()
+
+    batch_mean = x_ref.mean(dim=(0, 2, 3))
+    batch_var = ((x_ref - batch_mean[None, :, None, None]) ** 2).mean(dim=(0, 2, 3))
+    if cfg.training:
+        mean_use, var_use = batch_mean, batch_var
+        ref_running_mean = (
+            1.0 - cfg.momentum
+        ) * running_mean_in + cfg.momentum * batch_mean
+        ref_running_var = (
+            1.0 - cfg.momentum
+        ) * running_var_in + cfg.momentum * batch_var
+    else:
+        mean_use, var_use = running_mean_in, running_var_in
+
+    inv_std = 1.0 / torch.sqrt(var_use + eps)
+    ref = (x_ref - mean_use[None, :, None, None]) * inv_std[
+        None, :, None, None
+    ] * Gamma.to(torch.float32)[None, :, None, None] + Beta.to(torch.float32)[
+        None, :, None, None
+    ]
+
+    grid = batchnorm2d_grid(cfg.c, spec)
+    block = (spec.block_size, 1, 1)
+    sig = batchnorm2d_signature(spec)
+    values: Dict[str, Any] = {
+        "X": X,
+        "Gamma": Gamma,
+        "Beta": Beta,
+        "Y": Y,
+        "RunningMean": RunningMean,
+        "RunningVar": RunningVar,
+        "N": cfg.n,
+        "C": cfg.c,
+        "H": cfg.h,
+        "W": cfg.w,
+        "eps": eps,
+        "momentum": cfg.momentum,
+    }
+
+    try:
+        launcher = KernelLauncher(
+            hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
+        )
+        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        torch.cuda.synchronize()
+    except Exception as e:  # noqa: BLE001
+        res.status = "LAUNCH_FAIL"
+        res.detail = f"launch raised: {e}"
+        return res
+
+    max_abs, max_rel, margin = _compare(torch, Y, ref, tol)
+    res.max_abs_diff = max_abs
+    res.max_rel_diff = max_rel
+    res.margin = margin
+    status_ok = margin <= 0.0 and math.isfinite(margin)
+
+    rm_margin = rv_margin = 0.0
+    if cfg.training:
+        _, _, rm_margin = _compare(torch, RunningMean, ref_running_mean, tol)
+        _, _, rv_margin = _compare(torch, RunningVar, ref_running_var, tol)
+        res.extra["running_mean_margin"] = rm_margin
+        res.extra["running_var_margin"] = rv_margin
+        status_ok = (
+            status_ok
+            and rm_margin <= 0.0
+            and rv_margin <= 0.0
+            and math.isfinite(rm_margin)
+            and math.isfinite(rv_margin)
+        )
+
+    res.status = "GREEN" if status_ok else "DRIFT"
+    res.detail = (
+        f"train={cfg.training} grid={grid} block={block} "
+        f"max_abs={max_abs:.3e} max_rel={max_rel:.3e} margin={margin:.3e}"
+        + (
+            f" running_mean_margin={rm_margin:.3e} running_var_margin={rv_margin:.3e}"
+            if cfg.training
+            else ""
+        )
+    )
+    return res
+
+
+# ---------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------
 def _check_gpu() -> Optional[str]:
@@ -1203,6 +1553,9 @@ def run_all(arch: str = "gfx950", only: str = "") -> List[NumericResult]:
     for cfg in ROW_CONFIGS:
         if want(cfg.family, cfg.name):
             results.append(run_row_config(cfg, arch=arch))
+    for cfg in BATCHNORM_CONFIGS:
+        if want("batchnorm2d", cfg.name):
+            results.append(run_batchnorm_config(cfg, arch=arch))
     return results
 
 

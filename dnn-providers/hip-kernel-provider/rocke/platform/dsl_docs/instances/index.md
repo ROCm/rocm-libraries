@@ -181,6 +181,7 @@ the natural grid starves, and costs redundant tile reads once it does not.
 | `reduce.py` | `Reduce2DSpec`, `ReduceOp` | `instances/small_ops.md` |
 | `layernorm2d.py` | `LayerNorm2DSpec` | `instances/small_ops.md` |
 | `rmsnorm2d.py` | `RMSNorm2DSpec` | `instances/small_ops.md` |
+| `batchnorm2d.py` | `BatchNorm2DSpec` | `instances/small_ops.md` |
 | `transpose.py` | `Transpose2DSpec` | `instances/small_ops.md` |
 
 ## MoE Family
@@ -207,6 +208,7 @@ Elementwise binary: (A, B, C, N)
 Reduce2D: (X, Y, M, N)
 LayerNorm2D: (X, Gamma, Beta, Y[, mean, invstd], M, N, eps)
 RMSNorm2D: (X, Gamma, Y[, inv_rms], M, N, eps)
+BatchNorm2D: (X, Gamma, Beta, Y, RunningMean, RunningVar[, mean, invstd], N, C, H, W, eps, momentum)
 Transpose2D: (X, Y, M, N)
 ```
 
@@ -245,6 +247,7 @@ From `helpers/README.md`:
 | elementwise | yes | - | - | yes | - | yes | - | - |
 | layernorm2d | yes | - | yes | yes | yes | yes | - | - |
 | rmsnorm2d | yes | - | yes | yes | yes | yes | - | - |
+| batchnorm2d | yes | - | yes | yes | yes | yes | - | - |
 | reduce | yes | - | yes | yes | yes | yes | - | - |
 | transpose | yes | - | - | yes | - | yes | - | - |
 | gemm_universal | yes | partial (view strides) | - | - | - | yes | - | `MfmaAtom`, `WarpGrid`, `LdsLayout`, `CoalescedTileLoader`, `AsyncTileLoader`, `CShuffleEpilogue`, `DirectEpilogue`, `SchedulePolicy`, `SoftwarePipeline` |
