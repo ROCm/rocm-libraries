@@ -74,6 +74,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Improved CK Tile FMHA forward and backward performance with dropout on gfx1250 by computing the Philox random number generator's products with 32-bit multiplies.
 * Improved fp16 and bf16 CK Tile FMHA forward performance on gfx11, gfx1200, and gfx1201 by retuning the default tiles, using separate K and V LDS buffers, reducing register pressure for padded head dimensions, and restoring the faster software bf16 conversion.
 * Improved grouped convolution forward performance on gfx1250 with wavelet direct-load instances that load the weight tile with TDM and synchronize the compute waves with named barriers, for fp16 and bf16 2D (NHWGC) and 3D (NDHWGC) convolutions.
+* Improved CK Tile TDM GEMM performance on gfx1250 by restoring LDS padding for affected tile shapes, such as those with non-power-of-two LDS rows. The padding interval now evenly divides the LDS row, preventing incorrect results.
 
 ### Resolved issues
 
@@ -104,6 +105,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed build failures of the CK Tile FMHA backward instances for gfx1250 with `--offload-new-driver` by shortening the generated instance names, for example `_srv` instead of `_storerandval` and `_tl` instead of `_trload`.
 * Fixed the CK Tile dispatcher heuristics data pipeline refusing `--capture_hw` on gfx950 and gfx1250 nodes and misparsing kernel names whose pipeline name contains an underscore, such as `comp_tdm_v2`.
 * Fixed the `ck-template-driver` executable not being installed when CK is built with `CK_USE_CODEGEN=ON`.
+* Fixed CK Tile TDM GEMM tile shapes on gfx1250 that failed to build when LDS padding exceeded the available LDS size. Padding is now removed from the operand with the highest LDS usage.
 
 
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
@@ -116,11 +118,6 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 ### Optimized
 
 * Improved FMHA backward performance on gfx1250 by moving the operand transfers to TDM and the transposed reads to ds_load_tr, keeping the dK and dV accumulators in registers, pairing mirrored tiles under a causal mask, and coalescing the dQ atomic onto a single cache line.
-* Improved CK Tile TDM GEMM performance on gfx1250 for tile shapes that lost their LDS padding to avoid wrong results, such as tiles whose LDS rows are not a power of two, by padding them at an interval that divides the LDS row.
-
-### Fixed
-
-* Fixed CK Tile TDM GEMM tile shapes on gfx1250 failing to build because their LDS padding exceeded the LDS size; the padding is now dropped for the operand that needs the most LDS.
 
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
