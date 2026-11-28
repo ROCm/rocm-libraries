@@ -89,7 +89,7 @@ namespace rocsparse
             const bool debug_arguments
                 = (!getenv(rocsparse::envariables::names[rocsparse::envariables::DEBUG_ARGUMENTS]))
                       ? debug
-                      : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG);
+                      : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_ARGUMENTS);
             m_var.set_debug_arguments(debug_arguments);
 
             m_var.set_debug_verbose(
@@ -108,7 +108,7 @@ namespace rocsparse
                     ? debug
                     : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_FORCE_HOST_ASSERT));
 
-            m_var.set_debug_verbose(
+            m_var.set_debug_warnings(
                 (!getenv(rocsparse::envariables::names[rocsparse::envariables::DEBUG_WARNINGS]))
                     ? debug
                     : ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::DEBUG_WARNINGS));
