@@ -305,9 +305,11 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
                         print1(f"# Client on GPU {gpuIdx} exceeded {GPU_WALL_TIMEOUT_SECS}s wall-clock deadline, killing...")
                         proc.kill()
                         proc.wait()
-                    if proc.returncode and proc.returncode > 0:
+                    if proc.returncode:
                         printWarning(f"Client on GPU {gpuIdx} exited with code {proc.returncode}")
-                        overallReturnCode = max(overallReturnCode, proc.returncode)
+                        # A negative code means the client died on a signal (SIGSEGV, SIGKILL on
+                        # timeout). It is a failure like any other; abs() keeps the max() contract.
+                        overallReturnCode = max(overallReturnCode, abs(proc.returncode))
             finally:
                 # Final cleanup - kill anything still running
                 for proc, gpuIdx, _ in processes:
