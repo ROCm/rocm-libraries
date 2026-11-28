@@ -933,14 +933,6 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _TORCH_CASES,
-        "its torch-caller cases (graph replay, the concurrent workspace on torch "
-        "streams, the prepared decode lifecycle) take torch tensors and skip without "
-        "torch",
-        _LIBRARY,
-        "library/tests/test_strided_kv_decode_numeric.py",
-    ),
-    *_waiting(
-        _TORCH_CASES,
         "its torch cases exercise a torch API of rocKE (torch tensor inputs, "
         "to_torch, torch custom ops) and skip without torch",
         _LIBRARY,

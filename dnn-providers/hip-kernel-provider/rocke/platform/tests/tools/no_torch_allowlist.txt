@@ -56,7 +56,6 @@ library/tests/test_attention_bwd_bench.py: importorskip=6 torch_object=3
 library/tests/test_attention_unified_lse_numeric.py: importorskip=1 torch_api=2 torch_object=6
 library/tests/test_attention_workspace.py: import=1 torch_api=2 torch_object=1
 library/tests/test_strided_kv_decode.py: importorskip=2 torch_object=4
-library/tests/test_strided_kv_decode_numeric.py: importorskip=1 torch_api=20 torch_object=12
 platform/dsl_docs/development/verify_dsl_docs.py: import=1 torch_api=1 torch_object=18
 platform/dsl_docs/optimization/utilities/tools/dsl_probes/probe_rocprof_single.py: import=1 torch_api=4 torch_object=1
 platform/dsl_docs/optimization/utilities/tools/dsl_probes/probe_targeted_bench.py: import=1 torch_api=4
