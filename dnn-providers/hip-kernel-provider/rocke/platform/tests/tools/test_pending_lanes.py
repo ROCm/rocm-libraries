@@ -841,8 +841,10 @@ def test_a_zero_context_diff_names_the_lines_it_changes():
 def test_the_change_base_is_the_fork_point_of_the_first_base_given(monkeypatch):
     head = _git("rev-parse", "HEAD")
     tree = _git("rev-parse", "HEAD^{tree}")
-    if head is None or tree is None:
-        pytest.skip("this checkout is not a git work tree")
+    assert head is not None and tree is not None, (
+        f"change_base failed - cwd={ROCKE}, expected git rev-parse HEAD to succeed "
+        "(the registry tests run in a git checkout)"
+    )
     monkeypatch.delenv("ROCKE_CHANGE_BASE", raising=False)
     monkeypatch.setenv("PRE_COMMIT_FROM_REF", "HEAD")
     assert change_base() == head
@@ -1884,19 +1886,25 @@ def test_codeowners_rules_give_a_path_the_teams_of_its_last_directory_rule():
     assert codeowners_teams(codeowners, "group/other/x.py") == set()
 
 
-def _codeowners() -> str | None:
+def _codeowners() -> str:
     """The repository's CODEOWNERS, from the checkout or, in a sparse one,
-    from git; None when neither has it."""
+    from git. Fails when neither has it: a skip would pass the registry hook
+    having checked no team."""
     file = ROCKE.parents[2] / ".github" / "CODEOWNERS"
     if file.is_file():
         return file.read_text(encoding="utf-8")
-    return _git("show", "HEAD:.github/CODEOWNERS")
+    codeowners = _git("show", "HEAD:.github/CODEOWNERS")
+    if codeowners is None:
+        pytest.fail(
+            f"_codeowners failed - file={file}, expected it in the checkout or "
+            "readable with git show HEAD:.github/CODEOWNERS",
+            pytrace=False,
+        )
+    return codeowners
 
 
 def test_every_record_names_a_team_that_owns_its_test():
     codeowners = _codeowners()
-    if codeowners is None:
-        pytest.skip("this checkout has no .github/CODEOWNERS, in the tree or in git")
     prefix = ROCKE.relative_to(ROCKE.parents[2]).as_posix()
     records = [
         *((entry.path, entry.team) for entry in PENDING),
