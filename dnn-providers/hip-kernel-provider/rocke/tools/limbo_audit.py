@@ -11,9 +11,9 @@ the rest of its file runs, nor a file recorded under one lane whose other
 tests skip for another reason. This audit sees both, from what CI lanes did:
 the run records ``rocke.tests.run_records`` writes when a run sets
 ``ROCKE_RUN_RECORDS_DIR`` and ``PYTEST_PLUGINS=rocke.tests.run_records``. It
-needs those records, so it is not a unit test: a scheduled job, or the
-coordinator after a CI emulation, runs it over one records directory per CI
-lane, and fails on any test in limbo.
+needs those records, so it is not a unit test. No CI job writes the records
+or runs the audit today: it is run by hand over one records directory per CI
+lane, from runs that set the variables above, and fails on any test in limbo.
 
 A test is in limbo when no lane ran it and the registry does not account for
 it. The registry accounts for it when each lane that collected it but did not
