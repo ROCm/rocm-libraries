@@ -36,7 +36,9 @@ using namespace std;
 template <typename I>
 using lange_tuple = std::tuple<vector<I>, char>;
 
-// each size_range vector is a {M, N, lda}
+// each size_range vector is a {M, N, lda, singular}
+// if singular = 1, then one entry of the matrix is NaN (and so is the norm);
+// if singular = 2, then one entry of the matrix is infinite (and so is the norm)
 
 // each norm_type is one of: '1', 'F', 'I', 'M'
 
@@ -48,36 +50,46 @@ const vector<char> norm_range = {'1', 'F', 'I', 'M'};
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0, 10, 1},
-    {10, 0, 10},
+    {0, 10, 1, 0},
+    {10, 0, 10, 0},
     // invalid
-    {-1, 10, 1},
-    {10, -1, 10},
-    {10, 10, 5},
+    {-1, 10, 1, 0},
+    {10, -1, 10, 0},
+    {10, 10, 5, 0},
     // normal (valid) samples
-    {12, 20, 12},
-    {20, 15, 20},
-    {35, 35, 50}};
+    {12, 20, 12, 0},
+    {12, 20, 12, 1},
+    {20, 15, 20, 0},
+    {20, 15, 20, 2},
+    {35, 35, 50, 0},
+    {35, 35, 50, 1},
+    {35, 35, 50, 2}};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
-    {0, 10, 1},
-    {10, 0, 10},
+    {0, 10, 1, 0},
+    {10, 0, 10, 0},
     // invalid
-    {-1, 10, 1},
-    {10, -1, 10},
-    {10, 10, 5},
+    {-1, 10, 1, 0},
+    {10, -1, 10, 0},
+    {10, 10, 5, 0},
     // normal (valid) samples
-    {12, 20, 12},
-    {20, 15, 20},
-    {35, 35, 50}};
+    {12, 20, 12, 0},
+    {12, 20, 12, 1},
+    {20, 15, 20, 0},
+    {20, 15, 20, 2},
+    {35, 35, 50, 0},
+    {35, 35, 50, 1},
+    {35, 35, 50, 2}};
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range
-    = {{192, 192, 192}, {640, 300, 700}, {1024, 2000, 1024}, {2547, 2547, 2550}};
+    = {{192, 192, 192, 0},    {640, 300, 700, 0},    {640, 300, 700, 1},    {640, 300, 700, 2},
+       {1024, 2000, 1024, 0}, {2547, 2547, 2550, 0}, {2547, 2547, 2550, 1}, {2547, 2547, 2550, 2}};
 
 const vector<vector<int64_t>> large_matrix_size_range_64
-    = {{192, 192, 192}, {640, 300, 700}, {1024, 2000, 1024}, {2547, 2547, 2550}};
+    = {{192, 192, 192, 0},    {640, 300, 700, 0},    {640, 300, 700, 1},    {640, 300, 700, 2},
+       {1024, 2000, 1024, 0}, {2547, 2547, 2550, 0}, {2547, 2547, 2550, 1}, {2547, 2547, 2550, 2}};
 
 template <typename I>
 Arguments lange_setup_arguments(lange_tuple<I> tup)
@@ -94,6 +106,7 @@ Arguments lange_setup_arguments(lange_tuple<I> tup)
     arg.set<char>("norm_type", norm_type);
 
     arg.timing = 0;
+    arg.singular = matrix_size[3];
 
     return arg;
 }
