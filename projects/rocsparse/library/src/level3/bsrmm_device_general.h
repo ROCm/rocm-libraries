@@ -37,6 +37,7 @@ namespace rocsparse
               typename B,
               typename C>
     ROCSPARSE_DEVICE_ILF void bsrmm_general_blockdim_device(bool                nn,
+                                                            bool                conj_B,
                                                             rocsparse_direction direction,
                                                             J                   Mb,
                                                             J                   N,
@@ -94,16 +95,20 @@ namespace rocsparse
                             {
                                 shared_B[BSR_BLOCK_DIM * tidy + tidx]
                                     = (global_col < N && (tidx + y) < block_dim)
-                                          ? dense_B[block_dim * block_col + (tidx + y)
-                                                    + global_col * ldb]
+                                          ? rocsparse::conj_val(
+                                              dense_B[block_dim * block_col + (tidx + y)
+                                                      + global_col * ldb],
+                                              conj_B)
                                           : static_cast<B>(0);
                             }
                             else
                             {
                                 shared_B[BSR_BLOCK_DIM * tidy + tidx]
                                     = (global_col < N && (tidx + y) < block_dim)
-                                          ? dense_B[global_col
-                                                    + ldb * (block_dim * block_col + (tidx + y))]
+                                          ? rocsparse::conj_val(
+                                              dense_B[global_col
+                                                      + ldb * (block_dim * block_col + (tidx + y))],
+                                              conj_B)
                                           : static_cast<B>(0);
                             }
 

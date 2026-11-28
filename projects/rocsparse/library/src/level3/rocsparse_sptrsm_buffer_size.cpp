@@ -24,10 +24,10 @@
 #include "internal/generic/rocsparse_sptrsm.h"
 #include "rocsparse_utility.hpp"
 
-#include "../rocsparse_sptrsm_descr.hpp"
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_cscsm.hpp"
 #include "rocsparse_csrsm.hpp"
+#include "rocsparse_sptrsm_descr.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)

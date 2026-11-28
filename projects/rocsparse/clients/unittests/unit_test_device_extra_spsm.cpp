@@ -23,8 +23,7 @@
  * ************************************************************************ */
 
 //
-// Device unit tests for rocsparse_spsm (library/src/level3/refactored/ with
-// BUILD_WITH_TRSM_REFACTORING, library/src/level3/rocsparse_spsm.cpp without).
+// Device unit tests for rocsparse_spsm (library/src/level3/).
 //
 // The generic rocsparse_spsm API solves op(A) * C = alpha * op(B) for a
 // triangular sparse A. The three stages (buffer size, preprocess, compute)

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,139 +26,81 @@
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_utility.hpp"
-#include <map>
-#include <sstream>
 
-namespace rocsparse
+rocsparse_status rocsparse::coosm_analysis(rocsparse_handle            handle,
+                                           int64_t                     nrhs,
+                                           rocsparse_operation         op_A,
+                                           rocsparse_operation         op_B,
+                                           rocsparse_const_dnvec_descr alpha,
+                                           rocsparse_const_spmat_descr A,
+                                           rocsparse_const_dnmat_descr B,
+                                           rocsparse_analysis_policy   analysis,
+                                           rocsparse_csrsm_info*       p_csrsm_info,
+                                           size_t                      buffer_size_in_bytes,
+                                           void*                       buffer,
+                                           rocsparse_error*            p_error)
 {
-    typedef rocsparse_status (*coosm_analysis_t)(rocsparse_handle          handle,
-                                                 rocsparse_operation       trans_A,
-                                                 rocsparse_operation       trans_B,
-                                                 int64_t                   m,
-                                                 int64_t                   nrhs,
-                                                 int64_t                   nnz,
-                                                 const void*               alpha_device_host,
-                                                 const rocsparse_mat_descr descr,
-                                                 const void*               coo_val,
-                                                 const void*               coo_row_ind,
-                                                 const void*               coo_col_ind,
-                                                 const void*               B,
-                                                 int64_t                   ldb,
-                                                 rocsparse_mat_info        info,
-                                                 rocsparse_analysis_policy analysis,
-                                                 rocsparse_solve_policy    solve,
-                                                 rocsparse_csrsm_info*     p_csrsm_info,
-                                                 void*                     temp_buffer);
 
-    using coosm_analysis_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
+    ROCSPARSE_ROUTINE_TRACE;
 
-#define COOSM_ANALYSIS_CONFIG(I_, T_)                                                 \
-    {                                                                                 \
-        coosm_analysis_tuple(I_, T_),                                                 \
-            coosm_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                    typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
+    //
+    // Choose the indextype for the calculation of the offset array of the CSR format.
+    //
+    const rocsparse_indextype indextype = (A->nnz <= std::numeric_limits<int32_t>::max())
+                                              ? rocsparse_indextype_i32
+                                              : rocsparse_indextype_i64;
 
-    static const std::map<coosm_analysis_tuple, coosm_analysis_t> s_coosm_analysis_dispatch{
-        {COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-         COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-         COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-         COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-         COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_r),
-         COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_r),
-         COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_c),
-         COOSM_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_c)}};
-
-    static rocsparse_status coosm_analysis_find(coosm_analysis_t*   function_,
-                                                rocsparse_indextype i_type_,
-                                                rocsparse_datatype  t_type_)
+    rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = A->info->get_sorted_coo2csr_info();
+    if(sorted_coo2csr_info == nullptr)
     {
-        const auto& it = rocsparse::s_coosm_analysis_dispatch.find(
-            rocsparse::coosm_analysis_tuple(i_type_, t_type_));
+        sorted_coo2csr_info
+            = new rocsparse::sorted_coo2csr_info_t(A->rows, indextype, handle->stream);
+        A->info->set_sorted_coo2csr_info(sorted_coo2csr_info);
+        //
+        // Assign it first, because if an error occurs in calculate below, then we won't have a memory leak.
+        //
 
-        if(it != rocsparse::s_coosm_analysis_dispatch.end())
-        {
-            function_[0] = it->second;
-        }
-        // LCOV_EXCL_START
-        else
-        {
-#ifndef NDEBUG
-            std::cout << "invalid precision configuration: "
-                      << "i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
-                      << ", t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl;
-
-            std::cout << "available configuration are: " << std::endl;
-            for(const auto& p : rocsparse::s_coosm_analysis_dispatch)
-            {
-                const auto& t      = p.first;
-                const auto  i_type = std::get<0>(t);
-                const auto  t_type = std::get<1>(t);
-                std::cout << std::endl
-                          << std::endl
-                          << "i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl
-                          << ", t_type: " << rocsparse::enum_utils::to_string(t_type) << std::endl;
-            }
-#endif
-
-            std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "i_type: " << rocsparse::enum_utils::to_string(i_type_)
-                 << ", t_type: " << rocsparse::enum_utils::to_string(t_type_);
-
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   sstr.str().c_str());
-        }
-        // LCOV_EXCL_STOP
-
-        return rocsparse_status_success;
+        RETURN_IF_ROCSPARSE_ERROR(sorted_coo2csr_info->calculate(
+            handle, A->nnz, A->const_row_data, A->row_type, A->descr->base));
     }
-}
 
-rocsparse_status rocsparse::coosm_analysis(rocsparse_handle          handle,
-                                           rocsparse_operation       trans_A,
-                                           rocsparse_operation       trans_B,
-                                           int64_t                   m,
-                                           int64_t                   nrhs,
-                                           int64_t                   nnz,
-                                           rocsparse_datatype        alpha_device_host_datatype,
-                                           const void*               alpha_device_host,
-                                           const rocsparse_mat_descr descr,
-                                           rocsparse_datatype        coo_val_datatype,
-                                           const void*               coo_val,
-                                           rocsparse_indextype       coo_row_ind_indextype,
-                                           const void*               coo_row_ind,
-                                           rocsparse_indextype       coo_col_ind_indextype,
-                                           const void*               coo_col_ind,
-                                           rocsparse_datatype        B_datatype,
-                                           const void*               B,
-                                           int64_t                   ldb,
-                                           rocsparse_mat_info        info,
-                                           rocsparse_analysis_policy analysis,
-                                           rocsparse_solve_policy    solve,
-                                           rocsparse_csrsm_info*     p_csrsm_info,
-                                           void*                     temp_buffer)
-{
-    rocsparse::coosm_analysis_t f;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::coosm_analysis_find(&f, coo_row_ind_indextype, coo_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(f(handle,
-                                trans_A,
-                                trans_B,
-                                m,
-                                nrhs,
-                                nnz,
-                                alpha_device_host,
-                                descr,
-                                coo_val,
-                                coo_row_ind,
-                                coo_col_ind,
-                                B,
-                                ldb,
-                                info,
-                                analysis,
-                                solve,
-                                p_csrsm_info,
-                                temp_buffer));
+    //
+    // Create a local CSR version..
+    //
+    _rocsparse_spmat_descr A_csr(
+        rocsparse_format_csr,
+        A->batch_count,
+        A->rows,
+        A->cols,
+        A->nnz,
+        A->data_type,
+        A->const_val_data,
+        A->val_data,
+        A->batch_stride,
+        indextype,
+        sorted_coo2csr_info->get_row_ptr(), // supposed to have the same base, but to check ...
+        nullptr,
+        0,
+        A->col_type,
+        A->const_col_data,
+        A->col_data,
+        0,
+        A->idx_base,
+        A->descr,
+        A->info);
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
+                                                        nrhs,
+                                                        op_A,
+                                                        op_B,
+                                                        alpha,
+                                                        &A_csr,
+                                                        B,
+                                                        analysis,
+                                                        p_csrsm_info,
+                                                        buffer_size_in_bytes,
+                                                        buffer,
+                                                        p_error));
+
     return rocsparse_status_success;
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -154,6 +154,10 @@ rocsparse_status rocsparse_zgebsr2gebsc_buffer_size(rocsparse_handle            
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
+*
+*  \note
+*  If \p mb, \p nb, or \p nnzb is zero, the array arguments and \p temp_buffer may be null.
+*  A non-null \p bsc_col_ptr is then filled with \p idx_base.
 *
 *  @param[in]
 *  handle         handle to the rocSPARSE library context queue.

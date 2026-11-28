@@ -572,13 +572,12 @@ namespace
     }
 }
 
-// rocsparse_dnmat_copy_data (only declared with ROCSPARSE_WITH_TRSM_REFACTORING):
-// contiguous, padded and batched layouts, scaled copies through the kernel path in both
-// pointer modes, using rocsparse_dnvec_descr_create_scalar, and argument validation.
-// Every logical and padding element of the target is checked. rocsparse_dnmat_transpose
-// (declared under the same option): argument validation. Both routines: the f16, bf16,
-// i8, u8, i32 and u32 entries of their Uniform Precisions tables.
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+// rocsparse_dnmat_copy_data: contiguous, padded and batched layouts, scaled copies
+// through the kernel path in both pointer modes, using
+// rocsparse_dnvec_descr_create_scalar, and argument validation. Every logical and
+// padding element of the target is checked. rocsparse_dnmat_transpose: argument
+// validation. Both routines: the f16, bf16, i8, u8, i32 and u32 entries of their Uniform
+// Precisions tables.
 namespace
 {
     struct Layout
@@ -1011,7 +1010,6 @@ namespace
         EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
     }
 } // namespace
-#endif // ROCSPARSE_WITH_TRSM_REFACTORING
 
 // rocsparse::internal_spmat_print writes a description of a sparse matrix descriptor
 // (header fields, then optionally the index arrays and the values) to a std::ostream.

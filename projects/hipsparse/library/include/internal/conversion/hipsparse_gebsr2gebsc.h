@@ -319,6 +319,10 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *  This function is non-blocking and executed asynchronously with respect to the host.
 *  It can return before the actual computation has finished.
 *
+*  \note
+*  If \p mb, \p nb, or \p nnzb is zero, \p bsrVal, \p bsrRowPtr, \p bsrColInd, \p bscVal,
+*  \p bscRowInd, and \p bscColPtr may be null.
+*
 *  @param[in]
 *  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
@@ -451,6 +455,10 @@ hipsparseStatus_t hipsparseSgebsr2gebsc(hipsparseHandle_t    handle,
 *  This function is non-blocking and executed asynchronously with respect to the host.
 *  It can return before the actual computation has finished.
 *
+*  \note
+*  If \p mb, \p nb, or \p nnzb is zero, \p bsrVal, \p bsrRowPtr, \p bsrColInd, \p bscVal,
+*  \p bscRowInd, and \p bscColPtr may be null.
+*
 *  @param[in]
 *  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
@@ -582,6 +590,10 @@ hipsparseStatus_t hipsparseDgebsr2gebsc(hipsparseHandle_t    handle,
 *  This function is non-blocking and executed asynchronously with respect to the host.
 *  It can return before the actual computation has finished.
 *
+*  \note
+*  If \p mb, \p nb, or \p nnzb is zero, \p bsrVal, \p bsrRowPtr, \p bsrColInd, \p bscVal,
+*  \p bscRowInd, and \p bscColPtr may be null.
+*
 *  @param[in]
 *  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
@@ -712,6 +724,10 @@ hipsparseStatus_t hipsparseCgebsr2gebsc(hipsparseHandle_t    handle,
 *  \note
 *  This function is non-blocking and executed asynchronously with respect to the host.
 *  It can return before the actual computation has finished.
+*
+*  \note
+*  If \p mb, \p nb, or \p nnzb is zero, \p bsrVal, \p bsrRowPtr, \p bsrColInd, \p bscVal,
+*  \p bscRowInd, and \p bscColPtr may be null.
 *
 *  @param[in]
 *  handle      handle to the hipSPARSE library context queue.

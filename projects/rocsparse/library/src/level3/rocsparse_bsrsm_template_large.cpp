@@ -203,16 +203,31 @@ namespace rocsparse
             // Leading dimension for transposed X
             ldimX = nrhs;
 
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
-                    handle, m_rows, static_cast<int64_t>(nrhs), alpha, B, ldb, Xt, ldimX));
-            }
-            else
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
-                    handle, m_rows, static_cast<int64_t>(nrhs), *alpha, B, ldb, Xt, ldimX));
-            }
+            _rocsparse_dnvec_descr alpha_dnvec(
+                1, 1, rocsparse::get_datatype<T>(), alpha, nullptr, 1, 0, handle->pointer_mode);
+            _rocsparse_dnmat_descr source{true,
+                                          m_rows,
+                                          nrhs,
+                                          ldb,
+                                          nullptr,
+                                          B,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_column,
+                                          1,
+                                          0};
+            _rocsparse_dnmat_descr target{true,
+                                          m_rows,
+                                          nrhs,
+                                          ldimX,
+                                          Xt,
+                                          Xt,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_row,
+                                          1,
+                                          0};
+
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::dnmat_switch_order(handle, &alpha_dnvec, &source, &target, nullptr));
         }
         else
         {
@@ -260,15 +275,8 @@ namespace rocsparse
             local_bsr_col_ind = (const rocsparse_int*)trm_info->get_transposed_col_ind();
             local_bsr_val     = (const T*)bsrt_val;
 
-            switch(fill_mode)
-            {
-            case rocsparse_fill_mode_lower:
-                fill_mode = rocsparse_fill_mode_upper;
-                break;
-            case rocsparse_fill_mode_upper:
-                fill_mode = rocsparse_fill_mode_lower;
-                break;
-            }
+            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
+                                                                 : rocsparse_fill_mode_lower;
         }
 
         // Determine gcn_arch and ASIC revision
@@ -279,18 +287,13 @@ namespace rocsparse
         // gfx908 A0/1
         if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
         {
-            switch(fill_mode)
-            {
-            case rocsparse_fill_mode_upper:
+            if(fill_mode == rocsparse_fill_mode_upper)
             {
                 LAUNCH_LARGE_KERNEL(rocsparse::bsrsm_upper_large_kernel, 16, true);
-                break;
             }
-            case rocsparse_fill_mode_lower:
+            else
             {
                 LAUNCH_LARGE_KERNEL(rocsparse::bsrsm_lower_large_kernel, 16, true);
-                break;
-            }
             }
         }
         else
@@ -309,18 +312,13 @@ namespace rocsparse
 #define DEFINE_CASE(i)                                               \
     case i:                                                          \
     {                                                                \
-        switch(fill_mode)                                            \
-        {                                                            \
-        case rocsparse_fill_mode_upper:                              \
+        if(fill_mode == rocsparse_fill_mode_upper)                   \
         {                                                            \
             LAUNCH_LARGE_KERNEL(bsrsm_upper_large_kernel, i, false); \
-            break;                                                   \
         }                                                            \
-        case rocsparse_fill_mode_lower:                              \
+        else                                                         \
         {                                                            \
             LAUNCH_LARGE_KERNEL(bsrsm_lower_large_kernel, i, false); \
-            break;                                                   \
-        }                                                            \
         }                                                            \
         break;                                                       \
     }
@@ -339,8 +337,28 @@ namespace rocsparse
         // Transpose X back if X was not initially transposed
         if(trans_X == rocsparse_operation_none)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose_back(
-                handle, m_rows, static_cast<int64_t>(nrhs), Xt, ldimX, X, ldx));
+            _rocsparse_dnmat_descr source{true,
+                                          m_rows,
+                                          nrhs,
+                                          ldimX,
+                                          nullptr,
+                                          Xt,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_row,
+                                          1,
+                                          0};
+            _rocsparse_dnmat_descr target{true,
+                                          m_rows,
+                                          nrhs,
+                                          ldx,
+                                          X,
+                                          X,
+                                          rocsparse::get_datatype<T>(),
+                                          rocsparse_order_column,
+                                          1,
+                                          0};
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::dnmat_switch_order(handle, nullptr, &source, &target, nullptr));
         }
 
         return rocsparse_status_success;

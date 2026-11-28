@@ -40,6 +40,11 @@
 // A kernel without the grid-stride loop leaves every panel past the first sweep
 // holding its untouched right hand side.
 //
+// rocsparse::csrsm is the single-matrix kernel wrapper at the end of
+// csrsm_device.h, kept for this test. The library launches its own batched
+// kernel from level3/rocsparse_csrsm_solve.cpp. Both only forward to
+// rocsparse::csrsm_device, which holds the grid-stride loop tested here.
+//
 // The problem is a 16 x 16 lower bidiagonal matrix with 300 right hand sides, so
 // the whole footprint is a few tens of kilobytes and this runs on any GPU
 // (including the 15 GB gfx1201). No memory guard: this test always executes.
@@ -124,7 +129,7 @@ namespace
             map[i] = i;
         }
 
-        // B is row major with ldb = nrhs, the layout csrsm_solve_dispatch hands the
+        // B is row major with ldb = nrhs, the layout the csrsm solve hands the
         // kernel after transposing.
         std::vector<test_T> B(static_cast<size_t>(csrsm_m) * csrsm_nrhs);
         for(test_J i = 0; i < csrsm_m; ++i)

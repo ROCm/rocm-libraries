@@ -92,7 +92,8 @@ typedef struct _rocsparse_handle* rocsparse_handle;
  *  \details
  *  The rocSPARSE error descriptor is a structure holding the information related to an error
  *  that occurred during the execution of a rocSPARSE routine.
- *  It should be destroyed using rocsparse_destroy_error().
+ *  It should be destroyed using rocsparse_destroy_error(). No rocSPARSE routine returns an
+ *  error descriptor yet, and the \p p_error arguments are reserved for future use.
  */
 typedef struct _rocsparse_error* rocsparse_error;
 
@@ -309,7 +310,6 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
  */
 typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 /*! \ingroup types_module
  * \brief \p rocsparse_spsort_descr is a structure holding the rocSPARSE spsort
  * descriptor data. It must be initialized using
@@ -317,7 +317,6 @@ typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
  * end using rocsparse_spsort_descr_destroy().
  */
 typedef struct _rocsparse_spsort_descr* rocsparse_spsort_descr;
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -1184,12 +1183,9 @@ typedef enum rocsparse_sptrsm_input_
  */
 typedef enum rocsparse_sptrsm_output_
 {
-    rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot \p int64_t based position for output from the SpTRSM descriptor and synchronously return zero_pivot. */
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-    ,
+    rocsparse_sptrsm_output_zero_pivot_position, /**< Get zero pivot \p int64_t based position for output from the SpTRSM descriptor and synchronously return zero_pivot. */
     rocsparse_sptrsm_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpTRSM calculation for output from the SpTRSM descriptor. */
     rocsparse_sptrsm_output_singularity_position /**< Get the singularity \p int64_t based position for output from the SpTRSM descriptor. */
-#endif
 } rocsparse_sptrsm_output;
 
 /*! \ingroup types_module
@@ -1419,7 +1415,6 @@ typedef enum rocsparse_spgeam_alg_
     rocsparse_spgeam_alg_default = 0 /**< Default SpGEAM algorithm for the given format. */
 } rocsparse_spgeam_alg;
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 /*! \ingroup types_module
  *  \brief List of SpSort algorithms.
  *
@@ -1457,7 +1452,6 @@ typedef enum rocsparse_spsort_stage_
     rocsparse_spsort_stage_analysis, /**< Analysis of the data. */
     rocsparse_spsort_stage_compute /**< Performs the actual SpSort computation. */
 } rocsparse_spsort_stage;
-#endif
 
 /*! \ingroup types_module
  *  \brief List of gpsv algorithms.

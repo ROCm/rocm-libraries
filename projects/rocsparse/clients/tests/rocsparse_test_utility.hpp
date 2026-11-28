@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -92,10 +92,8 @@ ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_gtsv_interleaved
                                                       rocsparse_gtsvinterleavedalg2string);
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_gpsv_interleaved_alg,
                                                       rocsparse_gpsvalg2string);
-#if defined(ROCSPARSE_WITH_SPSORT)
 ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE(rocsparse_spsort_alg,
                                                       rocsparse_spsortalg2string);
-#endif
 
 #undef ROCSPARSE_TEST_NAME_SUFFIX_GENERATOR_PRINT_SPECIALIZE
 

@@ -419,7 +419,6 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spgeam_stage& 
     return rocsparse_status_invalid_value;
 }
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsort_stage& p)
 {
@@ -431,4 +430,3 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spsort_input& 
 {
     return rocsparse_status_invalid_value;
 }
-#endif

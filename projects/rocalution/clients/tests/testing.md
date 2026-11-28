@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-11-23
 
 This document describes how rocALUTION is tested today, which signals actually gate a merge, and where
 the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
@@ -77,7 +77,7 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-unit-test
 ```
 
 > When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`local_matrix_*`,
-> `local_vector`, `local_stencil`, `backend`, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
+> `local_vector`, `local_stencil`, `backend` except its two OpenMP tests, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
 > solver suites shrink their parameter lists. If no emulation variables are set, the full set of parameter combinations is exercised.
 
 **3. Add the right kind of test:** see [Choosing the Right Test Type](#choosing-the-right-test-type).
@@ -223,17 +223,18 @@ plain tests (`TEST`) such as `backend_init_order.backend`. Their `main` is
 `RUN_ALL_TESTS()` and accepts `--device <id>` and `--version`. The sources are
 `clients/tests/test_<component>.cpp`, with implementation headers in
 `clients/include/testing_<component>.hpp` and shared helpers in `clients/include/` (`utility.hpp`,
-`random.*`, `common.hpp`, `validate.hpp`).
+`random.*`, `common.hpp`).
 
 **What is not covered by the unit tests:** the multi-process paths of `GlobalMatrix`,
 `GlobalVector` and `ParallelManager`, which the MPI suites of `rocalution-test` cover. The
 deprecated AMG interface, `src/utils/` and `src/base/host/host_io.*` are tested only where other
-tests reach them, and they are excluded from the unit-test coverage numbers.
+tests reach them, and they are excluded from all coverage reports (see [Coverage](#coverage)).
 
 **Coverage expectation:** the long-term ROCm-wide goal is >95% line coverage of hardware-independent
-paths, pursued in phases. rocALUTION's host-code coverage is meaningful because a large share of the
-algorithm code runs on the CPU. The GPU backend duplicates those algorithms in device code, which
-host-side instrumentation does not capture. See [Coverage](#coverage).
+paths, pursued in phases. The Codecov `rocALUTION-unit` flag is held to 80%. rocALUTION's host-code
+coverage is meaningful because a large share of the algorithm code runs on the CPU. The GPU backend
+duplicates those algorithms in device code, which host-side instrumentation does not capture. See
+[Coverage](#coverage).
 
 ---
 
@@ -251,7 +252,7 @@ transfers and multi-node communication behave as expected.
 | Direct solvers | LU, QR, inversion |
 | Algebraic multigrid | pairwise AMG, Ruge–Stüben AMG, smoothed-aggregation (SA-AMG), unsmoothed-aggregation (UA-AMG) |
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
-| Structures (GPU) | `local_matrix` ops / conversions / multicoloring / itsolve / solve, `local_vector`, `local_stencil` |
+| Structures (GPU) | `local_matrix` ops / conversions / itsolve / solve, `local_vector`, `local_stencil` |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
 | MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup, and `ReBuildNumeric()` with host levels) |
 
@@ -297,10 +298,17 @@ Laplacian) across backends and both precisions; the emulation tiers shrink param
 running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
 **Overlap with the unit tests:** the `local_matrix*`, `local_vector`, `local_stencil` and `backend`
-suites skip in every TheRock tier, and they test operations that the unit tests now check against
-independent references. They are kept until a review of each suite confirms that the unit tests
-cover all of its checks. A suite that is covered is then deleted, not maintained next to the unit
-tests. The solver, preconditioner and AMG suites stay as the integration layer.
+suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
+`backend_omp_parallel_region` and `backend_omp_restore_state`, which run in every category. They
+test operations that the unit tests now check against independent references. They are kept until
+a review of each suite confirms that the unit tests cover all of its checks, on every platform and
+in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
+the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`
+and `local_matrix_multicoloring` suites and the ItLUSolve case of `local_matrix_itsolve` have been
+deleted on that basis. The Jenkins test command runs both unit-test binaries before
+`rocalution-test`, so the Jenkins lanes still run these checks. Clients-only builds and
+`rtest.xml` runs no longer run them (see [Known Gaps Summary](#known-gaps-summary)). The
+solver, preconditioner and AMG suites stay as the integration layer.
 
 ---
 
@@ -389,7 +397,7 @@ can look intermittent.
 | Integration tests | Yes | Component team | TheRock `standard` = regression subset (`ROCALUTION_EMULATION_REGRESSION=1`); Jenkins runs the full suite (filter commented out) |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
 | Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
-| Code coverage | No | Component team / CI | `codecov.groovy`, informational (Codecov, `rocALUTION`) |
+| Code coverage | Codecov status | Component team / CI | `rocALUTION` and `rocALUTION-unit` project statuses fail under the 80% target in `codecov.yml`. Jenkins `codecov.groovy`. TheRock does not run this status. |
 | ASAN | Separate lane | CI / DevOps | TheRock ASAN workflows + `BUILD_ADDRESS_SANITIZER`; not a confirmed per-PR blocking gate |
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
@@ -398,7 +406,7 @@ can look intermittent.
 MPI `./install.sh -c --host --mpi=on --no-openmp`. The test step runs `rocalution-unit-test`,
 `rocalution-unit-test-lifecycle` and `rocalution-test`, in that order, from
 `build/release/clients/staging` and stops at the first binary that fails. In the default build on gfx90a, it then runs
-`rocalution-test` again with `HSA_XNACK=0` and `HSA_XNACK=1` for the HMM cases; the host and MPI
+all three again with `HSA_XNACK=0` and `HSA_XNACK=1` for the HMM cases; the host and MPI
 builds skip those runs.
 
 ### PR Test Classification
@@ -406,7 +414,8 @@ builds skip those runs.
 | Status | Applies to |
 |---|---|
 | Trusted gate | TheRock CI `standard` category (regression subset) on changed projects |
-| Informational | Coverage upload (Codecov); TheRock nightly / comprehensive results; Jenkins full-suite lanes |
+| Codecov project status | `rocALUTION` and `rocALUTION-unit` fail when coverage is under the 80% target in `codecov.yml`. TheRock does not run this status, and `develop` branch protection has not been confirmed to require it. |
+| Informational | TheRock nightly / comprehensive results; Jenkins full-suite lanes |
 | Unstable / flaky | No quarantine mechanism for `rocalution-test`; the unit tests skip known bugs with `KNOWN_BUG` |
 
 **Flaky / known-bug policy:** in `rocalution-test`, there is **no `known_bugs.yaml`** and no test
@@ -439,8 +448,10 @@ the real types only.
 ./install.sh -cg --codecoverage
 cd build/debug
 make coverage_cleanup coverage GTEST_FILTER='*'
+make coverage_split
 # targets: coverage_analysis (profraw) -> coverage (llvm-profdata merge, llvm-cov export,
 #          scripts/filter_lcov_exclusions.py, genhtml -> coverage-report/)
+#          coverage_split writes coverage-unit.info and coverage-integration.info
 ```
 
 `coverage_analysis` runs `rocalution-test` with `GTEST_FILTER`, then `rocalution-unit-test`
@@ -465,7 +476,24 @@ preprocessor directives), which `llvm-cov` can report as missed. It fails, and r
 when a source file cannot be read or its markers do not pair up: a START that is never closed, a
 START inside an open block of the same kind, a STOP without a START, or a misspelled marker. Its
 self-tests, `scripts/test_filter_lcov_exclusions.py`, run as part of `make coverage`. Jenkins
-`codecov.groovy` uploads `coverage-report/coverage.info`.
+`codecov.groovy` uploads `coverage-report/coverage.info` as the Codecov flag `rocALUTION`.
+
+`make coverage_split` (run after `make coverage`) does not rerun any test. It merges the unit-test
+profiles (`rocalution-unit-test` and the lifecycle tests) and the `rocalution-test` profiles
+separately and writes `coverage-report/coverage-unit.info` and
+`coverage-report/coverage-integration.info`. Jenkins uploads `coverage-unit.info` as the Codecov
+flag `rocALUTION-unit`. A failed `coverage_split`, or a missing `coverage-unit.info`, fails the
+coverage job, and so does a lifecycle CTest run that finds no test. `coverage-integration.info` is
+left for a local look and is not uploaded. The combined `rocALUTION` flag is `coverage.info`, which
+includes both runs. `make coverage_cleanup` deletes `coverage-report/`, including the profiles and
+reports of a previous run.
+
+The flag rules are in the root [`codecov.yml`](../../../../codecov.yml). `rocALUTION` and
+`rocALUTION-unit` carry forward, and each has a project status with an 80% target. Codecov reports a
+failure when either flag is under 80%. A failed upload of the unit report does not fail the job.
+`rocALUTION-unit` is then built from the nodes whose upload succeeded; if none did, Codecov posts no
+`rocALUTION-unit` status for that commit and the carried-forward number stays. TheRock does not run
+these statuses. Branch protection on `develop` has not been confirmed to require them.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.
@@ -550,7 +578,8 @@ device configurations are not ASAN-covered.
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo output files only |
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism for `rocalution-test` | Medium | Medium | The unit tests skip known bugs with `KNOWN_BUG`; flaky tests handled ad-hoc |
-| `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it |
+| `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it, after which only the unit tests check it |
+| A clients-only build (`install.sh --clients-only`) cannot build the unit tests; the `rtest.xml` sets run only `rocalution-test` | Low | Medium | Neither runs in CI; the checks of the deleted structure suites run only through the unit-test binaries |
 | Unit tests not built on Windows (they use POSIX calls such as `alarm`, and some helpers do not compile there) | Medium | Medium | Windows runs `rocalution-test` only |
 | Device-code coverage not captured | Medium | Medium | Host-only LLVM coverage |
 | MPI/multi-node validation is partial; global stencil test commented out | Medium | Medium | Nightly MPI variant build |

@@ -62,7 +62,9 @@ namespace convut
     inline constexpr auto dir_r = rocsparse_direction_row;
     inline constexpr auto dir_c = rocsparse_direction_column;
     inline constexpr auto i32   = rocsparse_indextype_i32;
+    inline constexpr auto i64   = rocsparse_indextype_i64;
     inline constexpr auto f32   = rocsparse_datatype_f32_r;
+    inline constexpr auto f64   = rocsparse_datatype_f64_r;
 
     // A data status that no check reports.
     inline const auto bad_ds = static_cast<rocsparse_data_status>(-1);

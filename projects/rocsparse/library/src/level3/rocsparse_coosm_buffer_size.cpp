@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,128 +26,126 @@
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_utility.hpp"
-#include <map>
-#include <sstream>
 
-namespace rocsparse
+rocsparse_status rocsparse::coosm_analysis_buffer_size(rocsparse_handle            handle,
+                                                       const int64_t               nrhs,
+                                                       rocsparse_operation         op_A,
+                                                       rocsparse_operation         op_B,
+                                                       rocsparse_const_dnvec_descr alpha,
+                                                       rocsparse_const_spmat_descr A,
+                                                       rocsparse_const_dnmat_descr X,
+                                                       size_t*          p_buffer_size_in_bytes,
+                                                       rocsparse_error* p_error)
 {
-    typedef rocsparse_status (*coosm_buffer_size_t)(rocsparse_handle          handle,
-                                                    rocsparse_operation       trans_A,
-                                                    rocsparse_operation       trans_B,
-                                                    int64_t                   m,
-                                                    int64_t                   nrhs,
-                                                    int64_t                   nnz,
-                                                    const rocsparse_mat_descr descr,
-                                                    const void*               coo_val,
-                                                    const void*               coo_row_ind,
-                                                    const void*               coo_col_ind,
-                                                    rocsparse_order           order_B,
-                                                    rocsparse_mat_info        info,
-                                                    rocsparse_solve_policy    policy,
-                                                    size_t*                   buffer_size);
 
-    using coosm_buffer_size_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
+    ROCSPARSE_ROUTINE_TRACE;
 
-#define COOSM_BUFFER_SIZE_CONFIG(I_, T_)                                                 \
-    {                                                                                    \
-        coosm_buffer_size_tuple(I_, T_),                                                 \
-            coosm_buffer_size_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                       typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
+    const rocsparse_indextype indextype = (A->nnz <= std::numeric_limits<int32_t>::max())
+                                              ? rocsparse_indextype_i32
+                                              : rocsparse_indextype_i64;
 
-    static const std::map<coosm_buffer_size_tuple, coosm_buffer_size_t>
-        s_coosm_buffer_size_dispatch{
-            {COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-             COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-             COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-             COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-             COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_r),
-             COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_r),
-             COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_c),
-             COOSM_BUFFER_SIZE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_c)}};
+    //
+    // Trick since it is not used in csrsm_buffer_size, otherwise we need to create a proper ptr array for nothing.
+    //
+    const void* const_ptr = (const void*)0x4;
+    void*       ptr       = (void*)0x4;
 
-    static rocsparse_status coosm_buffer_size_find(coosm_buffer_size_t* function_,
-                                                   rocsparse_indextype  i_type_,
-                                                   rocsparse_datatype   t_type_)
-    {
-        const auto& it = rocsparse::s_coosm_buffer_size_dispatch.find(
-            rocsparse::coosm_buffer_size_tuple(i_type_, t_type_));
+    _rocsparse_spmat_descr A_csr(rocsparse_format_csr,
+                                 A->batch_count,
+                                 A->rows,
+                                 A->cols,
+                                 A->nnz,
+                                 A->data_type,
+                                 A->const_val_data,
+                                 A->val_data,
+                                 A->batch_stride,
+                                 indextype,
+                                 const_ptr,
+                                 ptr,
+                                 0,
+                                 A->col_type,
+                                 A->const_col_data,
+                                 A->col_data,
+                                 0,
+                                 A->idx_base,
+                                 A->descr,
+                                 A->info);
 
-        if(it != rocsparse::s_coosm_buffer_size_dispatch.end())
-        {
-            function_[0] = it->second;
-        }
-        // LCOV_EXCL_START
-        else
-        {
-#ifndef NDEBUG
-            std::cout << "invalid precision configuration: "
-                      << "i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
-                      << ", t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(
+        handle, nrhs, op_A, op_B, alpha, &A_csr, X, p_buffer_size_in_bytes, p_error));
 
-            std::cout << "available configuration are: " << std::endl;
-            for(const auto& p : rocsparse::s_coosm_buffer_size_dispatch)
-            {
-                const auto& t      = p.first;
-                const auto  i_type = std::get<0>(t);
-                const auto  t_type = std::get<1>(t);
-                std::cout << std::endl
-                          << std::endl
-                          << "i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl
-                          << ", t_type: " << rocsparse::enum_utils::to_string(t_type) << std::endl;
-            }
-#endif
-
-            std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "i_type: " << rocsparse::enum_utils::to_string(i_type_)
-                 << ", t_type: " << rocsparse::enum_utils::to_string(t_type_);
-
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   sstr.str().c_str());
-        }
-        // LCOV_EXCL_STOP
-
-        return rocsparse_status_success;
-    }
+    return rocsparse_status_success;
 }
 
-rocsparse_status rocsparse::coosm_buffer_size(rocsparse_handle          handle,
-                                              rocsparse_operation       trans_A,
-                                              rocsparse_operation       trans_B,
-                                              int64_t                   m,
-                                              int64_t                   nrhs,
-                                              int64_t                   nnz,
-                                              rocsparse_datatype        alpha_device_host_datatype,
-                                              const rocsparse_mat_descr descr,
-                                              rocsparse_datatype        coo_val_datatype,
-                                              const void*               coo_val,
-                                              rocsparse_indextype       coo_row_ind_indextype,
-                                              const void*               coo_row_ind,
-                                              rocsparse_indextype       coo_col_ind_indextype,
-                                              const void*               coo_col_ind,
-                                              rocsparse_datatype        B_datatype,
-                                              rocsparse_order           order_B,
-                                              rocsparse_mat_info        info,
-                                              rocsparse_solve_policy    policy,
-                                              size_t*                   buffer_size)
+rocsparse_status rocsparse::coosm_solve_buffer_size(rocsparse_handle            handle,
+                                                    const int64_t               nrhs,
+                                                    rocsparse_operation         op_A,
+                                                    rocsparse_operation         op_B,
+                                                    rocsparse_const_dnvec_descr alpha,
+                                                    rocsparse_const_spmat_descr A,
+                                                    rocsparse_const_dnmat_descr X,
+                                                    size_t*          p_buffer_size_in_bytes,
+                                                    rocsparse_error* p_error)
 {
-    rocsparse::coosm_buffer_size_t f;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::coosm_buffer_size_find(&f, coo_row_ind_indextype, coo_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(f(handle,
-                                trans_A,
-                                trans_B,
-                                m,
-                                nrhs,
-                                nnz,
-                                descr,
-                                coo_val,
-                                coo_row_ind,
-                                coo_col_ind,
-                                order_B,
-                                info,
-                                policy,
-                                buffer_size));
+
+    ROCSPARSE_ROUTINE_TRACE;
+
+    const rocsparse_indextype indextype = (A->nnz <= std::numeric_limits<int32_t>::max())
+                                              ? rocsparse_indextype_i32
+                                              : rocsparse_indextype_i64;
+
+    //
+    // Trick since it is not used in csrsm_buffer_size, otherwise we need to create a proper ptr array for nothing.
+    //
+    const void* const_ptr = (const void*)0x4;
+    void*       ptr       = (void*)0x4;
+
+    _rocsparse_spmat_descr A_csr(rocsparse_format_csr,
+                                 A->batch_count,
+                                 A->rows,
+                                 A->cols,
+                                 A->nnz,
+                                 A->data_type,
+                                 A->const_val_data,
+                                 A->val_data,
+                                 A->batch_stride,
+                                 indextype,
+                                 const_ptr,
+                                 ptr,
+                                 0,
+                                 A->col_type,
+                                 A->const_col_data,
+                                 A->col_data,
+                                 0,
+                                 A->idx_base,
+                                 A->descr,
+                                 A->info);
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(
+        handle, nrhs, op_A, op_B, alpha, &A_csr, X, p_buffer_size_in_bytes, p_error));
+
+    return rocsparse_status_success;
+}
+
+rocsparse_status rocsparse::coosm_buffer_size(rocsparse_handle            handle,
+                                              const int64_t               nrhs,
+                                              rocsparse_operation         op_A,
+                                              rocsparse_operation         op_B,
+                                              rocsparse_const_dnvec_descr alpha,
+                                              rocsparse_const_spmat_descr A,
+                                              rocsparse_const_dnmat_descr X,
+                                              size_t*                     p_buffer_size_in_bytes,
+                                              rocsparse_error*            p_error)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_analysis_buffer_size(
+        handle, nrhs, op_A, op_B, alpha, A, X, p_buffer_size_in_bytes, p_error));
+
+    size_t buffer_size_in_bytes;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_solve_buffer_size(
+        handle, nrhs, op_A, op_B, alpha, A, X, &buffer_size_in_bytes, p_error));
+
+    p_buffer_size_in_bytes[0] = std::max(p_buffer_size_in_bytes[0], buffer_size_in_bytes);
+
     return rocsparse_status_success;
 }

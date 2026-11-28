@@ -606,6 +606,70 @@ namespace
                             std::vector<float>(m, 0.0f), to_host(dy), "csritsv non unit nnz=0 y"));
                     }
                 }
+                // With or without a tolerance, an iteration limit <= 0 does nothing and the
+                // limit is returned unchanged. Otherwise y = alpha * x for a unit diagonal,
+                // with or without a history array, and history[0] is the initial residual
+                // ||alpha * x - 0||_inf. With a tolerance the step is exact, so one iteration
+                // is reported and, as for a non-empty matrix, history[1] is zero when the limit
+                // allows a second iteration. Without one all the iterations are run as for a
+                // non-empty matrix: the limit is returned unchanged and the remaining residuals
+                // are zero.
+                if(diag == rocsparse_diag_type_unit)
+                {
+                    float initial_residual = 0.0f;
+                    for(const float v : scaled)
+                        initial_residual = std::max(initial_residual, std::abs(v));
+                    for(const bool ex : {false, true})
+                        for(const bool with_tol : {false, true})
+                            for(const bool history : {false, true})
+                                for(const rocsparse_int limit : {5, 3, 0, -1})
+                                {
+                                    SCOPED_TRACE(::testing::Message()
+                                                 << "tolerance " << with_tol << ", ex " << ex
+                                                 << ", history " << history << ", nmaxiter "
+                                                 << limit);
+                                    device_vector<float> dy(std::vector<float>(m, 0.0f));
+                                    std::vector<float>   hist(5, -1.0f);
+                                    rocsparse_int        nmax = limit;
+                                    ASSERT_EQ(itsv_solve<float>(ex,
+                                                                handle,
+                                                                &nmax,
+                                                                0,
+                                                                with_tol ? &tol : nullptr,
+                                                                history ? hist.data() : nullptr,
+                                                                rocsparse_operation_none,
+                                                                m,
+                                                                0,
+                                                                &alpha,
+                                                                d2,
+                                                                dA.val,
+                                                                dA.ptr,
+                                                                dA.ind,
+                                                                i2,
+                                                                dx,
+                                                                dy,
+                                                                rocsparse_solve_policy_auto,
+                                                                dbuf),
+                                              rocsparse_status_success);
+                                    const bool stepped = (limit > 0);
+                                    EXPECT_EQ(nmax, (stepped && with_tol) ? 1 : limit);
+                                    EXPECT_TRUE(
+                                        expect_near(stepped ? scaled : std::vector<float>(m, 0.0f),
+                                                    to_host(dy),
+                                                    "csritsv unit nnz=0 y"));
+                                    if(history)
+                                    {
+                                        EXPECT_EQ(hist[0], stepped ? initial_residual : -1.0f);
+                                        for(rocsparse_int i = 1; i < 5; ++i)
+                                        {
+                                            const bool zero
+                                                = stepped && i < limit && (!with_tol || i == 1);
+                                            EXPECT_EQ(hist[i], zero ? 0.0f : -1.0f)
+                                                << "history[" << i << "]";
+                                        }
+                                    }
+                                }
+                }
                 // y already holds the solution: no step is needed.
                 if(diag == rocsparse_diag_type_unit)
                 {
@@ -982,6 +1046,101 @@ namespace
                                 return;
                         }
         EXPECT_EQ(seen.size(), size_t{32});
+    }
+
+    TEST_F(L2DeviceSpitsv, empty_matrix)
+    {
+        // nnz == 0 with a unit diagonal through the generic API, in both pointer modes:
+        // y = alpha * x, with the same iteration count and history as rocsparse_csritsv_solve.
+        const int32_t            m     = 9;
+        const float              alpha = 2.0f;
+        const float              tol   = 1.0e-6f;
+        const std::vector<float> x     = make_vector<float>(m, 6);
+        std::vector<float>       scaled(x);
+        for(auto& v : scaled)
+            v *= alpha;
+        float initial_residual = 0.0f;
+        for(const float v : scaled)
+            initial_residual = std::max(initial_residual, std::abs(v));
+        host_csr<float> A;
+        A.m = A.n = m;
+        A.ptr.assign(m + 1, 0);
+        const rocsparse_diag_type diag = rocsparse_diag_type_unit;
+
+        for(const bool device : {false, true})
+            for(const bool with_tol : {false, true})
+                for(const bool history : {false, true})
+                {
+                    SCOPED_TRACE(::testing::Message() << "device " << device << ", tolerance "
+                                                      << with_tol << ", history " << history);
+                    device_csr<float>    dA(A);
+                    device_vector<float> dx(x), dy(std::vector<float>(m, 0.0f)),
+                        dalpha(std::vector<float>(1, alpha));
+                    ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr && dalpha.ptr);
+
+                    spmat_guard mat;
+                    ASSERT_EQ(rocsparse_create_csr_descr(&mat.d,
+                                                         m,
+                                                         m,
+                                                         0,
+                                                         dA.ptr,
+                                                         dA.ind,
+                                                         dA.val,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_index_base_zero,
+                                                         rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                    dnvec_guard vx, vy;
+                    ASSERT_EQ(rocsparse_create_dnvec_descr(&vx.d, m, dx, rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                    ASSERT_EQ(rocsparse_create_dnvec_descr(&vy.d, m, dy, rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                    ASSERT_EQ(rocsparse_spmat_set_attribute(
+                                  mat.d, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
+                              rocsparse_status_success);
+
+                    rocsparse_int       nmax = 5;
+                    std::vector<float>  hist(5, -1.0f);
+                    scoped_pointer_mode mode(handle, device);
+                    const void*         palpha = device ? static_cast<const void*>(dalpha.ptr)
+                                                        : static_cast<const void*>(&alpha);
+                    auto call = [&](rocsparse_spitsv_stage stage, size_t* bytes, void* buffer) {
+                        return rocsparse_spitsv(handle,
+                                                &nmax,
+                                                with_tol ? &tol : nullptr,
+                                                history ? hist.data() : nullptr,
+                                                rocsparse_operation_none,
+                                                palpha,
+                                                mat.d,
+                                                vx.d,
+                                                vy.d,
+                                                rocsparse_datatype_f32_r,
+                                                rocsparse_spitsv_alg_default,
+                                                stage,
+                                                bytes,
+                                                buffer);
+                    };
+
+                    size_t bytes = 0;
+                    ASSERT_EQ(call(rocsparse_spitsv_stage_buffer_size, &bytes, nullptr),
+                              rocsparse_status_success);
+                    device_vector<char> dbuf(std::max<size_t>(bytes, 16));
+                    ASSERT_TRUE(dbuf.ptr);
+                    ASSERT_EQ(call(rocsparse_spitsv_stage_preprocess, nullptr, dbuf),
+                              rocsparse_status_success);
+                    ASSERT_EQ(call(rocsparse_spitsv_stage_compute, nullptr, dbuf),
+                              rocsparse_status_success);
+                    EXPECT_TRUE(expect_near(scaled, to_host(dy), "spitsv unit nnz=0 y"));
+                    EXPECT_EQ(nmax, with_tol ? 1 : 5);
+                    if(history)
+                    {
+                        EXPECT_EQ(hist[0], initial_residual);
+                        for(size_t i = 1; i < hist.size(); ++i)
+                            EXPECT_EQ(hist[i], (with_tol && i > 1) ? -1.0f : 0.0f)
+                                << "history[" << i << "]";
+                    }
+                }
     }
 
     TEST_F(L2DeviceSpitsv, argument_checks)

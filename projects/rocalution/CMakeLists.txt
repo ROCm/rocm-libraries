@@ -246,7 +246,7 @@ endif()
 
 
 # Setup version
-rocm_setup_version(VERSION "4.1.2")
+rocm_setup_version(VERSION "4.2.0")
 
 # Configure Windows version resource file
 if(WIN32)
@@ -338,18 +338,21 @@ if(BUILD_CODE_COVERAGE)
   # will run:
   #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
   # and then write the lcov and html reports to coverage-report
+  # > make coverage_split (after make coverage; does not rerun tests)
+  # writes coverage-unit.info and coverage-integration.info
   #
 
   # The unit tests run unfiltered: GTEST_FILTER selects rocalution-test cases,
   # and make passes it to the environment, where gtest would read it. The
-  # lifecycle tests run through CTest, one process per test. The executables
+  # lifecycle tests run through CTest, one process per test, and a run that
+  # finds none fails, since coverage_split needs their profiles. The executables
   # contain the same library objects as librocalution, and so the same %m
   # signature, so their profiles get names of their own.
   set(COVERAGE_UNIT_TEST_COMMANDS)
   if(TARGET rocalution-unit-test)
     set(COVERAGE_UNIT_TEST_COMMANDS
       COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_unit_%m.profraw" ./clients/staging/rocalution-unit-test
-      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/rocalution-coverage_lifecycle_%m.profraw" ${CMAKE_CTEST_COMMAND} -R "^lifecycle" --output-on-failure
+      COMMAND ${CMAKE_COMMAND} -E env --unset=GTEST_FILTER LLVM_PROFILE_FILE="${CMAKE_BINARY_DIR}/coverage-report/profraw/rocalution-coverage_lifecycle_%m.profraw" ${CMAKE_CTEST_COMMAND} -R "^lifecycle" --no-tests=error --output-on-failure
     )
   endif()
 
@@ -359,7 +362,10 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_%m.profraw" ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
+    # Integration profiles use their own prefix so coverage_split can merge
+    # them apart from the unit and lifecycle profiles. The rocalution-coverage_*.profraw
+    # merge glob of the coverage target still picks them up.
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocalution-coverage_integration_%m.profraw" ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
     COMMAND ${CMAKE_COMMAND} -DPROFRAW_DIR=${CMAKE_BINARY_DIR}/coverage-report/profraw -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckCoverageProfile.cmake
     ${COVERAGE_UNIT_TEST_COMMANDS}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -435,6 +441,30 @@ if(BUILD_CODE_COVERAGE)
     ${COVERAGE_HTML_COMMAND}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Building coverage report"
+  )
+
+  # Report the unit tests and rocalution-test separately, from the profiles
+  # coverage_analysis already wrote. This does not run any test.
+  # The unit report merges rocalution-unit-test and the lifecycle tests.
+  # The integration report is rocalution-test only. Jenkins uploads the unit
+  # report and leaves the integration report for a local look.
+  add_custom_target(
+    coverage_split
+    COMMAND ${LLVM_PROFDATA} merge -sparse
+            ./coverage-report/profraw/rocalution-coverage_unit_*.profraw
+            ./coverage-report/profraw/rocalution-coverage_lifecycle_*.profraw
+            -o ./coverage-report/unit.profdata
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata -format=lcov > ./coverage-report/coverage-unit-raw.info
+    COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ${COVERAGE_FILTER_OPTIONS} ./coverage-report/coverage-unit-raw.info ./coverage-report/coverage-unit.info
+    COMMAND ${LLVM_PROFDATA} merge -sparse
+            ./coverage-report/profraw/rocalution-coverage_integration_*.profraw
+            -o ./coverage-report/integration.profdata
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata -format=lcov > ./coverage-report/coverage-integration-raw.info
+    COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ${COVERAGE_FILTER_OPTIONS} ./coverage-report/coverage-integration-raw.info ./coverage-report/coverage-integration.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Building unit and integration coverage reports"
   )
 
   #

@@ -25,7 +25,7 @@
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
-#include "../../level2/rocsparse_csrsv.hpp"
+#include "../level2/rocsparse_csrsv.hpp"
 #include "rocsparse_csrsm.hpp"
 #include "rocsparse_utility.hpp"
 

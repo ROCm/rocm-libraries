@@ -32,12 +32,8 @@
 #include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-
 #include "internal/auxiliary/rocsparse_dnmat_copy_data.h"
 #include "internal/auxiliary/rocsparse_dnmat_transpose.h"
-
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,7 +88,7 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
  *  stream   the user-defined stream to associate with the handle and to use for
  *           all stream-ordered setup work during creation.
  *  @param[out]
- *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error  error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the initialization succeeded.
  *  \retval rocsparse_status_invalid_pointer \p handle pointer is invalid.
@@ -129,7 +125,7 @@ rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
  *  @param[in]
  *  handle   the handle to the rocSPARSE library context, which can be a null pointer.
  *  @param[out]
- *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error  error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_internal_error an internal error occurred.
@@ -1498,7 +1494,6 @@ rocsparse_status rocsparse_create_extract_descr(rocsparse_extract_descr*    desc
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
 
-#if defined(ROCSPARSE_WITH_SPSORT)
 /*! \ingroup aux_module
 *  \brief Sparse matrix SpSort routine descriptor creation.
 *
@@ -1511,7 +1506,7 @@ rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
 *  @param[out]
 *  p_spsort_descr pointer to the descriptor of the SpSort routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
@@ -1534,7 +1529,7 @@ rocsparse_status rocsparse_spsort_descr_create(rocsparse_handle        handle,
 *  @param[in]
 *  spsort_descr   descriptor of the SpSort routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
@@ -1558,7 +1553,7 @@ rocsparse_status rocsparse_spsort_descr_destroy(rocsparse_handle       handle,
  *  @param[in]
  *  data_size_in_bytes   size in bytes of the input data, which must be the size of that type.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1572,7 +1567,6 @@ rocsparse_status rocsparse_spsort_set_input(rocsparse_handle       handle,
                                             const void*            data,
                                             size_t                 data_size_in_bytes,
                                             rocsparse_error*       p_error);
-#endif
 
 /*! \ingroup aux_module
 *  \brief Sparse matrix SpGEAM routine descriptor creation.
@@ -1618,7 +1612,7 @@ rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr);
  *  @param[in]
  *  data_size_in_bytes   input data size.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1647,7 +1641,7 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
  *  @param[in]
  *  data_size_in_bytes   output data size.
  *  @param[out]
- *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1706,7 +1700,7 @@ rocsparse_status rocsparse_destroy_spmv_descr(rocsparse_spmv_descr descr);
    *  @param[in]
    *  size_in_bytes input value size in bytes.
    *  @param[out]
-   *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+   *  error        error descriptor, reserved for future use. A null pointer can be passed.
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_pointer if \p descr or \p in is invalid.
@@ -1733,7 +1727,7 @@ rocsparse_status rocsparse_spmv_set_input(rocsparse_handle     handle,
 *  @param[out]
 *  p_sptrsv_descr        pointer to the descriptor of the sptrsv routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -1757,7 +1751,7 @@ rocsparse_status rocsparse_sptrsv_descr_create(rocsparse_handle        handle,
 *  @param[in]
 *  sptrsv_descr        descriptor of the sptrsv routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -1811,7 +1805,7 @@ rocsparse_status rocsparse_destroy_sptrsv_descr(rocsparse_sptrsv_descr descr);
  *  @param[in]
  *  data_size_in_bytes   input data size in bytes.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *
  *  \retval rocsparse_status_success the operation completed successfully.
@@ -1841,7 +1835,7 @@ rocsparse_status rocsparse_sptrsv_set_input(rocsparse_handle       handle,
  *  @param[in]
  *  data_size_in_bytes   output data size in bytes.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1900,7 +1894,7 @@ rocsparse_status rocsparse_destroy_sptrsm_descr(rocsparse_sptrsm_descr descr);
  *  @param[in]
  *  data_size   input data size.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1929,7 +1923,7 @@ rocsparse_status rocsparse_sptrsm_set_input(rocsparse_handle       handle,
  *  @param[in]
  *  data_size_in_bytes   output data size in bytes.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1954,7 +1948,7 @@ rocsparse_status rocsparse_sptrsm_get_output(rocsparse_handle        handle,
 *  @param[out]
 *  p_spic0_descr        pointer to the descriptor of the Spic0 routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -1976,7 +1970,7 @@ rocsparse_status rocsparse_spic0_descr_create(rocsparse_handle       handle,
 *  @param[in]
 *  spic0_descr        descriptor of the spic0 routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
@@ -2008,7 +2002,7 @@ rocsparse_status rocsparse_spic0_descr_destroy(rocsparse_handle      handle,
  *  @param[in]
  *  input_size_in_bytes   input data size in bytes.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success.  A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *
  *  \retval rocsparse_status_success the operation completed successfully.
@@ -2040,7 +2034,7 @@ rocsparse_status rocsparse_spic0_set_input(rocsparse_handle      handle,
  *  @param[in]
  *  output_size_in_bytes   output data size in bytes.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -2066,7 +2060,7 @@ rocsparse_status rocsparse_spic0_get_output(rocsparse_handle       handle,
 *  @param[out]
 *  p_spilu0_descr        pointer to the descriptor of the Spilu0 routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success.  A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -2088,7 +2082,7 @@ rocsparse_status rocsparse_spilu0_descr_create(rocsparse_handle        handle,
 *  @param[in]
 *  spilu0_descr        descriptor of the spilu0 routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
@@ -2120,7 +2114,7 @@ rocsparse_status rocsparse_spilu0_descr_destroy(rocsparse_handle       handle,
  *  @param[in]
  *  input_size_in_bytes   input data size in bytes.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *
  *  \retval rocsparse_status_success the operation completed successfully.
@@ -2152,7 +2146,7 @@ rocsparse_status rocsparse_spilu0_set_input(rocsparse_handle       handle,
  *  @param[in]
  *  output_size_in_bytes   output data size in bytes.
  *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error        error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -2177,7 +2171,7 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
 *  @param[out]
 *  p_spildlt0_descr        pointer to the descriptor of the SpILDLT0 routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -2199,7 +2193,7 @@ rocsparse_status rocsparse_spildlt0_descr_create(rocsparse_handle          handl
 *  @param[in]
 *  spildlt0_descr        descriptor of the SpILDLT0 routine.
 *  @param[out]
-*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  p_error        error descriptor, reserved for future use. A null pointer can be passed.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
@@ -2234,7 +2228,7 @@ rocsparse_status rocsparse_spildlt0_descr_destroy(rocsparse_handle         handl
  *  @param[in]
  *  input_size_in_bytes   input data size in bytes.
  *  @param[out]
- *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success.  A null pointer can be passed if an error descriptor is not required.
+ *  p_error         error descriptor, reserved for future use. A null pointer can be passed.
  *
  *
  *  \retval rocsparse_status_success the operation completed successfully.
@@ -2266,7 +2260,7 @@ rocsparse_status rocsparse_spildlt0_set_input(rocsparse_handle         handle,
  *  @param[in]
  *  output_size_in_bytes   output data size in bytes.
  *  @param[out]
- *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *  p_error         error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -3282,9 +3276,7 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
  *  values   pointer to the scalar value (read-write view), or null for a read-only descriptor.
  *           When non-null it must equal \p const_values.
  *  @param[out]
- *  p_error   error descriptor created if the returned status is not
- *            \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is
- *            not required.
+ *  p_error   error descriptor, reserved for future use. A null pointer can be passed.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_handle the library context was not initialized.
