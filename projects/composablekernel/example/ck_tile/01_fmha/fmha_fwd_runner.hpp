@@ -570,7 +570,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         std::cerr << "The value of qscale_str cannot be 'mx' for non-MX data types" << std::endl;
         return fwd_result::invalid_args;
     }
-    // Row-major MXFP8 V is served by gfx1250 qr_tdm_fp8_sched; packed MXFP4 V stays col-major.
+    // Row-major MXFP8 V is served by gfx1250 qr_tdm and qr_tdm_fp8_sched; packed MXFP4 V stays
+    // col-major.
     if(is_mx && is_v_rowmajor && std::is_same_v<DataTypeConfig, FmhaFwdMxFp4>)
     {
         std::cerr << "The value of is_v_rowmajor must be 'false' for MXFP4" << std::endl;
@@ -2813,6 +2814,21 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     have_absmag = true;
                 }
             }
+            else if(supports_qscale && qscale.type == quant_scale_enum::no_scale && !(p_drop > 0))
+            {
+                // The device casts P before the final normalization. Casting the already
+                // normalized softmax on the host lands on a different, subnormal fp8 grid and
+                // drifts from exact attention, so use fp32 P. No condition scale: no_scale keeps
+                // the stock tolerance.
+                ck_tile::
+                    reference_batched_gemm<SMPLComputeDataType, VDataType, OaccDataType, ODataType>(
+                        p_host_ref_f32,
+                        v_host_ref,
+                        o_host_ref,
+                        ck_tile::identity{},
+                        ck_tile::identity{},
+                        oacc_element_func);
+            }
             else
             {
                 ck_tile::reference_batched_gemm<PDataType, VDataType, OaccDataType, ODataType>(
@@ -2822,11 +2838,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ck_tile::identity{},
                     ck_tile::identity{},
                     oacc_element_func);
-                // No condition scale here: without a descale the reference itself
-                // quantizes P, so both sides deviate from exact independently, and the
-                // near-argmax softmax this path produces drives P subnormal. The
-                // derived bound below models a quantized-descale path, so no_scale
-                // keeps the original tolerance.
+                // No condition scale here: dropout and other configs without a descale quantize
+                // P on the host, so both sides deviate from exact independently. The derived
+                // bound below models a quantized-descale path, so these keep the original
+                // tolerance.
             }
 
             ck_tile::HostTensor<ODataType> o_host_result({nhead, real_seqlen_q, hdim_v});

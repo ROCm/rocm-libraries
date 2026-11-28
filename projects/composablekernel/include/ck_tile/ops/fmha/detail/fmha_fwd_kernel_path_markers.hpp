@@ -58,6 +58,20 @@ struct uses_qr_tdm_lds_arena<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsAr
 template <typename Pipeline>
 inline constexpr bool uses_qr_tdm_lds_arena_v = uses_qr_tdm_lds_arena<Pipeline>::value;
 
+template <typename Pipeline, typename = void>
+struct uses_tdm_o_store : std::false_type
+{
+};
+
+template <typename Pipeline>
+struct uses_tdm_o_store<Pipeline, std::void_t<decltype(Pipeline::kTdmOStore)>>
+    : std::bool_constant<Pipeline::kTdmOStore>
+{
+};
+
+template <typename Pipeline>
+inline constexpr bool uses_tdm_o_store_v = uses_tdm_o_store<Pipeline>::value;
+
 // Whether the K/V views take the NT_HT cache hint on gfx1250 (see
 // FmhaFwdKernel::kKVCoherence): TDM pipelines that stage K/V in their LDS arena,
 // fp16/bf16, head dims below 256, tiles of at most 64 rows.

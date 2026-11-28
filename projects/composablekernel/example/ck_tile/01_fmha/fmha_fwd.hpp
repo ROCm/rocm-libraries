@@ -181,7 +181,7 @@ struct FmhaFwdTypeConfig<FmhaFwdMxFp8>
     static constexpr ck_tile::index_t kVScaleGranularity  = 32;
 };
 
-// MXFP8 inputs with a BF16 output (gfx125x qr_tdm_fp8_sched only).
+// MXFP8 inputs with a BF16 output (gfx125x qr_tdm and qr_tdm_fp8_sched).
 template <>
 struct FmhaFwdTypeConfig<FmhaFwdMxFp8Bf16> : FmhaFwdTypeConfig<FmhaFwdMxFp8>
 {
@@ -231,6 +231,9 @@ struct fmha_fwd_args
     const void* v_ptr;
     const void* bias_ptr; // bias or alibi_slope pointer
     const void* q_descale_ptr;
+    // With BLOCKSCALE on gfx1250 the K descale scales the softmax exponent as a plain float, so
+    // any positive value works; zero is clamped to a tiny positive value, keeping masked scores
+    // at -inf.
     const void* k_descale_ptr;
     // With BLOCKSCALE on gfx1250 the V descale rides an E8M0 scale operand, which keeps
     // only the exponent: a value that is not a power of two is truncated toward zero

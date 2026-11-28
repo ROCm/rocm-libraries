@@ -190,38 +190,57 @@ CK_TILE_DEVICE auto cast_tile_pk_fp8_fp32(const InTensor& in_dstr_tensors)
 
     constexpr index_t thread_buffer_size = InTensor::get_thread_buffer_size();
     static_assert(thread_buffer_size % 4 == 0);
-    constexpr index_t thread_buffer_size_pk = thread_buffer_size / 4;
 
     auto out_dstr_tensor = make_static_distributed_tensor<OutDataType>(in_tile_dstr);
+#if defined(__gfx1250__) && !defined(__gfx1250_strict__) && CK_TILE_USE_OCP_FP8
+    if constexpr(thread_buffer_size % 8 == 0)
+    {
+        // One V_CVT_SCALEF32_PK8_*_F32 per 8 elements, against two V_CVT_PK_*_F32 per 4.
+        // The instruction scales by exponent(S1), so 1.0f is the plain cast.
+        using vec_t = array<OutDataType, 8>;
+        static_for<0, thread_buffer_size / 8, 1>{}([&](auto i) {
+            const auto src =
+                in_dstr_tensors.get_thread_buffer().template get_as<fp32x8_t>(number<i>{});
+            out_dstr_tensor.get_thread_buffer().template set_as<vec_t>(
+                number<i>{},
+                bit_cast<vec_t>(
+                    cast_to_f8x8_scaled<numeric_traits<OutDataType>::f8_interpret>(src, 1.0f)));
+        });
+    }
+    else
+#endif
+    {
+        constexpr index_t thread_buffer_size_pk = thread_buffer_size / 4;
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wuninitialized"
 #endif
-    // __builtin_amdgcn_cvt_pk_fp8_f32() this builtin requires the old value, and
-    // will generate a v_mov_b32 vxxx [old] before cvt, which result in unwanted ISA
-    // so we prepare an uninitialized variable purposely, and turn off the warning
-    int dummy_old;
-    static_for<0, thread_buffer_size_pk, 1>{}([&](auto i) {
-        uint32_t x = __builtin_amdgcn_cvt_pk_fp8_f32(
-            in_dstr_tensors.get_thread_buffer()[number<4 * i + 0>{}],
-            in_dstr_tensors.get_thread_buffer()[number<4 * i + 1>{}],
-            dummy_old,
-            false); // false -> WORD0
+        // __builtin_amdgcn_cvt_pk_fp8_f32() this builtin requires the old value, and
+        // will generate a v_mov_b32 vxxx [old] before cvt, which result in unwanted ISA
+        // so we prepare an uninitialized variable purposely, and turn off the warning
+        int dummy_old;
+        static_for<0, thread_buffer_size_pk, 1>{}([&](auto i) {
+            uint32_t x = __builtin_amdgcn_cvt_pk_fp8_f32(
+                in_dstr_tensors.get_thread_buffer()[number<4 * i + 0>{}],
+                in_dstr_tensors.get_thread_buffer()[number<4 * i + 1>{}],
+                dummy_old,
+                false); // false -> WORD0
 
-        uint32_t y = __builtin_amdgcn_cvt_pk_fp8_f32(
-            in_dstr_tensors.get_thread_buffer()[number<4 * i + 2>{}],
-            in_dstr_tensors.get_thread_buffer()[number<4 * i + 3>{}],
-            x,
-            true); // true -> WORD1
+            uint32_t y = __builtin_amdgcn_cvt_pk_fp8_f32(
+                in_dstr_tensors.get_thread_buffer()[number<4 * i + 2>{}],
+                in_dstr_tensors.get_thread_buffer()[number<4 * i + 3>{}],
+                x,
+                true); // true -> WORD1
 
-        using vec_t = array<OutDataType, 4>;
+            using vec_t = array<OutDataType, 4>;
 
-        vec_t d = bit_cast<vec_t>(y);
-        out_dstr_tensor.get_thread_buffer().template set_as<vec_t>(number<i>{}, d);
-    });
+            vec_t d = bit_cast<vec_t>(y);
+            out_dstr_tensor.get_thread_buffer().template set_as<vec_t>(number<i>{}, d);
+        });
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
+    }
 
     return out_dstr_tensor;
 #else
