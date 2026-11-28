@@ -532,8 +532,11 @@ CK_TILE_HOST_DEVICE constexpr pk_fp4_t bf16x2_to_pk_fp4(const bf16x2_t& x, float
 #if CK_TILE_FP4_CVT_DEVICE
     return impl::_to_f4(x, scale);
 #else
-    return pk_fp4_t::_pack(float_to_mxfp4(detail::get_from_lane<0>(x), scale),
-                           float_to_mxfp4(detail::get_from_lane<1>(x), scale));
+    // bf16_to_float is required here: when bfloat16_t is ushort (HIP < 6.5,
+    // CK_TILE_USE_LLVM_BUILTIN_BF16==0), get_from_lane returns a ushort that
+    // would otherwise be widened to float as an integer, corrupting the value.
+    return pk_fp4_t::_pack(float_to_mxfp4(bf16_to_float(detail::get_from_lane<0>(x)), scale),
+                           float_to_mxfp4(bf16_to_float(detail::get_from_lane<1>(x)), scale));
 #endif
 }
 CK_TILE_HOST_DEVICE constexpr pk_fp4_t fp32x2_to_pk_fp4(const fp32x2_t& x, float scale)
