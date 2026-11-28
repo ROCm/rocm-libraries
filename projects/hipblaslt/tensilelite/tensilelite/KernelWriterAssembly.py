@@ -26406,6 +26406,23 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # PAP TDM/DTL LDS-bank helpers.
   ##############################################################################
+  def _shiftLocalReadAddrs(self, tc: str, bank, what: str, prefix: str = "") -> Module:
+    """Move every local-read address of tc into the LDS bank `bank` names.
+
+    A tile wider than the 64 KB ds_load offset reach reads through +1.. as well:
+    +64K windows over +0, or for a 2D MX phase one address per vector, all at a
+    fixed distance from +0. Each takes the same shift. Moving +0 alone leaves the
+    reads through the others in the old bank, which is the other tile's data.
+    """
+    mod = Module("shift LocalReadAddr%s" % tc)
+    num = {"A": self.states.a, "B": self.states.b,
+           "MXSA": self.states.mxsa, "MXSB": self.states.mxsb}[tc].numVgprLocalReadAddr
+    for i in range(max(num, 1)):
+      name = f"LocalReadAddr{tc}" if i == 0 else f"LocalReadAddr{tc}+{i}"
+      mod.add(VAddU32(dst=vgpr(name), src0=vgpr(name), src1=bank,
+                      comment=f"shift {prefix}{name} {what}"))
+    return mod
+
   def papTdmRecomputeWaveIdx(self, kernel: Mapping, waveIdxSgpr: int | str) -> Module:
     mod = Module("PAP TDM recompute WaveIdx")
     with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -26586,18 +26603,12 @@ class KernelWriterAssembly(KernelWriter):
                 comment="shift MX descriptor to PAP bank"))
 
       for tP in (tPA, tPB):
-        tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tc} to PAP bank"))
+        mod.add(self._shiftLocalReadAddrs(tP["tensorChar"], blkOffset, "to PAP bank"))
 
       if kernel["ProblemType"]["MXBlockA"]:
-        tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tcMX} to PAP bank"))
+        mod.add(self._shiftLocalReadAddrs(tPA["MX"]["tensorChar"], blkOffset, "to PAP bank"))
       if kernel["ProblemType"]["MXBlockB"]:
-        tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=blkOffset, comment=f"shift LocalReadAddr{tcMX} to PAP bank"))
+        mod.add(self._shiftLocalReadAddrs(tPB["MX"]["tensorChar"], blkOffset, "to PAP bank"))
 
     mod.add(skipLbl)
     return mod
@@ -26664,18 +26675,12 @@ class KernelWriterAssembly(KernelWriter):
                     src1=sgpr(papBankSgpr), comment=f"shift LocalWriteAddr{tc} to PAP DTL bank"))
 
       for tP in (tPA, tPB):
-        tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tc} to PAP DTL bank"))
+        mod.add(self._shiftLocalReadAddrs(tP["tensorChar"], sgpr(papBankSgpr), "to PAP DTL bank"))
 
       if kernel["ProblemType"]["MXBlockA"]:
-        tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tcMX} to PAP DTL bank"))
+        mod.add(self._shiftLocalReadAddrs(tPA["MX"]["tensorChar"], sgpr(papBankSgpr), "to PAP DTL bank"))
       if kernel["ProblemType"]["MXBlockB"]:
-        tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tcMX} to PAP DTL bank"))
+        mod.add(self._shiftLocalReadAddrs(tPB["MX"]["tensorChar"], sgpr(papBankSgpr), "to PAP DTL bank"))
 
     mod.add(skipLbl)
     return mod
@@ -26765,17 +26770,11 @@ class KernelWriterAssembly(KernelWriter):
       tailBankSgpr = tmpSgprRes.idx
       mod.add(self.papTdmSelectTailLdsBank(kernel, tailBankSgpr))
       for tP in (tPA, tPB):
-        tc = tP["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
-                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tc} to TDM write bank"))
+        mod.add(self._shiftLocalReadAddrs(tP["tensorChar"], sgpr(tailBankSgpr), "to TDM write bank", "tail "))
       if kernel["ProblemType"]["MXBlockA"]:
-        tcMX = tPA["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tcMX} to TDM write bank"))
+        mod.add(self._shiftLocalReadAddrs(tPA["MX"]["tensorChar"], sgpr(tailBankSgpr), "to TDM write bank", "tail "))
       if kernel["ProblemType"]["MXBlockB"]:
-        tcMX = tPB["MX"]["tensorChar"]
-        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tcMX}"), src0=vgpr(f"LocalReadAddr{tcMX}"),
-                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tcMX} to TDM write bank"))
+        mod.add(self._shiftLocalReadAddrs(tPB["MX"]["tensorChar"], sgpr(tailBankSgpr), "to TDM write bank", "tail "))
     return mod
 
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:

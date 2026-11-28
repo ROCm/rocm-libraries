@@ -35,7 +35,7 @@ GlobalParameters:
 # resident block) or its ASEM multiple. Those come back as
 # DID_NOT_SATISFY_ASSERTS, which leaves clientExit at 0 -- and so does a build
 # that silently produced no kernel. Check the per-size verdicts, not the exit
-# code. A full run is 700 rows: 678 PASSED, 22 rejected, 0 FAILED. The 22
+# code. A full run is 712 rows: 690 PASSED, 22 rejected, 0 FAILED. The 22
 # rejections are the K-ceiling misses in groups 1-6; groups 7-13 should pass
 # every row. No size is dead: every one of them runs on some tile.
 
@@ -281,12 +281,14 @@ BenchmarkProblems:
           - [Enum: none]
 
   ########################################################################
-  # 4. A=F8 B=F8 at MT 64x512 -- the passing half of that tile.
-  #    Split out of group 3 because PAP 1 fails here at batch > 1, at RAP 0 as
-  #    well as RAP 1, which is a PAP/batch defect older than RAP. Keeping PAP 0
-  #    holds on to the RAP coverage this tile does give: kTiles is 3, the
-  #    smallest resident block of any tile in this file, so it is the one that
-  #    exercises the k-tile floor and ceiling closest together.
+  # 4. A=F8 B=F8 at MT 64x512. B's local reads span more than the 64 KB
+  #    ds_load offset reach, so they go through LocalReadAddrB+1/+2 as well;
+  #    PAP's move to the high LDS bank used to shift only +0, and the tile
+  #    after a high-bank prefetch read half of B from the other buffer. kTiles
+  #    is 3, the smallest resident block of any tile in this file, so it is the
+  #    one that exercises the k-tile floor and ceiling closest together. With
+  #    TENSILE_PERSISTENT_MAX_CUS 17 or 32 a workgroup walks several tiles; at
+  #    the full CU count these sizes give each workgroup one.
   ########################################################################
   -
     - # ProblemType, TN
@@ -321,7 +323,7 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - PrefetchGlobalRead: [1,2]
         - ReuseAcrossPersistent: [0,1]
-        - PrefetchAcrossPersistent: [0]
+        - PrefetchAcrossPersistent: [0,1]
         # Rest of the audited configuration.
         - ScheduleIterAlg: [4]
         - StaggerU: [0]

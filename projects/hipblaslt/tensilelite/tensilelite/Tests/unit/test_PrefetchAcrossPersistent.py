@@ -2262,3 +2262,22 @@ def test_persistent_handoff_scope(assignment, tdma, tdmb, threads, drains, barri
     items = list(beforeReentry.flatitems())
     assert sum(isinstance(item, SWaitCnt) for item in items) == drains
     assert sum(isinstance(item, SBarrier) for item in items) == barriers
+
+
+@pytest.mark.parametrize("rap", [0, 1], ids=["rap0", "rap1"])
+def test_pap_bank_restore_moves_every_local_read_address(_gp_gfx1250, gfx1250_iim, assembler, capsys, rap):
+    """At MT 64x512 B's local reads reach past the 64 KB ds_load offset through +1 and +2.
+
+    The next tile after a high-bank prefetch has to read all of them from that bank; shifting
+    +0 alone left half of B read from the other buffer.
+    """
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 128, 1, 1, 2, 16, 2, 2],
+                         ProblemType={"MacDataTypeB": "F8", "MXBlockA": 0, "MXBlockB": 0},
+                         ReuseAcrossPersistent=rap, AssertSummationElementMultiple=256,
+                         PrefetchAcrossPersistent=1, SourceSwap=True, InitCIterWmma=1,
+                         ForceDisableShadowInit=True)
+    assert sol.get("Valid") and asm, capsys.readouterr().out
+    assert "vgprLocalReadAddrB+2" in asm, "the tile no longer needs a third B base; pick a wider one"
+    for name in ("LocalReadAddrA", "LocalReadAddrB", "LocalReadAddrB+1", "LocalReadAddrB+2"):
+        # Once per copy of the compute section.
+        assert asm.count("shift %s to PAP bank" % name) == (2 if rap else 1), name
