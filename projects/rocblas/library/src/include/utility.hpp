@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -814,6 +814,13 @@ bool rocblas_internal_is_strict_target(int device);
 
 // for internal use during testing, whether to skip actual kernel launch
 ROCBLAS_INTERNAL_EXPORT bool rocblas_internal_tensile_debug_skip_launch();
+
+// for internal use, fetch a pointer to the value one in the memory space of the handle's
+// pointer mode, e.g. as beta for internal gemm calls accumulating into C.
+// Requires the current device to be the handle's device.
+// Instantiated for float, double, rocblas_float_complex and rocblas_double_complex.
+template <typename T>
+rocblas_status rocblas_internal_get_one_ptr(rocblas_handle handle, const T*& one);
 
 template <typename T>
 struct rocblas_internal_val_ptr
