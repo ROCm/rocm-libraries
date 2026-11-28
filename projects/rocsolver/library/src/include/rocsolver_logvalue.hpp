@@ -259,4 +259,44 @@ struct formatter<rocsolver_logvalue<rocsolver_cholqr_shift>> : formatter<char>
     }
 };
 
+template <>
+struct formatter<rocsolver_logvalue<rocsolver_schur_job>> : formatter<char>
+{
+    template <typename FormatCtx>
+    auto format(rocsolver_logvalue<rocsolver_schur_job> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
+    {
+        return formatter<char>::format(rocsolver::rocsolver2char_schur_job(wrapper.value), ctx);
+    }
+};
+
+template <>
+struct formatter<rocsolver_logvalue<rocsolver_schur_vectors>> : formatter<char>
+{
+    template <typename FormatCtx>
+    auto format(rocsolver_logvalue<rocsolver_schur_vectors> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
+    {
+        return formatter<char>::format(rocsolver::rocsolver2char_schur_vectors(wrapper.value), ctx);
+    }
+};
+
+template <>
+struct formatter<rocsolver_logvalue<rocsolver_eigenvectors>> : formatter<char>
+{
+    template <typename FormatCtx>
+    auto format(rocsolver_logvalue<rocsolver_eigenvectors> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
+    {
+        return formatter<char>::format(rocsolver::rocsolver2char_eigenvectors(wrapper.value), ctx);
+    }
+};
+
+template <>
+struct formatter<rocsolver_logvalue<rocsolver_balance>> : formatter<char>
+{
+    template <typename FormatCtx>
+    auto format(rocsolver_logvalue<rocsolver_balance> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
+    {
+        return formatter<char>::format(rocsolver::rocsolver2char_balance(wrapper.value), ctx);
+    }
+};
+
 } // namespace

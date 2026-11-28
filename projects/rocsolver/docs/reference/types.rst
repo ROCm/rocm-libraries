@@ -86,3 +86,19 @@ rocsolver_norm_type
 rocsolver_cholqr_shift
 ------------------------
 .. doxygenenum:: rocsolver_cholqr_shift
+
+rocsolver_balance
+------------------------
+.. doxygenenum:: rocsolver_balance
+
+rocsolver_schur_job
+------------------------
+.. doxygenenum:: rocsolver_schur_job
+
+rocsolver_schur_vectors
+------------------------
+.. doxygenenum:: rocsolver_schur_vectors
+
+rocsolver_eigenvectors
+------------------------
+.. doxygenenum:: rocsolver_eigenvectors
