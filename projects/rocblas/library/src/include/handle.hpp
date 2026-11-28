@@ -107,6 +107,13 @@ enum class Processor : int
 // helper function in handle.cpp
 static rocblas_status free_existing_device_memory(rocblas_handle);
 
+// helper function in handle.cpp
+// for_new_handle is true only while constructing a handle. Only then are the
+// ROCBLAS_DEVICE_MEMORY_SIZE and thread-local overrides applied. A later restore
+// always gives the rocBLAS-managed architecture default and must not consume the
+// one-shot thread-local size meant for the next handle.
+static rocblas_status allocate_default_managed_device_memory(rocblas_handle, bool for_new_handle);
+
 // declare data packet methods for internal API
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     rocblas_internal_set_data_ptr(rocblas_handle handle, std::shared_ptr<void>& data_ptr);
@@ -468,6 +475,7 @@ public:
     friend rocblas_status(::rocblas_get_device_memory_size)(_rocblas_handle*, size_t*);
     friend rocblas_status(::rocblas_set_device_memory_size)(_rocblas_handle*, size_t);
     friend rocblas_status(::free_existing_device_memory)(rocblas_handle);
+    friend rocblas_status(::allocate_default_managed_device_memory)(rocblas_handle, bool);
     friend rocblas_status(::rocblas_set_workspace)(_rocblas_handle*, void*, size_t);
     friend bool(::rocblas_is_managing_device_memory)(_rocblas_handle*);
     friend bool(::rocblas_is_user_managing_device_memory)(_rocblas_handle*);

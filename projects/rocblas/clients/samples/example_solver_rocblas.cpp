@@ -28,9 +28,6 @@ int main()
     rocblas_handle handle;
     CHECK_ROCBLAS_ERROR(rocblas_create_handle(&handle));
 
-    // Free all memory in the handle
-    CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, 0));
-
     size_t sizes[] = {512, 1025, 10 * 1024 * 1024};
 
     if(rocblas_is_device_memory_size_query(handle))
@@ -115,6 +112,11 @@ int main()
                      << sizes[2] << std::endl;
         return 1;
     }
+
+    // Return the handle to the default rocBLAS-managed allocation
+    CHECK_ROCBLAS_ERROR(rocblas_set_device_memory_size(handle, 0));
+
+    // do additional work with the handle with ability to grow the memory size
 
     CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handle));
 
