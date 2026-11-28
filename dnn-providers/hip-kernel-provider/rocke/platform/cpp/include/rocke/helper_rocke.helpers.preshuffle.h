@@ -65,6 +65,12 @@ typedef struct rocke_preshuffleb_spec
  *   block_n * block_k * elem_bytes -- bytes per preshuffled tile. */
 int rocke_preshuffleb_spec_tile_bytes(const rocke_preshuffleb_spec_t* spec);
 
+/* Linear tile ID in the packed B buffer's (K tile, N tile) axes. */
+rocke_value_t* rocke_emit_preshuffleb_tile_id(rocke_ir_builder_t* b,
+                                              rocke_value_t* n_tile,
+                                              rocke_value_t* k_tile,
+                                              rocke_value_t* n_tile_count);
+
 /* ------------------------------------------------- emit_preshuffleb_offset *
  *
  * Python:

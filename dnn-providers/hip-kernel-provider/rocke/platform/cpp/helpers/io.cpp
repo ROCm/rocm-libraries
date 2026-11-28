@@ -38,6 +38,42 @@ static int rocke_io_is_vec_width(int n)
     return n == 2 || n == 4 || n == 8;
 }
 
+rocke_value_t* rocke_b_load_clipped_global_fragment(rocke_ir_builder_t* b,
+                                                    rocke_value_t* origin,
+                                                    rocke_value_t* start,
+                                                    rocke_value_t* bound,
+                                                    const rocke_type_t* dtype,
+                                                    int n,
+                                                    rocke_clipped_fragment_reader_t read,
+                                                    const void* user)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(n <= 0)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fragment needs positive width");
+    if(read == NULL)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "clipped fragment needs a reader");
+    std::vector<rocke_value_t*> values;
+    values.reserve(n);
+    for(int i = 0; i < n; ++i)
+    {
+        rocke_value_t* local = i ? rocke_b_add(b, start, rocke_b_const_i32(b, i)) : start;
+        rocke_value_t* coord = rocke_b_add(b, origin, local);
+        rocke_value_t* valid = rocke_b_cmp_lt(b, coord, bound);
+        rocke_value_t* raw = read(b, local, valid, i, user);
+        rocke_value_t* pad;
+        if(rocke_type_eq(dtype, rocke_fp8e4m3()) || rocke_type_eq(dtype, rocke_bf8e5m2()))
+            pad = rocke_b_trunc(b, rocke_b_const_i32(b, 0), dtype);
+        else if(rocke_type_eq(dtype, rocke_f64()))
+            pad = rocke_b_const_f64(b, 0.0);
+        else
+            pad = rocke_b_cast_f32_to(b, rocke_b_const_f32(b, 0.0), dtype);
+        values.push_back(rocke_b_select(b, valid, raw, pad));
+    }
+    return n == 1 ? values[0] : rocke_b_vec_pack(b, values.data(), n, dtype);
+}
+
 const rocke_type_t* rocke_io_ir_type(const char* dtype)
 {
     if(dtype == NULL)

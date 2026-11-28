@@ -10,12 +10,14 @@ default-on step needs its ``--no-...`` flag added to the argv lists below.
 import importlib.util
 import inspect
 import json
+import os
 from pathlib import Path
 import subprocess
 import shutil
 import sys
 
 import pytest
+from rocke.tests.subprocess_launcher import rocke_python_command
 
 
 @pytest.fixture
@@ -213,6 +215,102 @@ def test_ctest_readiness_and_failure_propagation(
     assert len(executions) == (0 if built == "none" else 1)
     if built == "none":
         assert "ctest: SKIPPED" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "python_path_roots",
+    [(), ("other", "selected"), ("selected", "other")],
+    ids=["cwd-only", "other-first", "selected-first"],
+)
+def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(
+    runner, tmp_path, python_path_roots
+):
+    selected = tmp_path / "selected"
+    tests = selected / "tests"
+    tools = selected / "tools"
+    tests.mkdir(parents=True)
+    tools.mkdir()
+    script = tests / "run_all.py"
+    shutil.copy2(runner.TESTS / "run_all.py", script)
+    # Standalone installs stage these helpers outside the source layout.
+    shutil.copy2(inspect.getfile(runner.available_cpus), tools / "_hostcaps.py")
+    launcher = inspect.getfile(rocke_python_command)
+
+    for root, marker in (
+        (selected, "SELECTED_GATE"),
+        (tmp_path / "other", "SHADOW_GATE"),
+    ):
+        package = root / "python" / "rocke"
+        (package / "tests").mkdir(parents=True)
+        (package / "__init__.py").touch()
+        (package / "tests" / "__init__.py").touch()
+        (package / "tests" / "universal_gemm_gpu_gate.py").write_text(
+            f"print({marker!r})\n", encoding="utf-8"
+        )
+        # Both checkouts can launch a gate, so a wrong import could exit green.
+        shutil.copy2(launcher, package / "tests" / "subprocess_launcher.py")
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    if python_path_roots:
+        env["PYTHONPATH"] = os.pathsep.join(
+            str(tmp_path / root / "python") for root in python_path_roots
+        )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--no-guard",
+            "--no-gate",
+            "--no-pytest",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--build-root",
+            str(tmp_path / "build"),
+            "--gemm-gpu",
+            "gfx950",
+        ],
+        cwd=tmp_path / "other" / "python",
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "SELECTED_GATE" in result.stdout
+    assert "SHADOW_GATE" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "gpu_rc,expected_status,verdict",
+    [(None, 0, "GREEN"), (0, 0, "GREEN"), (77, 77, "INCOMPLETE"), (1, 1, "RED")],
+)
+def test_requested_gemm_gpu_gate_controls_verdict(
+    runner, monkeypatch, tmp_path, capsys, gpu_rc, expected_status, verdict
+):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        assert "rocke.tests.universal_gemm_gpu_gate" in command
+        assert command[-2:] == ["--arch", "gfx950"]
+        return subprocess.CompletedProcess(command, gpu_rc)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    argv = [
+        "run_all.py",
+        "--no-guard",
+        "--no-gate",
+        "--no-pytest",
+        "--no-ir-validity",
+        "--no-arch-domain",
+        "--build-root",
+        str(tmp_path),
+    ]
+    if gpu_rc is not None:
+        argv.extend(["--gemm-gpu", "gfx950"])
+    monkeypatch.setattr(runner.sys, "argv", argv)
+    assert runner.main() == expected_status
+    assert len(calls) == (0 if gpu_rc is None else 1)
+    assert capsys.readouterr().out.splitlines()[-1] == f"RESULT: {verdict}"
 
 
 @pytest.mark.parametrize(

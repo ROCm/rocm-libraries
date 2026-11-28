@@ -25,6 +25,12 @@ from rocke.core.ir import F16, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.helpers.loads import (
     CoalescedTileLoader,
+    LdsColumnXor,
+    NO_SWIZZLE,
+    ROW_XOR_2x16B,
+    ROW_XOR_4x16B,
+    ROW_XOR_8x16B,
+    emit_lds_col_xor,
     lds_col_xor_params,
     swizzle_lds_col,
 )
@@ -96,6 +102,76 @@ class _IntBuilder:
 
 def _swz(row, col, p):
     return swizzle_lds_col(_IntBuilder(0, "col"), row, col, p)
+
+
+def test_no_swizzle_is_an_identity_even_without_a_valid_unit_or_builder():
+    assert NO_SWIZZLE == LdsColumnXor(0, 0, 0)
+    col = object()
+    assert NO_SWIZZLE.emit(object(), object(), col, unit_bytes=0) is col
+    # A zero row mask is not an identity if the independent flip is set.
+    with_flip = LdsColumnXor(0, 0, 4, flip_row_bit=2)
+    assert not with_flip.is_identity
+    assert with_flip.emit(_IntBuilder(0, "col"), 4, 5) == 21
+
+
+@pytest.mark.parametrize(
+    "layout,bits", [(ROW_XOR_2x16B, 1), (ROW_XOR_4x16B, 2), (ROW_XOR_8x16B, 3)]
+)
+def test_named_layouts_share_the_same_mapping_in_byte_and_element_units(layout, bits):
+    b = _IntBuilder(0, "col")
+    assert layout == LdsColumnXor(0, bits, 4)
+    for row in range(16):
+        for col in range((1 << bits) * 8):
+            element_col = layout.emit(b, row, col, unit_bytes=2)
+            assert element_col == col ^ ((row & ((1 << bits) - 1)) << 3)
+            assert layout.emit(b, row, col * 2) == element_col * 2
+
+
+@pytest.mark.parametrize(
+    "terms", [(-1, 3, 4), (0, 32, 4), (0, 3, 32), (0, 3, 4, -1), (True, 3, 4)]
+)
+def test_layout_rejects_invalid_bit_terms(terms):
+    with pytest.raises(ValueError) as error:
+        LdsColumnXor(*terms)
+    assert str(error.value) == "LDS column XOR terms must be integers in [0, 31]"
+
+
+@pytest.mark.parametrize("unit_bytes", [0, -2, 3])
+def test_layout_rejects_invalid_unit_width(unit_bytes):
+    with pytest.raises(ValueError) as error:
+        ROW_XOR_8x16B.shift_for(unit_bytes)
+    assert str(error.value) == "LDS column units must be a positive power of two bytes"
+
+
+def test_layout_rejects_unit_wider_than_chunk():
+    with pytest.raises(ValueError) as error:
+        ROW_XOR_8x16B.shift_for(32)
+    assert str(error.value) == "LDS column unit is larger than a swizzle chunk"
+
+
+@pytest.mark.parametrize("r,w,shift", [(0, 0, 3), (0, 3, 3), (3, 1, 4)])
+@pytest.mark.parametrize("elem_bytes", [1, 2, 8])
+def test_mask_swizzle_matches_gemm_remainder_in_element_or_byte_units(
+    r, w, shift, elem_bytes
+):
+    b = _IntBuilder(0, "col")
+    for row in range(64):
+        for col in (0, 1, 7, 15, 31, 63, 127):
+            mapped = emit_lds_col_xor(
+                b, row, col, row_shift=r, chunk_mask=(1 << w) - 1, chunk_log2=shift
+            )
+            assert mapped == col ^ (((row >> r) % (1 << w)) << shift)
+            assert (
+                emit_lds_col_xor(
+                    b,
+                    row,
+                    col * elem_bytes,
+                    row_shift=r,
+                    chunk_mask=(1 << w) - 1,
+                    chunk_log2=shift + elem_bytes.bit_length() - 1,
+                )
+                == mapped * elem_bytes
+            )
 
 
 @pytest.mark.parametrize(

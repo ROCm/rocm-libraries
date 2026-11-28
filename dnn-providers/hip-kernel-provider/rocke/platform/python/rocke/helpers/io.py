@@ -20,16 +20,28 @@ the most common dtype-promote-on-read pattern.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Literal
 
-from ..core.ir import BF16, F16, IRBuilder, TemporalHint, Type, Value
+from ..core.ir import (
+    BF8E5M2,
+    BF16,
+    F16,
+    F64,
+    FP8E4M3,
+    IRBuilder,
+    TemporalHint,
+    Type,
+    Value,
+)
 
 
 __all__ = [
     "DType",
     "concat_tree",
     "io_ir_type",
+    "iter_global_fragment_scalars",
+    "load_clipped_global_fragment",
     "load_lane_slice_f32",
     "load_scalar",
     "load_scalar_as_f32",
@@ -77,6 +89,72 @@ def load_scalar(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> Value:
     if dtype == "bf16":
         return b.global_load_bf16(ptr, idx)
     raise ValueError(f"unsupported I/O dtype {dtype!r}")
+
+
+def iter_global_fragment_scalars(
+    b: IRBuilder,
+    ptr: Value,
+    offset: Value,
+    *,
+    dtype: Type,
+    n: int,
+    align: int,
+    mask: Value | None = None,
+    pad: Value | None = None,
+) -> Iterator[Value]:
+    """Read a fragment as scalar storage units, optionally masked as a run.
+
+    ``offset`` is the physical start, including any runtime strides. A shared
+    ``mask`` applies to the whole run; when false, each load reads safe element
+    zero and returns ``pad``. The caller must ensure ``ptr[0]`` exists when
+    using a mask.
+    """
+    if n <= 0:
+        raise ValueError("fragment needs positive width")
+    if mask is not None and pad is None:
+        raise ValueError("a clipped fragment needs a pad value")
+    for i in range(n):
+        step = b.const_i32(i) if i else None
+        address = offset if step is None else b.add(offset, step)
+        if mask is None:
+            yield b.global_load(ptr, address, dtype, align=align)
+        else:
+            assert pad is not None
+            yield b.masked_global_load(ptr, address, mask, pad, dtype, align=align)
+
+
+def load_clipped_global_fragment(
+    b: IRBuilder,
+    origin: Value,
+    start: Value,
+    bound: Value,
+    *,
+    dtype: Type,
+    n: int,
+    read: Callable[[Value, Value, int], Value],
+) -> Value:
+    """Read a scalar run, zero-filling where ``origin + start + i >= bound``.
+
+    ``read(local_position, valid, i)`` must issue a safe scalar read even when
+    ``valid`` is false. It can clip a local column before striding or choose
+    a safe offset in packed storage. Return a scalar for one unit and a packed
+    vector for multiple units.
+    """
+    if n <= 0:
+        raise ValueError("fragment needs positive width")
+    values = []
+    for i in range(n):
+        local = b.add(start, b.const_i32(i)) if i else start
+        valid = b.cmp_lt(b.add(origin, local), bound)
+        raw = read(local, valid, i)
+        if dtype in (FP8E4M3, BF8E5M2):
+            pad = b.trunc(b.const_i32(0), dtype)
+        elif dtype == F64:
+            pad = b.const_f64(0.0)
+        else:
+            pad = b.cast_f32_to(b.const_f32(0.0), dtype)
+        values.append(b.select(valid, raw, pad))
+    return values[0] if n == 1 else b.vec_pack(values, dtype)
 
 
 def load_scalar_as_f32(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> Value:

@@ -41,11 +41,10 @@ ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocKE
 TESTS = ROCKE / "tests"
 TOOLS = ROCKE / "tools"
 
-# Same sys.path bootstrap as tests/conftest.py, so the runner can read shared
-# constants (e.g. backend.CPP_UNPORTED_ARCHES) out of the package it is testing
-# instead of restating them here and letting the two drift.
-if str(ROCKE / "python") not in sys.path:
-    sys.path.insert(0, str(ROCKE / "python"))
+# Prefer the package beside this runner for shared constants and subprocess
+# launchers, even if a different checkout precedes it on PYTHONPATH.
+_source_python_root = str(ROCKE / "python")
+sys.path[:] = [_source_python_root, *(p for p in sys.path if p != _source_python_root)]
 # Source runs keep helpers under tools/. Installed tests stage the same helper
 # beside the arch-domain generator instead. Bootstrap the first complete home so
 # importing this runner by path never depends on another test's sys.path changes.
@@ -496,6 +495,11 @@ def main() -> int:
         "Other gates and CTest remain complete",
     )
     ap.add_argument(
+        "--gemm-gpu",
+        choices=("gfx942", "gfx950", "gfx1250"),
+        help="also run the explicit UniversalGemm GPU numerical gate on this architecture",
+    )
+    ap.add_argument(
         "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
     )
     ap.add_argument(
@@ -592,8 +596,30 @@ def main() -> int:
             cwd=str(build_root),
         ).returncode
 
+    gpu_skipped = False
+    if args.gemm_gpu and status == 0:
+        print(f"\n== UniversalGemm GPU numerical gate ({args.gemm_gpu}) ==", flush=True)
+        from rocke.tests.subprocess_launcher import (
+            rocke_python_command,
+            rocke_subprocess_env,
+        )
+
+        rc = subprocess.run(
+            rocke_python_command(
+                "-m",
+                "rocke.tests.universal_gemm_gpu_gate",
+                "--arch",
+                args.gemm_gpu,
+                interpreter_flags=("-u",),
+            ),
+            env=rocke_subprocess_env(),
+        ).returncode
+        gpu_skipped = rc == 77  # Explicit request, but no GPU comparisons ran.
+        status |= rc
+
     result_scope = "FOCUSED " if run_focused else ""
-    print("\nRESULT:", result_scope + ("GREEN" if status == 0 else "RED"))
+    verdict = "INCOMPLETE" if gpu_skipped else ("GREEN" if status == 0 else "RED")
+    print("\nRESULT:", result_scope + verdict)
     return status
 
 

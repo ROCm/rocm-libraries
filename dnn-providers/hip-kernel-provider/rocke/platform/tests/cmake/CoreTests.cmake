@@ -456,6 +456,22 @@ if(BUILD_TESTING)
                  rocke_tanh_lowering)
   endif()
 
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tile_helper_guards.cpp")
+    add_executable(rocke_tile_helper_guards core/test_tile_helper_guards.cpp)
+    target_link_libraries(rocke_tile_helper_guards PRIVATE rocke_core)
+    add_test(NAME rocke_tile_helper_guards COMMAND rocke_tile_helper_guards)
+    set_tests_properties(rocke_tile_helper_guards
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(
+      _rocke_installed_name rocke_tile_helper_guards)
+    set_target_properties(rocke_tile_helper_guards
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_tile_helper_guards
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_tile_helper_guards)
+  endif()
+
   # Scalar typed global_load GEP index takes the index operand's width.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_global_load_index_width.cpp")
     add_executable(rocke_global_load_index_width core/test_global_load_index_width.cpp)

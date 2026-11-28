@@ -508,6 +508,20 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, part) == expected_platform_environment
         for name in tiling_entries:
             assert environment_for(tests, name) == expected_tiling_environment
+        for arch in ("gfx942", "gfx950", "gfx1250"):
+            name = f"rocke_universal_gemm_numerics_{arch}"
+            assert environment_for(tests, name) == expected_tiling_environment
+            gate = next(test for test in tests if test["name"] == name)
+            properties = {prop["name"]: prop["value"] for prop in gate["properties"]}
+            assert gate["command"][1:] == [
+                "-u",
+                "-m",
+                "rocke.tests.universal_gemm_gpu_gate",
+                "--arch",
+                arch,
+            ]
+            assert properties["SKIP_RETURN_CODE"] == 77
+            assert properties["RESOURCE_LOCK"] == ["rocke_universal_gemm_gpu"]
         if has_library:
             assert (
                 environment_for(tests, "rocke_library_mla_pytest")

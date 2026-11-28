@@ -89,6 +89,24 @@ rocke_value_t* rocke_b_load_scalar(rocke_ir_builder_t* b,
                                    rocke_value_t* idx,
                                    const char* dtype);
 
+typedef rocke_value_t* (*rocke_clipped_fragment_reader_t)(rocke_ir_builder_t* b,
+                                                          rocke_value_t* local_position,
+                                                          rocke_value_t* valid,
+                                                          int i,
+                                                          const void* user);
+
+/* Zero-fill units whose logical coordinate origin + start + i reaches bound.
+ * The reader must issue a safe read even when valid is false. Returns a
+ * scalar for n==1 or a packed vector for n>1. */
+rocke_value_t* rocke_b_load_clipped_global_fragment(rocke_ir_builder_t* b,
+                                                    rocke_value_t* origin,
+                                                    rocke_value_t* start,
+                                                    rocke_value_t* bound,
+                                                    const rocke_type_t* dtype,
+                                                    int n,
+                                                    rocke_clipped_fragment_reader_t read,
+                                                    const void* user);
+
 /* C99 port of rocke.helpers.io.load_scalar_as_f32:
  *
  *     def load_scalar_as_f32(b, ptr, idx, *, dtype) -> Value:
