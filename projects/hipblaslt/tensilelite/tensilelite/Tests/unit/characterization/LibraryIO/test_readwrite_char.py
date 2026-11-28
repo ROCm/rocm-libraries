@@ -52,6 +52,14 @@ _DATA = {
 _DATA_LIST = [{"SolutionIndex": 0, "Name": "k0"}, {"SolutionIndex": 1, "Name": "k1"}]
 
 
+def test_fast_yaml_dump_round_trips_empty_mappings(tmp_path):
+    solutions = [{"a": {}, "b": 1, "c": {}}, {"a": 2, "b": {}}]
+    path = tmp_path / "solutions.yaml"
+    with path.open("w") as output:
+        L.fast_yaml_dump(solutions, output)
+    assert yaml.safe_load(path.read_text()) == solutions
+
+
 # ===========================================================================
 # writeYAML / readYAML round-trip + written text
 # ===========================================================================
