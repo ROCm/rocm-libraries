@@ -19,6 +19,8 @@ _PYROOT = _ROCKE / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
+from rocke.tests.ctest_listing import PROVIDER_CTEST_SUBDIR, configure_installed_ctest
+
 # A session started from a git hook inherits the hook's GIT_DIR and
 # GIT_INDEX_FILE, which would point every git command a test runs, even in a
 # scratch directory, at the repository being committed to.
@@ -60,6 +62,18 @@ def build_programs(request):
                 pytrace=False,
             )
         pytest.skip("CMake and CTest required")
+
+
+@pytest.fixture(scope="session")
+def provider_ctest_layout(build_programs, tmp_path_factory) -> tuple[Path, Path]:
+    """The platform configured once per session as the provider installs it
+    (nothing built): ``configure_installed_ctest``'s build directory and
+    installed-CTest directory. Every test of the session shares them, so read
+    them and write elsewhere (``tmp_path``)."""
+    return configure_installed_ctest(
+        tmp_path_factory.mktemp("provider-ctest"),
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}",
+    )
 
 
 @pytest.hookimpl(hookwrapper=True)

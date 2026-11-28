@@ -38,7 +38,6 @@ What it sees, and what it does not:
 from __future__ import annotations
 
 import ast
-import shutil
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -47,7 +46,6 @@ from rocke.assets import platform_root
 from rocke.tests.ctest_listing import (
     GPU_RESOURCE_LOCK,
     PROVIDER_CTEST_SUBDIR,
-    configure_installed_ctest,
     list_installed_ctest_entries,
 )
 from rocke.tests.entry_selection import (
@@ -357,14 +355,8 @@ def test_another_resource_lock_is_not_the_gpu_lock(tree):
     assert len(placement_breaches(entries, SourceLayout())) == 1
 
 
-@pytest.mark.skipif(
-    shutil.which("cmake") is None or shutil.which("ctest") is None,
-    reason="CMake and CTest required",
-)
-def test_no_installed_host_entry_runs_gpu_tests(tmp_path):
-    build, ctest_dir = configure_installed_ctest(
-        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
-    )
+def test_no_installed_host_entry_runs_gpu_tests(provider_ctest_layout, tmp_path):
+    build, ctest_dir = provider_ctest_layout
     entries = list_installed_ctest_entries(ctest_dir, tmp_path)
     assert any(
         runs_pytest(entry.get("command", [])) for entry in entries

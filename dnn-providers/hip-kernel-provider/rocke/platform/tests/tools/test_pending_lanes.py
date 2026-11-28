@@ -55,7 +55,7 @@ from rocke.assets import platform_root
 from rocke.tests import in_tree_suites, pending_lanes
 from rocke.tests.comgr import CompilerBuild
 from rocke.tests.ctest_listing import (
-    configure_installed_ctest,
+    PROVIDER_CTEST_SUBDIR,
     list_ctest_entries,
     list_installed_ctest_entries,
 )
@@ -122,8 +122,6 @@ from rocke.tests.subprocess_launcher import rocke_subprocess_env
 ROCKE = platform_root().parent
 # The tiers pull-request and push CI select.
 CI_TIERS = frozenset({"quick", "standard"})
-# The provider build installs rocKE's CTest entries into bin/<this>.
-PROVIDER_CTEST_SUBDIR = "hip_kernel_provider"
 # The tests that run other test files as child pytest processes, so no CTest
 # command names those files.
 IN_TREE_RUNNER = "platform/tests/in_tree/test_in_tree_suites.py"
@@ -170,12 +168,10 @@ def run_by_another_test() -> dict[str, str]:
     return runners
 
 
-def ci_selected_files(scratch: Path) -> set[str]:
+def ci_selected_files(build: Path, installed_ctest: Path, scratch: Path) -> set[str]:
     """The test files, relative to the rocke directory, that pull-request and
-    push CI run."""
-    build, installed_ctest = configure_installed_ctest(
-        scratch, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}"
-    )
+    push CI run, read from the provider-configured ``build`` and its
+    ``installed_ctest`` (the ``provider_ctest_layout`` fixture)."""
     install = InstallLayout(
         [
             rule
@@ -1937,18 +1933,18 @@ def test_every_quarantined_test_is_current(request):
     )
 
 
-@pytest.mark.skipif(
-    shutil.which("cmake") is None or shutil.which("ctest") is None,
-    reason="CMake and CTest required",
-)
 # The provider's install paths this audit maps back to the source are POSIX
 # paths only; the registration it audits is the same on every platform.
 @pytest.mark.skipif(
     sys.platform == "win32", reason="the provider's install paths are POSIX paths"
 )
-def test_every_test_file_is_assigned_to_a_ci_entry_or_has_a_recorded_reason(tmp_path):
+def test_every_test_file_is_assigned_to_a_ci_entry_or_has_a_recorded_reason(
+    provider_ctest_layout, tmp_path
+):
     in_limbo, stale = audit(
-        tree_test_files(ROCKE), ci_selected_files(tmp_path), PENDING
+        tree_test_files(ROCKE),
+        ci_selected_files(*provider_ctest_layout, tmp_path),
+        PENDING,
     )
     assert not in_limbo, (
         f"{len(in_limbo)} test files are assigned to no CI entry and are not in "

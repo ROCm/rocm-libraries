@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import dataclasses
 import re
-import shutil
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -116,11 +115,19 @@ def _labelled(
 def _configured(scratch: Path, column: str) -> _Registration:
     """The registration of ``column``'s operating system, configured under
     ``scratch``."""
-    build, ctest_dir = configure_installed_ctest(
+    return _registration(
+        *configure_installed_ctest(
+            scratch,
+            f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}",
+            *_REGISTRATION_ARGUMENTS[column],
+        ),
         scratch,
-        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={PROVIDER_CTEST_SUBDIR}",
-        *_REGISTRATION_ARGUMENTS[column],
     )
+
+
+def _registration(build: Path, ctest_dir: Path, scratch: Path) -> _Registration:
+    """The registration configured into ``build`` and ``ctest_dir``, labelled
+    with scratch files under ``scratch``."""
     installed = _registered(list_installed_ctest_entries(ctest_dir, scratch))
     build_tree = _registered(list_ctest_entries(build))
     return _Registration(
@@ -133,18 +140,25 @@ def _configured(scratch: Path, column: str) -> _Registration:
 
 @pytest.fixture(scope="module")
 def registrations(
+    provider_ctest_layout: tuple[Path, Path],
     tmp_path_factory: pytest.TempPathFactory,
 ) -> dict[str, _Registration]:
     """Each column's registration this host can list: all of them, except a
-    Windows host's, which lists only its own."""
-    if shutil.which("cmake") is None or shutil.which("ctest") is None:
-        pytest.skip("CMake and CTest required")
+    Windows host's, which lists only its own. The host's own column is the
+    session's shared provider configure, which registers for this system
+    natively."""
     host = check.host_column()
-    listable = [host] if sys.platform == "win32" else list(_REGISTRATION_ARGUMENTS)
-    return {
-        column: _configured(tmp_path_factory.mktemp(f"quick-tier-{column}"), column)
-        for column in listable
+    by_column = {
+        host: _registration(
+            *provider_ctest_layout, tmp_path_factory.mktemp(f"quick-tier-{host}")
+        )
     }
+    if sys.platform != "win32":
+        for column in _REGISTRATION_ARGUMENTS.keys() - {host}:
+            by_column[column] = _configured(
+                tmp_path_factory.mktemp(f"quick-tier-{column}"), column
+            )
+    return by_column
 
 
 @pytest.fixture(scope="module")
