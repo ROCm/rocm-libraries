@@ -2,10 +2,11 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
-## hipBLASLt 1.5.0 for ROCm 10.3.0
+## hipBLASLt 10.3.0 for ROCm 10.3.0
 
 ### Added
 
+* `hipblasLtGetBuildVersion(char* buf, size_t len)`, which copies the identity of the loaded library: the ROCm package version it was built for and its git revision, for example `10.3.0a20261103 (git f4e24d58b)`. A build that is not a ROCm release, release candidate or nightly reports `<version>.dev0` instead of a package version. It needs no handle or GPU, takes the buffer size (a null buffer or one too small returns `HIPBLAS_STATUS_INVALID_VALUE`), and 256 bytes (`HIPBLASLT_BUILD_VERSION_MAX_LENGTH`) always hold the string. The same string is `HIPBLASLT_BUILD_VERSION` in `hipblaslt-version.h`, and `hipblaslt-bench` and `hipblaslt-test` print it. `hipblasLtGetGitRevision` still returns only the git revision.
 * `hipblaslt-bench --partitions N --split_dim M|N|B`, which runs `testing_matmul` through the
   experimental `PartitionedGemm` (see Experimental) with the same data, reference and verification,
   and `samples/31_hipblaslt_gemm_partitioned_ext`.
@@ -28,7 +29,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A` (`Disabled`, `GemmA2A` or `A2AGemm`), and the `tensilelite-client` option `--fused-gemm-a2a=1` is now `--fused-a2a=GemmA2A`. Device libraries and client configuration files from before this change must be regenerated.
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 * `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
-* hipBLASLt's CMake package accepts a request for any older version, so a future hipBLASLt 10.3.0 satisfies `find_package(hipblaslt 1.2.2)`. It previously required the same major version. The shared library keeps its name, `libhipblaslt.so.1`, which now changes only for an ABI break.
+* The hipBLASLt version is now the ROCm version it ships in (10.3.0 here, from 1.5.0), so `HIPBLASLT_VERSION_MAJOR`/`MINOR`/`PATCH`, `hipblasLtGetVersion`, the CMake package version and the deb/rpm package versions change with it. Nothing bumps it by hand: configure takes `HIPBLASLT_PROJECT_VERSION` if set, otherwise `ROCM_VERSION` from a superproject such as TheRock. A build outside TheRock that sets neither keeps reporting 1.5.0, with build version `1.5.0.dev0 (git <sha>)` so it never names a release, and a TheRock build without `ROCM_VERSION` stops at configure. The shared library keeps its name, `libhipblaslt.so.1`, which now changes only for an ABI break. Local kernel journals (`HIPBLASLT_LOCAL_KERNEL_LIBRARY`) are keyed by the version and git revision, so a 10.3.0 build does not read a journal written by a 1.5.0 build.
+* hipBLASLt's CMake package accepts a request for any older version, so `find_package(hipblaslt 1.2.2)` finds hipBLASLt 10.3.0. It previously required the same major version.
 
 ### Changed
 

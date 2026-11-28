@@ -262,6 +262,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last four rows are in
 | `host_memory_gtest.cpp` | `HostMemory_pre_checkin` | How the client holds pinned host memory: an idle buffer of 1 GiB or more stays cached only while consecutive tests reuse it (released after a test that does not, or when a test of another shape needs new memory), a smaller one until 100 consecutive tests have not reused it, large buffers get no 20% reuse slack, and a failed host allocation is reported instead of used. The `query_*` tests point the host-memory query (`host_memory.hpp`) at temporary copies of `/proc/meminfo` and the cgroup files, and check that it takes the smaller of `MemAvailable` and the tightest container memory limit (cgroup v1 or v2, up to the root). The `limit_*` tests check that `HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` caps that budget and never raises it, and that it makes the memory preflight skip. Pins at most about 3.3 GiB; no hipBLASLt kernels |
 | `maf_init_gtest.cpp` | `MafInitDevice_pre_checkin` | The `maf1_0` / `maf2_0` / `maf2_0_unit_scale` device fills on small buffers: sin/cos of the logical index with ld padding, batch strides and pointer-array batch indices, one rounding from double (BF16), interleaved batches all written, repeatable and distinct A/B/C/batch Gaussian streams, unit scale equal to `maf2_0` for non-block-scaled operands, and the 0.5 constant scale fill; no hipBLASLt kernels |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
+| `auxiliary_gtest.cpp` | `AuxBuildVersion` | `hipblasLtGetBuildVersion`: the string matches `HIPBLASLT_BUILD_VERSION` and ends with the git revision; a null buffer, a zero length and a buffer one byte short are rejected without writing past the given length (guard bytes); a buffer of exactly the right size succeeds. No handle or GPU |
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType`, `HostUnitBiasType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types; bias-type validation only when bias is enabled |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
 | `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
@@ -271,6 +272,11 @@ The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipb
 ([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no
 GPU. Every tier selects them by their `HostUnit*` suite prefix. CI still runs them through
 `hipblaslt-test`: the CPU-only binary ships in the test artifact, but no lane executes it yet.
+
+How configure picks the hipBLASLt version (`cmake/hipblaslt_version.cmake`) is covered by the
+`hipblaslt.version-resolution` CTest (`cmake/hipblaslt_version_tests.cmake`), registered when
+`HIPBLASLT_BUILD_TESTING` is on. TheRock CI runs `hipblaslt-test`, not this CTest, so run
+`ctest -R version-resolution` in the build directory when you change version resolution.
 
 That is a handful of test cases of genuinely hardware-independent logic, against a library of
 substantial size. It is not a meaningful unit-test suite; it is a few useful islands.

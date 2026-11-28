@@ -1875,6 +1875,32 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtGetBuildVersion(char* buf, size_t len)
+try
+{
+    static constexpr char v[] = HIPBLASLT_BUILD_VERSION;
+    static_assert(sizeof(v) <= HIPBLASLT_BUILD_VERSION_MAX_LENGTH);
+
+    if(buf == nullptr)
+    {
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    if(len < sizeof(v))
+    {
+        if(len > 0)
+            buf[0] = '\0';
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+
+    memcpy(buf, v, sizeof(v));
+
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtGetArchName(char** archName)
 try
 {

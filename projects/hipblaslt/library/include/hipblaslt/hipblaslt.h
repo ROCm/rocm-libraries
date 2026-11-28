@@ -743,6 +743,32 @@ hipblasStatus_t hipblasLtGetVersion(hipblasLtHandle_t handle, int* version);
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtGetGitRevision(hipblasLtHandle_t handle, char* rev);
 
+/*! \ingroup library_module
+ *  \brief Get the identity of the loaded hipBLASLt build
+ *
+ *  \details
+ *  Copies the build identity of the loaded library, with its terminating null,
+ *  into \p buf. The identity is the ROCm package version the library was built
+ *  for followed by its source revision, for example
+ *  ``10.3.0a20261103 (git f4e24d58b)``. A build that is not a ROCm release,
+ *  release candidate or nightly reports ``<major>.<minor>.<patch>.dev0`` in
+ *  place of the package version. The string is shorter than
+ *  ``HIPBLASLT_BUILD_VERSION_MAX_LENGTH`` (256) characters, so a buffer of that
+ *  size always holds it. No handle or GPU is needed.
+ *
+ *  @param[out]
+ *  buf  Buffer that receives the null-terminated identity.
+ *  @param[in]
+ *  len  Size of \p buf in bytes.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the identity was copied.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p buf is null or \p len is too
+ *  small for the identity and its terminating null. Nothing is written past
+ *  ``buf[len - 1]``; when \p len is nonzero, \p buf holds an empty string.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetBuildVersion(char* buf, size_t len);
+
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtGetArchName(char** archName);
 /*! \ingroup library_module

@@ -30,7 +30,11 @@
 #include "testing_auxiliary.hpp"
 #include <cctype>
 #include <cstring>
+#include <gtest/gtest.h>
+#include <hipblaslt/hipblaslt.h>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 namespace
 {
@@ -231,5 +235,64 @@ namespace
         RUN_TEST_ON_THREADS_STREAMS(aux_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(aux_test);
+
+    // hipblasLtGetBuildVersion needs no handle or GPU, so these run host-only.
+#define AUX_BUILD_VERSION_STR2(x) #x
+#define AUX_BUILD_VERSION_STR(x) AUX_BUILD_VERSION_STR2(x)
+
+    constexpr char    kGuard = '#';
+    const std::string kBuildVersion{HIPBLASLT_BUILD_VERSION};
+
+    TEST(AuxBuildVersion, smoke_ReportsTheConfiguredBuild)
+    {
+        char buf[HIPBLASLT_BUILD_VERSION_MAX_LENGTH];
+        ASSERT_EQ(hipblasLtGetBuildVersion(buf, sizeof(buf)), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(std::string(buf), kBuildVersion);
+
+        // The leading identity may be a package version whose base differs from
+        // the product version (configure warns); hipblaslt_version_tests.cmake
+        // covers how it is chosen.
+        std::string revision = AUX_BUILD_VERSION_STR(HIPBLASLT_VERSION_TWEAK);
+        if(revision.empty())
+            revision = "unknown";
+        const std::string suffix = " (git " + revision + ")";
+        ASSERT_GE(kBuildVersion.size(), suffix.size());
+        EXPECT_EQ(kBuildVersion.substr(kBuildVersion.size() - suffix.size()), suffix);
+    }
+
+    TEST(AuxBuildVersion, smoke_RejectsNullBuffer)
+    {
+        EXPECT_EQ(hipblasLtGetBuildVersion(nullptr, HIPBLASLT_BUILD_VERSION_MAX_LENGTH),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST(AuxBuildVersion, smoke_ShortBufferWritesOnlyAnEmptyString)
+    {
+        // One byte short: the identity fits but its terminating null does not.
+        const size_t      len = kBuildVersion.size();
+        std::vector<char> buf(len + 8, kGuard);
+        EXPECT_EQ(hipblasLtGetBuildVersion(buf.data(), len), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(buf[0], '\0');
+        for(size_t i = 1; i < buf.size(); ++i)
+            EXPECT_EQ(buf[i], kGuard) << "byte " << i;
+    }
+
+    TEST(AuxBuildVersion, smoke_ZeroLengthWritesNothing)
+    {
+        char buf[4] = {kGuard, kGuard, kGuard, kGuard};
+        EXPECT_EQ(hipblasLtGetBuildVersion(buf, 0), HIPBLAS_STATUS_INVALID_VALUE);
+        for(char c : buf)
+            EXPECT_EQ(c, kGuard);
+    }
+
+    TEST(AuxBuildVersion, smoke_ExactBufferHoldsTheIdentity)
+    {
+        const size_t      len = kBuildVersion.size() + 1;
+        std::vector<char> buf(len + 8, kGuard);
+        ASSERT_EQ(hipblasLtGetBuildVersion(buf.data(), len), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(std::string(buf.data()), kBuildVersion);
+        for(size_t i = len; i < buf.size(); ++i)
+            EXPECT_EQ(buf[i], kGuard) << "byte " << i;
+    }
 
 } // namespace

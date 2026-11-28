@@ -32,10 +32,23 @@ include(fetch_rocm_cmake)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
+include(hipblaslt_version)
 
-set(HIPBLASLT_PROJECT_VERSION "1.5.0" CACHE STRING "Semantic version string.")
+# A build tree configured before this change caches the old default (1.5.0),
+# which would now read as an explicit override and hide ROCM_VERSION.
+get_property(_hipblaslt_version_doc CACHE HIPBLASLT_PROJECT_VERSION PROPERTY HELPSTRING)
+if(_hipblaslt_version_doc STREQUAL "Semantic version string."
+   AND HIPBLASLT_PROJECT_VERSION STREQUAL "1.5.0")
+    message(STATUS "Clearing HIPBLASLT_PROJECT_VERSION=1.5.0 cached by an older hipBLASLt configure")
+    unset(HIPBLASLT_PROJECT_VERSION CACHE)
+endif()
+set(HIPBLASLT_PROJECT_VERSION "" CACHE STRING
+    "Override the hipBLASLt version (X.Y.Z); empty takes ROCM_VERSION, else ${HIPBLASLT_STANDALONE_VERSION}.")
+set(THEROCK_PACKAGE_VERSION "" CACHE STRING
+    "ROCm package identity for the build version, e.g. 10.3.0a20261103 (from TheRock).")
 
-set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
+hipblaslt_resolve_project_version("${HIPBLASLT_PROJECT_VERSION}" "${ROCM_VERSION}"
+    "${HIPBLASLT_ENABLE_THEROCK}" PROJECT_VERSION)
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
 list(GET VERSION_LIST 0 PROJECT_VERSION_MAJOR)
 list(GET VERSION_LIST 1 PROJECT_VERSION_MINOR)
@@ -46,6 +59,9 @@ set(hipblaslt_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(hipblaslt_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(hipblaslt_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 set(hipblaslt_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
+hipblaslt_build_version("${PROJECT_VERSION}" "${THEROCK_PACKAGE_VERSION}"
+    "${PROJECT_VERSION_TWEAK}" hipblaslt_BUILD_VERSION)
+message(STATUS "hipBLASLt build version: ${hipblaslt_BUILD_VERSION}")
 
 # rocm_set_soversion takes the SONAME from the major part, so "1.5" gives
 # libhipblaslt.so.1 and names the file libhipblaslt.so.1.5. Bump the major
@@ -667,6 +683,15 @@ if(HIPBLASLT_ENABLE_HOST
     else()
         message(STATUS "llvm-ifs not found; hipblaslt.symbol-contract.tensilelite-host test disabled")
     endif()
+endif()
+
+if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
+    enable_testing()
+    add_test(
+        NAME hipblaslt.version-resolution
+        COMMAND "${CMAKE_COMMAND}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_version_tests.cmake"
+    )
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
