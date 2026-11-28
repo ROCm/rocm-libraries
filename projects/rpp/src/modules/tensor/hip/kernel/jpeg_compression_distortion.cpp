@@ -225,20 +225,18 @@ __device__ inline void dct_inv_8x8_1d(float* vec, bool offset128) {
 }
 
 // Quantization
-__device__ inline void quantize(float* value, float* coeff, float qScale) {
+__device__ inline void quantize(float* value, float* coeff, int qScale) {
     for (int i = 0; i < 8; i++) {
-        float qCoeff = coeff[i] * qScale;               // Runtime multiplication (matches HOST)
-        value[i] = qCoeff * roundf(value[i] / qCoeff);  // Uses roundf; HOST AVX2 uses std::round
-                                                        // with equivalent behavior (no clamping)
+        // libjpeg's (base * scale + 50) / 100 in integers, clamped to the baseline 8-bit range
+        float qCoeff = max(1, min((static_cast<int>(coeff[i]) * qScale + 50) / 100, 255));
+        value[i] = qCoeff * roundf(value[i] / qCoeff);
     }
 }
 
-// Compute quality factor for JPEG quantization based on quality parameter
-__device__ inline Rpp32f get_quality_factor(Rpp32s quality) {
+// Percentage the base tables are scaled by for a quality (libjpeg's jpeg_quality_scaling)
+__device__ inline Rpp32s get_quality_scaling(Rpp32s quality) {
     quality = max(1, min(100, quality));
-    const Rpp32f lowerCompression = 2.0f - (quality / 50.0f);
-    const Rpp32f higherCompression = 50.0f / quality;
-    return (quality < 50) ? higherCompression : lowerCompression;
+    return (quality < 50) ? 5000 / quality : 200 - quality * 2;
 }
 
 // Scale input values to 0-255 range for DCT processing
@@ -324,7 +322,7 @@ __device__ __forceinline__ void process_jpeg_distortion(float src_smem[48][128],
                                                         int hipThreadIdx_x8, int hipThreadIdx_x4,
                                                         int localThreadIdx_y, int alignedWidth,
                                                         int3 hipThreadIdx_y_channel, float* tableY,
-                                                        float* tableCbCr, float qScale, T* srcPtr,
+                                                        float* tableCbCr, int qScale, T* srcPtr,
                                                         T* dstPtr) {
     // ----------- Step 1: RGB to YCbCr Conversion -----------
     d_float8 y_f8;
@@ -456,7 +454,7 @@ __global__ void jpeg_compression_distortion_pkd3_hip_tensor(T* srcPtr, uint2 src
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    float qScale = get_quality_factor(qualityTensor[id_z]);
+    int qScale = get_quality_scaling(qualityTensor[id_z]);
 
     int hipThreadIdx_x8 = hipThreadIdx_x * 8;
     int hipThreadIdx_x4 = hipThreadIdx_x * 4;
@@ -538,7 +536,7 @@ __global__ void jpeg_compression_distortion_pln3_hip_tensor(T* srcPtr, uint3 src
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    float qScale = get_quality_factor(qualityTensor[id_z]);
+    int qScale = get_quality_scaling(qualityTensor[id_z]);
 
     int hipThreadIdx_x8 = hipThreadIdx_x * 8;
     int hipThreadIdx_x4 = hipThreadIdx_x * 4;
@@ -657,7 +655,7 @@ __global__ void jpeg_compression_distortion_pkd3_pln3_hip_tensor(T* srcPtr, uint
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    float qScale = get_quality_factor(qualityTensor[id_z]);
+    int qScale = get_quality_scaling(qualityTensor[id_z]);
 
     int hipThreadIdx_x8 = hipThreadIdx_x * 8;
     int hipThreadIdx_x4 = hipThreadIdx_x * 4;
@@ -752,7 +750,7 @@ __global__ void jpeg_compression_distortion_pln3_pkd3_hip_tensor(T* srcPtr, uint
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    float qScale = get_quality_factor(qualityTensor[id_z]);
+    int qScale = get_quality_scaling(qualityTensor[id_z]);
 
     int hipThreadIdx_x8 = hipThreadIdx_x * 8;
     int hipThreadIdx_x4 = hipThreadIdx_x * 4;
@@ -879,7 +877,7 @@ __global__ void jpeg_compression_distortion_pln1_hip_tensor(T* srcPtr, uint3 src
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    float qScale = get_quality_factor(qualityTensor[id_z]);
+    int qScale = get_quality_scaling(qualityTensor[id_z]);
 
     int hipThreadIdx_x8 = hipThreadIdx_x * 8;
 

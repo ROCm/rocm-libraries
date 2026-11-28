@@ -58,6 +58,10 @@ const __m256 pCoeffGCr = _mm256_set1_ps(-0.714136f);
 
 const __m256 pCoeffBCb = _mm256_set1_ps(1.772f);
 
+// 8-bit range of the level-shifted chroma
+const __m256 pChromaMin = _mm256_set1_ps(-128.0f);
+const __m256 pChromaMax = _mm256_set1_ps(127.0f);
+
 const __m256i pxMask = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
 const __m256 pQuarterFactor = _mm256_set1_ps(0.25f);
 
@@ -89,14 +93,15 @@ constexpr std::pair<float, float> get_mul_add() {
         return {1.0f, 0.0f};  // No transformation for other types
 }
 
-// Compute quality factor for JPEG quantization based on quality parameter
-inline Rpp32f get_quality_factor(Rpp32s quality) {
-    Rpp32f qualityFactor;
-    if (quality < 50)
-        qualityFactor = 50.0f / quality;  // Higher compression
-    else
-        qualityFactor = 2.0f - (quality / 50.0f);  // Lower compression
-    return qualityFactor;
+// Percentage the base tables are scaled by for a quality (libjpeg's jpeg_quality_scaling)
+inline Rpp32s get_quality_scaling(Rpp32s quality) {
+    quality = std::max(1, std::min(100, quality));
+    return (quality < 50) ? 5000 / quality : 200 - quality * 2;
+}
+
+// libjpeg's (base * scale + 50) / 100 in integers, clamped to the baseline 8-bit range
+inline Rpp32f get_quantizer(Rpp32f base, Rpp32s qualityScaling) {
+    return clamp((static_cast<Rpp32s>(base) * qualityScaling + 50) / 100, 1, 255);
 }
 
 // Upsample 8 values in AVX2 register by duplicating adjacent pairs
@@ -141,12 +146,12 @@ inline void transpose_8x8_avx(__m256* p) {
 // Apply quantization to an 8x8 block with a given quantization table and quality
 inline void quantize_block(Rpp32f* block, const Rpp32f* quantTable, Rpp32s stride,
                            Rpp32s qualityParam) {
-    Rpp32f qualityFactor = get_quality_factor(qualityParam);
+    Rpp32s qualityScaling = get_quality_scaling(qualityParam);
     for (Rpp32s row = 0; row < 8; row++) {
         Rpp32s rowIdx = row * stride;
         Rpp32s rowQuantIdx = row * 8;
         for (Rpp32s col = 0; col < 8; col++) {
-            Rpp32f qCoeff = quantTable[rowQuantIdx + col] * qualityFactor;
+            Rpp32f qCoeff = get_quantizer(quantTable[rowQuantIdx + col], qualityScaling);
             block[rowIdx + col] = qCoeff * roundf(block[rowIdx + col] / qCoeff);
         }
     }
@@ -295,13 +300,13 @@ inline __m256 accurate_quant_round(__m256 val, __m256 quant) {
 
 // Applies quantization
 inline void quantize_block_avx2(__m256* p, const float* quantTable, int qualityParam) {
-    float qualityFactor = get_quality_factor(qualityParam);
-    __m256 pQualityFactor = _mm256_set1_ps(qualityFactor);
+    Rpp32s qualityScaling = get_quality_scaling(qualityParam);
 
     for (int i = 0; i < 8; i++) {
-        __m256 quantRow = _mm256_loadu_ps(&quantTable[i * 8]);
-        quantRow = _mm256_mul_ps(quantRow, pQualityFactor);  // Scale by quality
-        p[i] = accurate_quant_round(p[i], quantRow);         // Quantize
+        alignas(32) float quantRow[8];
+        for (int j = 0; j < 8; j++)
+            quantRow[j] = get_quantizer(quantTable[i * 8 + j], qualityScaling);
+        p[i] = accurate_quant_round(p[i], _mm256_load_ps(quantRow));  // Quantize
     }
 }
 
@@ -386,8 +391,9 @@ inline void ycbcr_to_rgb_generic(T* dstPtr, Rpp32s rowLimit, Rpp32s colLimit, Rp
             // Get chroma values for this 2x2 block
             Rpp32s cbcrIdx = blockRowOffset + col;
             Rpp32s colIdx = col << 1;
-            Rpp32f currCb = cb[cbcrIdx];
-            Rpp32f currCr = cr[cbcrIdx];
+            // Clamp the reconstructed planes to the 8-bit range before converting
+            Rpp32f currCb = clamp(cb[cbcrIdx], -128.0f, 127.0f);
+            Rpp32f currCr = clamp(cr[cbcrIdx], -128.0f, 127.0f);
 
             // Process 2x2 Y pixels for each Cb/Cr pair
             for (Rpp32s subRow = 0; subRow < 2; subRow++) {
@@ -400,7 +406,7 @@ inline void ycbcr_to_rgb_generic(T* dstPtr, Rpp32s rowLimit, Rpp32s colLimit, Rp
                     if ((rowIdx + subRow) >= colLimit || (colIdx + subCol) >= rowLimit) continue;
 
                     // Convert YCbCr to RGB
-                    Rpp32f yVal = y[yIdx] + 128.0f;
+                    Rpp32f yVal = clamp(y[yIdx] + 128.0f, 0.0f, 255.0f);
                     Rpp32f r = yVal + 1.402f * currCr;
                     Rpp32f g = yVal - 0.344136f * currCb - 0.714136f * currCr;
                     Rpp32f b = yVal + 1.772f * currCb;
@@ -585,6 +591,9 @@ inline void rgb_to_ycbcr_subsampled(__m256* pRgb, __m256* pY, __m256* pCb, __m25
 // convert ycbcr buffer to rgb buffer
 inline void ycbcr_to_rgb_subsampled(__m256* pY, __m256* pCb, __m256* pCr, __m256* pRgb) {
     for (Rpp32s i = 0; i < 8; i++) {
+        // Clamp the reconstructed chroma to the 8-bit range, as for Y below
+        pCb[i] = _mm256_min_ps(_mm256_max_ps(pCb[i], pChromaMin), pChromaMax);
+        pCr[i] = _mm256_min_ps(_mm256_max_ps(pCr[i], pChromaMin), pChromaMax);
         __m256 cb[2];
         upsample_avx2(pCb[i], &cb[0]);
         __m256 cr[2];

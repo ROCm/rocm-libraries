@@ -41,9 +41,9 @@ using namespace rpptest;
 
 namespace {
 
-// quality in [1, 99]. At q50 the scaled table is the Annex K base table, so it must stay green. q10
-// (needs the 255 clamp) and q90 (needs integer rounding) are red: the kernel quantizes by the raw
-// real-valued product.
+// quality in [1, 99]. At q50 the scaled table is the Annex K base table. q10 needs the 255 clamp
+// and q90 needs the integer rounding of the scaled table. q13 and q85 need libjpeg's integer
+// percentage scaling: a float factor (50/q, 2 - q/50) gives a different table there.
 struct JpegParams {
     int quality;
     std::string name() const {
@@ -110,11 +110,11 @@ TEST_P(JpegCompressionDistortionTest, Correctness) {
     });
 }
 
-INSTANTIATE_TEST_SUITE_P(Image_Geometric, JpegCompressionDistortionTest,
-                         ::testing::ValuesIn(with_params<JpegParams>(
-                             make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
-                                          {Layout::PKD3, Layout::PLN3, Layout::PLN1},
-                                          {Roi::Full, Roi::Partial},
-                                          {presets::kDefaultSize, presets::kTailWidthSize}),
-                             {JpegParams{50}, JpegParams{10}, JpegParams{90}})),
-                         op_config_name<JpegParams>);
+INSTANTIATE_TEST_SUITE_P(
+    Image_Geometric, JpegCompressionDistortionTest,
+    ::testing::ValuesIn(with_params<JpegParams>(
+        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                     {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full, Roi::Partial},
+                     {presets::kDefaultSize, presets::kTailWidthSize}),
+        {JpegParams{50}, JpegParams{10}, JpegParams{90}, JpegParams{13}, JpegParams{85}})),
+    op_config_name<JpegParams>);
