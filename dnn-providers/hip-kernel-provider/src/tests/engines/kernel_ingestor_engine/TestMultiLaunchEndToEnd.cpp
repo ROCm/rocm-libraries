@@ -286,6 +286,9 @@ DeviceProperties devicePropertiesFor(const std::string& arch)
     DeviceProperties properties;
     properties.gcnArchName = arch;
     properties.warpSize = 64;
+    // The state manager serves no catalog to a device without these facts.
+    properties.multiProcessorCount = 64;
+    properties.sharedMemPerBlock = 65536;
     return properties;
 }
 

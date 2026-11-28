@@ -304,6 +304,12 @@ inline std::optional<DeviceProperties> readDeviceProperties(const nlohmann::json
     properties.memoryBusWidth = *memoryBusWidth;
     properties.memoryClockRate = *memoryClockRate;
     properties.sharedMemPerBlock = *sharedMemPerBlock;
+    // The write path uses the same check, so a record the state manager refuses to
+    // write is also refused on read.
+    if(!isResolved(properties))
+    {
+        return std::nullopt;
+    }
     return properties;
 }
 

@@ -83,6 +83,9 @@ public:
     {
         _properties.gcnArchName = arch;
         _properties.warpSize = arch.rfind("gfx9", 0) == 0 ? 64 : 32;
+        // isApplicable() declines a device without these facts.
+        _properties.multiProcessorCount = 64;
+        _properties.sharedMemPerBlock = 65536;
     }
 
     hipdnn_plugin_sdk::ingestor::DeviceId deviceId(const Handle& /*handle*/) const override

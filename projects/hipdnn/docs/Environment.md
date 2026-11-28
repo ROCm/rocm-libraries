@@ -404,6 +404,18 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 - The ingestor winner-cache shard path is `ingestor-winners/<version>/<engine>/<uhd-id>/<engine-revision>-<model-hash>/<arch>/winners.jsonl`. The engine directory name is a filesystem-safe form of the engine name. `<uhd-id>` is `no-uhd` for an engine without a UHD, and `<model-hash>` is the first 16 hex digits of the engine's model content hash, or `unhashed` when it ships no heuristic. The architecture is the base target id with its feature suffixes stripped, so `gfx942:sramecc+:xnack-` appears as `gfx942`.
 - Deleting the cache root at any time is safe on Linux and Windows. hipDNN recreates it on the next write, and a run in progress keeps working.
 - Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
+- Ingestor winner-cache keys include the device's architecture name (with feature
+  suffixes), warp size, multiprocessor count, HBM capacity, memory bus width, memory clock
+  rate, and local data share (LDS) capacity in bytes per block. The multiprocessor count is the
+  raw value HIP reports: compute units (CUs) in CU mode, workgroup processors (WGPs) in WGP
+  mode. It is not converted to physical CUs.
+- A cached record is used only if it has a nonempty architecture name, a positive warp size
+  and multiprocessor count, and an LDS capacity from 1 to 2^63 - 1 bytes. The memory fields
+  must be present: the bus width and clock must be nonnegative, and the HBM capacity at most
+  2^63 - 1 bytes. Zero in a memory field means the device did not report it. Records with
+  missing or invalid values are skipped, even when the version stamps match. The ingestor
+  applies the same rule before it writes: a device whose facts fail it is neither matched nor
+  cached.
 - The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
 - A lookup in the ingestor winner cache can create a file. A read miss still leaves an empty shard file, stamped with the version, behind. A lookup in the autotune ranking cache creates nothing (see [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)).
 

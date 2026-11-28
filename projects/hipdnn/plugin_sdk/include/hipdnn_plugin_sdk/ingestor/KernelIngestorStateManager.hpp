@@ -1122,7 +1122,7 @@ public:
         }
         if(!deviceResolved(context))
         {
-            return {false, "no device resolved or the device reports no gcnArchName", 0};
+            return {false, "no device resolved or the device reports incomplete device facts", 0};
         }
         const auto key = cacheKey(context);
         if(key.has_value())
@@ -1414,6 +1414,16 @@ public:
             return;
         }
 
+        if(!isResolved(key.device.properties()))
+        {
+            // The reader rejects records for an unresolved device, so persisting one would
+            // add an unreadable line on every miss. winnerFor() never finds such a key, so
+            // an in-memory entry would be unreachable too.
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked ranking could not be cached "
+                                   "because its device facts are unresolved");
+            return;
+        }
+
         WinnerRecord adopted = writeBackToShard(key, record, cause);
 
         // LRU (RFC 0019 §9.2): a graph executed repeatedly keeps its ranking.
@@ -1427,6 +1437,13 @@ public:
     /// per-shard flag guarded by `_winnerCacheMutex`); it never holds a file lock.
     std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
     {
+        if(!isResolved(key.device.properties()))
+        {
+            // recordWinner() never stores these keys, and opening the shard would only
+            // create its file.
+            return std::nullopt;
+        }
+
         if(auto found = _winnerCache.get(key); found.has_value())
         {
             return found;
@@ -1448,7 +1465,8 @@ public:
     /// unslotted engine.
     std::optional<ProgramRecord> programFor(const WinnerKey& baseKey) const
     {
-        if(!_slotted || !baseKey.slot.empty() || !baseKey.graph.isUsable())
+        if(!_slotted || !baseKey.slot.empty() || !baseKey.graph.isUsable()
+           || !isResolved(baseKey.device.properties()))
         {
             return std::nullopt;
         }
@@ -1546,6 +1564,14 @@ public:
             // As recordWinner: an unkeyable graph's record could never be looked up.
             HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked slotted ranking could not be cached "
                                    "because its graph yields no key");
+            return;
+        }
+
+        if(!isResolved(baseKey.device.properties()))
+        {
+            // As recordWinner: the reader rejects records for an unresolved device.
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked slotted ranking could not be cached "
+                                   "because its device facts are unresolved");
             return;
         }
 
@@ -1873,7 +1899,7 @@ private:
 
     static bool deviceResolved(const MatchContext& context)
     {
-        return context.deviceId != NO_DEVICE && !context.deviceProperties.gcnArchName.empty();
+        return context.deviceId != NO_DEVICE && isResolved(context.deviceProperties);
     }
 
     /// Slot @p slotIndex's catalog for @p context, cached. A slotted engine builds every slot's
@@ -1886,7 +1912,7 @@ private:
         {
             const auto* reason = context.deviceId == NO_DEVICE
                                      ? "no device resolved"
-                                     : "resolved device reports no gcnArchName";
+                                     : "resolved device reports incomplete device facts";
             HIPDNN_PLUGIN_LOG_INFO(_logPrefix << reason << "; no kernel applies");
             return Catalog{};
         }
@@ -1999,10 +2025,10 @@ private:
     Catalog sortedCatalogOf(size_t slotIndex, const MatchContext& context) const
     {
         const auto& slot = _slots[slotIndex];
-        // Mirrors catalogFor's own reject guard: cacheKey() below reads graph content
-        // and device ordinal, not arch, so without this an unresolved-arch context would
-        // cache an empty catalog under the SAME key a later, resolved call for this
-        // device reuses -- permanently hiding that device's real catalog.
+        // catalogFor() rejects this context too, but cacheKey() below only reads the graph
+        // and device ordinal. Without this check an unresolved context would cache an empty
+        // catalog under the key a later resolved call for the same device uses, hiding that
+        // device's real catalog.
         if(!deviceResolved(context))
         {
             return catalogFor(slot, slotIndex, context);

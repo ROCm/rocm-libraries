@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -31,7 +32,9 @@ struct DeviceProperties
     /// `hipdnn_plugin_sdk::archMatches`, not `==`.
     std::string gcnArchName;
     int warpSize = 0; ///< Threads per wavefront; 0 if unresolved.
-    int multiProcessorCount = 0; ///< Compute units; 0 if unresolved.
+    /// Raw HIP count: compute units in CU mode, workgroup processors in WGP mode.
+    /// Zero means unresolved.
+    int multiProcessorCount = 0;
 
     // One arch spans several boards (gfx942: MI300X, MI325X, MI308X), and boards with equal
     // CU counts can differ in memory, which changes the winner on bandwidth-bound shapes.
@@ -44,6 +47,22 @@ struct DeviceProperties
     /// LDS bytes available to one workgroup; 0 if unresolved.
     std::size_t sharedMemPerBlock = 0;
 };
+
+/// Does @p properties describe a device matching can use? Requires a nonempty arch, a
+/// positive warp size and multiprocessor count, and an LDS capacity in
+/// `[1, INT64_MAX]`. The memory facts may be zero, which means "unknown" to the UHD, but
+/// `totalGlobalMem` must not exceed `INT64_MAX` and the bus width and clock must not be
+/// negative: the UHD reads every fact as `int64_t`, and the winner-cache reader drops
+/// records whose memory facts are negative. Default-constructed properties are
+/// unresolved. Every device-keyed ingestor path checks this before it matches or caches.
+inline bool isResolved(const DeviceProperties& properties)
+{
+    constexpr auto MAX_INT64 = static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max());
+    return !properties.gcnArchName.empty() && properties.warpSize > 0
+           && properties.multiProcessorCount > 0 && properties.sharedMemPerBlock > 0
+           && properties.sharedMemPerBlock <= MAX_INT64 && properties.totalGlobalMem <= MAX_INT64
+           && properties.memoryBusWidth >= 0 && properties.memoryClockRate >= 0;
+}
 
 /// Theoretical peak HBM bandwidth in bytes/second, or 0 when either input is
 /// unresolved. The factor of 2 is double data rate; kHz and bits convert to Hz and bytes.

@@ -72,6 +72,9 @@ DeviceProperties deviceProperties(std::string arch = "gfx1250", int warpSize = 3
     DeviceProperties properties;
     properties.gcnArchName = std::move(arch);
     properties.warpSize = warpSize;
+    // The shipped state manager serves no catalog to a device without these facts.
+    properties.multiProcessorCount = 64;
+    properties.sharedMemPerBlock = 65536;
     return properties;
 }
 

@@ -32,6 +32,7 @@
 #include "PackedKernelSource.hpp"
 #include "TestDescriptorRoot.hpp"
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
@@ -88,8 +89,8 @@ std::vector<T> valuesOf(const std::vector<uint8_t>& bytes)
 }
 
 // Copies the packed directory of device 0 under `root` into `scratch`. `copy` stays empty
-// when the build packed nothing for the device. `deviceProperties` receives the properties
-// of device 0, with the decorated arch name the device reports.
+// when the build packed nothing for the device. `deviceProperties` receives device 0's
+// validated facts, with the decorated arch name the device reports.
 //
 // Uses fatal assertions: call through ASSERT_NO_FATAL_FAILURE.
 inline void copyPackedArchForDevice(const std::filesystem::path& root,
@@ -103,9 +104,8 @@ inline void copyPackedArchForDevice(const std::filesystem::path& root,
     ASSERT_NO_FATAL_FAILURE(
         hip_kernel_provider::testing::findPackedArchDirectoryUnder(root, properties, arch, packed));
 
-    deviceProperties.gcnArchName = properties.gcnArchName;
-    deviceProperties.warpSize = properties.warpSize;
-    deviceProperties.multiProcessorCount = properties.multiProcessorCount;
+    const HandleDeviceResolver resolver;
+    deviceProperties = resolver.deviceProperties(0);
 
     if(!packed.empty())
     {

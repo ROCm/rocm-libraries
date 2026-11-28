@@ -5,11 +5,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -277,9 +280,9 @@ TEST(TestIngestorWinnerCache, OrderByRecordResolvesARepeatedTripleToItsFirstCand
 TEST(TestIngestorWinnerCache, KeysDifferingOnlyInDeviceAreDistinct)
 {
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    DeviceProperties first;
+    auto first = testDeviceProperties();
     first.gcnArchName = "gfx942";
-    DeviceProperties second;
+    auto second = testDeviceProperties();
     second.gcnArchName = "gfx950";
 
     const WinnerKey firstKey{GraphContentKey{graph}, DeviceKey{first}};
@@ -296,7 +299,7 @@ TEST(TestIngestorWinnerCache, KeysDifferingOnlyInGraphAreDistinct)
     ContentCarryingTestGraph::Spec wide;
     wide.tensors[0].dims = {4, 16};
 
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
 
     const WinnerKey firstKey{GraphContentKey{ContentCarryingTestGraph{narrow}},
@@ -336,7 +339,7 @@ TEST(TestIngestorWinnerCache, KeysDifferingOnlyInSlotAreDistinct)
 
 TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 {
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
 
     const WinnerKey firstKey{GraphContentKey{ContentCarryingTestGraph{}}, DeviceKey{properties}};
@@ -355,10 +358,9 @@ TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 /// enough to separate them, and it keeps the loop cheap.
 WinnerKey keyForIndex(const ContentCarryingTestGraph& graph, int index)
 {
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
-    properties.warpSize = 64;
-    properties.multiProcessorCount = index;
+    properties.multiProcessorCount += index;
     return WinnerKey{GraphContentKey{graph}, DeviceKey{properties}};
 }
 
@@ -498,10 +500,8 @@ TEST(TestIngestorWinnerCacheStateManager, ARecordUnderAnUnusableGraphKeyIsNotSto
     };
 
     const BytelessGraph graph;
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942";
-    properties.warpSize = 64;
-    properties.multiProcessorCount = 304;
     const WinnerKey key{GraphContentKey{graph}, DeviceKey{properties}};
     ASSERT_FALSE(key.graph.isUsable()) << "the fixture must actually be unkeyable";
 
@@ -554,11 +554,45 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
         << "a covering record must decide the order, not the heuristic";
 }
 
-/// A resolved device that names no arch cannot be told apart from another one: folding
-/// two of them into one winner-cache key would serve a measurement taken elsewhere.
-/// `GenericPlanBuilder::contextFor` throws on this, so the guard here defends callers
-/// that build a MatchContext directly.
-TEST(TestIngestorWinnerCacheStateManager, AnEmptyArchNameYieldsAnEmptyCatalog)
+/// The largest device fact isResolved() accepts, as the `size_t` the facts are held in.
+constexpr auto MAX_INT64_FACT = static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max());
+
+/// One way a device fails isResolved(): `unresolve` breaks exactly one fact of otherwise
+/// resolved properties.
+struct UnresolvedFact
+{
+    std::string name;
+    void (*unresolve)(DeviceProperties&);
+};
+
+std::vector<UnresolvedFact> unresolvedFacts()
+{
+    return {
+        {"EmptyArch", [](DeviceProperties& properties) { properties.gcnArchName.clear(); }},
+        {"ZeroWarpSize", [](DeviceProperties& properties) { properties.warpSize = 0; }},
+        {"ZeroMultiProcessorCount",
+         [](DeviceProperties& properties) { properties.multiProcessorCount = 0; }},
+        {"ZeroLdsCapacity", [](DeviceProperties& properties) { properties.sharedMemPerBlock = 0; }},
+        {"LdsCapacityBeyondInt64",
+         [](DeviceProperties& properties) { properties.sharedMemPerBlock = MAX_INT64_FACT + 1; }},
+        {"TotalGlobalMemBeyondInt64",
+         [](DeviceProperties& properties) { properties.totalGlobalMem = MAX_INT64_FACT + 1; }},
+        {"NegativeMemoryBusWidth",
+         [](DeviceProperties& properties) { properties.memoryBusWidth = -1; }},
+        {"NegativeMemoryClockRate",
+         [](DeviceProperties& properties) { properties.memoryClockRate = -1; }},
+    };
+}
+
+class TestIngestorWinnerCacheUnresolvedDevice : public ::testing::TestWithParam<UnresolvedFact>
+{
+};
+
+/// A device whose facts fail isResolved() cannot key the winner cache: two devices that name
+/// no arch cannot be told apart, and the reader drops a record whose facts are out of range.
+/// `GenericPlanBuilder::contextFor` throws on these, so the guard here defends callers that
+/// build a MatchContext directly.
+TEST_P(TestIngestorWinnerCacheUnresolvedDevice, AnUnresolvedDeviceYieldsAnEmptyCatalog)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
@@ -566,19 +600,20 @@ TEST(TestIngestorWinnerCacheStateManager, AnEmptyArchNameYieldsAnEmptyCatalog)
 
     auto properties = testDeviceProperties();
     ASSERT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
-        << "this test needs a catalog that is non-empty when the arch is named";
+        << "this test needs a catalog that is non-empty for a resolved device";
 
-    properties.gcnArchName.clear();
+    GetParam().unresolve(properties);
+    ASSERT_FALSE(isResolved(properties)) << "the case must break the rule it is named for";
 
     EXPECT_TRUE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
-        << "an unidentified device must match no kernel";
+        << "an unresolved device must match no kernel";
 
-    // The catalog cache is keyed on (graph, device ordinal), not arch: an empty-arch
-    // lookup that wrote its rejected, empty catalog under that key would permanently
-    // hide this device's real catalog once the arch is known again.
-    properties.gcnArchName = testDeviceProperties().gcnArchName;
+    // The catalog cache is keyed on (graph, device ordinal), not on the facts: an
+    // unresolved lookup that wrote its rejected, empty catalog under that key would
+    // permanently hide this device's real catalog once its facts resolve again.
+    properties = testDeviceProperties();
     EXPECT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
-        << "an unresolved-arch lookup must not poison this device's cached catalog";
+        << "an unresolved lookup must not poison this device's cached catalog";
 }
 
 /// The production sequence, on ONE manager: sort (heuristic, memoized), then record,
@@ -758,9 +793,8 @@ TEST(TestIngestorWinnerCacheStateManager, ConcurrentReadsOfOneKeyNeverSeeATornRe
 /// drops one is caught.
 DeviceProperties suffixedDeviceProperties(int multiProcessorCount = 304)
 {
-    DeviceProperties properties;
+    auto properties = testDeviceProperties();
     properties.gcnArchName = "gfx942:sramecc+:xnack-";
-    properties.warpSize = 64;
     properties.multiProcessorCount = multiProcessorCount;
     // MI300X: 192 GiB of HBM3 -- past 2^32, so a 32-bit round trip would truncate it.
     properties.totalGlobalMem = std::size_t{206'141'652'992};
@@ -880,6 +914,163 @@ TEST(TestIngestorWinnerCacheStateManager,
         EXPECT_EQ(rawLines[1], encodeWinnerRecordLine(key, first));
     }
 }
+
+TEST(TestIngestorWinnerCacheStateManager, CapacityBoundariesRetainDistinctWinnersAcrossManagers)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("capacity_boundaries");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const std::vector<std::size_t> capacities{1, 65'536, MAX_INT64_FACT};
+    {
+        const auto writer = makeNamedStateManager("test:CapacityBoundaries");
+        for(size_t i = 0; i < capacities.size(); ++i)
+        {
+            auto properties = suffixedDeviceProperties();
+            properties.sharedMemPerBlock = capacities[i];
+            writer->recordWinner(keyFor(graph, properties),
+                                 recordFor(static_cast<uint8_t>(0x10 + i), 1.5),
+                                 WinnerWriteCause::FRESH_MISS);
+        }
+    }
+
+    const auto reader = makeNamedStateManager("test:CapacityBoundaries");
+    for(size_t i = 0; i < capacities.size(); ++i)
+    {
+        auto properties = suffixedDeviceProperties();
+        properties.sharedMemPerBlock = capacities[i];
+        const auto served = reader->winnerFor(keyFor(graph, properties));
+        ASSERT_TRUE(served.has_value()) << "capacity " << capacities[i];
+        ASSERT_EQ(served->size(), 1U);
+        EXPECT_EQ(served->front().kernelId, testId(static_cast<uint8_t>(0x10 + i)));
+    }
+}
+
+struct InvalidDeviceField
+{
+    std::string name;
+    const char* field;
+    nlohmann::json value;
+};
+
+std::vector<InvalidDeviceField> invalidDeviceFields()
+{
+    return {
+        {"ArchEmpty", "gcn_arch_name", nlohmann::json("")},
+        {"ArchInteger", "gcn_arch_name", nlohmann::json(942)},
+        {"WarpSizeFloatingPoint", "warp_size", nlohmann::json(64.5)},
+        {"SharedMemPerBlockFloatingPointInteger", "shared_mem_per_block", nlohmann::json(65536.0)},
+        {"WarpSizeZero", "warp_size", nlohmann::json(0)},
+        {"MultiProcessorCountZero", "multi_processor_count", nlohmann::json(0)},
+        {"SharedMemPerBlockZero", "shared_mem_per_block", nlohmann::json(0)},
+        {"SharedMemPerBlockNegative", "shared_mem_per_block", nlohmann::json(-1)},
+        // A reader that truncated to int would decode these as a valid 64 and 304.
+        {"WarpSizeBeyondInt", "warp_size", nlohmann::json((int64_t{1} << 32) + 64)},
+        {"MultiProcessorCountBeyondInt",
+         "multi_processor_count",
+         nlohmann::json((int64_t{1} << 32) + 304)},
+        {"SharedMemPerBlockBeyondInt64",
+         "shared_mem_per_block",
+         nlohmann::json(MAX_INT64_FACT + 1)},
+        {"TotalGlobalMemBeyondInt64", "total_global_mem", nlohmann::json(MAX_INT64_FACT + 1)},
+        {"MemoryBusWidthNegative", "memory_bus_width", nlohmann::json(-1)},
+        {"MemoryClockRateNegative", "memory_clock_rate", nlohmann::json(-1)},
+    };
+}
+
+class TestIngestorWinnerCacheInvalidDevice : public ::testing::TestWithParam<InvalidDeviceField>
+{
+};
+
+TEST_P(TestIngestorWinnerCacheInvalidDevice, RejectsInvalidDeviceRecords)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto malformed = nlohmann::json::parse(
+        encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties()), recordFor(0x11, 1.0)));
+    const auto& invalid = GetParam();
+    malformed["device"][invalid.field] = invalid.value;
+    EXPECT_FALSE(decodeWinnerRecordLine(malformed.dump()).has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestIngestorWinnerCacheInvalidDevice,
+                         ::testing::ValuesIn(invalidDeviceFields()),
+                         [](const ::testing::TestParamInfo<InvalidDeviceField>& info) {
+                             return info.param.name;
+                         });
+
+/// Every device isResolved() accepts survives the codec unchanged, at both ends of each
+/// fact's range: the writer persists exactly these devices, so a reader bounded tighter than
+/// the rule would drop records the writer kept.
+TEST(TestIngestorWinnerCache, EveryBoundaryOfTheResolvedRangeRoundTrips)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    constexpr int MAX_INT = std::numeric_limits<int>::max();
+
+    auto lowest = suffixedDeviceProperties();
+    lowest.warpSize = 1;
+    lowest.multiProcessorCount = 1;
+    lowest.sharedMemPerBlock = 1;
+    lowest.totalGlobalMem = 0;
+    lowest.memoryBusWidth = 0;
+    lowest.memoryClockRate = 0;
+
+    auto highest = suffixedDeviceProperties();
+    highest.warpSize = MAX_INT;
+    highest.multiProcessorCount = MAX_INT;
+    highest.sharedMemPerBlock = MAX_INT64_FACT;
+    highest.totalGlobalMem = MAX_INT64_FACT;
+    highest.memoryBusWidth = MAX_INT;
+    highest.memoryClockRate = MAX_INT;
+
+    for(const auto& [name, device] : {std::pair{"Lowest", lowest}, std::pair{"Highest", highest}})
+    {
+        SCOPED_TRACE(name);
+        ASSERT_TRUE(isResolved(device)) << "the case must sit inside the rule";
+        const auto key = keyFor(graph, device);
+        const auto record = recordFor(0x41, 2.5);
+
+        const auto decoded = decodeWinnerRecordLine(encodeWinnerRecordLine(key, record));
+
+        ASSERT_TRUE(decoded.has_value());
+        EXPECT_EQ(decoded->first, key);
+        ASSERT_EQ(decoded->second.size(), 1U);
+        EXPECT_EQ(decoded->second.front().kernelId, record.front().kernelId);
+        EXPECT_EQ(decoded->second.front().packId, record.front().packId);
+        EXPECT_EQ(decoded->second.front().dispatchId, record.front().dispatchId);
+        EXPECT_DOUBLE_EQ(decoded->second.front().timeMs, record.front().timeMs);
+    }
+}
+
+// The reader rejects records for an unresolved device, so writing one would add an
+// unreadable line to the shard on every miss.
+TEST_P(TestIngestorWinnerCacheUnresolvedDevice, AnUnresolvedDeviceIsNeitherPersistedNorCached)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("unresolved_device");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    auto unresolved = suffixedDeviceProperties();
+    // The resolved arch's shard: the empty-arch case has no shard of its own to check.
+    const auto path = winnerCacheShardPath({"test:UnresolvedDevice"}, unresolved.gcnArchName);
+    GetParam().unresolve(unresolved);
+    ASSERT_FALSE(isResolved(unresolved)) << "the case must break the rule it is named for";
+
+    const auto manager = makeNamedStateManager("test:UnresolvedDevice");
+    for(int i = 0; i < 2; ++i)
+    {
+        manager->recordWinner(
+            keyFor(graph, unresolved), recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
+    }
+    EXPECT_FALSE(manager->winnerFor(keyFor(graph, unresolved)).has_value());
+    EXPECT_EQ(manager->winnerCacheSize(), 0U);
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestIngestorWinnerCacheUnresolvedDevice,
+                         ::testing::ValuesIn(unresolvedFacts()),
+                         [](const ::testing::TestParamInfo<UnresolvedFact>& info) {
+                             return info.param.name;
+                         });
 
 /// Proves the codec plus the read-once path across two manager lifetimes; the
 /// cross-process case is a separate ctest-driven pair below.
@@ -1233,83 +1424,6 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAWrongFormatVersionIsSkipped)
         << "the good line after the malformed one must still load";
 }
 
-/// A non-integer warp_size (e.g. a float) must not silently truncate through
-/// nlohmann's get<int>(); decodeWinnerRecordLine() must decline the line instead.
-TEST(TestIngestorWinnerCacheStateManager, ALineWithANonIntegerWarpSizeIsSkipped)
-{
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const ScopedCacheDir cacheDir("warp_size_non_integer");
-    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const auto properties = suffixedDeviceProperties();
-    const auto key = keyFor(graph, properties);
-    const auto laterProperties = suffixedDeviceProperties(400);
-    const auto laterKey = keyFor(graph, laterProperties);
-
-    {
-        const auto writer = makeNamedStateManager("test:WarpSizeNonInteger");
-        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
-    }
-
-    const auto path = winnerCacheShardPath({"test:WarpSizeNonInteger"}, properties.gcnArchName);
-    ASSERT_TRUE(std::filesystem::exists(path));
-    {
-        auto malformed
-            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
-        malformed["device"]["warp_size"] = 64.5;
-        std::ofstream out(path, std::ios::app);
-        out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
-                                      recordFor(0x33, 3.0))
-            << "\n";
-    }
-
-    const auto reader = makeNamedStateManager("test:WarpSizeNonInteger");
-    EXPECT_TRUE(reader->winnerFor(key).has_value());
-    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
-        << "a non-integer warp_size must be declined, not truncated";
-    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
-        << "the good line after the malformed one must still load";
-}
-
-/// A multi_processor_count outside int's range must not silently wrap through a
-/// static_cast from int64_t; decodeWinnerRecordLine() must decline the line instead.
-TEST(TestIngestorWinnerCacheStateManager, ALineWithAnOutOfRangeMultiProcessorCountIsSkipped)
-{
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const ScopedCacheDir cacheDir("multi_processor_count_out_of_range");
-    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    const auto properties = suffixedDeviceProperties();
-    const auto key = keyFor(graph, properties);
-    const auto laterProperties = suffixedDeviceProperties(400);
-    const auto laterKey = keyFor(graph, laterProperties);
-
-    {
-        const auto writer = makeNamedStateManager("test:MultiProcessorCountOutOfRange");
-        writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
-    }
-
-    const auto path
-        = winnerCacheShardPath({"test:MultiProcessorCountOutOfRange"}, properties.gcnArchName);
-    ASSERT_TRUE(std::filesystem::exists(path));
-    {
-        auto malformed
-            = nlohmann::json::parse(encodeWinnerRecordLine(laterKey, recordFor(0x32, 2.0)));
-        malformed["device"]["multi_processor_count"] = 4294967296LL;
-        std::ofstream out(path, std::ios::app);
-        out << malformed.dump() << "\n";
-        out << encodeWinnerRecordLine(keyFor(graph, suffixedDeviceProperties(500)),
-                                      recordFor(0x33, 3.0))
-            << "\n";
-    }
-
-    const auto reader = makeNamedStateManager("test:MultiProcessorCountOutOfRange");
-    EXPECT_TRUE(reader->winnerFor(key).has_value());
-    EXPECT_FALSE(reader->winnerFor(laterKey).has_value())
-        << "an out-of-int-range multi_processor_count must be declined, not wrapped";
-    EXPECT_TRUE(reader->winnerFor(keyFor(graph, suffixedDeviceProperties(500))).has_value())
-        << "the good line after the malformed one must still load";
-}
-
 /// The codec must carry the memory fields DeviceKey compares: a separately built key for the
 /// same live device must still hit.
 TEST(TestIngestorWinnerCacheStateManager, ARecordForARealDeviceIsServedToTheLiveDevicesKey)
@@ -1350,6 +1464,7 @@ TEST(TestIngestorWinnerCacheStateManager, APreviousFormatLineIsAMissNeverAZeroMe
     unresolvedMemory.gcnArchName = "gfx942:sramecc+:xnack-";
     unresolvedMemory.warpSize = 64;
     unresolvedMemory.multiProcessorCount = 304;
+    unresolvedMemory.sharedMemPerBlock = 65'536;
     const auto zeroMemoryKey = keyFor(graph, unresolvedMemory);
 
     {

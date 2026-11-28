@@ -28,6 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
@@ -177,6 +178,8 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
     hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
+    properties.multiProcessorCount = 48;
+    properties.sharedMemPerBlock = 65536;
     return properties;
 }
 
@@ -187,23 +190,20 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties gfx950Properties(std::strin
     hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
     properties.gcnArchName = std::move(arch);
     properties.warpSize = 64;
+    properties.multiProcessorCount = 256;
+    properties.sharedMemPerBlock = std::size_t{160} * 1024;
     return properties;
 }
 
-/// The real current device's properties, queried once; zeroed if no device is current.
+/// The current device's validated facts.
+///
+/// Returns unresolved properties when no device is current. Throws if a device is current
+/// but HIP fails the query or reports an invalid fact.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 {
-    hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
-    hipDeviceProp_t properties{};
-    int deviceId = 0;
-    if(hipGetDevice(&deviceId) == hipSuccess
-       && hipGetDeviceProperties(&properties, deviceId) == hipSuccess)
-    {
-        resolved.gcnArchName = properties.gcnArchName;
-        resolved.warpSize = properties.warpSize;
-        resolved.multiProcessorCount = properties.multiProcessorCount;
-    }
-    return resolved;
+    const HandleDeviceResolver resolver;
+    const Handle handle;
+    return resolver.deviceProperties(resolver.deviceId(handle));
 }
 
 /// Wraps a built graph buffer so a test reads it the way an engine does.
