@@ -210,7 +210,7 @@ namespace hipblaslt_experimental
     public:
         std::vector<std::unique_ptr<Gemm>> gemms;
         std::vector<int>                   devices; // device of each partition's handle
-        bool                               gfx1250 = true; // every partition is a gfx1250 device
+        bool                               supportedArch = true; // all on gfx1250 or gfx950
 
         hipblasOperation_t   opA, opB;
         hipDataType          typeA, typeB, typeC, typeD;
@@ -342,13 +342,14 @@ namespace hipblaslt_experimental
             pimpl->devices.push_back(handle ? reinterpret_cast<rocblaslt_handle>(handle)->device
                                             : -1);
         }
-        // PartitionedGemm is supported on gfx1250 only: setProblem refuses any other device.
+        // PartitionedGemm is supported on gfx1250 and gfx950: setProblem refuses any other device.
         for(int device : pimpl->devices)
         {
             hipDeviceProp_t props;
             if(hipGetDeviceProperties(&props, device) != hipSuccess
-               || std::strncmp(props.gcnArchName, "gfx1250", 7) != 0)
-                pimpl->gfx1250 = false;
+               || (std::strncmp(props.gcnArchName, "gfx1250", 7) != 0
+                   && std::strncmp(props.gcnArchName, "gfx950", 6) != 0))
+                pimpl->supportedArch = false;
         }
     }
 
@@ -384,9 +385,9 @@ namespace hipblaslt_experimental
         // All or nothing: a failure below must not leave the previous problem usable with some
         // partitions already switched to the new one.
         s.hasProblem = false;
-        if(!s.gfx1250)
+        if(!s.supportedArch)
         {
-            log_error(__func__, "PartitionedGemm is supported on gfx1250 devices only");
+            log_error(__func__, "PartitionedGemm is supported on gfx1250 and gfx950 devices only");
             return HIPBLAS_STATUS_NOT_SUPPORTED;
         }
         if(parts == 0 || m <= 0 || n <= 0 || k <= 0 || batch_count <= 0)

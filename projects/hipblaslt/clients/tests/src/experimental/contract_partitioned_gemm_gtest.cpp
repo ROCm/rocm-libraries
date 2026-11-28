@@ -9,9 +9,9 @@
 // HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM, the feature's revision. The same goes for the helpers
 // in contract_partitioned_gemm_helpers.hpp.
 //
-// The feature is supported on gfx1250 only, so every CI lane checks part of the contract: on
-// gfx1250 the tests of its behavior run, and on any other architecture NotSupportedOffGfx1250
-// checks that setProblem refuses.
+// The feature is supported on gfx1250 and gfx950, so every CI lane checks part of the contract:
+// on those two the tests of its behavior run, and on any other architecture
+// NotSupportedOnOtherArchitectures checks that setProblem refuses.
 
 #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
 #include "contract_partitioned_gemm_helpers.hpp"
@@ -20,7 +20,7 @@ using namespace partitioned_gemm_test;
 
 TEST(pre_checkin_partitioned_gemm_contract, PartitionCountAndSliceRule)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto parts = onDeviceZero(3);
     auto gemm  = makeGemm(parts);
     EXPECT_EQ(gemm.getPartitionCount(), 3u);
@@ -44,7 +44,7 @@ TEST(pre_checkin_partitioned_gemm_contract, PartitionCountAndSliceRule)
 
 TEST(pre_checkin_partitioned_gemm_contract, MSlicesRoundTo256BytesWithinOnePercent)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     // fp16, lda = 128 (op T), ldc = ldd = 256: the M offset moves 2 bytes per row in C and D, so
     // the slice is rounded up to 128 rows. It is used only when the last slice is at most 1%
     // smaller than the others; otherwise the plain size/N split is kept.
@@ -77,7 +77,7 @@ TEST(pre_checkin_partitioned_gemm_contract, MSlicesRoundTo256BytesWithinOnePerce
 
 TEST(pre_checkin_partitioned_gemm_contract, GetSliceNeedsAProblem)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto    parts = onDeviceZero(2);
     auto    gemm  = makeGemm(parts);
     int64_t offset, size;
@@ -86,7 +86,7 @@ TEST(pre_checkin_partitioned_gemm_contract, GetSliceNeedsAProblem)
 
 TEST(pre_checkin_partitioned_gemm_contract, StorePeerDNeedsTwoDifferentDs)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -114,9 +114,46 @@ TEST(pre_checkin_partitioned_gemm_contract, StorePeerDNeedsTwoDifferentDs)
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
+// With storePeerD each partition must also store its slice into the other partition's D. A kernel
+// without that second store would leave the peer D unwritten and still report success, so it is
+// never used for such a problem: the heuristic leaves it out, and isAlgoSupported and initialize
+// refuse it. The heuristic never gives a plain problem a kernel with the second store, so a plain
+// problem's algorithm is one without it.
+TEST(pre_checkin_partitioned_gemm_contract, StorePeerDRefusesKernelsWithoutThePeerStore)
+{
+    SKIP_UNLESS_SUPPORTED_ARCH();
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    std::vector<hipblasLtMatmulHeuristicResult_t> plain;
+    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, plain), HIPBLAS_STATUS_SUCCESS);
+    if(plain.empty())
+        GTEST_SKIP() << "no algorithm for the test problem on this device";
+
+    auto in       = buffers.inputs();
+    in.storePeerD = true;
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+    std::vector<size_t> workspaceBytes;
+    EXPECT_NE(gemm.isAlgoSupported(plain[0].algo, workspaceBytes), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_NE(gemm.initialize(plain[0].algo, parts.workspaces(), true, parts.streams),
+              HIPBLAS_STATUS_SUCCESS);
+
+    std::vector<hipblasLtMatmulHeuristicResult_t> peer;
+    ASSERT_EQ(gemm.algoGetHeuristic(8, pref, peer), HIPBLAS_STATUS_SUCCESS);
+    for(auto const& result : peer)
+        EXPECT_NE(std::memcmp(&result.algo, &plain[0].algo, sizeof(result.algo)), 0)
+            << "the heuristic returned the plain problem's algorithm for storePeerD";
+}
+
 TEST(pre_checkin_partitioned_gemm_contract, RejectsWrongPointerCounts)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -140,7 +177,7 @@ TEST(pre_checkin_partitioned_gemm_contract, RejectsWrongPointerCounts)
 
 TEST(pre_checkin_partitioned_gemm_contract, RejectsBadSizesAndScalars)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -164,7 +201,7 @@ TEST(pre_checkin_partitioned_gemm_contract, RejectsBadSizesAndScalars)
 
 TEST(pre_checkin_partitioned_gemm_contract, UserArgsAreNotSupportedYet)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto parts = onDeviceZero(2);
     auto gemm  = makeGemm(parts);
 
@@ -180,7 +217,7 @@ TEST(pre_checkin_partitioned_gemm_contract, UserArgsAreNotSupportedYet)
 
 TEST(pre_checkin_partitioned_gemm_contract, TwoPartitionsOnOneDeviceMatchGemm)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     // SPX mode: both partitions are on the same device, so their streams share it. Speed does
     // not matter there, the result must still be right.
     for(SplitDim dim : {SplitDim::N, SplitDim::M})
@@ -212,7 +249,7 @@ TEST(pre_checkin_partitioned_gemm_contract, TwoPartitionsOnOneDeviceMatchGemm)
 
 TEST(pre_checkin_partitioned_gemm_contract, RejectsWrongStreamAndWorkspaceCounts)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -235,7 +272,7 @@ TEST(pre_checkin_partitioned_gemm_contract, RejectsWrongStreamAndWorkspaceCounts
 // One partition is a plain GEMM: it must match Gemm exactly.
 TEST(pre_checkin_partitioned_gemm_contract, OnePartitionMatchesGemm)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto              parts = onDeviceZero(1);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -260,13 +297,13 @@ TEST(pre_checkin_partitioned_gemm_contract, OnePartitionMatchesGemm)
     expectSlicesMatch(gemm, parts, buffers, ref, SplitDim::N);
 }
 
-// PartitionedGemm is supported on gfx1250 only. On any other architecture setProblem must return
-// NOT_SUPPORTED, with and without storePeerD, and leave the object without a problem. This runs
-// on one device of any other architecture, so that CI lanes that are not gfx1250 cover it.
-TEST(pre_checkin_partitioned_gemm_contract, NotSupportedOffGfx1250)
+// PartitionedGemm is supported on gfx1250 and gfx950. On any other architecture setProblem must
+// return NOT_SUPPORTED, with and without storePeerD, and leave the object without a problem. This
+// runs on one device of any other architecture, so that the CI lanes of the others cover it.
+TEST(pre_checkin_partitioned_gemm_contract, NotSupportedOnOtherArchitectures)
 {
-    if(isGfx1250())
-        GTEST_SKIP() << "PartitionedGemm is supported on gfx1250";
+    if(isSupportedArch())
+        GTEST_SKIP() << "PartitionedGemm is supported on this architecture";
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -293,7 +330,7 @@ TEST(pre_checkin_partitioned_gemm_contract, NotSupportedOffGfx1250)
 // Batch split: whole matrices, the first partitions take batch_count / N batches, the last the rest.
 TEST(pre_checkin_partitioned_gemm_contract, BatchSplitSlices)
 {
-    SKIP_UNLESS_GFX1250();
+    SKIP_UNLESS_SUPPORTED_ARCH();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;

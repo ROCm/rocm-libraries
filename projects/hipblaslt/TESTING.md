@@ -378,9 +378,11 @@ variables control these checks:
   the kernel library. `MatmulMemory_pre_checkin` in `matmul_gtest.cpp` runs this check on two
   shapes, pinning up to about 1.9 GiB for about 3 s.
 
-All tiers exclude `*known_bug*`. Multi-GPU coverage is narrow: the `*multi_gpu*` cases are built
-only with the fused GEMM plus all-to-all feature (`HIPBLASLT_ENABLE_GEMM_A2A_FUSION`, off by
-default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pull requests.
+All tiers exclude `*known_bug*`. Multi-GPU coverage is narrow: the `*multi_gpu*` cases run on a
+two-GPU gfx950 node in Math CI's `precheckin` on pull requests. They are the fused GEMM plus
+all-to-all cases, built only with `HIPBLASLT_ENABLE_GEMM_A2A_FUSION` (off by default), and the
+experimental `PartitionedGemm` cases (`partitioned_gemm_ext_*_multi_gpu`), which put the two
+partitions on the two GPUs when there is no GPU in DPX mode.
 
 **How the tiers are applied in CI.** TheRock's test lane runs hipBLASLt through the CTest presets
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
@@ -712,8 +714,8 @@ tracked as a gap.
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
-- Client GTest `standard` tier on gfx94X-dcgpu (Linux) and gfx110X (Windows), and `quick` tier on
-  gfx950-dcgpu (Linux), through Multi-Arch CI
+- Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
+  through Multi-Arch CI; gfx950 only for pull requests that touch `projects/hipblaslt/`
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
   gfx950 GPUs
 - The Math CI sensitive-word scan, the job named `static-analysis`
@@ -921,7 +923,7 @@ the set of architectures the library supports or builds for.
 | Configuration | Validation level | Frequency | Notes |
 | --- | --- | --- | --- |
 | Linux, gfx90a / gfx942 / gfx950 / gfx12 | Client test suite | PR, via Math CI `precheckin` | Broadest per-PR hardware coverage. Also compiles for gfx1250 |
-| Linux, two gfx950 GPUs | Multi-GPU cases (`*multi_gpu*`) | PR, via Math CI `precheckin` | Fused GEMM plus all-to-all build only. Skipped on `develop` runs |
+| Linux, two gfx950 GPUs | Multi-GPU cases (`*multi_gpu*`) | PR, via Math CI `precheckin` | Built with fused GEMM plus all-to-all. Runs those cases and the `PartitionedGemm` cases across the two GPUs. Skipped on `develop` runs |
 | Linux, gfx90a / gfx942 / gfx950 / gfx12 | TensileLite's whole unit and characterization tree, then the `common` GEMM-selection suite | PR, via Math CI `preliminary` | Skipped unless `tensilelite/` changed, and the second stage needs the first to pass. See [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates) |
 | Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
@@ -967,8 +969,9 @@ For gfx1250:
 
 **Explicitly not tested**, so that nothing is assumed at release time:
 
-- **Multi-GPU, beyond one feature.** The only multi-GPU tests cover fused GEMM plus all-to-all, on
-  two gfx950 GPUs, in Math CI on pull requests.
+- **Multi-GPU, beyond two features.** The only multi-GPU tests cover fused GEMM plus all-to-all
+  and `PartitionedGemm`, on two gfx950 GPUs, in Math CI on pull requests. No CI lane runs
+  `PartitionedGemm` on the partitions of a GPU in DPX mode, its target configuration on gfx1250.
 - **Windows beyond gfx110X and gfx1151.** No other Windows architecture runs hipBLASLt tests.
 - **HMM / managed memory**, except in the `full` tier, which requires a capable host and does not run
   in PR or nightly CI.
@@ -1786,7 +1789,8 @@ cadence, and pull requests get a performance number.
   worst failure mode a math library has.
 - **Test the public API itself** (AIHPBLAS-3579): compile the public headers from a C translation
   unit and with more than one toolchain, and check public macro and type names.
-- **Widen multi-GPU coverage** (AIHPBLAS-4625) beyond its one feature, fused GEMM plus all-to-all.
+- **Widen multi-GPU coverage** (AIHPBLAS-4625) beyond fused GEMM plus all-to-all and
+  `PartitionedGemm` on two gfx950 GPUs, for example to a gfx1250 in DPX mode.
 - **Create a host-only link target for library internals** (AIHPBLAS-5033), resolving the
   include-path collision, so C++ unit tests can reach validation, enum and string mapping,
   tuning-override parsing, and workspace-sizing logic without linking the whole shared library.
@@ -1929,7 +1933,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | Address, index, and launch-size arithmetic past 32-bit thresholds is not tested systematically. Several defects of this kind returned success with wrong or partly unwritten output | Medium | High | Targeted large-size regression tests for individual past defects | AIHPBLAS-4988 |
 | Nothing tests the public API itself: no test compiles the public headers from a C translation unit or with more than one toolchain, or checks public macro and type names, so several API breaks were found by users first | Medium | Medium | The client suite exercises the API through C++ only | AIHPBLAS-3579 |
 | No CI lane runs TSAN yet, and there is no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | AIHPBLAS-5035 |
-| Multi-GPU tests cover one feature, fused GEMM plus all-to-all, on two gfx950 GPUs | Low | High if hit | Math CI's `precheckin` runs the `*multi_gpu*` cases on pull requests | AIHPBLAS-4625 |
+| Multi-GPU tests cover two features, fused GEMM plus all-to-all and `PartitionedGemm`, on two gfx950 GPUs; none runs on a gfx1250 in DPX mode | Low | High if hit | Math CI's `precheckin` runs the `*multi_gpu*` cases on pull requests | AIHPBLAS-4625 |
 | Three parallel enum-to-string tables can drift | Low | Medium | None automated | AIHPBLAS-3558 |
 
 ## Owners and Review Cadence

@@ -84,6 +84,30 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "runs LibraryLogic, which picks winners from timed results",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/split_m_shared_b_gfx950.yaml",
+        "validates D after back-to-back joined split launches, run only in the sync loop",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/split_m_shared_b_mxfp4_gfx950.yaml",
+        "validates D after back-to-back joined split launches, run only in the sync loop",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/split_m_shared_d_free_run_gfx950.yaml",
+        "validates D after back-to-back free-run split launches, run only in the sync loop",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/split_m_shared_d_gfx950.yaml",
+        "validates D after back-to-back joined split launches, run only in the sync loop",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/split_n_shared_a_gfx950.yaml",
+        "validates D after back-to-back joined split launches, run only in the sync loop",
+    ),
+    SyncsPerBenchmarkOptOut(
+        "common/comm/gfx950/split_n_shared_d_gfx950.yaml",
+        "validates D after back-to-back joined split launches, run only in the sync loop",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/gemm/fp8nfp16mix_hfp8ns.yaml",
         "LibraryLogic requires benchmark data to build the library table",
     ),

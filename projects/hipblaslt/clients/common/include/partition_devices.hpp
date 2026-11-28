@@ -11,8 +11,9 @@
 //
 // partitionDevices(count): the partitions of one GPU when the machine has a GPU with exactly
 // `count` partitions, otherwise `count` times the same device (SPX: no speed benefit, but the
-// result is the same). dpxPair() is the pair itself, for the tests that only mean something
-// across two partitions.
+// result is the same). dpxPair() is the pair itself. devicePair() is two devices that can reach
+// each other's memory: the DPX pair, or else two separate GPUs with peer access between them,
+// for the tests that only mean something across two devices.
 
 #pragma once
 
@@ -69,6 +70,27 @@ namespace hipblaslt_partitions
                 first = std::make_pair(group[0], group[1]);
         }
         return first;
+    }
+
+    // The two partitions of a GPU in DPX mode, or else the first two GPUs that can access each
+    // other's memory (hipDeviceCanAccessPeer both ways), or nothing. The caller enables the peer
+    // access it needs.
+    inline std::optional<std::pair<int, int>> devicePair()
+    {
+        if(auto pair = dpxPair())
+            return pair;
+        int count = 0;
+        if(hipGetDeviceCount(&count) != hipSuccess)
+            return std::nullopt;
+        for(int a = 0; a < count; a++)
+            for(int b = a + 1; b < count; b++)
+            {
+                int ab = 0, ba = 0;
+                if(hipDeviceCanAccessPeer(&ab, a, b) == hipSuccess && ab
+                   && hipDeviceCanAccessPeer(&ba, b, a) == hipSuccess && ba)
+                    return std::make_pair(a, b);
+            }
+        return std::nullopt;
     }
 
     // The devices `count` partitions run on, one per partition. Partition 0 is `first` when it is

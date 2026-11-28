@@ -102,7 +102,7 @@ def test_identical_trees_pass(trees):
 def test_real_headers_parse_cleanly():
     surface = cea.load_surface(cea.DirTree(_REAL_ROOT))
     assert surface.errors == []
-    assert surface.revisions == {"PARTITIONED_GEMM": 1}
+    assert surface.revisions == {"PARTITIONED_GEMM": 2}
     assert surface.high_water is not None
     assert surface.decls["function hipblasLtExperimentalGetFeatureRevision"][0] == cea.CORE
     assert "macro HIPBLASLT_EXPERIMENTAL_ENUM_BIT" in surface.decls
@@ -111,7 +111,7 @@ def test_real_headers_parse_cleanly():
 def test_fixture_feature_parses_cleanly(trees):
     surface = cea.load_surface(cea.DirTree(trees[0]))
     assert surface.errors == []
-    assert surface.revisions == {"DEMO": 1, "PARTITIONED_GEMM": 1}
+    assert surface.revisions == {"DEMO": 1, "PARTITIONED_GEMM": 2}
     assert surface.decls["function hipblasLtExperimentalDemoAlignSize"][0] == "DEMO"
     assert surface.contracts[_DEMO_CONTRACT][0] == "DEMO"
 
