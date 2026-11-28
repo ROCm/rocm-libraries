@@ -61,15 +61,9 @@ test_categories:
       - "extended"
 
   full:
-    description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
-    # rtest-driver enabled so patterns and exclude are not used
+    description: "Stress / weekly - comprehensive plus Jenkins weekly (stress + HMM, check numerics on smoke)"
+    # rtest-driver enabled so patterns and exclude are not used; see ctest_full in rtest.xml
     test_patterns:
-    #  - "*stress*"
-    #  - "*HMM*"
-    # current CI use case currently does not match stress use case
-    #  - "*quick*"
-    #  - "*pre_checkin*"
-    #  - "*nightly*"
       - "*known_bug*"
     exclude:
       - "*known_bug*"
