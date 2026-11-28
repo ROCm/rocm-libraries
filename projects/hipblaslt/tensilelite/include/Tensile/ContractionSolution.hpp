@@ -262,6 +262,7 @@ namespace TensileLite
         std::string name;
         std::vector<CustomArgDefinition> args;
         dim3 macrotile{0, 0, 0};
+        dim3 clusterDim{1, 1, 1};
         dim3 threads{0, 0, 0};
         vector3<CustomGridSize> grid{CustomGridSize::One, CustomGridSize::One, CustomGridSize::One};
         CustomWorkspaceType workspaceType = CustomWorkspaceType::None;

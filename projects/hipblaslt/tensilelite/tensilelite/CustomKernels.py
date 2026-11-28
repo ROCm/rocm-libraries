@@ -555,6 +555,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         "macrotile": macrotile,
         "threads": threads,
         "grid": grid,
+        "clusterDim": [1, 1],
         "workspaceType": "None",
         "workspaceSizePerElemC": 0,
         "workspaceSizePerElemBias": 0,
@@ -647,6 +648,7 @@ def getCustomKernelConfig(
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
     kernelConfig["CustomKernel"]["name"] = kernelName
+    kernelConfig["CustomKernel"].setdefault("clusterDim", [1, 1])
     kernelConfig["CustomKernel"].setdefault("workspaceType", "None")
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemC", 0)
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemBias", 0)

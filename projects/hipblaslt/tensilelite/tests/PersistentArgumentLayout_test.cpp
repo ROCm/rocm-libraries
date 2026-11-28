@@ -341,6 +341,7 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
         solution.customKernel.macrotile = TensileLite::dim3(128, 128, 64);
         solution.customKernel.threads = TensileLite::dim3(256, 1, 1);
         solution.customKernel.grid = {CustomGridSize::PersistentGrid, CustomGridSize::One, CustomGridSize::One};
+        solution.customKernel.clusterDim = cluster;
         auto append = [&](CustomArgType type, CustomArgSemantic semantic) {
             solution.customKernel.args.push_back({type, semantic});
         };
