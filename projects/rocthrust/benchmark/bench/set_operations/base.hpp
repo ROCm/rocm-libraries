@@ -89,6 +89,29 @@ struct base_set_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(items_in_AB);
 
+    state.test([&] {
+      const auto left                        = std::min<size_t>(items_in_A, 96);
+      const auto right                       = std::min<size_t>(m_items - items_in_A, 96);
+      const auto input                       = bench_utils::set_input<T>(left, right);
+      const thrust::device_vector<T> d_input = input;
+      thrust::device_vector<T> result(input.size());
+      const auto end =
+        op(policy(alloc).on(state.stream),
+           d_input.cbegin(),
+           d_input.cbegin() + left,
+           d_input.cbegin() + left,
+           d_input.cend(),
+           result.begin());
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+
+      thrust::host_vector<T> expected(input.size());
+      const auto expected_end =
+        op(thrust::seq, input.cbegin(), input.cbegin() + left, input.cbegin() + left, input.cend(), expected.begin());
+      expected.resize(expected_end - expected.begin());
+      PRIMBENCH_ASSERT(static_cast<size_t>(end - result.begin()), expected.size());
+      bench_utils::check_output(result, expected);
+    });
+
     state.run([&] {
       op(policy(alloc).on(state.stream),
          in.cbegin(),

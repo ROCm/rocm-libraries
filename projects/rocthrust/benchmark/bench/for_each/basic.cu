@@ -62,6 +62,19 @@ struct for_each_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items);
 
+    state.test([&] {
+      const auto input                = bench_utils::arithmetic_input<T>(m_items);
+      thrust::device_vector<T> result = input;
+      thrust::for_each(policy(alloc).on(state.stream), result.begin(), result.end(), op);
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+      auto expected = input;
+      for (auto& value : expected)
+      {
+        value = T(value * value);
+      }
+      bench_utils::check_output(result, expected);
+    });
+
     state.run([&] {
       thrust::for_each(policy(alloc).on(state.stream), in.begin(), in.end(), op);
     });

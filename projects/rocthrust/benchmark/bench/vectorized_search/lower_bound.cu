@@ -61,20 +61,29 @@ struct vectorized_search_benchmark : public primbench::benchmark_interface
     const auto needles = needles_ratio * static_cast<std::size_t>(static_cast<double>(m_items) / 100.0);
 
     thrust::device_vector<T> data = bench_utils::generate(m_items + needles, state.seed);
-    thrust::device_vector<bool> result(needles);
+    thrust::device_vector<std::ptrdiff_t> result(needles);
     thrust::sort(data.begin(), data.begin() + m_items);
 
     state.set_items(needles);
     state.add_reads<T>(needles);
 
-    state.run([&] {
+    const auto search = [&](auto& input, size_t count, auto& output) {
       thrust::lower_bound(
         policy(alloc).on(state.stream),
-        data.begin(),
-        data.begin() + m_items,
-        data.begin() + m_items,
-        data.end(),
-        result.begin());
+        input.begin(),
+        input.begin() + count,
+        input.begin() + count,
+        input.end(),
+        output.begin());
+    };
+    state.test([&] {
+      bench_utils::check_vectorized_search(
+        data, m_items, result, state.stream, search, [](auto first, auto last, const T& value) {
+          return std::lower_bound(first, last, value) - first;
+        });
+    });
+    state.run([&] {
+      search(data, m_items, result);
     });
   }
 

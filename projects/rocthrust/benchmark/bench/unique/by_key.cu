@@ -100,6 +100,45 @@ struct unique_benchmark : public primbench::benchmark_interface
     state.add_writes<T>(unique_elements);
     state.add_writes<K>(unique_elements);
 
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      const auto keys  = bench_utils::read_range(in_keys, 0, count);
+      thrust::host_vector<T> values(count);
+      for (size_t i = 0; i < count; ++i)
+      {
+        values[i] = T(i % 71);
+      }
+
+      const thrust::device_vector<K> d_keys   = keys;
+      const thrust::device_vector<T> d_values = values;
+      thrust::device_vector<K> result_keys(count);
+      thrust::device_vector<T> result_values(count);
+      const auto ends = thrust::unique_by_key_copy(
+        policy(alloc).on(state.stream),
+        d_keys.cbegin(),
+        d_keys.cend(),
+        d_values.cbegin(),
+        result_keys.begin(),
+        result_values.begin());
+      HIP_CHECK(hipStreamSynchronize(state.stream));
+
+      thrust::host_vector<K> expected_keys;
+      thrust::host_vector<T> expected_values;
+      for (size_t i = 0; i < count; ++i)
+      {
+        if (i == 0 || keys[i] != keys[i - 1])
+        {
+          expected_keys.push_back(keys[i]);
+          expected_values.push_back(values[i]);
+        }
+      }
+
+      PRIMBENCH_ASSERT(static_cast<size_t>(ends.first - result_keys.begin()), expected_keys.size());
+      PRIMBENCH_ASSERT(static_cast<size_t>(ends.second - result_values.begin()), expected_values.size());
+      bench_utils::check_output(result_keys, expected_keys);
+      bench_utils::check_output(result_values, expected_values);
+    });
+
     state.run([&] {
       thrust::unique_by_key_copy(
         policy(alloc).on(state.stream),

@@ -66,6 +66,27 @@ struct shuffle_benchmark : public primbench::benchmark_interface
 
     thrust::device_vector<T> data(m_items);
     auto do_engine = [&](auto&& engine_constructor) {
+      state.test([&] {
+        const auto count = std::min<size_t>(m_items, 128);
+        thrust::host_vector<T> input(count);
+        std::iota(input.begin(), input.end(), 0);
+        thrust::device_vector<T> result = input;
+        auto engine                     = engine_constructor();
+        engine.seed(state.seed);
+        thrust::shuffle(policy(alloc).on(state.stream), result.begin(), result.end(), engine);
+        HIP_CHECK(hipStreamSynchronize(state.stream));
+        auto output = bench_utils::read_range(result, 0, count);
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+        auto expected = input;
+        engine.seed(state.seed);
+        thrust::shuffle(expected.begin(), expected.end(), engine);
+        bench_utils::check_values(output, expected);
+#endif
+        std::sort(output.begin(), output.end());
+        bench_utils::check_values(output, input);
+      });
+
       state.run([&] {
         thrust::shuffle(policy(alloc).on(state.stream), data.begin(), data.end(), engine_constructor());
       });

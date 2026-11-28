@@ -73,6 +73,29 @@ struct merge_benchmark : public primbench::benchmark_interface
     state.add_reads<T>(m_items);
     state.add_writes<T>(m_items);
 
+    state.test([&] {
+      const auto lhs = bench_utils::read_range(in, 0, std::min(items_in_lhs, bench_utils::validation_items / 2));
+      const auto rhs =
+        bench_utils::read_range(in, items_in_lhs, std::min(m_items - items_in_lhs, bench_utils::validation_items / 2));
+      thrust::host_vector<T> expected(lhs.size() + rhs.size());
+      std::merge(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), expected.begin());
+
+      if (expected.size() == m_items)
+      {
+        bench_utils::check_output(out, expected);
+      }
+      else
+      {
+        const thrust::device_vector<T> d_lhs = lhs;
+        const thrust::device_vector<T> d_rhs = rhs;
+        thrust::device_vector<T> result(expected.size());
+        thrust::merge(
+          policy(alloc).on(state.stream), d_lhs.cbegin(), d_lhs.cend(), d_rhs.cbegin(), d_rhs.cend(), result.begin());
+        HIP_CHECK(hipStreamSynchronize(state.stream));
+        bench_utils::check_output(result, expected);
+      }
+    });
+
     state.run([&] {
       thrust::merge(
         policy(alloc).on(state.stream),

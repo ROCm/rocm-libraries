@@ -48,6 +48,22 @@ struct less_then_t
   }
 };
 
+struct make_large_data
+{
+  THRUST_HOST_DEVICE bench_utils::large_data operator()(int i) const
+  {
+    return bench_utils::large_data(i % 31 - 15);
+  }
+};
+
+struct large_data_value
+{
+  THRUST_HOST_DEVICE int operator()(const bench_utils::large_data& value) const
+  {
+    return static_cast<int>(value);
+  }
+};
+
 template <typename T>
 struct copy_benchmark : public primbench::benchmark_interface
 {
@@ -83,6 +99,56 @@ struct copy_benchmark : public primbench::benchmark_interface
     state.set_items(m_items);
     state.add_reads<T>(m_items);
     state.add_writes<T>(selected_elements);
+
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      thrust::device_vector<T> replay_output(count);
+      if constexpr (std::is_same_v<T, bench_utils::large_data>)
+      {
+        thrust::device_vector<T> replay_input(count);
+        const thrust::counting_iterator<int> first(0);
+        thrust::transform(policy(alloc).on(state.stream), first, first + count, replay_input.begin(), make_large_data{});
+
+        const auto end = thrust::copy_if(
+          policy(alloc).on(state.stream),
+          replay_input.cbegin(),
+          replay_input.cend(),
+          replay_output.begin(),
+          less_then_t<T>{T(0)});
+        thrust::host_vector<int> expected;
+        for (size_t i = 0; i < count; ++i)
+        {
+          const int value = static_cast<int>(i % 31) - 15;
+          if (value < 0)
+          {
+            expected.push_back(value);
+          }
+        }
+
+        PRIMBENCH_ASSERT(static_cast<size_t>(end - replay_output.begin()), expected.size());
+        thrust::device_vector<int> values(expected.size());
+        thrust::transform(
+          policy(alloc).on(state.stream),
+          replay_output.cbegin(),
+          replay_output.cbegin() + expected.size(),
+          values.begin(),
+          large_data_value{});
+        HIP_CHECK(hipStreamSynchronize(state.stream));
+        bench_utils::check_output(values, expected);
+      }
+      else
+      {
+        const auto input                            = bench_utils::read_range(in, 0, count);
+        const thrust::device_vector<T> replay_input = input;
+        const auto end                              = thrust::copy_if(
+          policy(alloc).on(state.stream), replay_input.cbegin(), replay_input.cend(), replay_output.begin(), select_op);
+        HIP_CHECK(hipStreamSynchronize(state.stream));
+        thrust::host_vector<T> expected;
+        std::copy_if(input.begin(), input.end(), std::back_inserter(expected), select_op);
+        PRIMBENCH_ASSERT(static_cast<size_t>(end - replay_output.begin()), expected.size());
+        bench_utils::check_output(replay_output, expected);
+      }
+    });
 
     state.run([&] {
       thrust::copy_if(policy(alloc).on(state.stream), in.cbegin(), in.cend(), out.begin(), select_op);

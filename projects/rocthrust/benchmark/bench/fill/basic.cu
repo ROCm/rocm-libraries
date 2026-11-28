@@ -62,6 +62,11 @@ struct fill_benchmark : public primbench::benchmark_interface
     state.set_items(m_items);
     state.add_writes<T>(m_items);
 
+    state.test([&] {
+      const auto count = std::min(m_items, bench_utils::validation_items);
+      bench_utils::check_output(out, thrust::host_vector<T>(count, T{VAL}));
+    });
+
     state.run([&] {
       thrust::fill(policy(alloc).on(state.stream), out.begin(), out.end(), T{VAL});
     });
