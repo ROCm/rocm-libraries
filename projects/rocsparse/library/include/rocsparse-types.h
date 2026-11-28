@@ -47,13 +47,15 @@
 #define ROCSPARSE_DEVICE_ILF static __device__ __forceinline__
 
 // The standard attribute is allowed on enumerators from C++17 and C23. Older C and C++ use the GNU
-// form, which gcc and clang accept there.
+// form, which gcc and clang accept there. MSVC accepts the standard attribute in C++14.
 #if(defined(__cplusplus) && __cplusplus >= 201703L)   \
     || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) \
     || (!defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L)
 #define ROCSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
 #elif defined(__GNUC__) || defined(__clang__)
 #define ROCSPARSE_DEPRECATED_MSG(MSG) __attribute__((__deprecated__(MSG)))
+#elif defined(_MSC_VER) && defined(__cplusplus)
+#define ROCSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
 #else
 #define ROCSPARSE_DEPRECATED_MSG(MSG)
 #endif

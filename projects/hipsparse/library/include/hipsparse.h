@@ -51,22 +51,18 @@
 #define DEPRECATED_CUDA_10000(warning)
 #define DEPRECATED_CUDA_9000(warning)
 
-#ifdef __cplusplus
-#ifndef __has_cpp_attribute
-#define __has_cpp_attribute(X) 0
-#endif
-#define HIPSPARSE_HAS_DEPRECATED_MSG __has_cpp_attribute(deprecated) >= 201309L
-#else
-#ifndef __has_c_attribute
-#define __has_c_attribute(X) 0
-#endif
-#define HIPSPARSE_HAS_DEPRECATED_MSG __has_c_attribute(deprecated) >= 201904L
-#endif
-
-#if HIPSPARSE_HAS_DEPRECATED_MSG
+// The standard attribute is allowed on enumerators from C++17 and C23. Older C and C++ use the GNU
+// form, which gcc and clang accept there. MSVC accepts the standard attribute in C++14.
+#if(defined(__cplusplus) && __cplusplus >= 201703L)   \
+    || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) \
+    || (!defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L)
+#define HIPSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
+#elif defined(__GNUC__) || defined(__clang__)
+#define HIPSPARSE_DEPRECATED_MSG(MSG) __attribute__((__deprecated__(MSG)))
+#elif defined(_MSC_VER) && defined(__cplusplus)
 #define HIPSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
 #else
-#define HIPSPARSE_DEPRECATED_MSG(MSG) HIPSPARSE_DEPRECATED // defined in hipsparse-export.h
+#define HIPSPARSE_DEPRECATED_MSG(MSG)
 #endif
 /// \endcond
 
