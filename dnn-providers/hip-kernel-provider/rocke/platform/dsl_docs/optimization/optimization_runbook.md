@@ -2275,6 +2275,33 @@ which knob to flip next. See §18 for the full workflow.
 | `probe_targeted_bench.py` | Per-shape latency vs baseline (Triton, etc.) | Final latency table per shape |
 | `probe_rocprof_single.py` | One-process kernel runner for rocprof | Clean rocprof attach window |
 
+#### 12.1.R 3-D NDHWC implicit-GEMM conv (gfx942)
+
+The forward (`ImplicitGemmConvSpec`), data-gradient (`ImplicitGemmConvDgradSpec`)
+and weight-gradient (`ImplicitGemmConvWgradSpec`) builders under
+`library/kernels/common/conv_implicit_gemm*.py` carry a family of 3-D K-loop
+levers, one row per group below. Every one is default-off (or `0` / `1`) and
+leaves the default kernel's code unchanged; the spec field's comment and the
+validator (`is_valid_*_spec`) give each knob's exact constraints. Step 0
+sweeps should walk these groups for a 3-D problem on gfx942. The shipped
+choice per problem lives in the pin and route tables
+([`conv_pin_tables`](../../../library/dispatch/conv_pin_tables/README.md),
+[`conv_route_tables`](../../../library/dispatch/conv_route_tables/README.md)), which also document
+how to regenerate them.
+
+| Knob group | Spec | What it does | When to change |
+|---|---|---|---|
+| Uniform-tap K loop: `uniform_k_decode`, `uk_tap_fast`, `uk_nopad`, `uk_chunk_group`, `split_addr_k_decode` (fwd); `tap_outer_k`, `tapk_*` (dgrad) | fwd, dgrad | Walk the K loop as (channel chunk, filter tap) counters held uniform, so the per-element K decode leaves the loop | When the channels per group divide `tile_k`; the plain loop stays the fallback. See [fwd](../../../library/kernels/common/README_conv_implicit_gemm.md#3-d-x-halo-input-reuse-and-k-loop-knobs-uniform_k_decode--reg_prefetch1--lds_xor), [dgrad](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md#tap-outer-k-loop-tap_outer_k) |
+| Register prefetch and LDS reuse: `reg_prefetch`, `prefetch_regs`, `lds_ahead`, `rpf_lds_barrier`, `rpf_fetch_late`, `rpf_setprio` (fwd); `prefetch_regs`, `pfr_sched` (wgrad) | fwd, wgrad | Stage the next K tile's global reads in registers ahead of the current tile's MFMAs and write them to LDS after | Latency-bound K loops with register headroom; check occupancy first (`probe_occupancy.py`). See [wgrad](../../../library/kernels/common/README_conv_implicit_gemm_wgrad.md#gfx942-k-loop-register-prefetch-packed-transpose-on-store-carried-addressing) |
+| LDS layout: `lds_xor`, `lds_xor_rowkey`, `lds_kpack_read` (fwd); `lds_kpack`, `kp_line`, `lds_bswz` (wgrad); `b_kpack` (dgrad) | fwd, dgrad, wgrad | XOR-swizzled tiles instead of the row pad, and k-packed fragment reads that serve two K steps per LDS read | When the profile shows LDS bank conflicts or LDS-read-bound MFMA issue (§12.1.F) |
+| Input-halo reuse: `uk_xhalo`, `xh_*` (fwd); `dy_halo`, `tapk_xhalo`, `xh_*` (dgrad); `xwin`, `xwin_*` (wgrad) | fwd, dgrad, wgrad | Load one input row window per tile and reuse it across the x taps instead of re-reading it per tap | Stride-1 3-D filters with several x taps. See [fwd](../../../library/kernels/common/README_conv_implicit_gemm.md#3-d-x-halo-input-reuse-and-k-loop-knobs-uniform_k_decode--reg_prefetch1--lds_xor), [dgrad](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md#dy-halo-reuse-dy_halo), [wgrad](../../../library/kernels/common/README_conv_implicit_gemm_wgrad.md#x-window-reuse-across-the-x-taps-xwin) |
+| Block ping-pong: `rpf_pingpong`, `pp_pre_mfma`, `pp_b_double`, `pp_fetch_deep`, `pp_split_fetch`, `pp_end_guard` (fwd); `tapk_pingpong`, `tapk_pp_*` (dgrad); `xwin_pp`, `xwin_groups`, `plain_pp` (wgrad) | fwd, dgrad, wgrad | Two wave groups alternate loading and MFMA work on two LDS buffers | Large tiles where loads and MFMAs do not overlap in one wave group. See [fwd](../../../library/kernels/common/README_conv_implicit_gemm.md#8-wave-block-ping-pong-k-loop-rpf_pingpong-uniform_k_decode--reg_prefetch1), [wgrad](../../../library/kernels/common/README_conv_implicit_gemm_wgrad.md#xwin-block-ping-pong-xwin_groups-xwin_pp-xwin_gn) |
+| MFMA and memory scheduling: `defer_mfma`, `defer_mfma_per_write`, `vmem_interleave`, `sched_strategy`, `no_agpr` | fwd (`no_agpr` also dgrad) | Reorder MFMAs against the LDS writes and global loads of the next tile | After the layout and prefetch levers, when ISA inspection shows waits between MFMA groups |
+| Split-K and tails: `split_k`, `split_atomic*`, `split_tail*`, `split_hybrid`, `split_det`, `split_streamk` (fwd); `pp_streamk`, `pp_boxes`, `pp_box_*` (dgrad) | fwd, dgrad | Cut the K reduction (or the tail tiles) across workgroups and fold the partials atomically, through a scratch slab, or in a fixed order (`*_det`, `pp_box_det`) | Problems whose tile count leaves CUs idle (§12.1.I); prefer the deterministic forms where run-to-run identical results are required |
+| Workgroup order: `xcd_remap`, `m_band`, `split_xcd_remap` | fwd, dgrad, wgrad | Give each XCD a contiguous run of tiles, optionally in output-plane bands, so neighbouring tiles share one L2 | Multi-XCD targets with input reuse between neighbouring M tiles (§12.1.L) |
+| Epilogue: `cshuffle_m_chunks`, `epi_lds_barriers` (fwd, dgrad); `epi_store_fast`, `epi_quad_xpose` (fwd, wgrad); `xh_dx_wmask` and the kernel identity's `dx_interior_axes` (dgrad) | fwd, dgrad, wgrad | Stage the cshuffle epilogue in M chunks to cut its LDS, and take a fast store path for full tiles. See [dgrad](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md#interior-only-dx-dx_interior-dx_interior_axes-and-the-x-halo-w-mask-xh_dx_wmask) | When the epilogue's LDS limits occupancy, or on halo-form problems |
+| Weight-gradient scratch: `ws_store`, `ws_fuse`, `ws_tree`, `ws_lc`, `ws_gred`, `sep_addr` | wgrad | How the split-K partials reach the scratch slabs and how the second stage folds them | Split wgrad problems; see [wgrad](../../../library/kernels/common/README_conv_implicit_gemm_wgrad.md#plain-store-scratch-ws_store-tag-wss1) |
+
 ### 12.2 Sweep Discipline
 
 - Sweep one family at a time.

@@ -3,4 +3,5 @@
 """Convolution AOT support: kernel identities and names, AOT build jobs, and
 the direct-conv variant registry shared by the AOT cache and the dispatcher;
 plus the split-K cost model (:mod:`kernels.conv.split_k_planner`) the conv
-split-K resolver plans with."""
+split-K resolver plans with, the implicit-GEMM helper modules (dgrad interior
+and box planning, output-plane band order) and the 3-D Winograd family."""

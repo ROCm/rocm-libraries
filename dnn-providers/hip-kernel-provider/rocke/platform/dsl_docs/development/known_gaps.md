@@ -18,9 +18,10 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green, with one exception: §5 (additive bias) covers a
-Python-engine-only feature that *is* reachable from a valid config — see that
-section for why the gate stays green anyway. They fall into three kinds:
+gate is fully green, with two exceptions: §5 (additive bias) and §11 (conv
+knobs the C++ binding refuses) cover Python-engine-only features that *are*
+reachable from a valid config — see those sections for why the gate stays green
+anyway. They fall into three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -384,6 +385,104 @@ mirrors are not maintained for attention bodies added after the port.
 
 **What closes it:** a decision to restore per-family C++ builder mirrors, or
 retiring the C engine.
+
+---
+
+## 10. 3-D Winograd convolution (`conv_winograd3d`) — Python-only kernel family
+
+**Subsystem:** `library/kernels/conv/conv_winograd3d.py` (specs, validators and
+kernel builders), `library/kernels/conv/conv_winograd3d_dropin.py` (the drop-in
+call), `library/kernels/conv/conv_winograd3d_select.py` (the plan selector),
+`library/dispatch/conv_routes.py` (the `winograd` and `padcopy_halo` routes)
+
+The 3-D Winograd family (F(2x2,3x3) on y, x with a direct 3-tap z; bf16 NDHWC,
+stride 1, 3x3x3 filter; fwd and dgrad) has **no C++ twin** of its specs,
+validators, kernel builders or plan selector; it is built and selected in Python
+only. `grep -r winograd3d library/cpp/` returns nothing. It has no parity
+emitter pair under `library/tests/parity/` and no entry in the library golden, so
+neither `run_diff` nor the golden check covers it.
+
+**Who reaches it:** opt-in callers only. Default dispatch (`algorithm="auto"`),
+the conv pin tables, the AOT jobs and the hipDNN provider never select it. The
+route table `library/dispatch/conv_route_tables/gfx942_unet3d_bf16.json` routes
+22 of its 60 `deterministic` cases to it (`winograd`: 10 fwd, 12 dgrad) and runs
+its pad copy kernel in 4 more (`padcopy_halo`); a route table is read only when a
+caller passes one to `dispatch/conv_routes.py`. The other callers are
+`Winograd3dDropin`, `benchmarks/common/benchmark_winograd3d.py`,
+`benchmarks/common/conv_route_check.py` and the tests.
+
+| What's missing | Where |
+|---|---|
+| C twins of the specs and their validators: `Winograd3dSpec` (`is_valid_spec`), `WinogradYxSpec` (`is_valid_yx_spec`, `dropin_spec_error`), `WinogradXSpec`, and the auxiliary specs (`XToC8Spec` / `XToC8RangeSpec` / `XToC8LdsSpec`, `PadCopyKernelSpec`, `YxWeightTransformSpec` / `V2Spec` / `V3Spec`, `YxAuxSpec`, `KsReduceSpec`) | `library/cpp/include/rocke/` |
+| C builders: `build_winograd_yx` and its LDS variants, `build_yx_aux`, `build_yx_frel_aux`, the weight transforms, `build_x_to_c8*`, `build_pad_copy`, `build_ks_reduce`, `build_winograd3d_fwd` | `library/cpp/instances/common/` |
+| Binding entry points (`<family>_lower_llvm` / `_serialize_ir` / `_verify`) and the matching `lower_*` wrappers | `library/cpp/bindings/`, `library/kernels/conv/engine_bridge.py` |
+| Parity coverage: `<family>_emit.{py,c}` pairs (one config per spec variant per arch; `run_diff` picks a pair up by name) and their library golden entries | `library/tests/parity/` |
+| The plan selector (`select_winograd3d`, the `TUNED_PAD1` / `TUNED_PAD011` tables) | host-only; needed in C++ only once a C++ caller (the provider) selects Winograd |
+
+**What is gated today:** the kernels are lowered by both engines through the
+family-agnostic serialized-IR path (`rocke.core.backend.lower_kernel_via_backend`),
+but nothing compares the two engines on them and no golden pins their IR. CPU:
+`library/tests/test_conv_winograd3d.py` (validators, names, grids, selector,
+route-table loading). GPU: `library/tests/test_conv_winograd3d_gpu.py` checks
+every shipped route spec against a float32 torch `conv3d` / `conv_transpose3d`
+reference, and
+`library/tests/test_conv_routes_gpu.py` checks the `winograd` route against the
+drop-in call and the reference.
+
+**Why deferred:** the family is an opt-in prototype with no C++ caller; it is
+reachable only from an explicit route table.
+
+**What closes it:** the builder, spec and validator port above, its parity
+emitters and golden entries. Required before the default dispatch, the AOT jobs
+or the provider select a Winograd route.
+
+**Sign-off:** pending; requested in #14711, the PR that adds the family.
+
+---
+
+## 11. Implicit-GEMM conv knobs the C++ binding refuses
+
+**Subsystem:** `library/cpp/bindings/rocke_library_engine_conv.cpp`
+(`conv_igemm_build_spec`, `conv_wgrad_build_spec`, `conv_dgrad_build_spec`),
+`library/kernels/common/conv_implicit_gemm.py`,
+`library/kernels/common/conv_implicit_gemm_dgrad.py`,
+`library/kernels/common/conv_implicit_gemm_wgrad.py`
+
+The C++ conv spec structs have no field for the spec values below. When a spec
+dict sets one to a non-default value, the binding refuses it with a
+`ValueError` that names the field (`refuse_unported_conv_field`,
+`refuse_non_identity_acc_epilogue`) instead of building the knob-less kernel
+under the spec's name. Nothing falls back: `engine_bridge.lower_conv_implicit_gemm`
+raises under `backend="cpp"` (the default) and under `both`. A kernel that uses
+one of them is built by the Python builder only; its IR is then lowered through
+the family-agnostic serialized-IR path like any other kernel. The default value
+of each knob builds the ported kernel, so every `run_diff` config and golden
+entry of these families is unaffected.
+
+| Spec value | Family | Why the C++ engine refuses it |
+|---|---|---|
+| `prefetch_regs`, `xh_dpp`, `a_direct`, `xh_subtile`, `pp_fetch_deep` (any non-default) | fwd (`ImplicitGemmConvSpec`) | K-loop variants added in Python only; `rocke_implicit_gemm_conv_spec_t` has no field for them |
+| non-identity `acc_epilogue` | wgrad (`WgradConvSpec`) | the C++ wgrad spec has no fused accumulator epilogue |
+| `lds_layout` (any explicit layout object) | wgrad, dgrad | the binding reads no dict form of an `LdsLayout` |
+
+**Who reaches them:** the fwd K-loop knobs are swept by the opt-in AOT grid
+(`library/kernels/conv/aot_jobs.py`, scoped by the `ROCKE_AOT_*` variables) and
+by the conv benchmarks over that cache, and are rebuilt from a kernel label by
+`rebuild_job_for_identity`. No kernel named by the conv pin or route tables uses
+one of them. The wgrad and dgrad entries are spec fields that predate this
+refusal; nothing in `library/` outside the tests sets them, and the AOT grid
+does not sweep them, so only a caller that builds such a spec by hand reaches
+them.
+
+**What is gated today:** the refusals themselves
+(`library/tests/test_conv_cpp_binding_knobs.py`,
+`library/tests/test_conv_fwd_3d_lds_knobs.py::test_python_only_knobs_refused_by_cpp`);
+the fwd knobs' validators, names and labels on CPU; their numerics on GPU
+(`library/tests/test_conv_fwd_correctness.py`, `test_conv_fwd_3d_lds_knobs.py`).
+
+**What closes it:** per knob, the field on the C++ spec struct, the emission in
+the C++ builder, the binding read in place of the refusal, and a `run_diff`
+parity config with the knob set (`library/tests/parity/conv_implicit_gemm*_emit.{py,c}`).
 
 ---
 

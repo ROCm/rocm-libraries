@@ -3534,5 +3534,207 @@ class TestConvWgradTf32(unittest.TestCase):
             )  # fmt: skip
 
 
+# ---------------------------------------------------------------------------
+# Opt-in Stage 1 epilogues that share memory across tiles / with the K loop
+# ---------------------------------------------------------------------------
+
+
+def _wgrad_epi_problem(C: int, K: int, Di: int, Hi: int, Wi: int):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(
+        N=1, Di=Di, Hi=Hi, Wi=Wi, C=C, K=K, Z=3, Y=3, X=3, sD=1, pD=1, pH=1, pW=1, dD=1
+    )
+
+
+def _wgrad_epi_spec(problem, **kw):
+    """A bf16 3-D two-stage spec with the gfx942 K-loop knobs (16x16x16)."""
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    base = dict(
+        problem=problem,
+        data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=1,
+        lds_k_pad=4,
+        split_k=2,
+        two_stage=True,
+        prefetch_regs=1,
+        lds_kpack=2,
+    )
+    base.update(kw)
+    return WgradConvSpec(**base)
+
+
+def _wgrad_epi_identity(spec, arch: str):
+    """The cache identity the benchmark's launch binds a spec's kernel by."""
+    import dataclasses as _dc
+
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    fields = {f.name for f in _dc.fields(KernelIdentity)}
+    kw = dict(
+        arch=arch,
+        direction="wgrad",
+        algorithm="implicit_gemm",
+        dtype_a="bf16",
+        dtype_b="bf16",
+        dtype_d="bf16",
+        wave_size=spec.wave_size,
+        vector_size_a=spec.vector_size_a,
+        vector_size_b=spec.vector_size_b,
+        vector_size_c=spec.vector_size_c,
+        lds_k_pad=spec.lds_k_pad,
+    )
+    for f in _dc.fields(spec):
+        if f.name in fields and f.name not in kw and f.name not in ("problem", "data"):
+            v = getattr(spec, f.name)
+            if v is not None and not _dc.is_dataclass(v):
+                kw[f.name] = v
+    return KernelIdentity(**kw)
+
+
+def _run_wgrad_epi(spec, split_k: int, reps: int, *, skew: int = 0) -> int:
+    """Launch ``spec`` ``reps`` times through the benchmark's cached-kernel
+    bind (workspace, counters, kernargs) and return how many launches gave a
+    wrong dW. ``skew`` makes wave 1 sleep after every LDS barrier, a wave
+    skew barrier-correct code does not care about."""
+    import contextlib
+
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.core.ir import IRBuilder
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    from benchmarks.common.benchmark_implicit_gemm_conv import (
+        _cached_bind,
+        _free_extras,
+    )
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        build_implicit_gemm_conv_wgrad,
+    )
+
+    @contextlib.contextmanager
+    def _skewed():
+        orig = IRBuilder.sync_lds_only
+
+        def sync(self, *a, **k):
+            orig(self, *a, **k)
+            w1 = self.cmp_eq(
+                self.div(self.thread_id_x(), self.const_i32(64)), self.const_i32(1)
+            )
+            with self.scf_if(w1):
+                for _ in range(skew):
+                    self.inline_asm("s_sleep 127", "~{memory}", [], None)
+
+        IRBuilder.sync_lds_only = sync
+        try:
+            yield
+        finally:
+            IRBuilder.sync_lds_only = orig
+
+    arch = GPU_ARCH
+    with _skewed() if skew else contextlib.nullcontext():
+        kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
+    launcher = KernelLauncher.from_artifact(compile_kernel(kernel, arch=arch))
+    p = spec.problem
+    torch.manual_seed(0)
+    X = torch.empty(p.N, p.Di, p.Hi, p.Wi, p.C).uniform_(-1, 1).to(torch.bfloat16)
+    dY = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K).uniform_(-1, 1).to(torch.bfloat16)
+    ref = torch.nn.grad.conv3d_weight(
+        X.float().permute(0, 4, 1, 2, 3),
+        (p.K, p.C, p.Z, p.Y, p.X),
+        dY.float().permute(0, 4, 1, 2, 3),
+        padding=(p.pD, p.pH, p.pW),
+    ).permute(0, 2, 3, 4, 1)
+    dW = torch.empty(p.K, p.Z, p.Y, p.X, p.C, dtype=torch.bfloat16)
+    tol = 2e-2 * float(ref.abs().max())
+    rt = Runtime()
+    bufs = [rt.alloc(t.nbytes) for t in (dY, X, dW)]
+    live: list = []
+    bad = 0
+    try:
+        rt.memcpy_h2d(bufs[0], _u8(dY), dY.nbytes)
+        rt.memcpy_h2d(bufs[1], _u8(X), X.nbytes)
+        run, _ = _cached_bind(
+            "wgrad",
+            p,
+            _wgrad_epi_identity(spec, arch),
+            {"block_size": spec.block_size},
+            rt,
+            launcher,
+            "bf16",
+            split_k,
+            tuple(int(b) for b in bufs),
+            (dY.nbytes, X.nbytes, dW.nbytes),
+            arch,
+            {},
+            KernelLauncher,
+            LaunchConfig,
+            live,
+        )
+        for _ in range(reps):
+            rt.memset(bufs[2], 0xFF, dW.nbytes)  # poison: every element is stored
+            run()
+            synchronize_and_release(0)
+            rt.memcpy_d2h(_u8(dW), bufs[2], dW.nbytes)
+            if not bool(((dW.float() - ref).abs() <= tol).all()):
+                bad += 1
+    finally:
+        _free_extras(rt, live)
+        for b in bufs:
+            rt.free(b)
+    return bad
+
+
+@unittest.skipUnless(
+    not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs a gfx942/gfx950 GPU + torch"
+)
+class TestWgradSharedMemoryEpilogues(unittest.TestCase):
+    def test_ws_fuse_edge_tiles_keep_the_first_element(self):
+        # C=24, K=72: every tile row / column has an edge tile, whose
+        # out-of-bounds elements map to slab element 0 -- tile (0, 0)'s first
+        # element, which that tile may still be accumulating. The final reader
+        # of an edge tile must not clear it. The race was intermittent (a few
+        # launches in a hundred), hence the repetitions.
+        spec = _wgrad_epi_spec(
+            _wgrad_epi_problem(24, 72, 8, 16, 16), ws_replicas=1, sep_addr=2, ws_fuse=1
+        )
+        self.assertEqual(_run_wgrad_epi(spec, 16, 200), 0)
+
+    def test_ws_lc_after_the_two_buffer_loop(self):
+        # The ws_lc tile shares LDS bytes with the K loop's tiles; the
+        # prefetch_regs=2 loop ends on its last fragment reads without a
+        # barrier. With one wave held back after every barrier, a missing
+        # barrier lets the other wave overwrite tile data still to be read.
+        p = _wgrad_epi_problem(64, 72, 6, 10, 32)
+        for pfr in (1, 2, 3):
+            with self.subTest(prefetch_regs=pfr):
+                spec = _wgrad_epi_spec(
+                    p,
+                    tile_n=192,
+                    warp_m=1,
+                    warp_n=2,
+                    ws_replicas=8,
+                    prefetch_regs=pfr,
+                    xwin=3,
+                    ws_lc=1,
+                )
+                self.assertEqual(_run_wgrad_epi(spec, 4, 3, skew=20), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

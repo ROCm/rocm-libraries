@@ -364,6 +364,56 @@ typedef struct rocke_conv_build_ctx
      * slice (z = group * ks_count + slice), and the slab base the epilogue adds
      * to every D offset. Mirrors the Python builder's `split` locals. */
     bool fwd_split;
+    /* The atomic split-K forward (Python `_split`, fwd_split_k_atomic): the
+     * slices atomic-add their partial tiles into the zeroed D; ks / ks_count
+     * follow the problem block and there is no workspace. Exclusive with
+     * fwd_split (the two-stage workspace split). */
+    bool fwd_asplit;
+    rocke_value_t* fwd_p_full_tiles; /* split_tail kernarg              */
+    rocke_value_t* fwd_is_full; /* split_tail: tile runs unsplit         */
+    rocke_value_t* fwd_p_sk_flags; /* split_det counters                */
+    rocke_value_t* fwd_szf_idx; /* split_zero_first: the tile's flag word (NULL off) */
+    rocke_value_t* fwd_p_sk_partials; /* split_det f32 partial slots    */
+    rocke_value_t* fwd_skx_slice; /* split_xcd_remap: the remapped slice  */
+    /* split_streamk / split_hybrid segment loop (open across the K loop and
+     * the epilogue) and its per-segment state. */
+    bool fsk_open;
+    rocke_value_t* fsk_k_lo;
+    rocke_value_t* fsk_k_hi;
+    rocke_value_t* fsk_tile;
+    rocke_value_t* shy_S;
+    rocke_value_t* shy_H;
+    rocke_value_t* shy_s;
+    rocke_value_t* shy_prim;
+    /* wgrad: the logical split-K slice (Python slice_id, after m_band). */
+    rocke_value_t* wgrad_slice_id;
+    /* wgrad sep_addr (1/2): the separable dY / X descriptors; wg_inc: the
+     * sep_addr=2 carried-address state (wgrad.cpp), NULL off. */
+    int wg_sep_addr;
+    bool wg_is3d; /* the true (not stub) wgrad problem is 3-D */
+    /* wgrad xwin: groups per workgroup, the group index (SGPR), the gn
+     * virtual tile column, the logical slice for the workspace slab, the
+     * per-group LDS tile rows, and the n_base of the workspace epilogue. */
+    int wg_xg;
+    rocke_value_t* wg_xg_idx;
+    rocke_value_t* wg_gn_vx;
+    rocke_value_t* wg_z_virtual;
+    int wg_a_buf_rows;
+    int wg_b_buf_rows;
+    rocke_value_t* wg_xw_nb0;
+    int wg_xw_nsub;
+    /* rpf_fetch_late: called once after the MFMA phase's first fragment reads. */
+    void (*after_first_reads)(void* user);
+    void* after_first_reads_user;
+    /* dgrad 3-D kernargs (Python params, is_3d). */
+    rocke_value_t* p_W_stride_z;
+    rocke_value_t* p_magic_m_Di_mult;
+    rocke_value_t* p_magic_m_Di_shift;
+    rocke_value_t* p_dX_stride_di;
+    void* wg_inc;
+    /* wgrad emit_mfma_phase a_row_off / b_row_off (prefetch_regs=2), NULL off. */
+    rocke_value_t* wg_a_row_off;
+    rocke_value_t* wg_b_row_off;
     rocke_value_t* fwd_p_ws;
     rocke_value_t* fwd_p_ws_bytes;
     rocke_value_t* fwd_p_ks;
@@ -591,7 +641,58 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* split_ystep; /* dH * A_stride_hi */
     rocke_value_t* split_xstep; /* dW * A_stride_wi */
     rocke_value_t* split_group_base; /* group_idx * cpg (c_gm merged), NULL when ungrouped */
+    /* 3-D split addressing (Python: the `if split_ab and p.is_3d:` block): the
+     * depth origin's -pD and one filter-depth step dD * A_stride_di. NULL on 2-D. */
+    rocke_value_t* split_neg_pD;
+    rocke_value_t* split_zstep;
+    /* _emit_fwd_kloops' c1 = b.const_i32(1) (the uniform-tap advance reads it). */
+    rocke_value_t* uk_c1;
+    /* emit_mfma_phase modes of the rpf_pingpong loop (all off by default):
+     * pp_read collects the tile's fragments (no MFMA), pp_use runs MFMAs
+     * [pp_i0, pp_i1) of collected fragments; _pp_part's b_only / b_from /
+     * kk_from narrow the reads. vmi_pending: buffer_loads the next MFMA phase
+     * spreads over its MFMAs (vmem_interleave). */
+    struct rocke_conv_frag* pp_read;
+    int pp_read_n;
+    /* defer_mfma (Python _mfma_defer): while defer_on, emit_mfma_phase reads
+     * the fragments of its last defer_n kk steps into defer_frags and leaves
+     * their MFMAs to the caller. */
+    bool defer_on;
+    int defer_n;
+    struct rocke_conv_frag* defer_frags;
+    int defer_cnt;
+    const struct rocke_conv_frag* pp_use;
+    int pp_i0;
+    int pp_i1;
+    bool pp_b_only;
+    int pp_b_from_p1; /* _pp_part["b_from"] + 1; 0 => None */
+    int pp_kk_from;
+    int vmi_pending;
+    /* x-halo emit_mfma_phase arguments (NULL / 0 off): a_lds_rows, b_row_off,
+     * a_shift_prev (the previous tap's A fragments per kk) and a_rec (this
+     * tap's, recorded); xa_ring_off: the xh_yring region base row. */
+    rocke_value_t** xh_a_rows;
+    int xh_b_row_off;
+    rocke_value_t* (*xh_prev)[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* (*xh_rec)[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* xa_ring_off;
+    /* xh_stride_m: whether this workgroup ran the x-halo loop (epilogue map). */
+    rocke_value_t* xsm_ok;
+    /* _fetch_part (pp_split_fetch): skip an operand's global reads. */
+    bool fetch_skip_a;
+    bool fetch_skip_b;
+    /* _fetch_part["hi"] (pp_end_guard): the uniform-tap fetch's end bound. */
+    rocke_value_t* fetch_hi;
 } rocke_conv_build_ctx_t;
+
+/* One kk step's MFMA operands (Python load_frags' (a_rows, b_cols)). */
+typedef struct rocke_conv_frag
+{
+    rocke_value_t* a[ROCKE_CONV_MAX_ACCS];
+    int na;
+    rocke_value_t* b[ROCKE_CONV_MAX_ACCS];
+    int nb;
+} rocke_conv_frag_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend
  * selects v_mul_u32_u24. Only for terms the host bounds (conv_args.MUL24_REDUCTION_LIMIT). */
@@ -649,6 +750,37 @@ rocke_value_t* rocke_conv_emit_mfma(rocke_ir_builder_t* b,
                                     rocke_value_t* bv,
                                     rocke_value_t* c);
 
+/* fwd_split_k_atomic(spec): split_k > 1 on wave64 MFMA, on a 3-D problem or
+ * with split_atomic -- the atomic split-K forward rather than the two-stage
+ * workspace split. */
+bool rocke_conv_fwd_split_k_atomic(const rocke_implicit_gemm_conv_spec_t* s);
+/* The split_atomic rule of fwd_split_k_conflict: false with Python's reason when
+ * split_atomic is set off a 2-D wave64 split. */
+bool rocke_conv_fwd_split_atomic_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                    char* reason,
+                                    size_t reason_cap);
+/* Python _fxd_wave_rows / _xhalo_a_rows / _xhalo_b_rows. */
+int rocke_conv_fxd_wave_rows(const rocke_implicit_gemm_conv_spec_t* s);
+/* Python fwd_split_det_slab_m_chunks: split_det 3 stages its f32 partial tile
+ * through LDS in this many row slabs (cshuffle_m_chunks, doubled while a slab
+ * exceeds 32 KB and the warp's M atoms still divide). Shared by the epilogue
+ * and the LDS budget. */
+int rocke_conv_fwd_split_det_slab_m_chunks(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_conv_xhalo_a_rows(const rocke_implicit_gemm_conv_spec_t* s);
+int rocke_conv_xhalo_b_rows(const rocke_implicit_gemm_conv_spec_t* s);
+
+/* fwd_split_k_conflict(spec) for the wave64 MFMA atomic split-K forward (the
+ * knobs the C port carries): false with the reason when Python's returns a
+ * non-empty string. */
+bool rocke_conv_fwd_asplit_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                       char* reason,
+                                       size_t reason_cap);
+/* _fwd_kloop_conflict(spec) for the knobs the C port carries (xcd_remap,
+ * m_band): false with the reason when Python's returns a non-empty string. */
+bool rocke_conv_fwd_kloop_conflict_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                      char* reason,
+                                      size_t reason_cap);
+
 /* _ir_dtype(dtype): "fp16" -> f16, "bf16" -> bf16, "fp32" -> f32. Any other
  * spelling sets the builder's ValueError (a TF32 spelling with the "compute
  * mode, not a storage dtype" text) and returns NULL. */
@@ -673,6 +805,18 @@ rocke_value_t* rocke_conv_emit_smem_load(rocke_ir_builder_t* b,
                                          rocke_value_t* col,
                                          int n,
                                          const rocke_type_t* smem_dtype);
+
+/* rocke_conv_emit_smem_load with an explicit LDS element type (NULL / f16: the
+ * f16 path); the name the 3-D K-loop twins use. */
+static inline rocke_value_t* rocke_conv_emit_smem_load_dt(rocke_ir_builder_t* b,
+                                                          rocke_value_t* smem,
+                                                          rocke_value_t* row,
+                                                          rocke_value_t* col,
+                                                          int n,
+                                                          const rocke_type_t* dtype)
+{
+    return rocke_conv_emit_smem_load(b, smem, row, col, n, dtype);
+}
 
 /* _to_mma_operand(b, frag, data): hand an fp32 LDS fragment to a TF32 MMA as
  * vec<tf32xN> (a bitcast, no rounding). Every non-TF32 spec gets frag back. */
@@ -818,6 +962,24 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
  * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
 
+/* The reg_prefetch K loops (Python _emit_fwd_kloops, the plain "k" loop):
+ * reg_prefetch 1 (one LDS buffer) and 2 (x2-unrolled ping-pong + tail), with
+ * the lds_xor stores. Writes ctx->final_accs. */
+void rocke_conv_emit_fwd_kloops(rocke_conv_build_ctx_t* ctx);
+
+/* Python _eqx_chan: the B LDS row's output channel (epi_quad_xpose 2/3/4). */
+rocke_value_t* rocke_conv_eqx_chan(rocke_conv_build_ctx_t* ctx, rocke_value_t* r);
+
+/* lds_xor column of tile element (row, col) (Python lds_swz). */
+rocke_value_t*
+    rocke_conv_lds_swz(rocke_conv_build_ctx_t* ctx, rocke_value_t* row, rocke_value_t* col);
+/* Python _xa (xh_stride_m): the LDS (row, col) of x-halo A element (row, col). */
+void rocke_conv_xa(rocke_conv_build_ctx_t* ctx,
+                   rocke_value_t* row,
+                   rocke_value_t* col,
+                   rocke_value_t** prow_out,
+                   rocke_value_t** col_out);
+
 /* async_dma branch (lines 1320-1347): SoftwarePipeline.run_ping_pong over the
  * AsyncTileLoader path. (SoftwarePipeline is a peer port; the driver reproduces
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
@@ -883,6 +1045,10 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
 
 /* _emit_cshuffle_epilogue(b, spec, accs[n], grid, d_rsrc, ir_d_pitch_pw): LDS-staged
  * cshuffle store via CShuffleEpilogue.from_grid + the D descriptor addr_fn. */
+/* split_zero_first: slice 0 zeroes its D tile and raises the tile's flag
+ * (Python _szf_idx block, emitted before the K loops). */
+void rocke_conv_emit_fwd_szf_zero(rocke_conv_build_ctx_t* ctx);
+
 void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_implicit_gemm_conv_spec_t* spec,
                                        rocke_value_t* const* accs,
@@ -897,7 +1063,11 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* slab_base,
                                        const char* out_dtype,
                                        rocke_value_t* bound_m,
-                                       rocke_value_t* bound_n);
+                                       rocke_value_t* bound_n,
+                                       /* atomic split: D and its row pitch (NULL => store) */
+                                       rocke_value_t* atomic_d,
+                                       rocke_value_t* atomic_row_pitch,
+                                       struct rocke_conv_build_ctx* sctx);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

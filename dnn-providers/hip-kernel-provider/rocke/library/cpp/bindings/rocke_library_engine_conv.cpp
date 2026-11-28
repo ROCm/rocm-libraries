@@ -26,13 +26,16 @@
 #include <cstring>
 #include <deque>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
+#include "conv_knob_fields.hpp"
 #include "family_glue.hpp"
 
 extern "C" {
 #include "rocke/arch_domain.h"
 #include "rocke/arena.h"
+#include "rocke/instance_conv_dgrad_interior.h"
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_pp_mfma.h"
@@ -49,6 +52,7 @@ extern "C" {
 #include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/instance_conv_fwd_split_k_reduce.h"
 #include "rocke/instance_conv_implicit_gemm.h"
+#include "rocke/instance_conv_implicit_gemm_dgrad.h"
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
 #include "rocke/instance_deep_fused_conv_pool.h"
@@ -72,6 +76,38 @@ using rocke_bind::verify_kernel;
 
 /* ======================= conv: shared problem ======================= */
 
+/* A conv-spec dict key the C++ engine has no field for: a non-default value
+ * would be dropped and the engine would build a different kernel under the
+ * spec's name, so refuse it (ValueError) instead. */
+void refuse_unported_conv_field(const py::dict& d, const char* family, const char* key)
+{
+    if(!d.contains(key))
+        return;
+    py::object v = d[key];
+    if(v.is_none() || (py::isinstance<py::bool_>(v) && !v.cast<bool>())
+       || (py::isinstance<py::int_>(v) && v.cast<long long>() == 0))
+        return;
+    throw py::value_error(std::string("rocke_library_engine: ") + family + " field '" + key
+                          + "' has no C++ engine twin (non-default value)");
+}
+
+/* A conv-spec dict key the spec builder does not read at all (a dataclass field
+ * the binding was never taught, or a typo): refused (ValueError) instead of
+ * building the default kernel under the spec's name. ``known`` is every key the
+ * family's builder reads or refuses by name. */
+void refuse_unknown_conv_keys(const py::dict& d,
+                              const char* family,
+                              const std::unordered_set<std::string>& known)
+{
+    for(const auto& kv : d)
+    {
+        const std::string key = py::str(kv.first);
+        if(known.count(key) == 0)
+            throw py::value_error(std::string("rocke_library_engine: ") + family
+                                  + " has no spec field '" + key + "'");
+    }
+}
+
 /* Fill a rocke_conv_problem_t from a "problem" sub-dict (used by
  * conv_implicit_gemm and img2col, which share the same field set). */
 void fill_conv_problem(rocke_conv_problem_t* p, const py::dict& d)
@@ -90,12 +126,22 @@ void fill_conv_problem(rocke_conv_problem_t* p, const py::dict& d)
     p->dH = dict_int(d, "dH", p->dH);
     p->dW = dict_int(d, "dW", p->dW);
     p->groups = dict_int(d, "groups", p->groups);
-    p->is_3d = dict_bool(d, "is_3d", p->is_3d);
-    p->Di = dict_int(d, "Di", p->Di);
-    p->Z = dict_int(d, "Z", p->Z);
-    p->sD = dict_int(d, "sD", p->sD);
-    p->pD = dict_int(d, "pD", p->pD);
-    p->dD = dict_int(d, "dD", p->dD);
+    /* The depth fields: None (a 2-D dataclasses.asdict(ConvProblem)) keeps
+     * the 2-D default; a set depth makes the problem 3-D unless the dict says
+     * otherwise (asdict has no is_3d key). */
+    bool has_depth = false;
+    auto depth = [&](const char* key, int dflt) -> int {
+        if(!d.contains(key) || d[key].is_none())
+            return dflt;
+        has_depth = true;
+        return d[key].cast<int>();
+    };
+    p->Di = depth("Di", p->Di);
+    p->Z = depth("Z", p->Z);
+    p->sD = depth("sD", p->sD);
+    p->pD = depth("pD", p->pD);
+    p->dD = depth("dD", p->dD);
+    p->is_3d = dict_bool(d, "is_3d", p->is_3d || has_depth);
 }
 
 /* ========================= conv_implicit_gemm ======================= */
@@ -119,6 +165,25 @@ void fill_conv_acc_epilogue(rocke_conv_acc_epilogue_t* e, const py::dict& d)
         e->has_clamp_max = true;
         e->clamp_max = d["clamp_max"].cast<double>();
     }
+}
+
+/* acc_epilogue on a family whose C++ spec cannot carry a fused epilogue into
+ * its kernel: absent, None or an identity dict is the default; any other
+ * epilogue would be dropped (the default kernel under the spec's name), so it
+ * is refused (ValueError). */
+void refuse_non_identity_acc_epilogue(const py::dict& d, const char* family)
+{
+    if(!d.contains("acc_epilogue") || d["acc_epilogue"].is_none())
+        return;
+    if(!py::isinstance<py::dict>(d["acc_epilogue"]))
+        throw py::value_error(std::string("rocke_library_engine: ") + family
+                              + " field 'acc_epilogue' must be a dict");
+    rocke_conv_acc_epilogue_t e = rocke_conv_acc_epilogue_default();
+    fill_conv_acc_epilogue(&e, d["acc_epilogue"].cast<py::dict>());
+    if(!rocke_conv_acc_epilogue_is_identity(&e))
+        throw py::value_error(std::string("rocke_library_engine: ") + family
+                              + " field 'acc_epilogue' has no C++ engine twin "
+                                "(non-identity epilogue)");
 }
 
 rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
@@ -214,6 +279,15 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
         s.has_vector_size_c = true;
         s.vector_size_c = d["vector_size_c"].cast<int>();
     }
+    /* The K-loop / epilogue knobs (absent keys keep the defaults). */
+#define ROCKE_KNOB_INT(f) s.f = dict_int(d, #f, s.f);
+#define ROCKE_KNOB_BOOL(f) s.f = dict_bool(d, #f, s.f);
+    ROCKE_CONV_FWD_KNOB_FIELDS(ROCKE_KNOB_INT, ROCKE_KNOB_BOOL)
+    s.cshuffle_no_alias = dict_bool(d, "cshuffle_no_alias", s.cshuffle_no_alias);
+#undef ROCKE_KNOB_INT
+#undef ROCKE_KNOB_BOOL
+    for(const char* key : {"prefetch_regs", "xh_dpp", "a_direct", "xh_subtile", "pp_fetch_deep"})
+        refuse_unported_conv_field(d, "conv_implicit_gemm", key);
     return s;
 }
 
@@ -2012,7 +2086,67 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
             s.pipeline = keep(v);
         if(dict_str(d, "epilogue", v))
             s.epilogue = keep(v);
+        if(dict_str(d, "dtype_acc", v))
+            s.dtype_acc = keep(v);
     }
+#define ROCKE_KNOB_INT(f) s.f = dict_int(d, #f, s.f);
+#define ROCKE_KNOB_BOOL(f) s.f = dict_bool(d, #f, s.f);
+    ROCKE_CONV_WGRAD_KNOB_FIELDS(ROCKE_KNOB_INT, ROCKE_KNOB_BOOL)
+#undef ROCKE_KNOB_INT
+#undef ROCKE_KNOB_BOOL
+    /* The C++ wgrad spec has no fused accumulator epilogue and no explicit
+     * LDS layout object: refuse what it would drop. */
+    refuse_non_identity_acc_epilogue(d, "conv_wgrad");
+    refuse_unported_conv_field(d, "conv_wgrad", "lds_layout");
+    static const std::unordered_set<std::string> known = [] {
+        std::unordered_set<std::string> k = {"problem",
+                                             "tile_m",
+                                             "tile_n",
+                                             "tile_k",
+                                             "warp_m",
+                                             "warp_n",
+                                             "warp_tile_m",
+                                             "warp_tile_n",
+                                             "warp_tile_k",
+                                             "wave_size",
+                                             "split_k",
+                                             "two_stage",
+                                             "ws_replicas",
+                                             "prefetch_addr",
+                                             "register_prefetch",
+                                             "prefetch_global_regs",
+                                             "streamk_ctas",
+                                             "group_merge",
+                                             "async_dma",
+                                             "unroll_k",
+                                             "lds_k_outer",
+                                             "chiplet_swizzle",
+                                             "chiplet_wgm",
+                                             "chiplet_num_xcds",
+                                             "chiplet_chunk_size",
+                                             "lds_k_pad",
+                                             "waves_per_eu",
+                                             "vector_size_a",
+                                             "vector_size_b",
+                                             "vector_size_c",
+                                             "name",
+                                             "streamk",
+                                             "streamk_reduction",
+                                             "dtype_a",
+                                             "dtype_b",
+                                             "dtype_d",
+                                             "mma_dtype",
+                                             "pipeline",
+                                             "epilogue",
+                                             "dtype_acc",
+                                             "acc_epilogue",
+                                             "lds_layout"};
+#define ROCKE_KNOB_KEY(f) k.insert(#f);
+        ROCKE_CONV_WGRAD_KNOB_FIELDS(ROCKE_KNOB_KEY, ROCKE_KNOB_KEY)
+#undef ROCKE_KNOB_KEY
+        return k;
+    }();
+    refuse_unknown_conv_keys(d, "conv_wgrad", known);
     return s;
 }
 
@@ -2058,6 +2192,306 @@ std::vector<std::string> conv_wgrad_verify(const py::dict& d, const std::string&
                              rocke_build_implicit_gemm_conv_wgrad_new(&b, &s, arch.c_str()));
 }
 
+/* =================== conv_implicit_gemm_dgrad =================== */
+
+rocke_dgrad_conv_spec_t conv_dgrad_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_dgrad_conv_spec_t s = rocke_dgrad_conv_spec_default();
+    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+        fill_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "pipeline", v))
+            s.pipeline = keep(v);
+        if(dict_str(d, "epilogue", v))
+            s.epilogue = keep(v);
+        if(dict_str(d, "dtype_a", v))
+            s.dtype_a = keep(v);
+        if(dict_str(d, "dtype_b", v))
+            s.dtype_b = keep(v);
+        if(dict_str(d, "dtype_d", v))
+            s.dtype_d = keep(v);
+        if(dict_str(d, "dtype_acc", v))
+            s.dtype_acc = keep(v);
+        /* ConvDataSpec.mma_dtype: absent or None keeps the NULL default. */
+        if(dict_str(d, "mma_dtype", v))
+            s.mma_dtype = keep(v);
+    }
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.warp_m = dict_int(d, "warp_m", s.warp_m);
+    s.warp_n = dict_int(d, "warp_n", s.warp_n);
+    s.warp_tile_m = dict_int(d, "warp_tile_m", s.warp_tile_m);
+    s.warp_tile_n = dict_int(d, "warp_tile_n", s.warp_tile_n);
+    s.warp_tile_k = dict_int(d, "warp_tile_k", s.warp_tile_k);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.async_dma = dict_bool(d, "async_dma", s.async_dma);
+    s.unroll_k = dict_bool(d, "unroll_k", s.unroll_k);
+    s.lds_k_outer = dict_bool(d, "lds_k_outer", s.lds_k_outer);
+    s.chiplet_swizzle = dict_bool(d, "chiplet_swizzle", s.chiplet_swizzle);
+    s.chiplet_wgm = dict_int(d, "chiplet_wgm", s.chiplet_wgm);
+    s.chiplet_num_xcds = dict_int(d, "chiplet_num_xcds", s.chiplet_num_xcds);
+    s.chiplet_chunk_size = dict_int(d, "chiplet_chunk_size", s.chiplet_chunk_size);
+    s.split_k = dict_int(d, "split_k", s.split_k);
+    s.num_load_waves = dict_int(d, "num_load_waves", s.num_load_waves);
+    s.max_sub_gemms = dict_int(d, "max_sub_gemms", s.max_sub_gemms);
+    s.uniform_k_decode = dict_bool(d, "uniform_k_decode", s.uniform_k_decode);
+    s.patch = dict_bool(d, "patch", s.patch);
+    s.tap_outer_k = dict_bool(d, "tap_outer_k", s.tap_outer_k);
+    s.xcd_tile_order = dict_bool(d, "xcd_tile_order", s.xcd_tile_order);
+    s.dy_halo = dict_int(d, "dy_halo", s.dy_halo);
+    s.dy_halo_setprio = dict_int(d, "dy_halo_setprio", s.dy_halo_setprio);
+    s.dy_halo_kouter_pad = dict_int(d, "dy_halo_kouter_pad", s.dy_halo_kouter_pad);
+    s.halo_max_wo = dict_int(d, "halo_max_wo", s.halo_max_wo);
+    if(d.contains("lds_k_pad") && !d["lds_k_pad"].is_none())
+    {
+        s.has_lds_k_pad = true;
+        s.lds_k_pad = d["lds_k_pad"].cast<int>();
+    }
+    if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
+    {
+        s.has_waves_per_eu = true;
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
+    }
+    if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
+    {
+        s.has_vector_size_a = true;
+        s.vector_size_a = d["vector_size_a"].cast<int>();
+    }
+    if(d.contains("vector_size_b") && !d["vector_size_b"].is_none())
+    {
+        s.has_vector_size_b = true;
+        s.vector_size_b = d["vector_size_b"].cast<int>();
+    }
+    if(d.contains("vector_size_c") && !d["vector_size_c"].is_none())
+    {
+        s.has_vector_size_c = true;
+        s.vector_size_c = d["vector_size_c"].cast<int>();
+    }
+#define ROCKE_KNOB_INT(f) s.f = dict_int(d, #f, s.f);
+#define ROCKE_KNOB_BOOL(f) s.f = dict_bool(d, #f, s.f);
+    ROCKE_CONV_DGRAD_KNOB_FIELDS(ROCKE_KNOB_INT, ROCKE_KNOB_BOOL)
+#undef ROCKE_KNOB_INT
+#undef ROCKE_KNOB_BOOL
+    s.cshuffle_no_alias = dict_bool(d, "cshuffle_no_alias", s.cshuffle_no_alias);
+    if(d.contains("acc_epilogue") && !d["acc_epilogue"].is_none())
+    {
+        if(!py::isinstance<py::dict>(d["acc_epilogue"]))
+            throw py::value_error("rocke_library_engine: conv_dgrad field 'acc_epilogue' "
+                                  "must be a dict");
+        fill_conv_acc_epilogue(&s.acc_epilogue, d["acc_epilogue"].cast<py::dict>());
+    }
+    /* An explicit LDS layout object has no dict form the binding reads. */
+    refuse_unported_conv_field(d, "conv_dgrad", "lds_layout");
+    static const std::unordered_set<std::string> known = [] {
+        std::unordered_set<std::string> k = {"problem",
+                                             "name",
+                                             "pipeline",
+                                             "epilogue",
+                                             "dtype_a",
+                                             "dtype_b",
+                                             "dtype_d",
+                                             "dtype_acc",
+                                             "mma_dtype",
+                                             "tile_m",
+                                             "tile_n",
+                                             "tile_k",
+                                             "warp_m",
+                                             "warp_n",
+                                             "warp_tile_m",
+                                             "warp_tile_n",
+                                             "warp_tile_k",
+                                             "wave_size",
+                                             "async_dma",
+                                             "unroll_k",
+                                             "lds_k_outer",
+                                             "chiplet_swizzle",
+                                             "chiplet_wgm",
+                                             "chiplet_num_xcds",
+                                             "chiplet_chunk_size",
+                                             "split_k",
+                                             "num_load_waves",
+                                             "max_sub_gemms",
+                                             "uniform_k_decode",
+                                             "patch",
+                                             "tap_outer_k",
+                                             "xcd_tile_order",
+                                             "dy_halo",
+                                             "dy_halo_setprio",
+                                             "dy_halo_kouter_pad",
+                                             "halo_max_wo",
+                                             "lds_k_pad",
+                                             "waves_per_eu",
+                                             "vector_size_a",
+                                             "vector_size_b",
+                                             "vector_size_c",
+                                             "cshuffle_no_alias",
+                                             "acc_epilogue",
+                                             "lds_layout"};
+#define ROCKE_KNOB_KEY(f) k.insert(#f);
+        ROCKE_CONV_DGRAD_KNOB_FIELDS(ROCKE_KNOB_KEY, ROCKE_KNOB_KEY)
+#undef ROCKE_KNOB_KEY
+        return k;
+    }();
+    refuse_unknown_conv_keys(d, "conv_dgrad", known);
+    return s;
+}
+
+std::string conv_dgrad_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_conv_spec_t s = conv_dgrad_build_spec(d, store);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_implicit_gemm_conv_dgrad_new(&b, &s, arch.c_str());
+    if(!k || !rocke_ir_builder_ok(&b))
+    {
+        std::string msg = std::string("rocke_library_engine.conv_dgrad_lower_llvm build failed: ")
+                          + rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
+    guard.reset();
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_dgrad_lower_llvm");
+}
+
+std::string conv_dgrad_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_dgrad_serialize_ir",
+                                rocke_dgrad_conv_spec_t,
+                                conv_dgrad_build_spec,
+                                rocke_build_implicit_gemm_conv_dgrad_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_dgrad_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_dgrad_verify",
+                             rocke_dgrad_conv_spec_t,
+                             conv_dgrad_build_spec,
+                             rocke_build_implicit_gemm_conv_dgrad_new(&b, &s, arch.c_str()));
+}
+
+/* ============ dgrad interior-only dX (dx_interior) + shell zero-fill ============ */
+
+py::dict conv_problem_to_py(const rocke_conv_problem_t& p)
+{
+    py::dict d;
+    d["N"] = p.N;
+    d["Hi"] = p.Hi;
+    d["Wi"] = p.Wi;
+    d["C"] = p.C;
+    d["K"] = p.K;
+    d["Y"] = p.Y;
+    d["X"] = p.X;
+    d["sH"] = p.sH;
+    d["sW"] = p.sW;
+    d["pH"] = p.pH;
+    d["pW"] = p.pW;
+    d["dH"] = p.dH;
+    d["dW"] = p.dW;
+    d["groups"] = p.groups;
+    if(p.is_3d)
+    {
+        d["Di"] = p.Di;
+        d["Z"] = p.Z;
+        d["sD"] = p.sD;
+        d["pD"] = p.pD;
+        d["dD"] = p.dD;
+    }
+    return d;
+}
+
+rocke_conv_problem_t conv_problem_from_py(const py::dict& d)
+{
+    rocke_conv_problem_t p = rocke_conv_problem_default(1, 1, 1, 1, 1, 1, 1);
+    fill_conv_problem(&p, d);
+    return p;
+}
+
+/* The dX kernarg dict of a view launch (Python interior_view_dx / wmask_view):
+ * p_dX_stride_di only for a 3-D problem. */
+py::dict dx_view_to_py(const rocke_dgrad_dx_view_t& v, bool is_3d)
+{
+    py::dict s;
+    s["p_dX_stride_n"] = v.stride_n;
+    s["p_dX_stride_hi"] = v.stride_hi;
+    s["p_dX_stride_wi"] = v.stride_wi;
+    if(is_3d)
+        s["p_dX_stride_di"] = v.stride_di;
+    return s;
+}
+
+rocke_dgrad_halo_zero_spec_t halo_zero_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_dgrad_halo_zero_spec_t s = rocke_dgrad_halo_zero_spec_default();
+    s.block = dict_int(d, "block", s.block);
+    std::string v;
+    if(dict_str(d, "name", v))
+    {
+        store.push_back(v);
+        s.name = store.back().c_str();
+    }
+    return s;
+}
+
+std::string conv_dgrad_halo_zero_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_halo_zero_spec_t s = halo_zero_build_spec(d, store);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_dgrad_halo_zero_new(&b, &s);
+    if(!k || !rocke_ir_builder_ok(&b))
+    {
+        std::string msg
+            = std::string("rocke_library_engine.conv_dgrad_halo_zero_lower_llvm build failed: ")
+              + rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
+    guard.reset();
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_dgrad_halo_zero_lower_llvm");
+}
+
+std::string conv_dgrad_halo_zero_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_dgrad_halo_zero_serialize_ir",
+                                rocke_dgrad_halo_zero_spec_t,
+                                halo_zero_build_spec,
+                                rocke_build_dgrad_halo_zero_new(&b, &s));
+}
+
+std::vector<std::string> conv_dgrad_halo_zero_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_dgrad_halo_zero_verify",
+                             rocke_dgrad_halo_zero_spec_t,
+                             halo_zero_build_spec,
+                             rocke_build_dgrad_halo_zero_new(&b, &s));
+}
+
 /* =================== conv_wgrad_workspace_reduce (Stage 2) ================ */
 
 rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
@@ -2087,6 +2521,31 @@ rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
         if(dict_str(d, "problem_short", v))
             s.problem_short = keep(v);
     }
+    /* The vector / looped fold knobs: dropped, a vec = 4 dict would build the
+     * scalar fold (covering a quarter of the vec grid's dW), a ws_bf16 one
+     * would read bf16 slabs as f32 and a rezero one would leave the scratch
+     * dirty while the launcher skips its clear. */
+#define ROCKE_KNOB_INT(f) s.f = dict_int(d, #f, s.f);
+#define ROCKE_KNOB_BOOL(f) s.f = dict_bool(d, #f, s.f);
+    ROCKE_CONV_WGRAD_REDUCE_KNOB_FIELDS(ROCKE_KNOB_INT, ROCKE_KNOB_BOOL)
+#undef ROCKE_KNOB_INT
+#undef ROCKE_KNOB_BOOL
+    static const std::unordered_set<std::string> known = [] {
+        std::unordered_set<std::string> k = {"tile_m",
+                                             "tile_n",
+                                             "wg_M",
+                                             "wg_N",
+                                             "groups",
+                                             "ws_replicas",
+                                             "dtype_d",
+                                             "name",
+                                             "problem_short"};
+#define ROCKE_KNOB_KEY(f) k.insert(#f);
+        ROCKE_CONV_WGRAD_REDUCE_KNOB_FIELDS(ROCKE_KNOB_KEY, ROCKE_KNOB_KEY)
+#undef ROCKE_KNOB_KEY
+        return k;
+    }();
+    refuse_unknown_conv_keys(d, "conv_wgrad_reduce", known);
     return s;
 }
 
@@ -2341,11 +2800,141 @@ void register_conv(py::module_& m)
 
     /* ---- wgrad two-stage family ---- */
     reg3("conv_wgrad", conv_wgrad_lower_llvm, conv_wgrad_serialize_ir, conv_wgrad_verify);
-    /* conv_wgrad_reduce is used by the byte-identity gate
-     * (platform/tools/check_byte_identity.py) and by external callers driving
-     * Stage 2 via the Python engine API directly.  The benchmark drives Stage 2
-     * via the Python instance layer (rocke.instances.common.conv_wgrad_workspace_reduce),
-     * not through this binding, so the registration may appear unused in that context. */
+    m.def(
+        "conv_implicit_gemm_is_valid_spec",
+        [](const py::dict& d, const std::string& arch) -> py::tuple {
+            const char* a = require_arch(arch);
+            std::deque<std::string> store;
+            rocke_implicit_gemm_conv_spec_t s = conv_igemm_build_spec(d, store);
+            char reason[1024] = {0};
+            const bool ok = rocke_implicit_gemm_conv_is_valid_spec(&s, a, reason, sizeof(reason));
+            return py::make_tuple(ok, ok ? std::string("ok") : std::string(reason));
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "C port of the fwd is_valid_spec: (ok, reason), reason 'ok' when accepted.");
+    /* ---- dgrad interior-only dX (launch-time dx_interior) ---- */
+    reg3("conv_dgrad_halo_zero",
+         conv_dgrad_halo_zero_lower_llvm,
+         conv_dgrad_halo_zero_serialize_ir,
+         conv_dgrad_halo_zero_verify);
+    m.def(
+        "conv_dgrad_interior_view",
+        [](const py::dict& problem, bool keep_w, int axes) -> py::dict {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            rocke_conv_problem_t v = rocke_dgrad_interior_view_problem(&p, keep_w, axes);
+            rocke_dgrad_dx_view_t dx;
+            rocke_dgrad_interior_view_dx(&p, keep_w, axes, &dx);
+            py::dict out;
+            out["problem"] = conv_problem_to_py(v);
+            out["dx_offset"] = dx.offset;
+            out["dx_strides"] = dx_view_to_py(dx, p.is_3d);
+            return out;
+        },
+        py::arg("problem"),
+        py::arg("keep_w"),
+        py::arg("axes"),
+        "C port of interior_view_problem + interior_view_dx: {problem, dx_offset, dx_strides}.");
+    m.def(
+        "conv_dgrad_wmask_view",
+        [](const py::dict& problem) -> py::dict {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            rocke_conv_problem_t v;
+            rocke_dgrad_dx_view_t dx;
+            rocke_dgrad_wmask_view(&p, &v, &dx);
+            py::dict out;
+            out["problem"] = conv_problem_to_py(v);
+            out["dx_offset"] = dx.offset;
+            out["dx_strides"] = dx_view_to_py(dx, p.is_3d);
+            return out;
+        },
+        py::arg("problem"),
+        "C port of wmask_view: {problem, dx_offset, dx_strides}.");
+    m.def(
+        "conv_dgrad_dx_interior_problem_ok",
+        [](const py::dict& problem, int mask) -> py::tuple {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            char reason[256] = {0};
+            const bool ok = rocke_dgrad_dx_interior_problem_ok(&p, mask, reason, sizeof(reason));
+            return py::make_tuple(ok, std::string(reason));
+        },
+        py::arg("problem"),
+        py::arg("mask"),
+        "C port of dx_interior_problem_ok: (ok, reason).");
+    m.def(
+        "conv_dgrad_dx_interior_launch_ok",
+        [](const py::dict& spec, int dx_interior, int axes, const py::dict& problem) -> py::tuple {
+            std::deque<std::string> store;
+            rocke_dgrad_conv_spec_t s = conv_dgrad_build_spec(spec, store);
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            char reason[256] = {0};
+            const bool ok = rocke_dgrad_dx_interior_launch_ok(
+                &s, dx_interior, axes, &p, reason, sizeof(reason));
+            return py::make_tuple(ok, std::string(reason));
+        },
+        py::arg("spec"),
+        py::arg("dx_interior"),
+        py::arg("axes"),
+        py::arg("problem"),
+        "C port of dx_interior_launch_conflict: (ok, reason), reason 'ok' when accepted.");
+    m.def(
+        "conv_dgrad_halo_zero_launch",
+        [](const py::dict& problem, int elem_bytes, int axes, const py::dict& spec) -> py::tuple {
+            rocke_conv_problem_t p = conv_problem_from_py(problem);
+            std::deque<std::string> store;
+            rocke_dgrad_halo_zero_spec_t s = halo_zero_build_spec(spec, store);
+            int64_t vals[ROCKE_DGRAD_HALO_ZERO_SCALARS];
+            int grid[3], block[3];
+            if(rocke_dgrad_halo_zero_launch(&p, elem_bytes, axes, &s, vals, grid, block)
+               != ROCKE_OK)
+                throw py::value_error("dx_interior zero-fill needs C * elem_bytes % 16 == 0");
+            static const char* const names[ROCKE_DGRAD_HALO_ZERO_SCALARS] = {"Di",
+                                                                             "Do",
+                                                                             "Hi",
+                                                                             "Ho",
+                                                                             "ru",
+                                                                             "hd",
+                                                                             "hh",
+                                                                             "e",
+                                                                             "L1",
+                                                                             "L2",
+                                                                             "L3",
+                                                                             "n1",
+                                                                             "n2",
+                                                                             "u1",
+                                                                             "u2",
+                                                                             "u3"};
+            py::dict v;
+            for(int i = 0; i < ROCKE_DGRAD_HALO_ZERO_SCALARS; ++i)
+                v[names[i]] = vals[i];
+            return py::make_tuple(v,
+                                  py::make_tuple(grid[0], grid[1], grid[2]),
+                                  py::make_tuple(block[0], block[1], block[2]));
+        },
+        py::arg("problem"),
+        py::arg("elem_bytes"),
+        py::arg("axes"),
+        py::arg("spec"),
+        "C port of halo_zero_launch without the pointer kernargs: (values, grid, block).");
+    /* ---- implicit-GEMM dgrad ---- */
+    reg3("conv_dgrad", conv_dgrad_lower_llvm, conv_dgrad_serialize_ir, conv_dgrad_verify);
+    m.def(
+        "conv_dgrad_is_valid_spec",
+        [](const py::dict& d, const std::string& arch) -> py::tuple {
+            const char* a = require_arch(arch);
+            std::deque<std::string> store;
+            rocke_dgrad_conv_spec_t s = conv_dgrad_build_spec(d, store);
+            char reason[1024] = {0};
+            const bool ok = rocke_dgrad_conv_is_valid_spec(&s, a, reason, sizeof(reason));
+            return py::make_tuple(ok, ok ? std::string("ok") : std::string(reason));
+        },
+        py::arg("spec"),
+        py::arg("arch"),
+        "C port of is_valid_dgrad_spec: (ok, reason), reason 'ok' when accepted.");
+    /* conv_wgrad_reduce serves external callers driving Stage 2 through the
+     * C++ engine; library/tests/test_conv_cpp_binding_knobs.py pins it to the
+     * Python engine. The benchmark builds Stage 2 through the Python
+     * kernels.common.conv_wgrad_workspace_reduce, not through this binding. */
     reg3("conv_wgrad_reduce",
          conv_wgrad_reduce_lower_llvm,
          conv_wgrad_reduce_serialize_ir,

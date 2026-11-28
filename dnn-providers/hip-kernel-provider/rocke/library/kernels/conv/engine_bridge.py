@@ -18,6 +18,7 @@ added on both sides in the same change.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, Dict, Optional, Tuple
 
 from rocke.core import GemmLowerResult, import_engine, lower_family, name_of
@@ -145,9 +146,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
     # The vector-size/optional knobs are forwarded only when the spec sets
     # them (not None), so the binding falls back to the engine default
     # otherwise.
-    # FIXME: cshuffle_no_alias and lds_layout are not forwarded, so cpp drops
-    # them. Pre-existing; forwarding them changes cpp output and needs its own
-    # parity test.
+    # FIXME: lds_layout is not forwarded, so cpp drops it. Pre-existing;
+    # forwarding it changes cpp output and needs its own parity test.
+    # (cshuffle_no_alias rides the knob-field loop below when set.)
     for f in (
         "lds_k_pad",
         "waves_per_eu",
@@ -158,6 +159,15 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         v = getattr(spec, f, None)
         if v is not None:
             d[f] = v
+    # The K-loop / epilogue knob fields: forwarded when they differ from the
+    # dataclass default (the binding reads them by name and refuses a knob
+    # the C++ engine has no twin for), so a default spec's dict is unchanged.
+    for f in dataclasses.fields(spec) if dataclasses.is_dataclass(spec) else ():
+        if f.name in d or f.name in ("problem", "data", "acc_epilogue", "lds_layout"):
+            continue
+        v = getattr(spec, f.name)
+        if isinstance(v, (bool, int)) and v != f.default:
+            d[f.name] = v
     return d
 
 

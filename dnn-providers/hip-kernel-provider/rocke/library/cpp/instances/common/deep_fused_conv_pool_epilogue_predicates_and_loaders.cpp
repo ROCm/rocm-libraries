@@ -242,7 +242,7 @@ void rocke_dfcp_load_conv0_a_tile_specialized(rocke_ir_builder_t* b,
     const rocke_conv_problem_t* c;
     int conv_tile_w;
     int load_vec;
-    rocke_coalesced_tile_loader_t loader;
+    rocke_coalesced_tile_loader_t loader{};
     dfcp_spec_desc_state st;
 
     (void)conv_spec; /* Python carries it for parity but the body never reads it. */

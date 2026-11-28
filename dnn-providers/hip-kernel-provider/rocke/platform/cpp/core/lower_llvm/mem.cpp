@@ -341,12 +341,15 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
     cur->terminated = true;
     val = rocke_ll_fresh(L, "flag");
     hit = rocke_ll_fresh(L, "flag.hit");
+    /* Optional "ordering" attr ("monotonic": the caller fences once after). */
+    const char* wait_ord = ll_attr_str(op, "ordering", "acquire");
     rocke_ll_block_emitf(L,
                          spin,
-                         "  %s = load atomic i32, ptr addrspace(1) %s%s acquire, align 4",
+                         "  %s = load atomic i32, ptr addrspace(1) %s%s %s, align 4",
                          val,
                          gep,
-                         ll_syncscope(L, scope));
+                         ll_syncscope(L, scope),
+                         wait_ord);
     rocke_ll_block_emitf(
         L, spin, "  %s = icmp eq i32 %s, %s", hit, val, rocke_ll_operand(L, expect));
     done = rocke_ll_new_block(L, "flag.done");
@@ -456,6 +459,14 @@ static void lower_pk_atomic_add(rocke_lower_t* L,
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     rocke_ll_require_global_header_ptr(L, op_name, ptr, "ptr");
+    /* An explicit "syncscope" attr (IRBuilder syncscope=) on the op overrides
+     * the per-dtype default scope, as in Python; "system" is LLVM's default
+     * and has no clause (below). */
+    const char* attr_scope = ll_attr_str(op, "syncscope", NULL);
+    if(attr_scope && attr_scope[0])
+    {
+        scope = attr_scope;
+    }
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
                    gep,
@@ -464,8 +475,11 @@ static void lower_pk_atomic_add(rocke_lower_t* L,
                    idx_ty,
                    rocke_ll_operand(L, idx));
     L->needs_fp_atomic_md = true;
-    const char* sync
-        = (scope != NULL && strcmp(scope, "agent") == 0) ? " syncscope(\"agent\")" : "";
+    /* "system" is LLVM's default scope and has no textual clause (Python:
+     * _llvm_syncscope). */
+    const char* sync = (scope != NULL && strcmp(scope, "system") != 0)
+                           ? rocke_arena_printf(&L->arena, " syncscope(\"%s\")", scope)
+                           : "";
     rocke_ll_emitf(L,
                    "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x %s> %s%s %s"
                    ", !amdgpu.no.fine.grained.memory !1"
@@ -1223,13 +1237,14 @@ static void op_tile_buffer_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     tmp = rocke_ll_fresh(L, form->load_hint);
     rocke_ll_emitf(L,
                    "  %s = call %s @llvm.amdgcn.raw.ptr.buffer.load.%s("
-                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   "ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                    tmp,
                    form->llvm_type,
                    form->suffix,
                    rocke_ll_operand(L, rsrc),
                    rocke_ll_operand(L, voffset),
-                   rocke_ll_operand(L, soffset));
+                   rocke_ll_operand(L, soffset),
+                   (long long)ll_attr_int(op, "aux", 0));
     rocke_ll_emitf(L,
                    "  %s = bitcast %s %s to %s",
                    ll_res(op),
@@ -1613,11 +1628,12 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_emitf(L, "  %s = bitcast float %s to i32", bc, scalar);
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
-                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "aux", 0));
     }
     else
     {
@@ -1634,13 +1650,14 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
                        (long long)dwords);
         rocke_ll_emitf(L,
                        "  call void @llvm.amdgcn.raw.ptr.buffer.store.v%lldi32("
-                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
                        (long long)dwords,
                        (long long)dwords,
                        bc,
                        rocke_ll_operand(L, rsrc),
                        rocke_ll_operand(L, voffset),
-                       rocke_ll_operand(L, soffset));
+                       rocke_ll_operand(L, soffset),
+                       (long long)ll_attr_int(op, "aux", 0));
     }
 }
 

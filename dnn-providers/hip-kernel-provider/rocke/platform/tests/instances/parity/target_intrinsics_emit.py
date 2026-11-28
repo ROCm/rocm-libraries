@@ -24,6 +24,8 @@
 # error mode, and both engines refusing reads as parity while comparing nothing.
 # Configs 10..12 cover arith.fdot2 (f16, bf16) and the bf16 4x4x4 MFMA atom
 # (the `_1k` intrinsic with its <4 x i16> operand bitcasts); they lower for gfx950.
+# Config 13 covers gpu.grid_dim on every axis, with and without the workgroup
+# size divide (the dispatch-packet read); it lowers for gfx942.
 from rocke.core.ir import (
     BF16,
     CACHE_STREAM,
@@ -191,6 +193,18 @@ def build_mfma_4x4x4_bf16(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_grid_dim(b: IRBuilder) -> None:
+    out = b.param("out", PtrType(I32, "global"), align=4)
+    tid = b.thread_id_x()
+    gx = b.grid_dim("x", 256)
+    gy = b.grid_dim("y")
+    gz = b.grid_dim("z", 64)
+    gxy = b.add(gx, gy)
+    total = b.add(gxy, gz)
+    b.global_store(out, tid, total, align=4)
+    b.ret()
+
+
 BUILDERS = [
     build_async_lds_two_allocs,
     build_async_lds_b8,
@@ -205,6 +219,7 @@ BUILDERS = [
     build_fdot2_f16,
     build_fdot2_bf16,
     build_mfma_4x4x4_bf16,
+    build_grid_dim,
 ]
 
 # The target each config lowers for: one the committed arch-domain columns say
@@ -223,6 +238,7 @@ ARCHES = [
     "gfx950",  # arith.fdot2 f16
     "gfx950",  # arith.fdot2 bf16
     "gfx950",  # bf16 4x4x4 MFMA
+    "gfx942",  # gpu.grid_dim (the dispatch packet; every target)
 ]
 
 

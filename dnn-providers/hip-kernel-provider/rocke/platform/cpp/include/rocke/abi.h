@@ -136,8 +136,17 @@ extern "C" {
  * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
  *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
  *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
- *     returns long long (it returned int), which changes its signature. */
-#define ROCKE_ABI_VERSION 20
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_ir_builder_t gained block_id_override[3] at its end;
+ *     rocke_coalesced_tile_loader_t gained row_kpack, kp_line, no_loads,
+ *     vec_lo and vec_hi at its end; rocke_cshuffle_epilogue_t gained
+ *     atomic_pair_lanes through atomic_row_map_user at its end;
+ *     rocke_implicit_gemm_conv_spec_t gained split_atomic mid-struct and,
+ *     with rocke_dgrad_conv_spec_t and rocke_implicit_gemm_conv_wgrad_spec_t,
+ *     the 3-D conv knob fields; rocke_wgrad_reduce_spec_t gained vec through
+ *     slab_par at its end. Each change alters the struct's size, and the
+ *     mid-struct field also the offsets of every field after it. */
+#define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

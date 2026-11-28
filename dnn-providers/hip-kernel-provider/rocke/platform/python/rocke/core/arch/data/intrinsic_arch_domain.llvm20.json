@@ -22,6 +22,7 @@
     "amdgcn.s.wqm.i32": "llvm.amdgcn.s.wqm.i32.i32",
     "amdgcn.s.wqm.i64": "llvm.amdgcn.s.wqm.i64.i64",
     "ballot.i64": "llvm.amdgcn.ballot.i64",
+    "dispatch.ptr": "llvm.amdgcn.dispatch.ptr",
     "ds.bpermute": "llvm.amdgcn.ds.bpermute",
     "ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16",
     "exp2.f32": "llvm.exp2.f32",
@@ -4007,6 +4008,82 @@
       "gfx950": {
         "evidence": "not an intrinsic in llvm20",
         "status": "name_absent",
+        "verified_on": "llvm20"
+      }
+    },
+    "dispatch.ptr": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1154": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
         "verified_on": "llvm20"
       }
     },
@@ -21395,6 +21472,7 @@
     "amdgcn.s.wqm.i32": {"operands": [{"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1},
     "amdgcn.s.wqm.i64": {"operands": [{"source": "argument", "type": "i64"}], "return_type": "i64", "version": 1},
     "ballot.i64": {"operands": [{"source": "argument", "type": "i1"}], "return_type": "i64", "version": 1},
+    "dispatch.ptr": {"operands": [], "return_type": "ptr addrspace(4)", "version": 1},
     "ds.bpermute": {"operands": [{"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1},
     "ds.read.tr16.b64": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<4 x i16>", "version": 1},
     "exp2.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},

@@ -14,6 +14,7 @@
  *     .load        (method)          rocke_coalesced_tile_loader_load()
  *     .col_xor     (field check)     rocke_coalesced_tile_loader_set_col_xor()
  *   lds_col_xor_params (function)   rocke_lds_col_xor_params()
+ *   lds_col_xor_key    (function)   rocke_lds_col_xor_key()
  *   swizzle_lds_col    (function)   rocke_swizzle_lds_col()
  *   AsyncTileLoader (frozen dc)     rocke_async_tile_loader_t
  *     .choose_dwords (classmethod)    rocke_async_tile_loader_choose_dwords()
@@ -130,6 +131,18 @@ typedef struct rocke_coalesced_tile_loader
      * has_col_xor. */
     bool has_col_xor;
     int col_xor[4];
+    /* Python row_kpack (row mode only): pack row_kpack adjacent columns (K
+     * steps) into one LDS write; 0/1 keeps the historical decode and store. */
+    int row_kpack;
+    /* Python kp_line (row_kpack > 1): line-major lane decode of the packed
+     * units (0 = column-group fastest). */
+    int kp_line;
+    /* load_global only: emit everything but the buffer reads (a recording
+     * pass, Python's suppressed buffer_load_vN; staged v = NULL), and
+     * vec_range = [vec_lo, vec_hi) (vec_hi 0 = every vector). */
+    bool no_loads;
+    int vec_lo;
+    int vec_hi;
 } rocke_coalesced_tile_loader_t;
 
 /* lds_col_xor_params(tile_cols, chunk=8): the conflict-free XOR swizzle of an
@@ -144,9 +157,14 @@ typedef struct rocke_coalesced_tile_loader
  * fixed-shape form; see the Python docstring. */
 rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4]);
 
-/* swizzle_lds_col(b, row, col, col_xor):
- *   col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
- *          << chunk_log2)
+/* lds_col_xor_key(b, row, col_xor):
+ *   (((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1)) << chunk_log2
+ * emitted in the Python call order; flip_shift < 0 drops the flip term (a
+ * hand-built key, see the Python docstring). NULL on a failed builder. */
+rocke_value_t*
+    rocke_lds_col_xor_key(rocke_ir_builder_t* b, rocke_value_t* row, const int col_xor[4]);
+
+/* swizzle_lds_col(b, row, col, col_xor): col ^ lds_col_xor_key(b, row, col_xor),
  * emitted in the Python call order. NULL on a failed builder. */
 rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
                                      rocke_value_t* row,
@@ -323,6 +341,14 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
                                                    rocke_value_t* ptr,
                                                    rocke_value_t* num_bytes,
                                                    int coherency);
+/* CoalescedTileLoader.kp_col0(): first column of this thread's packed column group. */
+rocke_value_t* rocke_coalesced_tile_loader_kp_col0(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid);
+
+/* CoalescedTileLoader.kpack_ok() staticmethod. */
+bool rocke_coalesced_tile_loader_kpack_ok(
+    int tile_rows, int tile_cols, int block_size, int load_vec, int kpack);
 
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot

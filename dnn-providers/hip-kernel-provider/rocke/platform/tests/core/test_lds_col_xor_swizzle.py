@@ -25,8 +25,11 @@ from rocke.core.ir import F16, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.helpers.loads import (
     CoalescedTileLoader,
+    lds_col_xor_key,
     lds_col_xor_params,
     swizzle_lds_col,
+    xor8_key,
+    xor8_params,
 )
 
 
@@ -152,6 +155,35 @@ def test_every_accepted_chunk_permutes_each_row(cols, chunk):
         assert sorted(phys) == list(range(cols))
         for c in range(cols):
             assert phys[c] % chunk == c % chunk
+
+
+@pytest.mark.parametrize("row_shift", [0, 1, 2, 3])
+@pytest.mark.parametrize("cols", [16, 32, 64, 128])
+def test_negative_flip_shift_drops_the_flip_term(row_shift, cols):
+    """``flip_shift < 0``: the key is ``((row >> row_shift) & mask) <<
+    chunk_log2`` alone (the hand-built keys of the conv lds_xor tiles), and
+    each row is still permuted."""
+    mask = cols // 8 - 1
+    p = (row_shift, mask, 3, -1)
+    for row in range(64):
+        assert (
+            lds_col_xor_key(_IntBuilder(0, "col"), row, p)
+            == ((row >> row_shift) & mask) << 3
+        )
+        phys = [_swz(row, c, p) for c in range(cols)]
+        assert sorted(phys) == list(range(cols))
+
+
+@pytest.mark.parametrize("cols", [16, 32, 64])
+def test_xor8_key_is_the_flipless_col_xor_key(cols):
+    """``xor8_key`` is :func:`lds_col_xor_key` on the ``xor8_params`` tuple
+    with no flip term."""
+    sh, mask, ush = xor8_params(cols)
+    for row in range(64):
+        assert (
+            xor8_key(_IntBuilder(0, "col"), row, tile_cols=cols)
+            == ((row >> sh) & mask) << ush
+        )
 
 
 @pytest.mark.parametrize("cols", [16, 32, 64, 128])

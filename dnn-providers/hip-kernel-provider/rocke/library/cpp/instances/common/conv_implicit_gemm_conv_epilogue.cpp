@@ -18,8 +18,10 @@
  */
 #include <string.h>
 
+#include "rocke/arena.h"
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_b_pack_f32_to */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
+#include <stdio.h>
 
 /* ===================================================================== *
  * rocke_conv_apply_accumulator_epilogue   (Python lines 647-689)
@@ -433,6 +435,423 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
  * LDS-staged cshuffle store via CShuffleEpilogue.from_grid; the conv-specific
  * bit is the same D-descriptor addr_fn used by the direct path.
  * ===================================================================== */
+/* _det_store_slab's ws_addr: D's packed [M, K] layout (a group's channel
+ * slab at group * kpg), one slab per slot; always valid. */
+typedef struct
+{
+    rocke_value_t* slab;
+    rocke_value_t* p_K;
+    rocke_value_t* k_out_group_base;
+} conv_ws_addr_ctx_t;
+
+static rocke_value_t* conv_ws_addr(rocke_ir_builder_t* b,
+                                   rocke_value_t* m_val,
+                                   rocke_value_t* n_val,
+                                   rocke_value_t** out_valid,
+                                   void* user)
+{
+    conv_ws_addr_ctx_t* w = (conv_ws_addr_ctx_t*)user;
+    if(w->k_out_group_base != NULL)
+        n_val = rocke_b_add(b, w->k_out_group_base, n_val);
+    rocke_value_t* mk = rocke_b_mul(b, m_val, w->p_K);
+    *out_valid = NULL;
+    return rocke_b_add(b, w->slab, rocke_b_add(b, mk, n_val));
+}
+
+/* Python _atomic() of the wave64 atomic split-K forward: the plain cshuffle
+ * atomic store into D, or (split_det 1/2) the deterministic owner fold. */
+static void conv_fwd_split_store(rocke_conv_build_ctx_t* ctx,
+                                 const rocke_cshuffle_epilogue_t* epi,
+                                 rocke_value_t* const* accs,
+                                 int num_accs,
+                                 rocke_value_t* D,
+                                 rocke_value_t* row_pitch,
+                                 rocke_value_t* bound_m,
+                                 rocke_value_t* bound_n,
+                                 rocke_value_t* col_offset,
+                                 rocke_conv_d_addr_ctx_t* dctx,
+                                 rocke_value_t* d_rsrc)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    if(!spec->split_det && spec->split_zero_first)
+    {
+        /* The tile was zeroed by its slice 0 at kernel start: wait for that,
+         * add, and the last adder resets the flag pair. */
+        rocke_value_t* c0 = ctx->c0;
+        rocke_value_t* c_1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* f_idx = ctx->fwd_szf_idx;
+        {
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_b_global_flag_wait_eq_ord(b, ctx->fwd_p_sk_flags, f_idx, c_1, NULL, "monotonic");
+            rocke_b_fence(b, "agent", "acquire");
+            rocke_b_region_leave(b);
+        }
+        rocke_b_sync(b);
+        rocke_cshuffle_epilogue_atomic_store_ex(
+            b, epi, accs, num_accs, D, row_pitch, bound_m, bound_n, col_offset);
+        {
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_value_t* n_idx = rocke_b_add(b, f_idx, c_1);
+            rocke_value_t* old
+                = rocke_b_global_atomic_add(b, ctx->fwd_p_sk_flags, n_idx, c_1, NULL);
+            rocke_value_t* last = rocke_b_cmp_eq(b, old, rocke_b_sub(b, ctx->fwd_p_ks_count, c_1));
+            rocke_if_t t1 = rocke_b_scf_if(b, last);
+            rocke_b_region_enter(b, t1.then_region);
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, n_idx, c0, NULL, "monotonic");
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, f_idx, c0, NULL, "monotonic");
+            rocke_b_region_leave(b);
+            rocke_b_region_leave(b);
+        }
+        return;
+    }
+    if(!spec->split_det && spec->split_flag_store)
+    {
+        /* Slice 0 stores and raises the flag; the rest wait, add. */
+        rocke_value_t* c0 = ctx->c0;
+        rocke_value_t* c_1 = rocke_b_const_i32(b, 1);
+        rocke_value_t* mt = rocke_b_div(b, ctx->block_m_off_v, rocke_b_const_i32(b, ctx->block_m));
+        rocke_value_t* mtn = rocke_b_mul(b, mt, ctx->p_num_pid_n);
+        rocke_value_t* nt = rocke_b_div(b, ctx->block_n_off_v, rocke_b_const_i32(b, ctx->block_n));
+        rocke_value_t* t_lin = rocke_b_add(b, mtn, nt);
+        if(ctx->group_idx != NULL)
+        {
+            rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+            t_lin = rocke_b_add(b, t_lin, rocke_b_mul(b, ctx->group_idx, tiles));
+        }
+        rocke_value_t* f_idx
+            = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, t_lin, rocke_b_const_i32(b, 2)));
+        rocke_value_t* n_idx = rocke_b_add(b, f_idx, c_1);
+        rocke_if_else_t ie = rocke_b_scf_if_else(b, rocke_b_cmp_eq(b, ctx->fwd_slice_id, c0));
+        rocke_b_region_enter(b, ie.then_region);
+        {
+            rocke_cshuffle_epilogue_store(
+                b, epi, accs, num_accs, rocke_conv_d_addr, (void*)dctx, d_rsrc, bound_m, bound_n);
+            rocke_b_fence(b, "agent", "release");
+            rocke_b_sync(b);
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, f_idx, c_1, "agent", "release");
+            rocke_b_region_leave(b);
+        }
+        rocke_b_region_leave(b);
+        rocke_b_region_enter(b, ie.else_region);
+        {
+            rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+            rocke_b_region_enter(b, t0.then_region);
+            rocke_b_global_flag_wait_eq_ord(b, ctx->fwd_p_sk_flags, f_idx, c_1, NULL, "monotonic");
+            rocke_b_fence(b, "agent", "acquire");
+            rocke_value_t* old
+                = rocke_b_global_atomic_add(b, ctx->fwd_p_sk_flags, n_idx, c_1, NULL);
+            rocke_value_t* k2 = rocke_b_sub(b, ctx->fwd_p_ks_count, rocke_b_const_i32(b, 2));
+            rocke_if_t t1 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, old, k2));
+            rocke_b_region_enter(b, t1.then_region);
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, n_idx, c0, NULL, "monotonic");
+            rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, f_idx, c0, NULL, "monotonic");
+            rocke_b_region_leave(b);
+            rocke_b_region_leave(b);
+            rocke_b_sync(b);
+            rocke_cshuffle_epilogue_atomic_store_ex(
+                b, epi, accs, num_accs, D, row_pitch, bound_m, bound_n, col_offset);
+        }
+        rocke_b_region_leave(b);
+        return;
+    }
+    if(!spec->split_det)
+    {
+        /* Each K slice adds its partial tile into the zeroed D. */
+        rocke_cshuffle_epilogue_atomic_store_ex(
+            b, epi, accs, num_accs, D, row_pitch, bound_m, bound_n, col_offset);
+        return;
+    }
+    if(spec->split_det == 3)
+    {
+        /* _det_store_slab: every contribution stores its f32 partial tile,
+         * row-major through the cshuffle LDS staging, into its own [M, K]
+         * slab of sk_partials (slot = slice); a separate fold kernel sums the
+         * slabs in slot order into D. */
+        rocke_value_t* slot = ctx->fwd_slice_id;
+        if(spec->split_hybrid)
+            slot = rocke_b_select(b, ctx->shy_prim, ctx->shy_s, ctx->shy_S);
+        rocke_value_t* mk = rocke_b_mul(b, ctx->p_M, ctx->p_K);
+        rocke_value_t* slab = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, slot, mk));
+        rocke_value_t* ws_rsrc
+            = rocke_b_buffer_rsrc(b, ctx->fwd_p_sk_partials, rocke_b_const_i32(b, 0x7FFFFFF0));
+        /* Row slabs of <= 32 KB of f32 where the warp's M atoms allow. */
+        const int mch = rocke_conv_fwd_split_det_slab_m_chunks(spec);
+        rocke_cshuffle_epilogue_t e32 = rocke_cshuffle_epilogue_from_grid(epi->atom, &epi->grid, 4);
+        e32.out_dtype = "fp32";
+        e32.no_alias = spec->cshuffle_no_alias;
+        e32.war_barriers = 1;
+        if(mch > 1)
+            e32.m_chunks = mch;
+        e32.lds_barriers = spec->epi_lds_barriers;
+        conv_ws_addr_ctx_t wctx;
+        wctx.slab = slab;
+        wctx.p_K = ctx->p_K;
+        wctx.k_out_group_base = col_offset;
+        rocke_cshuffle_epilogue_store(
+            b, &e32, accs, num_accs, conv_ws_addr, (void*)&wctx, ws_rsrc, bound_m, bound_n);
+        return;
+    }
+    /* _det_store (modes 1 / 2): the owner (last slice) folds the other
+     * contributions' f32 partials in slot order and stores D once; the others
+     * store their partial into their slot and count in. Mode 2 moves the
+     * partials through agent-coherent (SC1) buffer accesses. */
+    rocke_value_t* c0 = ctx->c0;
+    const bool coh = spec->split_det == 2;
+    const int aux = 16; /* SC1 */
+    rocke_value_t* ws_rsrc = NULL;
+    if(coh)
+        ws_rsrc = rocke_b_buffer_rsrc(b, ctx->fwd_p_sk_partials, rocke_b_const_i32(b, 0x7FFFFFF0));
+    rocke_value_t* c_1 = rocke_b_const_i32(b, 1);
+    rocke_value_t* c_tile = rocke_b_const_i32(b, ctx->block_m * ctx->block_n);
+    rocke_value_t *f_idx, *t_slot, *n_wait, *is_owner, *n_slots, *slot;
+    if(spec->split_hybrid)
+    {
+        rocke_value_t* has_rem = rocke_b_cmp_lt(b, c0, ctx->shy_H);
+        rocke_value_t* np_ = rocke_b_lnot(b, ctx->shy_prim);
+        rocke_value_t* sm1 = rocke_b_sub(b, ctx->shy_S, c_1);
+        rocke_value_t* last = rocke_b_land(b, ctx->shy_prim, rocke_b_cmp_eq(b, ctx->shy_s, sm1));
+        is_owner = rocke_b_select(b, has_rem, np_, last);
+        rocke_value_t* sm1b = rocke_b_sub(b, ctx->shy_S, c_1);
+        n_wait = rocke_b_to_sgpr_u32(b, rocke_b_select(b, has_rem, ctx->shy_S, sm1b));
+        n_slots = ctx->shy_S;
+        slot = ctx->shy_s;
+        f_idx = ctx->fsk_tile;
+        t_slot = ctx->fsk_tile;
+    }
+    else
+    {
+        rocke_value_t* mt = rocke_b_div(b, ctx->block_m_off_v, rocke_b_const_i32(b, ctx->block_m));
+        rocke_value_t* mtn = rocke_b_mul(b, mt, ctx->p_num_pid_n);
+        rocke_value_t* nt = rocke_b_div(b, ctx->block_n_off_v, rocke_b_const_i32(b, ctx->block_n));
+        rocke_value_t* t_lin = rocke_b_add(b, mtn, nt);
+        rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+        f_idx = t_lin;
+        t_slot = t_lin;
+        rocke_value_t* per_group = tiles;
+        if(spec->split_tail)
+        {
+            /* Slots for the tail tiles only (launch order). */
+            t_slot = rocke_b_sub(b, t_lin, ctx->fwd_p_full_tiles);
+            per_group = rocke_b_sub(b, tiles, ctx->fwd_p_full_tiles);
+        }
+        if(ctx->group_idx != NULL)
+        {
+            f_idx = rocke_b_add(b, f_idx, rocke_b_mul(b, ctx->group_idx, tiles));
+            t_slot = rocke_b_add(b, t_slot, rocke_b_mul(b, ctx->group_idx, per_group));
+        }
+        n_wait = rocke_b_to_sgpr_u32(b, rocke_b_sub(b, ctx->fwd_p_ks_count, c_1));
+        is_owner = rocke_b_cmp_eq(b, ctx->fwd_slice_id, n_wait);
+        n_slots = n_wait;
+        slot = ctx->fwd_slice_id;
+    }
+    f_idx = rocke_b_to_sgpr_u32(b, f_idx);
+    rocke_value_t* t_base
+        = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, rocke_b_mul(b, t_slot, n_slots), c_tile));
+    const int bs = rocke_implicit_gemm_conv_spec_block_size(spec);
+    (void)rocke_b_const_i32(b, bs); /* c_bs */
+    /* Each accumulator vector as 4-wide f32 pieces. */
+    int piece_ai[256], piece_q[256], n_pieces = 0;
+    for(int ai = 0; ai < num_accs; ++ai)
+    {
+        const int n = ctx->c_per_lane;
+        for(int q = 0; q < n / 4; ++q)
+        {
+            piece_ai[n_pieces] = ai;
+            piece_q[n_pieces++] = q;
+        }
+    }
+    auto piece_off = [&](rocke_value_t* base, int j) -> rocke_value_t* {
+        rocke_value_t* cj = rocke_b_const_i32(b, j * bs);
+        rocke_value_t* t = rocke_b_add(b, cj, ctx->tid);
+        rocke_value_t* m4 = rocke_b_mul(b, t, rocke_b_const_i32(b, 4));
+        return rocke_b_add(b, base, m4);
+    };
+    {
+        rocke_if_t nf = rocke_b_scf_if(b, rocke_b_lnot(b, is_owner));
+        rocke_b_region_enter(b, nf.then_region);
+        rocke_value_t* s_base = rocke_b_add(b, t_base, rocke_b_mul(b, slot, c_tile));
+        for(int j = 0; j < n_pieces; ++j)
+        {
+            rocke_value_t* acc = accs[piece_ai[j]];
+            rocke_value_t* v;
+            if(ctx->c_per_lane == 4)
+                v = acc;
+            else
+            {
+                rocke_value_t* el[4];
+                for(int e = 0; e < 4; ++e)
+                    el[e] = rocke_b_vec_extract(b, acc, 4 * piece_q[j] + e);
+                v = rocke_b_vec_pack(b, el, 4, rocke_f32());
+            }
+            if(coh)
+            {
+                rocke_value_t* po = piece_off(s_base, j);
+                rocke_value_t* bo = rocke_b_mul(b, po, rocke_b_const_i32(b, 4));
+                rocke_b_buffer_store_vN_f32_aux(b, ws_rsrc, bo, c0, v, 4, aux);
+            }
+            else
+                rocke_b_global_store_vN(b, ctx->fwd_p_sk_partials, piece_off(s_base, j), v, 4, 0);
+        }
+        if(!coh)
+            rocke_b_fence(b, "agent", "release");
+        rocke_b_sync(b);
+        rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+        rocke_b_region_enter(b, t0.then_region);
+        (void)rocke_b_global_atomic_add(b, ctx->fwd_p_sk_flags, f_idx, c_1, NULL);
+        rocke_b_region_leave(b);
+        rocke_b_region_leave(b);
+    }
+    rocke_if_t ow = rocke_b_scf_if(b, is_owner);
+    rocke_b_region_enter(b, ow.then_region);
+    {
+        rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+        rocke_b_region_enter(b, t0.then_region);
+        rocke_b_global_flag_wait_eq_ord(b, ctx->fwd_p_sk_flags, f_idx, n_wait, NULL, "monotonic");
+        if(!coh)
+            rocke_b_fence(b, "agent", "acquire");
+        /* Every contribution has counted in: reset for the next launch. */
+        rocke_b_global_flag_store(b, ctx->fwd_p_sk_flags, f_idx, c0, NULL, "monotonic");
+        rocke_b_region_leave(b);
+        rocke_b_sync(b);
+        if(!coh)
+            rocke_b_fence(b, "agent", "acquire");
+        else
+            rocke_b_fence(b, "workgroup", "acquire"); /* no partial load above the wait */
+        rocke_iter_arg_t it[ROCKE_CONV_MAX_ACCS];
+        char nb[32];
+        for(int i = 0; i < num_accs; ++i)
+        {
+            snprintf(nb, sizeof(nb), "sdet_a%d", i);
+            it[i].name = rocke_arena_strdup(&b->arena, nb);
+            it[i].init = accs[i];
+        }
+        rocke_for_t fold
+            = rocke_b_scf_for_iter(b, c0, n_wait, c_1, it, num_accs, "sdet_s", false, true);
+        rocke_b_region_enter(b, fold.body);
+        {
+            rocke_value_t* s_base = rocke_b_add(b, t_base, rocke_b_mul(b, fold.iv, c_tile));
+            rocke_value_t* loaded[256];
+            for(int j = 0; j < n_pieces; ++j)
+            {
+                if(coh)
+                {
+                    rocke_value_t* po = piece_off(s_base, j);
+                    rocke_value_t* bo = rocke_b_mul(b, po, rocke_b_const_i32(b, 4));
+                    loaded[j] = rocke_b_buffer_load_vN_aux(b, ws_rsrc, bo, c0, rocke_f32(), 4, aux);
+                }
+                else
+                    loaded[j] = rocke_b_global_load_vN(
+                        b, ctx->fwd_p_sk_partials, piece_off(s_base, j), rocke_f32(), 4, 0);
+            }
+            rocke_value_t* nw[ROCKE_CONV_MAX_ACCS];
+            int j = 0;
+            for(int ai = 0; ai < num_accs; ++ai)
+            {
+                rocke_value_t* acc = fold.iter_vars[ai];
+                const int n = ctx->c_per_lane;
+                if(n == 4)
+                {
+                    nw[ai] = rocke_b_fadd(b, acc, loaded[j]);
+                    ++j;
+                    continue;
+                }
+                rocke_value_t* parts[64];
+                int np = 0;
+                for(int q = 0; q < n / 4; ++q)
+                    for(int e = 0; e < 4; ++e)
+                        parts[np++] = rocke_b_vec_extract(b, loaded[j + q], e);
+                j += n / 4;
+                nw[ai] = rocke_b_fadd(b, acc, rocke_b_vec_pack(b, parts, np, rocke_f32()));
+            }
+            rocke_b_scf_yield(b, nw, num_accs);
+        }
+        rocke_b_region_leave(b);
+        rocke_cshuffle_epilogue_store(b,
+                                      epi,
+                                      fold.op->results,
+                                      num_accs,
+                                      rocke_conv_d_addr,
+                                      (void*)dctx,
+                                      d_rsrc,
+                                      bound_m,
+                                      bound_n);
+    }
+    rocke_b_region_leave(b);
+}
+
+/* split_zero_first (Python _szf_idx block, before the K loops): slice 0 of a
+ * split tile zeroes the tile's D (bounds-checked wide stores), releases it
+ * and raises the flag the slices' atomic stores wait for. */
+void rocke_conv_emit_fwd_szf_zero(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* mt = rocke_b_div(b, ctx->block_m_off_v, rocke_b_const_i32(b, ctx->block_m));
+    rocke_value_t* mtn = rocke_b_mul(b, mt, ctx->p_num_pid_n);
+    rocke_value_t* nt = rocke_b_div(b, ctx->block_n_off_v, rocke_b_const_i32(b, ctx->block_n));
+    rocke_value_t* t_lin = rocke_b_add(b, mtn, nt);
+    if(ctx->group_idx != NULL)
+    {
+        rocke_value_t* tiles = rocke_b_mul(b, ctx->p_num_pid_m, ctx->p_num_pid_n);
+        t_lin = rocke_b_add(b, t_lin, rocke_b_mul(b, ctx->group_idx, tiles));
+    }
+    ctx->fwd_szf_idx = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, t_lin, rocke_b_const_i32(b, 2)));
+    rocke_value_t* zc = rocke_b_cmp_eq(b, ctx->fwd_slice_id, c0);
+    if(spec->split_tail)
+        zc = rocke_b_land(b, zc, rocke_b_lnot(b, ctx->fwd_is_full));
+    rocke_if_t zi = rocke_b_scf_if(b, zc);
+    rocke_b_region_enter(b, zi.then_region);
+    {
+        const int zsv = 8;
+        const int zvpr = ctx->block_n / zsv;
+        const int zthreads = ctx->threads;
+        rocke_value_t* zbf = rocke_b_vec_trunc_f32_to_bf16(b, rocke_b_zero_vec_f32(b, zsv));
+        rocke_value_t* c_eb = rocke_b_const_i32(b, 2);
+        rocke_value_t* oob = rocke_b_const_i32(b, 0x7FFFFFFF);
+        rocke_value_t* c_nb = ctx->merged ? ctx->c_gm : ctx->p_kpg;
+        rocke_conv_d_addr_ctx_t dctx;
+        dctx.D_desc = ctx->D_desc;
+        dctx.k_out_group_base = ctx->d_k_out_group_base;
+        dctx.slab_base = NULL;
+        const int ne = (ctx->block_m * zvpr + zthreads - 1) / zthreads;
+        for(int e = 0; e < ne; ++e)
+        {
+            rocke_value_t* vidx = rocke_b_add(b, rocke_b_const_i32(b, e * zthreads), ctx->tid);
+            rocke_value_t* row = rocke_b_div(b, vidx, rocke_b_const_i32(b, zvpr));
+            rocke_value_t* cm = rocke_b_mod(b, vidx, rocke_b_const_i32(b, zvpr));
+            rocke_value_t* col = rocke_b_mul(b, cm, rocke_b_const_i32(b, zsv));
+            rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
+            rocke_value_t* n_val = rocke_b_add(b, ctx->block_n_off_v, col);
+            rocke_value_t* r_ok = rocke_b_cmp_lt(b, row, rocke_b_const_i32(b, ctx->block_m));
+            rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->p_M);
+            rocke_value_t* rm = rocke_b_land(b, r_ok, m_ok);
+            rocke_value_t* nz = rocke_b_add(b, n_val, rocke_b_const_i32(b, zsv));
+            rocke_value_t* n_ok = rocke_b_cmp_le(b, nz, c_nb);
+            rocke_value_t* ok = rocke_b_land(b, rm, n_ok);
+            rocke_value_t* valid = NULL;
+            rocke_value_t* off = rocke_conv_d_addr(b, m_val, n_val, &valid, &dctx);
+            if(valid != NULL)
+                ok = rocke_b_land(b, ok, valid);
+            rocke_value_t* safe = rocke_b_select(b, ok, rocke_b_mul(b, off, c_eb), oob);
+            rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe, c0, zbf, zsv / 2);
+        }
+        rocke_b_fence(b, "agent", "release");
+        rocke_b_sync(b);
+        rocke_if_t t0 = rocke_b_scf_if(b, rocke_b_cmp_eq(b, ctx->tid, c0));
+        rocke_b_region_enter(b, t0.then_region);
+        rocke_b_global_flag_store(
+            b, ctx->fwd_p_sk_flags, ctx->fwd_szf_idx, rocke_b_const_i32(b, 1), "agent", "release");
+        rocke_b_region_leave(b);
+    }
+    rocke_b_region_leave(b);
+}
+
 void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_implicit_gemm_conv_spec_t* spec,
                                        rocke_value_t* const* accs,
@@ -447,7 +866,10 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* slab_base,
                                        const char* out_dtype,
                                        rocke_value_t* bound_m,
-                                       rocke_value_t* bound_n)
+                                       rocke_value_t* bound_n,
+                                       rocke_value_t* atomic_d,
+                                       rocke_value_t* atomic_row_pitch,
+                                       rocke_conv_build_ctx_t* sctx)
 {
     const rocke_conv_problem_t* p = &spec->problem;
     /* This is the epilogue group_merge actually ships on (the validator rejects
@@ -510,11 +932,90 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     epi.out_dtype = store_dtype;
     epi.no_alias = spec->cshuffle_no_alias;
     epi.war_barriers = _war_barriers;
+    if(spec->cshuffle_m_chunks > 1)
+        epi.m_chunks = spec->cshuffle_m_chunks;
+    epi.lds_barriers = spec->epi_lds_barriers;
+    if(spec->epi_store_fast && !rocke_conv_problem_is_pointwise(p) && sctx != NULL)
+    {
+        /* epi_store_fast: packed N[D]HWK and the tile in bounds -> the wide
+         * stores at offset m * K + k_out, a constant row step. */
+        rocke_conv_build_ctx_t* c = sctx;
+        rocke_value_t* e1 = rocke_b_cmp_eq(b, c->p_D_stride_wo, c->p_K);
+        rocke_value_t* wk = rocke_b_mul(b, c->p_Wo, c->p_K);
+        rocke_value_t* e2 = rocke_b_cmp_eq(b, c->p_D_stride_ho, wk);
+        rocke_value_t* pk = rocke_b_land(b, e1, e2);
+        if(p->is_3d)
+        {
+            rocke_value_t* hh = rocke_b_mul(b, c->p_Ho, c->p_D_stride_ho);
+            pk = rocke_b_land(b, pk, rocke_b_cmp_eq(b, c->p_D_stride_do, hh));
+            rocke_value_t* dd = rocke_b_mul(b, c->p_Do, c->p_D_stride_do);
+            pk = rocke_b_land(b, pk, rocke_b_cmp_eq(b, c->p_D_stride_n, dd));
+        }
+        else
+        {
+            rocke_value_t* hh = rocke_b_mul(b, c->p_Ho, c->p_D_stride_ho);
+            pk = rocke_b_land(b, pk, rocke_b_cmp_eq(b, c->p_D_stride_n, hh));
+        }
+        rocke_value_t* me = rocke_b_add(b, c->block_m_off_v, rocke_b_const_i32(b, c->block_m));
+        pk = rocke_b_land(b, pk, rocke_b_cmp_le(b, me, bound_m));
+        rocke_value_t* ne = rocke_b_add(b, c->block_n_off_v, rocke_b_const_i32(b, c->block_n));
+        pk = rocke_b_land(b, pk, rocke_b_cmp_le(b, ne, bound_n));
+        epi.fast_ok = pk;
+        epi.fast_row_pitch = c->p_K;
+        epi.fast_col_base = k_out_group_base;
+    }
 
     /* AOT: the D descriptor, the grouped k_out base and the store bounds all
      * come from the build context. Python builds them before the K-loop (so
      * the wavelet driver can reuse the same store code) and bounds with the
      * p_M / p_kpg kernargs, so nothing is emitted here. */
+    if(atomic_d != NULL)
+    {
+        epi.atomic_pair_lanes = spec->split_atomic_pairs;
+        if(spec->split_atomic_agent)
+            epi.atomic_syncscope = "agent";
+        if(spec->split_atomic_fast)
+            epi.atomic_fast_full = true;
+        rocke_conv_d_addr_ctx_t dctx;
+        dctx.D_desc = D_desc;
+        dctx.k_out_group_base = k_out_group_base;
+        dctx.slab_base = slab_base;
+        if(!spec->split_tail)
+        {
+            conv_fwd_split_store(sctx,
+                                 &epi,
+                                 accs,
+                                 num_accs,
+                                 atomic_d,
+                                 atomic_row_pitch,
+                                 bound_m,
+                                 bound_n,
+                                 k_out_group_base,
+                                 &dctx,
+                                 d_rsrc);
+            return;
+        }
+        /* split_tail: a whole-K tile stores plainly; a tail slice adds. */
+        rocke_if_else_t ie = rocke_b_scf_if_else(b, sctx->fwd_is_full);
+        rocke_b_region_enter(b, ie.then_region);
+        rocke_cshuffle_epilogue_store(
+            b, &epi, accs, num_accs, rocke_conv_d_addr, (void*)&dctx, d_rsrc, bound_m, bound_n);
+        rocke_b_region_leave(b);
+        rocke_b_region_enter(b, ie.else_region);
+        conv_fwd_split_store(sctx,
+                             &epi,
+                             accs,
+                             num_accs,
+                             atomic_d,
+                             atomic_row_pitch,
+                             bound_m,
+                             bound_n,
+                             k_out_group_base,
+                             &dctx,
+                             d_rsrc);
+        rocke_b_region_leave(b);
+        return;
+    }
     if(rocke_conv_problem_is_pointwise(p))
     {
         rocke_conv_d_addr_pw_ctx_t pw;
@@ -641,6 +1142,175 @@ static void rocke_conv_emit_cluster_fold(rocke_conv_build_ctx_t* ctx)
  * Python if/elif chain. Reads ctx->final_accs; builds ctx->D_desc as the
  * per-epilogue helpers need it.
  * ===================================================================== */
+/* Python _emit_fwd_epilogue_qx (epi_quad_xpose): register-only store of the
+ * 16x16-atom accumulators through a lane transpose (DPP + v_perm). */
+static void conv_emit_fwd_epilogue_qx(rocke_conv_build_ctx_t* ctx, rocke_value_t* const* accs)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_implicit_gemm_conv_spec_t* spec = ctx->spec;
+    const int mfmas_m = ctx->mfmas_m, mfmas_n = ctx->mfmas_n;
+    const int eqx = spec->epi_quad_xpose;
+    const bool bf = spec->dtype_d != NULL && strcmp(spec->dtype_d, "bf16") == 0;
+    const rocke_type_t* dt = bf ? rocke_bf16() : rocke_f16();
+    const bool x3 = eqx == 3 || eqx == 4;
+    const bool fast_cvt = eqx == 4 && bf;
+    rocke_value_t* c0 = ctx->c0;
+    rocke_value_t* lane = ctx->lane;
+    rocke_value_t* c1_ = rocke_b_const_i32(b, x3 ? 4 : 1);
+    rocke_value_t* c2_ = rocke_b_const_i32(b, x3 ? 8 : 2);
+    rocke_value_t* q_hi = rocke_b_cmp_ne(b, rocke_b_land(b, lane, c2_), c0);
+    rocke_value_t* q_odd = rocke_b_cmp_ne(b, rocke_b_land(b, lane, c1_), c0);
+    rocke_value_t* s0 = rocke_b_const_i32(b, 0x05040100);
+    rocke_value_t* sel_s = rocke_b_select(b, q_odd, s0, rocke_b_const_i32(b, 0x07060302));
+    rocke_value_t* s1 = rocke_b_const_i32(b, 0x03020504);
+    rocke_value_t* sel_o0 = rocke_b_select(b, q_odd, s1, rocke_b_const_i32(b, 0x05040100));
+    rocke_value_t* s2 = rocke_b_const_i32(b, 0x03020706);
+    rocke_value_t* sel_o1 = rocke_b_select(b, q_odd, s2, rocke_b_const_i32(b, 0x07060100));
+    rocke_value_t *row_in, *col_in;
+    if(x3)
+    {
+        rocke_value_t* l16 = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+        rocke_value_t* r4 = rocke_b_mul(b, l16, rocke_b_const_i32(b, 4));
+        rocke_value_t* l4 = rocke_b_div(b, lane, rocke_b_const_i32(b, 4));
+        row_in = rocke_b_add(b, r4, rocke_b_land(b, l4, rocke_b_const_i32(b, 3)));
+        rocke_value_t* l3 = rocke_b_land(b, lane, rocke_b_const_i32(b, 3));
+        col_in = rocke_b_mul(b, l3, rocke_b_const_i32(b, 4));
+    }
+    else
+    {
+        rocke_value_t* l16 = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+        rocke_value_t* r4 = rocke_b_mul(b, l16, rocke_b_const_i32(b, 4));
+        row_in = rocke_b_add(b, r4, rocke_b_land(b, lane, rocke_b_const_i32(b, 3)));
+        col_in = rocke_b_land(b, lane, rocke_b_const_i32(b, 12));
+    }
+    rocke_value_t* wmo = rocke_warp_grid_warp_m_off(b, &ctx->grid);
+    rocke_value_t* m_base = rocke_b_add(b, rocke_b_add(b, ctx->block_m_off_v, wmo), row_in);
+    rocke_value_t* wno = rocke_warp_grid_warp_n_off(b, &ctx->grid);
+    rocke_value_t* n_base = rocke_b_add(b, rocke_b_add(b, ctx->block_n_off_v, wno), col_in);
+    rocke_value_t* c_eb_d = rocke_b_const_i32(b, 2);
+    rocke_value_t* oob = rocke_b_const_i32(b, 0x7FFFFFFF);
+    const rocke_type_t* wt2 = rocke_vector_type(b, rocke_i32(), 2);
+    const bool wide = eqx == 2 || eqx == 3 || eqx == 4;
+    rocke_value_t* c_lsb_sh = rocke_b_const_i32(b, 16);
+    rocke_value_t* c1_one = rocke_b_const_i32(b, 1);
+    rocke_value_t* c_7fff = rocke_b_const_i32(b, 0x7FFF);
+    rocke_value_t* c_qnan = rocke_b_const_i32(b, 0x7FC00000);
+    rocke_value_t* s_hi2 = rocke_b_const_i32(b, 0x07060302);
+    auto cvt_pair = [&](rocke_value_t* acc, int i0) -> rocke_value_t* {
+        rocke_value_t* ts[2];
+        for(int k = 0; k < 2; ++k)
+        {
+            rocke_value_t* fv = rocke_b_vec_extract(b, acc, i0 + k);
+            rocke_value_t* uv = rocke_b_bitcast(b, fv, rocke_i32());
+            rocke_value_t* lsb = rocke_b_land(b, rocke_b_lshr(b, uv, c_lsb_sh), c1_one);
+            rocke_value_t* t = rocke_b_add(b, rocke_b_add(b, uv, c_7fff), lsb);
+            rocke_value_t* nan = rocke_b_fcmp(b, "uno", fv, fv);
+            ts[k] = rocke_b_select(b, nan, c_qnan, t);
+        }
+        return rocke_b_perm_b32(b, ts[1], ts[0], s_hi2);
+    };
+    if(wide)
+    {
+        rocke_value_t* wn2 = rocke_warp_grid_warp_n_off(b, &ctx->grid);
+        rocke_value_t* bw = rocke_b_add(b, ctx->block_n_off_v, wn2);
+        n_base = rocke_b_add(b, bw, rocke_b_add(b, col_in, col_in));
+    }
+    rocke_value_t* m_str = NULL;
+    if(spec->xh_stride_m)
+    {
+        rocke_value_t* wm2 = rocke_warp_grid_warp_m_off(b, &ctx->grid);
+        rocke_value_t* m_wave = rocke_b_add(b, ctx->block_m_off_v, wm2);
+        m_str = rocke_b_add(b, m_wave, rocke_b_mul(b, row_in, rocke_b_const_i32(b, mfmas_m)));
+    }
+    /* d_addr: the pointwise closure (flat [M, K], always valid) or the D
+     * descriptor's, as the other fwd epilogues pick it. */
+    rocke_conv_d_addr_ctx_t dctx;
+    dctx.D_desc = ctx->D_desc;
+    dctx.k_out_group_base = ctx->d_k_out_group_base;
+    dctx.slab_base = NULL;
+    rocke_conv_d_addr_pw_ctx_t pw;
+    pw.pitch = ctx->ir_d_pitch_pw;
+    pw.k_out_group_base = ctx->d_k_out_group_base;
+    pw.valid = ctx->ir_always_valid_d;
+    rocke_value_t* n_bound = ctx->merged ? ctx->c_gm : ctx->p_kpg;
+    for(int mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* m_val = rocke_b_add(b, m_base, rocke_b_const_i32(b, mi * 16));
+        if(spec->xh_stride_m)
+        {
+            rocke_value_t* ms = rocke_b_add(b, m_str, rocke_b_const_i32(b, mi));
+            m_val = rocke_b_select(b, ctx->xsm_ok, ms, m_val);
+        }
+        rocke_value_t* valid = NULL;
+        rocke_value_t* off0 = ctx->is_pointwise
+                                  ? rocke_conv_d_addr_pointwise(b, m_val, n_base, &valid, &pw)
+                                  : rocke_conv_d_addr(b, m_val, n_base, &valid, &dctx);
+        rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, ctx->p_M);
+        if(valid != NULL)
+            m_ok = rocke_b_land(b, m_ok, valid);
+        rocke_value_t* pend[2] = {NULL, NULL};
+        for(int ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = accs[mi * mfmas_n + ni];
+            rocke_value_t *w0, *w1;
+            if(fast_cvt)
+            {
+                w0 = cvt_pair(acc, 0);
+                w1 = cvt_pair(acc, 2);
+            }
+            else
+            {
+                rocke_value_t* w = rocke_b_vec_bitcast(b, rocke_b_vec_cast_f32_to(b, acc, dt), wt2);
+                w0 = rocke_b_vec_extract(b, w, 0);
+                w1 = rocke_b_vec_extract(b, w, 1);
+            }
+            rocke_value_t* snd = rocke_b_select(b, q_hi, w0, w1);
+            rocke_value_t* rcv = rocke_b_dpp_xor(b, snd, x3 ? 8 : 2);
+            rocke_value_t* a_ = rocke_b_select(b, q_hi, rcv, w0);
+            rocke_value_t* bv = rocke_b_select(b, q_hi, w1, rcv);
+            rocke_value_t* pm = rocke_b_perm_b32(b, bv, a_, sel_s);
+            rocke_value_t* t_;
+            if(!x3)
+                t_ = rocke_b_dpp_xor(b, pm, 1);
+            else
+            {
+                rocke_value_t* sr = rocke_b_mov_dpp(b, pm, 4, -1, false);
+                rocke_value_t* sl = rocke_b_mov_dpp(b, pm, -1, 4, false);
+                t_ = rocke_b_select(b, q_odd, sr, sl);
+            }
+            rocke_value_t* o0 = rocke_b_perm_b32(b, t_, a_, sel_o0);
+            rocke_value_t* o1 = rocke_b_perm_b32(b, t_, bv, sel_o1);
+            if(wide && ni % 2 == 0)
+            {
+                pend[0] = o0;
+                pend[1] = o1;
+                continue;
+            }
+            rocke_value_t* words[4];
+            int nw = 0;
+            if(wide)
+            {
+                words[nw++] = pend[0];
+                words[nw++] = pend[1];
+            }
+            words[nw++] = o0;
+            words[nw++] = o1;
+            const int n_rel = wide ? 32 * (ni / 2) : 16 * ni;
+            rocke_value_t* n_val = rocke_b_add(b, n_base, rocke_b_const_i32(b, n_rel));
+            rocke_value_t* ne = rocke_b_add(b, n_val, rocke_b_const_i32(b, 2 * nw));
+            rocke_value_t* ok = rocke_b_land(b, m_ok, rocke_b_cmp_le(b, ne, n_bound));
+            rocke_value_t* off = rocke_b_add(b, off0, rocke_b_const_i32(b, n_rel));
+            rocke_value_t* safe = rocke_b_select(b, ok, rocke_b_mul(b, off, c_eb_d), oob);
+            rocke_value_t* pk = rocke_b_vec_pack(b, words, nw, rocke_i32());
+            rocke_value_t* v = rocke_b_vec_bitcast(b, pk, rocke_vector_type(b, dt, 2 * nw));
+            if(bf)
+                rocke_b_buffer_store_vN_bf16(b, ctx->d_rsrc, safe, c0, v, nw);
+            else
+                rocke_b_buffer_store_vN_f16(b, ctx->d_rsrc, safe, c0, v, nw);
+        }
+    }
+}
+
 void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -668,6 +1338,11 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                    ctx->extra_context,
                                    ctx->ov->user);
     }
+    /* epi_quad_xpose: the register-only store (Python _emit_fwd_epilogue_qx). */
+    else if(spec->epi_quad_xpose)
+    {
+        conv_emit_fwd_epilogue_qx(ctx, final_accs);
+    }
     /* The store's N bound is Python's c_N_bound: kpg, or kpg*Gm == Gm under
      * merge (the true kpg, 1 on depthwise, would clamp away Gm-1 of every Gm
      * real outputs). */
@@ -688,7 +1363,10 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                           ctx->fwd_split ? ctx->fwd_slab_base : NULL,
                                           ctx->fwd_split ? "fp32" : NULL,
                                           ctx->p_M,
-                                          ctx->merged ? ctx->c_gm : ctx->p_kpg);
+                                          ctx->merged ? ctx->c_gm : ctx->p_kpg,
+                                          ctx->fwd_asplit ? ctx->D : NULL,
+                                          ctx->fwd_asplit ? ctx->p_K : NULL,
+                                          ctx);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)

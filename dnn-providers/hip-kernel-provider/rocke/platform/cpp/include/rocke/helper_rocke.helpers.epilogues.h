@@ -180,6 +180,37 @@ typedef struct rocke_cshuffle_epilogue
      * exclusive LDS bytes (not aliased onto A/B) and the step-0 reuse barrier is
      * elided. Default false keeps the aliased/low-LDS behavior (byte-identical). */
     bool no_alias; /* default false */
+    /* atomic_store step 3 as lane-contiguous bf16 pairs (Python
+     * atomic_pair_lanes, the checked form). Default false. */
+    bool atomic_pair_lanes;
+    /* Stage the C tile in m_chunks slabs of tile_m / m_chunks rows (Python
+     * m_chunks; MFMA bf16 / fp32-store output). Default 1 (0 reads as 1). */
+    int m_chunks;
+    /* Workgroup barriers of the epilogue as LDS-only barriers (Python
+     * lds_barriers -> sync_lds_only). Default false. */
+    bool lds_barriers;
+    /* atomic_pair_lanes: every pair's LDS read issued first, and (rows
+     * wave-uniform, one iteration per lane at most) the rows' map done once
+     * and read back with v_readlane (Python atomic_row_batch). Default false. */
+    bool atomic_row_batch;
+    /* atomic_pair_lanes: a workgroup whose tile is wholly in bounds skips the
+     * per-pair checks and walks its pairs at a constant row step (Python
+     * atomic_fast_full). Default false. */
+    bool atomic_fast_full;
+    /* store(): when fast_ok (an i1 the caller computes: tile in bounds and D
+     * rows fast_row_pitch elements apart, offset = m * pitch + n +
+     * fast_col_base) holds, the bf16 wide stores walk the tile at a constant
+     * row step (Python fast_ok / fast_row_pitch / fast_col_base). NULL off. */
+    rocke_value_t* fast_ok;
+    rocke_value_t* fast_row_pitch;
+    rocke_value_t* fast_col_base;
+    /* atomic_store's packed bf16 atomics: LLVM sync scope (NULL = system,
+     * the default; "agent" = device scope). Python atomic_syncscope. */
+    const char* atomic_syncscope;
+    /* atomic_store(row_map=): the destination row of tile row m (NULL = m).
+     * Read by the atomic_pair_lanes paths. Default NULL. */
+    rocke_value_t* (*atomic_row_map)(rocke_ir_builder_t* b, rocke_value_t* m, void* user);
+    void* atomic_row_map_user;
 } rocke_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",
@@ -237,6 +268,18 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                                           rocke_value_t* wg_N,
                                           rocke_value_t* bounds_m, /* NULL => no bounds */
                                           rocke_value_t* bounds_n);
+/* atomic_store(..., col_offset=): col_offset (NULL => none) is added to every
+ * destination offset after the bounds check (e.g. a conv group's
+ * output-channel slab base when wg_N is the full row stride). */
+void rocke_cshuffle_epilogue_atomic_store_ex(rocke_ir_builder_t* b,
+                                             const rocke_cshuffle_epilogue_t* epi,
+                                             rocke_value_t* const* accs,
+                                             int num_accs,
+                                             rocke_value_t* dw_ptr,
+                                             rocke_value_t* wg_N,
+                                             rocke_value_t* bounds_m,
+                                             rocke_value_t* bounds_n,
+                                             rocke_value_t* col_offset);
 
 /* CShuffleEpilogue.atomic_store(b, accs, dw_ptr, wg_N=None, bounds=None, addr_fn=...).
  * As rocke_cshuffle_epilogue_atomic_store, with an optional addr_fn for an

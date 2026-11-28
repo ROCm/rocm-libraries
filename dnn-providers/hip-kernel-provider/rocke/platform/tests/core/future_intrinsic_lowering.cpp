@@ -3010,6 +3010,84 @@ void case_ldexp()
     rocke_ir_builder_free(&b);
 }
 
+/* grid_dim: the C++ builder's op reads the dispatch packet's grid size for its
+ * axis (bytes 12/16/20) and divides by block_size when it is above 1, declares
+ * llvm.amdgcn.dispatch.ptr once, reads the same packet words through
+ * __builtin_amdgcn_dispatch_ptr in HIP source; it is pure; the builder refuses
+ * a bad axis or block_size with the Python engine's texts
+ * (tests/core/test_grid_dim.py). */
+void build_grid_dim(rocke_ir_builder_t* b)
+{
+    rocke_value_t* y = rocke_b_param(b, "Y", rocke_ptr_type(b, rocke_i32(), "global"), nullptr);
+    rocke_value_t* gx = rocke_b_grid_dim(b, "x", 64);
+    rocke_value_t* gy = rocke_b_grid_dim(b, "y", 1);
+    rocke_value_t* gz = rocke_b_grid_dim(b, "z", 1);
+    rocke_b_global_store(b, y, rocke_b_const_i32(b, 0), gx, 4);
+    rocke_b_global_store(b, y, rocke_b_const_i32(b, 1), gy, 4);
+    rocke_b_global_store(b, y, rocke_b_const_i32(b, 2), gz, 4);
+}
+
+void case_grid_dim()
+{
+    const std::string ir = lower_one("grid_dim", build_grid_dim, "gfx942");
+    EXPECT_IR_COUNT(ir, "declare ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()\n", 1);
+    EXPECT_IR_COUNT(ir, " = call ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()", 3);
+    EXPECT_IR_COUNT(ir, ".dp, i64 12\n", 1);
+    EXPECT_IR_COUNT(ir, ".dp, i64 16\n", 1);
+    EXPECT_IR_COUNT(ir, ".dp, i64 20\n", 1);
+    EXPECT_IR_COUNT(ir, ".gs, 64\n", 1);
+    EXPECT_IR_COUNT(ir, " = udiv i32 ", 1);
+
+    const std::string hip = lower_one_hip("grid_dim_hip", build_grid_dim, "gfx942");
+    EXPECT_IR_COUNT(
+        hip, "(int)(((const unsigned int*)__builtin_amdgcn_dispatch_ptr())[3] / 64u);", 1);
+    EXPECT_IR_COUNT(hip, "(int)((const unsigned int*)__builtin_amdgcn_dispatch_ptr())[4];", 1);
+    EXPECT_IR_COUNT(hip, "(int)((const unsigned int*)__builtin_amdgcn_dispatch_ptr())[5];", 1);
+
+    if(!rocke_opcode_is_pure(ROCKE_OP_GPU_GRID_DIM))
+        fail("gpu.grid_dim must be pure", __LINE__);
+    if(std::string(rocke_opcode_name(ROCKE_OP_GPU_GRID_DIM)) != "gpu.grid_dim")
+        fail("ROCKE_OP_GPU_GRID_DIM must be named gpu.grid_dim", __LINE__);
+
+    const struct
+    {
+        const char* axis;
+        int block_size;
+        const char* want;
+    } bad[] = {
+        {"w", 1, "grid_dim axis must be x, y, or z, got 'w'"},
+        {nullptr, 1, "grid_dim axis must be x, y, or z, got None"},
+        {"x", 0, "grid_dim block_size must be >= 1, got 0"},
+    };
+    for(const auto& t : bad)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "grid_dim_bad");
+        std::string err;
+        rocke_value_t* r = nullptr;
+        try
+        {
+            r = rocke_b_grid_dim(&b, t.axis, t.block_size);
+            if(rocke_ir_builder_status(&b) != ROCKE_OK)
+            {
+                const char* msg = rocke_ir_builder_error(&b);
+                err = msg ? msg : "(no message)";
+            }
+        }
+        catch(const std::exception& e)
+        {
+            err = e.what();
+        }
+        if(r != nullptr || err.find(t.want) == std::string::npos)
+        {
+            char msg[ROCKE_ERR_MSG_CAP + 128];
+            snprintf(msg, sizeof(msg), "want \"%s\", err \"%s\"", t.want, err.c_str());
+            fail(msg, __LINE__);
+        }
+        rocke_ir_builder_free(&b);
+    }
+}
+
 void case_gfx1250_tdm_gated()
 {
     const struct
@@ -4514,6 +4592,7 @@ const TestCase k_cases[] = {
     {"global_ptr_offset", case_global_ptr_offset},
     {"trap", case_trap},
     {"ldexp", case_ldexp},
+    {"grid_dim", case_grid_dim},
     {"gfx1250_tdm_gated", case_gfx1250_tdm_gated},
     {"gfx1250_tdm_builder_rejects", case_gfx1250_tdm_builder_rejects},
     {"gfx1250_tdm_purity", case_gfx1250_tdm_purity},

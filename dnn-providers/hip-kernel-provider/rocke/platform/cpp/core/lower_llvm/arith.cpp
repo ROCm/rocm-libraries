@@ -11,7 +11,7 @@
  *   arith.cmp/fcmp, arith.fmax/fmin,
  *   arith.select/and/or/not/smax/smin/umax/umin/xor/shl/lshr/umul_hi_i32,
  *   math.exp2/log2/rcp/rcp_fast/sqrt/rsqrt/tanh,
- *   gpu.thread_id / gpu.block_id.
+ *   gpu.thread_id / gpu.block_id / gpu.grid_dim.
  *
  * Every shared helper (rocke_ll_emit, rocke_ll_operand, rocke_ll_llvm_type,
  * rocke_ll_need, rocke_ll_fresh, rocke_ll_fp32_hex, rocke_ll_binop, rocke_ll_fail, ...)
@@ -976,6 +976,48 @@ static void _op_gpu_block_id(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  %s = call i32 @llvm.amdgcn.workgroup.id.%s()", res->name, axis);
 }
 
+/* Python _op_gpu_grid_dim: hsa_kernel_dispatch_packet_t holds grid_size_{x,y,z}
+ * (work-items, u32) at bytes 12/16/20; gridDim = grid_size / the workgroup
+ * size (the op's block_size attr). */
+static void _op_gpu_grid_dim(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* res = ll_result(op);
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    const char* axis = rocke_attr_get_str(&op->attrs, "axis");
+    if(axis == NULL)
+    {
+        axis = "x";
+    }
+    int off = 0;
+    if(strcmp(axis, "x") == 0)
+        off = 12;
+    else if(strcmp(axis, "y") == 0)
+        off = 16;
+    else if(strcmp(axis, "z") == 0)
+        off = 20;
+    else
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "grid_dim axis must be x, y, or z, got '%s'", axis);
+    int64_t bs = 1;
+    rocke_attr_get_int(&op->attrs, "block_size", &bs);
+    const char* r = res->name;
+    rocke_ll_need(L, "dispatch.ptr");
+    rocke_ll_emitf(L, "  %s.dp = call ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()", r);
+    rocke_ll_emitf(
+        L, "  %s.gp = getelementptr inbounds i8, ptr addrspace(4) %s.dp, i64 %d", r, r, off);
+    if(bs > 1)
+    {
+        rocke_ll_emitf(L, "  %s.gs = load i32, ptr addrspace(4) %s.gp, align 4", r, r);
+        rocke_ll_emitf(L, "  %s = udiv i32 %s.gs, %lld", r, r, (long long)bs);
+    }
+    else
+    {
+        rocke_ll_emitf(L, "  %s = load i32, ptr addrspace(4) %s.gp, align 4", r, r);
+    }
+}
+
 /* ------------------------------------------------------------- registration */
 
 void rocke_ll_register_arith(void)
@@ -1027,6 +1069,7 @@ void rocke_ll_register_arith(void)
 
     rocke_ll_set_handler(ROCKE_OP_GPU_THREAD_ID, _op_gpu_thread_id);
     rocke_ll_set_handler(ROCKE_OP_GPU_BLOCK_ID, _op_gpu_block_id);
+    rocke_ll_set_handler(ROCKE_OP_GPU_GRID_DIM, _op_gpu_grid_dim);
 }
 
 } /* namespace ckc */

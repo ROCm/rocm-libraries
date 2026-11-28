@@ -39,7 +39,11 @@ where = ["."]
 include = ["kernels*", "builders*", "dispatch*", "benchmarks*"]
 
 [tool.setuptools.package-data]
-dispatch = ["grouped_convolution_instances/*.json"]
+dispatch = [
+    "grouped_convolution_instances/*.json",
+    "conv_pin_tables/*.json",
+    "conv_route_tables/*.json",
+]
 
 [project.scripts]
 rocke-attention-combo-sweep = "benchmarks.common.attention_combo_sweep:main"

@@ -250,6 +250,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "workgroup.x": "declare i32 @llvm.amdgcn.workgroup.id.x()",
     "workgroup.y": "declare i32 @llvm.amdgcn.workgroup.id.y()",
     "workgroup.z": "declare i32 @llvm.amdgcn.workgroup.id.z()",
+    "dispatch.ptr": "declare ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()",
     "s.barrier": "declare void @llvm.amdgcn.s.barrier()",
     # gfx1250 (gfx1250) split wait counters used to drain LDS / VMEM before an
     # LDS barrier (the monolithic s_waitcnt is not selectable there).
@@ -2251,7 +2252,22 @@ class _Lowerer:
 
                 # Recurse into sub-regions; scf.for gets a conservative loop_end
                 for r in op.regions:
-                    if op.name == "scf.for":
+                    if op.name == "scf.for" and (
+                        op.attrs.get("smem_iter_local")
+                        or op.attrs.get("smem_per_iteration")
+                        or op.attrs.get("lds_iter_local")
+                    ):
+                        # The body rewrites every allocation it uses before
+                        # reading it, on every iteration (and closes the
+                        # iteration with a barrier): nothing it touches is
+                        # live across the back edge, so its uses keep their
+                        # straight-line intervals. ``smem_iter_local`` is the
+                        # attribute (IRBuilder.scf_for_iter's
+                        # smem_per_iteration sets it); ``smem_per_iteration``
+                        # and ``lds_iter_local`` are accepted as aliases of
+                        # it. The C++ engine reads the same three.
+                        walk(r.ops, loop_end=loop_end)
+                    elif op.name == "scf.for":
                         # Conservative loop liveness: a value written on one
                         # iteration may be read on the next, so every allocation
                         # touched anywhere in the loop body must be treated as
@@ -3515,6 +3531,25 @@ class _Lowerer:
             f"  {op.result.name} = call i32 @llvm.amdgcn.workgroup.id.{axis}()"
         )
 
+    def _op_gpu_grid_dim(self, op: Op) -> None:
+        # hsa_kernel_dispatch_packet_t: grid_size_{x,y,z} (work-items, u32)
+        # at bytes 12/16/20; gridDim = grid_size / the workgroup size.
+        axis = op.attrs.get("axis", "x")
+        off = {"x": 12, "y": 16, "z": 20}.get(axis)
+        if off is None:
+            raise ValueError(f"grid_dim axis must be x, y, or z, got {axis!r}")
+        bs = int(op.attrs.get("block_size", 1))
+        r = op.result.name
+        self._need("dispatch.ptr")
+        e = self._current().emit
+        e(f"  {r}.dp = call ptr addrspace(4) @llvm.amdgcn.dispatch.ptr()")
+        e(f"  {r}.gp = getelementptr inbounds i8, ptr addrspace(4) {r}.dp, i64 {off}")
+        if bs > 1:
+            e(f"  {r}.gs = load i32, ptr addrspace(4) {r}.gp, align 4")
+            e(f"  {r} = udiv i32 {r}.gs, {bs}")
+        else:
+            e(f"  {r} = load i32, ptr addrspace(4) {r}.gp, align 4")
+
     # gfx1250 workgroup clusters
 
     def _lower_cluster_read(self, op: Op, short_name: str, intrinsic: str) -> None:
@@ -3723,9 +3758,10 @@ class _Lowerer:
         cur.terminated = True
         val = self._fresh("flag")
         hit = self._fresh("flag.hit")
+        wait_ord = op.attrs.get("ordering", "acquire")
         spin.emit(
             f"  {val} = load atomic i32, ptr addrspace(1) {gep}"
-            f"{_llvm_syncscope(scope)} acquire, align 4"
+            f"{_llvm_syncscope(scope)} {wait_ord}, align 4"
         )
         spin.emit(f"  {hit} = icmp eq i32 {val}, {self._operand(expect)}")
         done = self._new_block("flag.done")
@@ -3778,6 +3814,10 @@ class _Lowerer:
             ", !amdgpu.no.remote.memory !1"
             ", !amdgpu.ignore.denormal.mode !1"
         )
+        # An explicit "syncscope" attr (IRBuilder syncscope=) on the op
+        # overrides the per-dtype default scope; "system" is LLVM's default
+        # and has no clause (_llvm_syncscope). The mirror reads the same attr.
+        scope = op.attrs.get("syncscope") or scope
         sync = _llvm_syncscope(scope) if scope else ""
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
@@ -6301,7 +6341,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {int(op.attrs.get('aux', 0))})"
         )
         self._current().emit(
             f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "
@@ -6581,7 +6621,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('aux', 0))})"
             )
         else:
             self._current().emit(
@@ -6593,7 +6633,7 @@ class _Lowerer:
                 f"ptr addrspace(8) {self._operand(rsrc)}, "
                 f"i32 {self._operand(voffset)}, "
                 f"i32 {self._operand(soffset)}, "
-                f"i32 0)"
+                f"i32 {int(op.attrs.get('aux', 0))})"
             )
 
     def _op_tile_async_buffer_load_lds(self, op: Op) -> None:

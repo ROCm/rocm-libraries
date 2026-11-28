@@ -176,6 +176,14 @@ typedef struct rocke_implicit_gemm_conv_spec
      * Stage 2 (instance_conv_fwd_split_k_reduce.h) folds the slabs into D.
      * Default 1 emits none of this. Mirrors Python ImplicitGemmConvSpec.split_k. */
     int split_k; /* default 1     */
+    /* The atomic form of the wave64 MFMA split binary
+     * (rocke_conv_fwd_split_k_atomic): ks / ks_count follow the problem block
+     * and every slice atomic-adds its partial tile into the zeroed D -- no
+     * workspace, no Stage 2. A 3-D problem always takes it (the two-stage
+     * split above serves 2-D problems only); split_atomic selects it for a
+     * 2-D problem too. Default false. Mirrors
+     * ImplicitGemmConvSpec.split_atomic. */
+    bool split_atomic; /* default false */
     /* Single-launch split-K through a gfx1250 workgroup cluster (0 = off). The
      * split_k_cluster slices of one output tile form one (1, 1, S) cluster;
      * after a cluster barrier each slice folds 1/S of the tile's rows across
@@ -217,6 +225,160 @@ typedef struct rocke_implicit_gemm_conv_spec
      * gets its own LDS bytes (pool = ab+c) and the barrier is elided -> lower
      * small-tile latency, more LDS. Only affects epilogue == "cshuffle". */
     bool cshuffle_no_alias; /* default false */
+
+    /* XCD-contiguous tile order (Python ImplicitGemmConvSpec.xcd_remap): each of
+     * the xcd_remap XCDs walks one contiguous run of num_wgs / xcd_remap tiles
+     * (M-major), so the input-row reuse between neighbouring M tiles stays in
+     * one L2. A bijection of the launch grid. 0 (default) = launch order. */
+    int xcd_remap; /* default 0 */
+    /* Output-plane band order of the M tiles on top of xcd_remap
+     * (kernels/conv/conv_m_band.py). 0 (default) = off. */
+    int m_band; /* default 0 */
+
+    /* Register-staged global prefetch of the next K tile (Python
+     * ImplicitGemmConvSpec.reg_prefetch): tile t+1's global reads go into
+     * registers ahead of tile t's MFMAs and to LDS after them. 1: one LDS
+     * buffer (a barrier retires the reads, a second publishes); 2: two LDS
+     * buffers, x2-unrolled ping-pong plus a 0/1-trip tail. 0 (default) = off. */
+    int reg_prefetch; /* default 0 */
+    /* XOR-swizzled A/B LDS tiles in place of the +8 row pad (lds_xor): the
+     * 16-byte chunk of tile element (r, c) moves by the row's key. Needs the
+     * reg_prefetch / uniform_k_decode loops and tile_k >= 32. */
+    bool lds_xor; /* default false */
+    /* k-packed fragment reads (lds_kpack_read): one 16-byte LDS read serves
+     * two kk steps. reg_prefetch / uniform_k_decode loops, even kk count. */
+    bool lds_kpack_read; /* default false */
+    /* lds_xor_rowkey: key the k-packed lds_xor swizzle of tile_k 32 on the
+     * row itself (not the 128-byte span). */
+    bool lds_xor_rowkey; /* default false */
+
+    /* Not ported (Python engine only): prefetch_regs, xh_dpp, a_direct,
+     * xh_subtile, pp_fetch_deep. This struct has no field for them; the conv
+     * binding refuses a spec dict that sets one to a non-default value, so no
+     * kernel is built here under such a spec's name. */
+
+    /* Uniform-tap K loop (uniform_k_decode): when cpg % tile_k == 0 the tile's
+     * channel base and filter tap are carried as uniform counters, so the
+     * per-element k decode disappears; otherwise the plain fallback loop. */
+    bool uniform_k_decode; /* default false */
+    /* uk_tap_fast: the 3-D uniform-tap loop walks the filter taps fastest and
+     * the channel chunk outermost. */
+    bool uk_tap_fast; /* default false */
+    /* uk_nopad: the uniform-tap loop without the per-element bounds checks
+     * (unpadded / halo-form input; only the tap-range check stays). */
+    bool uk_nopad; /* default false */
+    /* uk_chunk_group (power of two >= 2, uk_tap_fast only): chunks fastest
+     * inside a group of that many, then the tap, then the next group. */
+    int uk_chunk_group; /* default 0 */
+    /* fb_skip_empty: the uniform_k_decode kernels' fallback loop skips its
+     * prologue load when its range is empty. */
+    bool fb_skip_empty; /* default false */
+
+    /* lds_ahead: the LDS fragment reads of kk step kk+1 issue before the
+     * MFMAs of step kk (reg_prefetch loops). */
+    bool lds_ahead; /* default false */
+    /* defer_mfma: the MFMAs of the last defer_mfma kk steps of a tile run after
+     * the barrier that retires its LDS reads, interleaved with the next tile's
+     * LDS store (reg_prefetch=1 loop). */
+    int defer_mfma; /* default 0 */
+    /* defer_mfma_per_write: MFMAs per ds_write of that store phase. */
+    int defer_mfma_per_write; /* default 0 */
+    /* vmem_interleave: the next tile's buffer_loads go one per that many
+     * MFMAs of the reg_prefetch / rpf_pingpong phase (hint pipelines). */
+    int vmem_interleave; /* default 0 */
+    /* rpf_setprio (1..3): raise the wave priority over the load issue + MFMAs
+     * of the reg_prefetch loops. */
+    int rpf_setprio; /* default 0 */
+    /* rpf_pingpong (1..5): the 8-wave block ping-pong of the uniform_k_decode
+     * + reg_prefetch=1 loop (two waves per SIMD alternate memory and compute
+     * phases). 4/5: tile t+2's global reads in [mem B] / [compute B]. */
+    int rpf_pingpong; /* default 0 */
+    /* pp_pre_mfma: MFMAs of each compute phase placed ahead of its barrier. */
+    int pp_pre_mfma; /* default 0 */
+    /* pp_b_double: rpf_pingpong with B in two LDS buffers (pairs + tail). */
+    bool pp_b_double; /* default false */
+    /* pp_split_fetch (rpf_pingpong 5): where each operand's global reads go.
+     * The C port carries 1-4 and 10; 5-9 are Python-only (rejected here). */
+    int pp_split_fetch; /* default 0 */
+    /* split_addr_k_decode: on the 3-D split-addressing path the tile's tap
+     * is decoded once from its k origin (cpg % tile_k == 0) and the channel
+     * is the origin's plus the column. */
+    bool split_addr_k_decode; /* default false */
+    /* pp_end_guard: the plain rpf_pingpong loop's uniform-tap fetches read
+     * nothing for a tile at or past the loop's end (t_ok &= k < hi). */
+    bool pp_end_guard; /* default false */
+
+    /* Knobs of the wave64 MFMA atomic split-K forward (split_k > 1). */
+    /* split_tail: the first full_tiles tiles (launch order) run the whole
+     * reduction unsplit and store plainly; their other slices exit. Appends
+     * the full_tiles kernarg. */
+    bool split_tail; /* default false */
+    /* split_atomic_agent: the split-K packed atomics at device (agent) scope,
+     * performed in the L2 (Python split_atomic_agent; tag saa). */
+    bool split_atomic_agent; /* default false */
+    /* split_atomic_pairs: the bf16 atomic store as lane-contiguous pairs (one
+     * 4-byte LDS read per pair). */
+    bool split_atomic_pairs; /* default false */
+    /* split_atomic_fast (with split_atomic_pairs, unchunked): a wholly
+     * in-bounds tile walks its pairs at a constant row step (tag sapf). */
+    bool split_atomic_fast; /* default false */
+    /* epi_store_fast: the unchunked bf16 cshuffle store walks a packed,
+     * in-bounds tile at a constant row step (tag esf). */
+    bool epi_store_fast; /* default false */
+    /* split_flag_store: slice 0 stores its tile plainly and raises the tile's
+     * flag, the other slices wait and atomic-add; no zeroed D (tag sfs). */
+    bool split_flag_store; /* default false */
+    /* split_zero_first: slice 0 zeroes its D tile before its K loop and raises
+     * the flag every slice's atomic store waits for (tag szf). Both append the
+     * sk_flags kernarg. */
+    bool split_zero_first; /* default false */
+    /* split_tail_compact (split_tail): one flat grid -- full tiles, then the
+     * tail slice-major -- decoded into the default launch's (x, y, z) (tag stc). */
+    bool split_tail_compact; /* default false */
+    /* split_det (1, 2, 3): deterministic split: every non-owner slice stores
+     * its f32 partial tile into its slot of sk_partials and counts in; the
+     * owner (last slice) folds them in slot order and stores D once. 2 moves
+     * the partials through agent-coherent (SC1) buffer accesses. Appends
+     * sk_flags and sk_partials. 3 instead stores every slice's f32 partial
+     * tile into its own [M, K] slab of sk_partials (slot = slice); a separate
+     * fold kernel sums the slabs in slot order into D (not with split_tail). */
+    int split_det; /* default 0 */
+    /* split_xcd_remap: the whole split launch of one group, slice-major,
+     * remapped XCD-contiguously (replaces xcd_remap / chiplet_swizzle). */
+    int split_xcd_remap; /* default 0 */
+    /* split_streamk: workgroup w of the flat grid of ks_count runs the global
+     * K iterations [w*T/G, (w+1)*T/G) of the tile-major T, one segment per
+     * tile it touches (the kernel body runs in a segment loop). */
+    bool split_streamk; /* default false */
+    /* split_hybrid (E >= 0): S aligned slices per tile plus whole-tile
+     * remainder workgroups (E: the remainder's extra K tiles of balance). */
+    int split_hybrid; /* default 0 */
+
+    /* The fwd 3-D x-halo loop family (uniform_k_decode + reg_prefetch=1 +
+     * lds_xor): uk_xhalo stages tile_m + uk_xhalo input pixels once per
+     * (chunk, z, y) and serves the 3 x taps from LDS. The C port carries the
+     * wave-private DMA staging form (fxh_dma >= 1000, xh_stride_m). */
+    int uk_xhalo; /* default 0 */
+    bool xh_wait_smem; /* retire scalar loads before the x-halo loop */
+    int epi_quad_xpose; /* 1..4: register-only quad-transpose store (16x16 atom) */
+    bool no_agpr; /* agpr_alloc "0,0" */
+    bool xh_stride_m; /* x-halo A rows M-strided across a wave's MFMAs */
+    int fxh_dma; /* x-halo DMA staging schedule (>= 1000: wave-private A) */
+    int xh_yring; /* x-halo input-row ring across the y taps (2 / 4 rows, + 10:
+                   * early reload; + 20, early ring rows, is Python-only) */
+    bool xh_pad; /* fxh_dma >= 1000 loop on padded inputs (zero halo from masked DMA) */
+
+    /* cshuffle_m_chunks: stage the cshuffle C tile in that many row slabs
+     * (bf16 wave64 MFMA cshuffle). Default 1 (0 reads as 1). */
+    int cshuffle_m_chunks; /* default 1 */
+    /* epi_lds_barriers: the cshuffle epilogue's barriers as LDS-only ones. */
+    bool epi_lds_barriers; /* default false */
+    /* reg_prefetch=1 loop: LDS-only per-tile barriers (rpf_lds_barrier) and
+     * the next tile's reads after the first fragment reads (rpf_fetch_late). */
+    bool rpf_lds_barrier;
+    bool rpf_fetch_late;
+    /* AMDGPU machine-scheduler strategy (0 = default, 1..5). */
+    int sched_strategy;
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

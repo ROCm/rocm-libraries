@@ -137,8 +137,560 @@ static int make_cfg_split_k_cshuffle(int idx, rocke_dgrad_conv_spec_t* spec, con
     return 0;
 }
 
+/* gfx942 3-D tap-outer configs; mirrors _GFX942_3D in the Python emitter (the
+ * table is there). make_cfg_3d numbers them from 57; parity config N is its
+ * config N - GFX942_3D_OFFSET (they follow the split-K cshuffle configs, which
+ * end at 70). */
+#define GFX942_3D_OFFSET 14
+
+static int make_cfg_3d(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    *spec = rocke_dgrad_conv_spec_default();
+    *arch = "gfx942";
+    if(idx == 63)
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+    else
+        spec->problem = rocke_conv_problem_make_3d(
+            1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, idx == 65 ? 0 : 1, 1, 1, 1, 1, 1);
+    spec->problem.groups = idx == 64 ? 1 : 2;
+    const char* dt = idx == 62 ? "fp16" : "bf16";
+    spec->dtype_a = dt;
+    spec->dtype_b = dt;
+    spec->dtype_d = dt;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 16;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->has_lds_k_pad = true;
+    spec->lds_k_pad = 0;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->tap_outer_k = true;
+    const bool s1 = idx >= 60 && idx <= 62;
+    if(s1)
+    {
+        spec->tile_m = 256;
+        spec->tile_n = 64;
+        spec->tile_k = 32;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->xcd_remap = 6;
+        spec->has_waves_per_eu = true;
+        spec->waves_per_eu = 2;
+        spec->tapk_prefetch = idx == 60 ? 3 : idx == 61 ? 2 : 1;
+        spec->b_kpack = idx == 62 ? 0 : 2;
+        return 0;
+    }
+    spec->tile_m = 128;
+    spec->tile_n = 256;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 4;
+    if(idx == 58 || idx == 63 || idx == 64)
+    {
+        spec->tapk_prefetch = 1;
+        spec->b_kpack = 4;
+        spec->xcd_remap = 6;
+    }
+    if(idx == 59)
+    {
+        spec->tapk_prefetch = 3;
+        spec->b_kpack = 4;
+    }
+    if(idx >= 66 && idx <= 70)
+    {
+        static const int pp[5] = {4, 4, 4, 5, 3};
+        static const int pps[5] = {2, 5, 12, 1, 2};
+        static const int pbs[5] = {0, 3, 2, 0, 0};
+        spec->tapk_prefetch = 1;
+        spec->b_kpack = 4;
+        spec->xcd_remap = 6;
+        spec->lds_xor = true;
+        spec->tapk_pingpong = pp[idx - 66];
+        spec->tapk_pp_sched = pps[idx - 66];
+        spec->tapk_pp_bslab = pbs[idx - 66];
+    }
+    return 0;
+}
+
+/* 71-76, 84-94, 97-109: the ping-pong / box record kernels; mirrors _GFX942_3D_PP in the
+ * Python emitter (the table is there). */
+static int make_cfg_3d_pp(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    make_cfg_3d(57, spec, arch);
+    spec->tapk_prefetch = 1;
+    spec->b_kpack = 4;
+    spec->tapk_pingpong = 4;
+    spec->lds_xor = true;
+    spec->xcd_remap = 6;
+    const bool t256 = idx == 71 || idx == 72 || idx == 74;
+    if(t256)
+    {
+        spec->tile_m = 256;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_m = 4;
+        spec->warp_n = 2;
+    }
+    static const int pps[6] = {5, 5, 2, 12, 5, 2};
+    static const int pbs[6] = {3, 0, 3, 3, 0, 0};
+    static const int mch[6] = {2, 4, 1, 2, 1, 1};
+    static const int sk[6] = {8, 8, 1, 3, 4, 8};
+    static const int pbx[6] = {7, 7, 77, 77, 77, 7};
+    static const int pbo[6] = {2, 2, 2, 0, 3, 1};
+    static const int pbd[6] = {1, 1, 0, 1, 1, 1};
+    if(idx == 84)
+    {
+        /* no boxes: tapk_ztrim, the partial dY tile, stride-1 pp_epi 2 */
+        spec->tile_m = 224;
+        spec->tile_n = 256;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 4;
+        spec->tapk_pp_sched = 5;
+        spec->tapk_pp_epi = 2;
+        spec->tapk_ztrim = 1;
+        spec->tapk_pp_bslab = 3;
+        spec->cshuffle_m_chunks = 7;
+        return 0;
+    }
+    if(idx >= 107 && idx <= 109)
+    {
+        /* tapk_pingpong 1 / 2 / 3, tapk_pp_sched 0 */
+        spec->tapk_pingpong = idx - 106;
+        spec->lds_xor = idx != 108;
+        spec->split_k = idx == 109 ? 4 : 1;
+        return 0;
+    }
+    if(idx == 106)
+    {
+        /* xh_epi_lin on the dense pp_epi 2 store */
+        spec->tapk_pp_sched = 5;
+        spec->tapk_pp_epi = 2;
+        spec->xh_epi_lin = true;
+        spec->epi_lds_barriers = true;
+        return 0;
+    }
+    if(idx >= 101 && idx <= 105)
+    {
+        /* pp_zskip and the split box stores */
+        static const int pps101[5] = {5, 2, 2, 7, 12};
+        static const int sk101[5] = {1, 3, 4, 8, 4};
+        static const int pbx101[5] = {0, 5, 3, 113, 7};
+        static const int pbo101[5] = {0, 2, 2, 1, 2};
+        const int i = idx - 101;
+        if(idx == 105)
+        {
+            spec->tile_m = 256;
+            spec->tile_n = 256;
+            spec->tile_k = 32;
+            spec->warp_m = 4;
+            spec->warp_n = 2;
+            spec->tapk_pp_bslab = 3;
+            spec->cshuffle_m_chunks = 2;
+        }
+        spec->tapk_pp_sched = pps101[i];
+        spec->split_k = sk101[i];
+        spec->pp_boxes = pbx101[i];
+        spec->pp_box_order = pbo101[i];
+        spec->pp_box_det = idx == 102 ? 2 : 0;
+        spec->pp_zskip = idx == 101 || idx == 102 || idx == 104;
+        spec->epi_lds_barriers = idx == 103;
+        spec->split_atomic_pairs = idx == 104;
+        return 0;
+    }
+    if(idx == 99 || idx == 100)
+    {
+        /* split-K ping-pong without boxes */
+        spec->tapk_pp_sched = idx == 99 ? 5 : 2;
+        spec->split_k = idx == 99 ? 4 : 3;
+        spec->split_atomic_pairs = idx == 100;
+        return 0;
+    }
+    if(idx == 97 || idx == 98)
+    {
+        /* tapk_pp_sched 7: split boxes (97), plain (98) */
+        spec->tapk_pp_sched = 7;
+        if(idx == 97)
+        {
+            spec->split_k = 8;
+            spec->pp_boxes = 7;
+            spec->pp_box_order = 2;
+            spec->pp_box_det = 1;
+        }
+        return 0;
+    }
+    if(idx == 93 || idx == 94)
+    {
+        /* 93: non-box pp, plain cshuffle store in m_chunks; 94: pbd 2 boxes */
+        spec->tapk_pp_sched = idx == 93 ? 5 : 2;
+        if(idx == 93)
+            spec->cshuffle_m_chunks = 2;
+        else
+        {
+            spec->split_k = 8;
+            spec->pp_boxes = 7;
+            spec->pp_box_order = 1;
+            spec->pp_box_det = 2;
+        }
+        return 0;
+    }
+    if(idx >= 88 && idx <= 92)
+    {
+        /* the other two-ahead schedules; m_band on the non-box ping-pong */
+        static const int pps88[5] = {4, 3, 6, 11, 1};
+        spec->tapk_pp_sched = pps88[idx - 88];
+        if(idx == 88)
+        {
+            spec->tile_m = 256;
+            spec->tile_n = 128;
+            spec->tile_k = 64;
+            spec->warp_m = 4;
+            spec->warp_n = 2;
+            spec->tapk_pp_epi = 2;
+            spec->tapk_ztrim = 1;
+        }
+        if(idx == 92)
+        {
+            spec->tile_m = 512;
+            spec->tile_n = 128;
+            spec->tile_k = 32;
+            spec->warp_m = 4;
+            spec->warp_n = 2;
+            spec->tapk_pp_epi = 2;
+            spec->tapk_pp_bslab = 1;
+            spec->m_band = 11;
+            spec->cshuffle_m_chunks = 2;
+        }
+        return 0;
+    }
+    if(idx >= 85 && idx <= 87)
+    {
+        /* split_atomic_pairs on pixel-list boxes */
+        if(idx > 85)
+        {
+            spec->tile_m = 256;
+            spec->tile_n = 256;
+            spec->tile_k = 32;
+            spec->warp_m = 4;
+            spec->warp_n = 2;
+            spec->tapk_pp_sched = 12;
+            spec->tapk_pp_bslab = 3;
+            spec->cshuffle_m_chunks = idx == 86 ? 2 : 4;
+            spec->pp_boxes = idx == 86 ? 77 : 7;
+            spec->epi_lds_barriers = true;
+            if(idx == 87)
+            {
+                spec->pp_box_cus = 456;
+                spec->pp_box_order = 2;
+            }
+        }
+        else
+        {
+            spec->tapk_pp_sched = 2;
+            spec->pp_boxes = 7;
+            spec->pp_box_order = 1;
+        }
+        spec->split_k = 8;
+        spec->split_atomic_pairs = true;
+        return 0;
+    }
+    const int i = idx - 71;
+    spec->tapk_pp_sched = pps[i];
+    spec->tapk_pp_bslab = pbs[i];
+    spec->cshuffle_m_chunks = mch[i];
+    spec->split_k = sk[i];
+    spec->pp_boxes = pbx[i];
+    spec->pp_box_order = pbo[i];
+    spec->pp_box_det = pbd[i];
+    if(idx == 73)
+    {
+        spec->tapk_pp_epi = 2;
+        spec->epi_lds_barriers = true;
+    }
+    return 0;
+}
+
+/* 77-80: the x-halo record kernel family; mirrors _GFX942_3D_XH in the
+ * Python emitter (the table is there). */
+static int make_cfg_3d_xh(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    make_cfg_3d(57, spec, arch);
+    if(idx == 80)
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 128, 128, 3, 3, 1, 1, 1, 0, 1, 1);
+    else
+        spec->problem = rocke_conv_problem_make_3d(
+            1, 16, 16, 16, 128, 128, 3, 3, 3, 1, 1, 1, 1, 1, 0, 1, 1, 1);
+    spec->problem.groups = 2;
+    spec->tile_m = 256;
+    spec->tile_n = 64;
+    spec->tile_k = 32;
+    spec->warp_m = 4;
+    spec->warp_n = 1;
+    spec->tapk_xhalo = true;
+    spec->b_kpack = 2;
+    spec->xhalo_exact = true;
+    spec->xh_a_k4 = true;
+    spec->xh_b_wide = true;
+    spec->xh_b_kpad = 4;
+    spec->lds_xor = true;
+    spec->has_waves_per_eu = true;
+    spec->waves_per_eu = 2;
+    if(idx == 77 || idx >= 80)
+    {
+        spec->tapk_prefetch = 3;
+        spec->tapk_ilv = 4;
+        spec->tapk_lds_ahead = 1;
+        spec->tapk_lds_barrier = true;
+        spec->xh_order = 6;
+        spec->xh_defer = 4;
+        spec->xh_fast_a = 1;
+        spec->xh_epi = 1;
+        spec->tapk_setprio = 1;
+        spec->xcd_remap = 6;
+        spec->m_band = 11;
+        spec->xh_stride_m = true;
+        spec->xh_epi_lin = true;
+        spec->epi_lds_barriers = true;
+        spec->xh_tap_rsrc = true;
+        spec->tapk_ztrim = idx == 77 ? 2 : 0;
+        spec->cshuffle_m_chunks = 2;
+    }
+    if(idx >= 81)
+    {
+        spec->xh_yring = idx == 81 ? 130 : 66;
+        spec->tapk_ztrim = 1;
+        spec->no_agpr = idx != 83;
+        if(idx == 81)
+            spec->xh_order = 7;
+        else if(idx == 82)
+            spec->xh_defer = 0;
+        else
+        {
+            spec->xh_order = 1;
+            spec->xh_defer = 2;
+        }
+    }
+    if(idx == 78)
+    {
+        spec->tapk_prefetch = 3;
+        spec->xh_order = 1;
+        spec->tapk_setprio = 1;
+        spec->tapk_lds_barrier = true;
+        spec->tapk_ilv = 4;
+    }
+    if(idx == 79)
+    {
+        spec->tapk_prefetch = 1;
+        spec->tapk_ztrim = 1;
+        spec->xh_fast_a = 1;
+        spec->xh_tap_rsrc = true;
+        spec->xh_epi = 1;
+        spec->tapk_lds_ahead = 1;
+        spec->xh_defer = 2;
+    }
+    return 0;
+}
+
+/* The gfx942 3-D configs by their own number (from 57); mirrors
+ * _gfx942_3d_any() in the Python emitter. */
+static int make_cfg_3d_any(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    if(idx >= 128 && idx <= 132)
+    {
+        /* knob values both validators refuse; mirrors _GFX942_3D_BAD */
+        static const int base[5] = {57, 58, 77, 57, 77};
+        const int r = make_cfg_3d_any(base[idx - 128], spec, arch);
+        if(idx == 128)
+            spec->b_kpack = 3;
+        else if(idx == 129)
+            spec->tap_outer_k = false;
+        else if(idx == 130)
+            spec->problem.pW = 1;
+        else if(idx == 131)
+            spec->tapk_prefetch = 2;
+        else
+            spec->xh_defer = 128;
+        return r;
+    }
+    if(idx >= 122 && idx <= 124)
+    {
+        /* the shipped x-halo pin forms: 77 + m_band 8 + xh_dx_wmask; 81 with
+         * xh_order 6, xh_defer 3, xh_dx_wmask; t256x128x16 with b_kpack 4,
+         * tapk_prefetch 1, xh_order 2, m_band 16, xh_dx_wmask */
+        const int r = make_cfg_3d_xh(idx == 123 ? 81 : 77, spec, arch);
+        spec->xh_dx_wmask = true;
+        if(idx == 122)
+            spec->m_band = 8;
+        else if(idx == 123)
+        {
+            spec->xh_order = 6;
+            spec->xh_defer = 3;
+        }
+        else
+        {
+            spec->tile_n = 128;
+            spec->tile_k = 16;
+            spec->b_kpack = 4;
+            spec->tapk_prefetch = 1;
+            spec->xh_order = 2;
+            spec->xh_defer = 0;
+            spec->m_band = 16;
+        }
+        return r;
+    }
+    if(idx >= 125 && idx <= 127)
+    {
+        /* the shipped box forms: pp_boxes 8 / 77 split-K with pp_box_det 1;
+         * pp_boxes 8 unsplit with tapk_pp_epi 2 */
+        const int r = make_cfg_3d(57, spec, arch);
+        spec->tapk_prefetch = 1;
+        spec->b_kpack = 4;
+        spec->tapk_pingpong = 4;
+        spec->lds_xor = true;
+        spec->xcd_remap = 6;
+        spec->epi_lds_barriers = true;
+        spec->tapk_pp_sched = idx == 127 ? 5 : 2;
+        spec->pp_boxes = idx == 126 ? 77 : 8;
+        if(idx == 127)
+        {
+            spec->tapk_pp_epi = 2;
+            spec->pp_box_order = 2;
+            return r;
+        }
+        spec->split_k = idx == 125 ? 8 : 4;
+        spec->pp_box_order = 1;
+        spec->pp_box_det = 1;
+        if(idx == 125)
+            spec->pp_box_cus = 684;
+        return r;
+    }
+    if(idx >= 113 && idx <= 115)
+    {
+        /* xh_dx_wmask on 77 (linear store), 77 without xh_epi_lin, and 81 */
+        const int r = make_cfg_3d_xh(idx == 115 ? 81 : 77, spec, arch);
+        spec->xh_dx_wmask = true;
+        if(idx == 114)
+            spec->xh_epi_lin = false;
+        return r;
+    }
+    if(idx >= 118 && idx <= 121)
+    {
+        /* xh_epi 2 (no xh_stride_m) / 3 on 77's loop, 120-121 with xh_dx_wmask */
+        const int r = make_cfg_3d_xh(77, spec, arch);
+        spec->xh_epi = (idx % 2 == 0) ? 2 : 3;
+        spec->xh_epi_lin = false;
+        if(spec->xh_epi == 2)
+            spec->xh_stride_m = false;
+        spec->xh_dx_wmask = idx >= 120;
+        return r;
+    }
+    if(idx == 116 || idx == 117)
+    {
+        /* pp_boxes 8 (pp_boxes 7's binary) on 105 and 76 */
+        const int r = make_cfg_3d_pp(idx == 116 ? 105 : 76, spec, arch);
+        spec->pp_boxes = 8;
+        return r;
+    }
+    if(idx == 95 || idx == 96)
+    {
+        /* xh_fast_a without xh_tap_rsrc on 77 / 79 */
+        const int r = make_cfg_3d_xh(idx == 95 ? 77 : 79, spec, arch);
+        spec->xh_tap_rsrc = false;
+        return r;
+    }
+    if(idx == 112)
+    {
+        /* 77 with the B tiles swizzled under lds_xor (xh_b_kpad 0) */
+        const int r = make_cfg_3d_xh(77, spec, arch);
+        spec->xh_b_kpad = 0;
+        return r;
+    }
+    if(idx == 110 || idx == 111)
+    {
+        /* 110: tapk_setprio 2 on 77's loop; 111: the y-ring (82) through the
+         * per-tap MFMA phase. Both without tapk_ilv / tapk_lds_ahead /
+         * xh_defer / xh_stride_m. */
+        const int r = make_cfg_3d_xh(idx == 110 ? 77 : 82, spec, arch);
+        if(idx == 110)
+            spec->tapk_setprio = 2;
+        spec->tapk_ilv = 0;
+        spec->tapk_lds_ahead = 0;
+        spec->xh_defer = 0;
+        spec->xh_stride_m = false;
+        return r;
+    }
+    if(idx >= 77 && idx <= 83)
+        return make_cfg_3d_xh(idx, spec, arch);
+    if((idx >= 71 && idx <= 76) || (idx >= 84 && idx <= 94) || (idx >= 97 && idx <= 109))
+        return make_cfg_3d_pp(idx, spec, arch);
+    if(idx >= 57 && idx <= 70)
+        return make_cfg_3d(idx, spec, arch);
+    return -1;
+}
+
+static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch);
+
+/* cshuffle_no_alias (147-150) and a non-identity acc_epilogue (151-156) on
+ * earlier configs. Keep in lockstep with _EPI_ALIAS in
+ * conv_implicit_gemm_dgrad_emit.py (which lists what each index covers). */
+static int make_cfg_epi_alias(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    static const int base[10] = {2, 16, 67, 101, 0, 16, 91, 98, 13, 0};
+    const int r = make_cfg(base[idx - 147], spec, arch);
+    if(r != 0)
+        return r;
+    if(idx <= 150)
+    {
+        spec->cshuffle_no_alias = true;
+        return 0;
+    }
+    rocke_conv_acc_epilogue_t* e = &spec->acc_epilogue;
+    if(idx == 151 || idx == 154)
+    {
+        /* _EPI_A */
+        e->bias = 0.5;
+        e->scale = 2.0;
+        e->relu = true;
+    }
+    else if(idx == 152 || idx == 155)
+    {
+        /* _EPI_B */
+        e->scale = 0.25;
+        e->has_clamp_min = true;
+        e->clamp_min = -1.0;
+        e->has_clamp_max = true;
+        e->clamp_max = 6.0;
+    }
+    else if(idx == 153)
+    {
+        /* _EPI_C */
+        e->relu = true;
+        e->has_clamp_max = true;
+        e->clamp_max = 6.0;
+    }
+    else
+    {
+        /* clamp_min > clamp_max */
+        e->has_clamp_min = true;
+        e->clamp_min = 2.0;
+        e->has_clamp_max = true;
+        e->clamp_max = 1.0;
+    }
+    return 0;
+}
+
 static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
+    if(idx >= 147 && idx <= 156)
+        return make_cfg_epi_alias(idx, spec, arch);
+    if(idx >= 57 + GFX942_3D_OFFSET)
+        return make_cfg_3d_any(idx - GFX942_3D_OFFSET, spec, arch);
     *spec = rocke_dgrad_conv_spec_default();
     spec->tile_m = 64;
     spec->tile_n = 64;

@@ -84,6 +84,7 @@ f32 range gives the infinity or zero of its sign. Any other operand types are re
 |---------------------|--------------------|--------------------------------------|
 | `gpu.thread_id`     | `thread_id_x`      | `llvm.amdgcn.workitem.id.x()`        |
 | `gpu.block_id`      | `block_id_x/y/z`   | `llvm.amdgcn.workgroup.id.{x,y,z}()` |
+| `gpu.grid_dim`      | `grid_dim(axis, block_size)` | load of the grid size from `llvm.amdgcn.dispatch.ptr()` (byte 12/16/20), `udiv` by `block_size` when it is above 1 |
 | `tile.lane_id`      | `lane_id`          | `mbcnt.hi(-1, mbcnt.lo(-1, 0))`      |
 | `tile.readfirstlane`| `readfirstlane`    | `llvm.amdgcn.readfirstlane.{i32,i64}` |
 | `tile.pin_sgpr`     | `pin_sgpr`         | `asm volatile("" : "+s"(x))`         |

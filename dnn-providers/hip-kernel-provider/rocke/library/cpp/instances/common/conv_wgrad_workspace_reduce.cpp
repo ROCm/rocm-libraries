@@ -35,6 +35,12 @@
 #ifndef ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS
 #define ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS 8
 #endif
+/* The widest vec (an f32 slab load of at most 8 elements) and the deepest
+ * fold_loop (Python _MAX_VEC / _MAX_FOLD_LOOP):
+ * the folds hold one value per vector lane and per looped slab load in fixed
+ * arrays of these sizes, so the validator refuses anything past them. */
+#define ROCKE_WGRAD_REDUCE_MAX_VEC 8
+#define ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP 64
 
 /* ---- spec helpers -------------------------------------------------------- */
 
@@ -49,12 +55,14 @@ rocke_wgrad_reduce_spec_t rocke_wgrad_reduce_spec_default(void)
     s.problem_short = "";
     s.groups = 1;
     s.ws_replicas = ROCKE_WGRAD_REDUCE_DEFAULT_WS_REPLICAS;
+    s.vec = 1;
+    s.slab_par = 1;
     return s;
 }
 
 int rocke_wgrad_reduce_spec_block_size(const rocke_wgrad_reduce_spec_t* spec)
 {
-    return spec->tile_m * spec->tile_n;
+    return spec->tile_m * spec->tile_n * (spec->slab_par > 1 ? spec->slab_par : 1);
 }
 
 rocke_status_t
@@ -63,8 +71,9 @@ rocke_status_t
     /* Python: parts = [short, t{m}x{n}] + (["wsr{R}"] if R > 1) + [dtype_d] */
     char t_buf[32];
     char r_buf[32];
+    char v_buf[16], rz_buf[16], fl_buf[16], sp_buf[16];
     snprintf(t_buf, sizeof(t_buf), "t%dx%d", spec->tile_m, spec->tile_n);
-    const char* parts[4];
+    const char* parts[10];
     int n_parts = 0;
     parts[n_parts++] = spec->problem_short ? spec->problem_short : "";
     parts[n_parts++] = t_buf;
@@ -72,6 +81,28 @@ rocke_status_t
     {
         snprintf(r_buf, sizeof(r_buf), "wsr%d", spec->ws_replicas);
         parts[n_parts++] = r_buf;
+    }
+    if(spec->vec > 1)
+    {
+        snprintf(v_buf, sizeof(v_buf), "v%d", spec->vec);
+        parts[n_parts++] = v_buf;
+    }
+    if(spec->rezero)
+    {
+        snprintf(rz_buf, sizeof(rz_buf), "rz%d", spec->rezero);
+        parts[n_parts++] = rz_buf;
+    }
+    if(spec->ws_bf16)
+        parts[n_parts++] = "wsb";
+    if(spec->fold_loop)
+    {
+        snprintf(fl_buf, sizeof(fl_buf), "fl%d", spec->fold_loop);
+        parts[n_parts++] = fl_buf;
+    }
+    if(spec->slab_par > 1)
+    {
+        snprintf(sp_buf, sizeof(sp_buf), "sp%d", spec->slab_par);
+        parts[n_parts++] = sp_buf;
     }
     parts[n_parts++] = spec->dtype_d ? spec->dtype_d : "fp16";
     return rocke_kernel_name_join(spec->name, parts, n_parts, NULL, NULL, 0, out, out_cap, NULL);
@@ -115,7 +146,337 @@ bool rocke_wgrad_reduce_is_valid_spec(const rocke_wgrad_reduce_spec_t* spec,
             snprintf(reason, reason_cap, "dtype_d must be fp16/bf16/fp32 (got '%s')", dtype_d);
         return false;
     }
+    /* Python wgrad_reduce_spec_conflict, reason for reason. */
+    const int v = spec->vec;
+    if(v != 1 && v != 2 && v != 4 && v != ROCKE_WGRAD_REDUCE_MAX_VEC)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.vec must be 1, 2, 4 or %d (got %d)",
+                     ROCKE_WGRAD_REDUCE_MAX_VEC,
+                     v);
+        return false;
+    }
+    if(v > 1 && spec->wg_N % v)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.vec=%d must divide the dW row length wg_N=%d",
+                     v,
+                     spec->wg_N);
+        return false;
+    }
+    if(spec->ws_bf16 && v <= 1)
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.ws_bf16 needs vec > 1");
+        return false;
+    }
+    if(spec->fold_loop < 0 || spec->fold_loop > ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.fold_loop must be 0..%d (got %d)",
+                     ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP,
+                     spec->fold_loop);
+        return false;
+    }
+    if(spec->fold_loop && v <= 1)
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.fold_loop needs vec > 1");
+        return false;
+    }
+    if(spec->fold_loop && (spec->rezero || spec->groups > 1))
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.fold_loop: no rezero, ungrouped only");
+        return false;
+    }
+    if(spec->slab_par < 1)
+    {
+        if(reason)
+            snprintf(reason,
+                     reason_cap,
+                     "WgradReduceSpec.slab_par must be >= 1 (got %d)",
+                     spec->slab_par);
+        return false;
+    }
+    if(spec->slab_par > 1 && !spec->fold_loop)
+    {
+        if(reason)
+            snprintf(reason, reason_cap, "WgradReduceSpec.slab_par needs fold_loop");
+        return false;
+    }
     return true;
+}
+
+/* ---- vector / looped folds (Python _emit_vec_fold / _emit_loop_fold) ---- */
+
+/* The cast + pack of the folded f32 values (pack_f32_to) and the vec store. */
+static void wr_fold_store(rocke_ir_builder_t* b,
+                          const rocke_wgrad_reduce_spec_t* spec,
+                          rocke_value_t* dw_ptr,
+                          rocke_value_t* off,
+                          rocke_value_t* const* tot,
+                          int v)
+{
+    const char* d = spec->dtype_d ? spec->dtype_d : "fp16";
+    rocke_value_t* pk;
+    if(strcmp(d, "fp32") == 0 || strcmp(d, "f32") == 0)
+        pk = rocke_b_vec_pack(b, tot, v, rocke_f32());
+    else
+        pk = rocke_b_pack_f32_to(b, tot, v, d);
+    rocke_b_global_store_vN(b, dw_ptr, off, pk, v, 0);
+}
+
+/* load(off): one vec-wide slab read as f32 scalars. */
+static void wr_load(rocke_ir_builder_t* b,
+                    const rocke_wgrad_reduce_spec_t* spec,
+                    rocke_value_t* ws_ptr,
+                    rocke_value_t* off,
+                    int v,
+                    rocke_value_t** out)
+{
+    if(spec->ws_bf16)
+    {
+        rocke_value_t* pv = rocke_b_global_load_vN(b, ws_ptr, off, rocke_bf16(), v, 0);
+        for(int i = 0; i < v; ++i)
+            out[i] = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, pv, i));
+    }
+    else
+    {
+        rocke_value_t* pv = rocke_b_global_load_vN(b, ws_ptr, off, rocke_f32(), v, 0);
+        for(int i = 0; i < v; ++i)
+            out[i] = rocke_b_vec_extract(b, pv, i);
+    }
+}
+
+static void wr_emit_vec_fold(rocke_ir_builder_t* b,
+                             const rocke_wgrad_reduce_spec_t* spec,
+                             rocke_value_t* ws_ptr,
+                             rocke_value_t* dw_ptr,
+                             rocke_value_t* wg_M_p,
+                             rocke_value_t* wg_N_p,
+                             rocke_value_t* c_m,
+                             rocke_value_t* c_n,
+                             rocke_value_t* grp_id)
+{
+    const int v = spec->vec;
+    c_n = rocke_b_mul(b, c_n, rocke_b_const_i32(b, v));
+    rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_p);
+    rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_p);
+    rocke_if_t g = rocke_b_scf_if(b, rocke_b_land(b, m_ok, n_ok));
+    rocke_b_region_enter(b, g.then_region);
+    {
+        rocke_value_t* grp_stride = rocke_b_mul(b, wg_M_p, wg_N_p);
+        rocke_value_t* elem = rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_p), c_n);
+        rocke_value_t* dw_off = rocke_b_add(b, rocke_b_mul(b, grp_id, grp_stride), elem);
+        const int reps = spec->ws_replicas;
+        rocke_value_t* ws_base = dw_off;
+        if(reps != 1)
+        {
+            rocke_value_t* gr = rocke_b_mul(b, grp_id, rocke_b_const_i32(b, reps));
+            ws_base = rocke_b_add(b, rocke_b_mul(b, gr, grp_stride), elem);
+        }
+        /* Every slab's vector load first, then the fold in slab order. */
+        rocke_value_t** parts
+            = (rocke_value_t**)rocke_arena_alloc(&b->arena, sizeof(rocke_value_t*) * (size_t)reps);
+        if(parts == NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_OOM, "wgrad_reduce: parts alloc failed");
+            return;
+        }
+        const rocke_type_t* lt = spec->ws_bf16 ? rocke_bf16() : rocke_f32();
+        for(int r = 0; r < reps; ++r)
+        {
+            rocke_value_t* off
+                = r == 0 ? ws_base
+                         : rocke_b_add(
+                               b, ws_base, rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
+            parts[r] = rocke_b_global_load_vN(b, ws_ptr, off, lt, v, 0);
+        }
+        rocke_value_t* tot[ROCKE_WGRAD_REDUCE_MAX_VEC];
+        for(int r = 0; r < reps; ++r)
+            for(int i = 0; i < v; ++i)
+            {
+                rocke_value_t* x = rocke_b_vec_extract(b, parts[r], i);
+                if(spec->ws_bf16)
+                    x = rocke_b_cast_to_f32(b, x);
+                tot[i] = r == 0 ? x : rocke_b_fadd(b, tot[i], x);
+            }
+        if(spec->rezero)
+        {
+            rocke_value_t* z = rocke_b_zero_vec_f32(b, v);
+            for(int r = 0; r < reps; ++r)
+            {
+                rocke_value_t* off
+                    = r == 0 ? ws_base
+                             : rocke_b_add(
+                                   b, ws_base, rocke_b_mul(b, rocke_b_const_i32(b, r), grp_stride));
+                rocke_b_global_store_vN(b, ws_ptr, off, z, v, 0);
+            }
+        }
+        wr_fold_store(b, spec, dw_ptr, dw_off, tot, v);
+    }
+    rocke_b_region_leave(b);
+}
+
+static void wr_emit_loop_fold(rocke_ir_builder_t* b,
+                              const rocke_wgrad_reduce_spec_t* spec,
+                              rocke_value_t* ws_ptr,
+                              rocke_value_t* dw_ptr,
+                              rocke_value_t* wg_M_p,
+                              rocke_value_t* wg_N_p,
+                              rocke_value_t* tid)
+{
+    if(spec->vec <= 1)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "WgradReduceSpec.fold_loop needs vec > 1");
+        return;
+    }
+    if(spec->rezero || spec->groups > 1)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "WgradReduceSpec.fold_loop: no rezero, ungrouped only");
+        return;
+    }
+    const int v = spec->vec;
+    const int R = spec->ws_replicas;
+    const int P = spec->slab_par > 1 ? spec->slab_par : 1;
+    const int U = spec->fold_loop;
+    const int TE = spec->tile_m * spec->tile_n;
+    rocke_value_t* p_v = P > 1 ? rocke_b_div(b, tid, rocke_b_const_i32(b, TE)) : NULL;
+    rocke_value_t* e_v = P > 1 ? rocke_b_mod(b, tid, rocke_b_const_i32(b, TE)) : tid;
+    rocke_value_t* t_m = rocke_b_div(b, e_v, rocke_b_const_i32(b, spec->tile_n));
+    rocke_value_t* t_n = rocke_b_mod(b, e_v, rocke_b_const_i32(b, spec->tile_n));
+    rocke_value_t* by = rocke_b_block_id_y(b);
+    rocke_value_t* c_m
+        = rocke_b_add(b, rocke_b_mul(b, by, rocke_b_const_i32(b, spec->tile_m)), t_m);
+    rocke_value_t* bx = rocke_b_block_id_x(b);
+    rocke_value_t* cn0
+        = rocke_b_add(b, rocke_b_mul(b, bx, rocke_b_const_i32(b, spec->tile_n)), t_n);
+    rocke_value_t* c_n = rocke_b_mul(b, cn0, rocke_b_const_i32(b, v));
+    rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_p);
+    rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_p);
+    rocke_value_t* in_bounds = rocke_b_land(b, m_ok, n_ok);
+    rocke_value_t* slab = rocke_b_mul(b, wg_M_p, wg_N_p);
+    rocke_value_t* elem = rocke_b_add(b, rocke_b_mul(b, c_m, wg_N_p), c_n);
+    /* Out-of-bounds threads read element 0 and store nothing. */
+    rocke_value_t* elem_safe = rocke_b_select(b, in_bounds, elem, rocke_b_const_i32(b, 0));
+    rocke_value_t* base = P == 1 ? elem_safe : rocke_b_add(b, elem_safe, rocke_b_mul(b, p_v, slab));
+    const int step_slabs = P * U;
+    const int n_main = R / step_slabs;
+    rocke_value_t* acc[ROCKE_WGRAD_REDUCE_MAX_VEC];
+    bool have = false;
+    if(n_main)
+    {
+        rocke_value_t* stride_it = rocke_b_mul(b, slab, rocke_b_const_i32(b, step_slabs));
+        rocke_value_t* init = rocke_b_zero_vec_f32(b, v);
+        rocke_iter_arg_t it[1];
+        it[0].name = "fold_acc";
+        it[0].init = init;
+        rocke_value_t* lo = rocke_b_const_i32(b, 0);
+        rocke_value_t* hi = rocke_b_const_i32(b, n_main);
+        rocke_value_t* st = rocke_b_const_i32(b, 1);
+        rocke_for_t loop = rocke_b_scf_for_iter(b, lo, hi, st, it, 1, "fold_it", false, true);
+        rocke_b_region_enter(b, loop.body);
+        {
+            rocke_value_t* off0 = rocke_b_add(b, base, rocke_b_mul(b, loop.iv, stride_it));
+            rocke_value_t* vals[ROCKE_WGRAD_REDUCE_MAX_FOLD_LOOP][ROCKE_WGRAD_REDUCE_MAX_VEC];
+            for(int u = 0; u < U; ++u)
+            {
+                rocke_value_t* off
+                    = u == 0
+                          ? off0
+                          : rocke_b_add(b, off0, rocke_b_mul(b, slab, rocke_b_const_i32(b, u * P)));
+                wr_load(b, spec, ws_ptr, off, v, vals[u]);
+            }
+            rocke_value_t* tot[ROCKE_WGRAD_REDUCE_MAX_VEC];
+            for(int i = 0; i < v; ++i)
+                tot[i] = rocke_b_vec_extract(b, loop.iter_vars[0], i);
+            for(int u = 0; u < U; ++u)
+                for(int i = 0; i < v; ++i)
+                    tot[i] = rocke_b_fadd(b, tot[i], vals[u][i]);
+            rocke_value_t* pk = rocke_b_vec_pack(b, tot, v, rocke_f32());
+            rocke_b_scf_yield(b, &pk, 1);
+        }
+        rocke_b_region_leave(b);
+        for(int i = 0; i < v; ++i)
+            acc[i] = rocke_b_vec_extract(b, loop.op->results[0], i);
+        have = true;
+    }
+    /* Remainder slabs r = n_main * P * U + u * P + p (< R), in order. */
+    const int rem = R - n_main * step_slabs;
+    if(rem)
+    {
+        rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
+        const int r0 = n_main * step_slabs;
+        for(int u = 0; u < (rem + P - 1) / P; ++u)
+        {
+            const int r_first = r0 + u * P;
+            rocke_value_t* off
+                = rocke_b_add(b, base, rocke_b_mul(b, slab, rocke_b_const_i32(b, r_first)));
+            rocke_value_t* vals[ROCKE_WGRAD_REDUCE_MAX_VEC];
+            if(r_first + P <= R)
+                wr_load(b, spec, ws_ptr, off, v, vals);
+            else
+            {
+                rocke_value_t* ok
+                    = P > 1 ? rocke_b_cmp_lt(b, p_v, rocke_b_const_i32(b, R - r_first)) : NULL;
+                rocke_value_t* off_c = off;
+                if(ok != NULL)
+                {
+                    rocke_value_t* last = rocke_b_add(
+                        b, elem_safe, rocke_b_mul(b, slab, rocke_b_const_i32(b, R - 1)));
+                    off_c = rocke_b_select(b, ok, off, last);
+                }
+                wr_load(b, spec, ws_ptr, off_c, v, vals);
+                if(ok != NULL)
+                    for(int i = 0; i < v; ++i)
+                        vals[i] = rocke_b_select(b, ok, vals[i], zero);
+            }
+            for(int i = 0; i < v; ++i)
+                acc[i] = have ? rocke_b_fadd(b, acc[i], vals[i]) : vals[i];
+            have = true;
+        }
+    }
+    if(P > 1)
+    {
+        int shape[2] = {P, TE * v};
+        rocke_value_t* sm = rocke_b_smem_alloc_f32(b, shape, 2, "fold_part");
+        rocke_value_t* col = rocke_b_mul(b, e_v, rocke_b_const_i32(b, v));
+        rocke_value_t* idx[2] = {p_v, col};
+        rocke_b_smem_store_vN_f32(b, sm, idx, 2, rocke_b_vec_pack(b, acc, v, rocke_f32()), v);
+        rocke_b_sync(b);
+        rocke_value_t* p0 = rocke_b_cmp_eq(b, p_v, rocke_b_const_i32(b, 0));
+        rocke_if_t g = rocke_b_scf_if(b, rocke_b_land(b, in_bounds, p0));
+        rocke_b_region_enter(b, g.then_region);
+        rocke_value_t* tot[ROCKE_WGRAD_REDUCE_MAX_VEC];
+        for(int q = 0; q < P; ++q)
+        {
+            rocke_value_t* qi = rocke_b_const_i32(b, q);
+            rocke_value_t* ci = rocke_b_mul(b, e_v, rocke_b_const_i32(b, v));
+            rocke_value_t* li[2] = {qi, ci};
+            rocke_value_t* pv = rocke_b_smem_load_vN_f32(b, sm, li, 2, v);
+            rocke_value_t* xs[ROCKE_WGRAD_REDUCE_MAX_VEC];
+            for(int i = 0; i < v; ++i)
+                xs[i] = rocke_b_vec_extract(b, pv, i);
+            for(int i = 0; i < v; ++i)
+                tot[i] = q == 0 ? xs[i] : rocke_b_fadd(b, tot[i], xs[i]);
+        }
+        wr_fold_store(b, spec, dw_ptr, elem, tot, v);
+        rocke_b_region_leave(b);
+    }
+    else
+    {
+        rocke_if_t g = rocke_b_scf_if(b, in_bounds);
+        rocke_b_region_enter(b, g.then_region);
+        wr_fold_store(b, spec, dw_ptr, elem, acc, v);
+        rocke_b_region_leave(b);
+    }
 }
 
 /* ---- main builder -------------------------------------------------------- */
@@ -138,7 +499,7 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
 
     const int tile_m = spec->tile_m;
     const int tile_n = spec->tile_n;
-    const int BS = tile_m * tile_n; /* one thread per output element */
+    const int BS = rocke_wgrad_reduce_spec_block_size(spec); /* tile_m * tile_n * slab_par */
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
     const bool is_fp32_out = (strcmp(dtype_d, "fp32") == 0 || strcmp(dtype_d, "f32") == 0);
 
@@ -159,6 +520,20 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
     wo.align = 16;
     wo.align_set = true;
 
+    if(spec->rezero && spec->vec <= 1)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "WgradReduceSpec.rezero needs vec > 1");
+        return NULL;
+    }
+    if(spec->rezero && spec->ws_bf16)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "WgradReduceSpec.rezero stores f32 zeros; not with ws_bf16 scratch");
+        return NULL;
+    }
+    if(spec->rezero)
+        ro.readonly = ro.readonly_set = false;
     rocke_value_t* ws_ptr
         = rocke_b_param(b, "ws_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &ro);
     /* fp32 output: use f32 pointer directly (io_ir_type only handles f16/bf16). */
@@ -174,6 +549,11 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
 
     /* ---- thread / block indices ------------------------------------------ */
     rocke_value_t* tid = rocke_b_thread_id_x(b);
+    if(spec->fold_loop)
+    {
+        wr_emit_loop_fold(b, spec, ws_ptr, dw_ptr, wg_M_p, wg_N_p, tid);
+        return rocke_ir_builder_ok(b) ? b->kernel : NULL;
+    }
     rocke_value_t* blk_m = rocke_b_block_id_y(b); /* M tiles (local within group) */
     rocke_value_t* blk_n = rocke_b_block_id_x(b); /* N tiles */
     rocke_value_t* grp_id = rocke_b_block_id_z(b); /* group index */
@@ -189,6 +569,12 @@ rocke_kernel_def_t* rocke_build_wgrad_workspace_reduce(rocke_ir_builder_t* b,
     /* Per-group (m, n) coordinates */
     rocke_value_t* c_m = rocke_b_add(b, rocke_b_mul(b, blk_m, rocke_b_const_i32(b, tile_m)), t_m);
     rocke_value_t* c_n = rocke_b_add(b, rocke_b_mul(b, blk_n, rocke_b_const_i32(b, tile_n)), t_n);
+
+    if(spec->vec > 1)
+    {
+        wr_emit_vec_fold(b, spec, ws_ptr, dw_ptr, wg_M_p, wg_N_p, c_m, c_n, grp_id);
+        return rocke_ir_builder_ok(b) ? b->kernel : NULL;
+    }
 
     /* OOB guard: threads outside [0, wg_M) x [0, wg_N) do nothing */
     rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_p);

@@ -424,14 +424,130 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "prefetch_global_regs",
             "patch",
             "tap_outer_k",
+            "tapk_prefetch",
+            "tapk_xhalo",
+            "b_kpack",
+            "tapk_ilv",
+            "xhalo_exact",
+            "cshuffle_m_chunks",
+            "tapk_lds_ahead",
+            "tapk_lds_barrier",
+            "tapk_setprio",
+            "xh_b_wide",
+            "xh_b_kpad",
+            "tapk_pingpong",
+            "tapk_pp_sched",
+            "tapk_pp_epi",
+            "tapk_pp_persist",
+            "tapk_pp_xhalo",
+            "tapk_ztrim",
+            "tapk_pp_bslab",
+            "xh_fast_a",
+            "xh_epi",
+            "xh_persist",
+            "xh_a_k4",
+            "xh_order",
+            "xh_defer",
             "dy_halo",
             "dy_halo_setprio",
             "dy_halo_kouter_pad",
             "halo_max_wo",
             "split_k_cluster",
+            "prefetch_regs",
+            "lds_kpack",
+            "xcd_remap",
+            "sep_addr",
+            "pfr_sched",
+            "lds_bswz",
+            "kp_line",
+            "xwin",
+            "xwin_rows",
+            "xwin_groups",
+            "xwin_pp",
+            "xwin_mrow",
+            "xwin_gn",
+            "ws_fuse",
+            "ws_store",
+            "xwin_kband",
+            "plain_pp",
+            "xwin_bq",
+            "xwin_aq",
+            "xwin_pps",
+            "xwin_rot",
+            "xwin_kord",
+            "ws_lc",
+            "ws_gred",
+            "ws_tree",
+            "reg_prefetch",
+            "lds_xor",
+            "split_addr_k_decode",
+            "a_direct",
+            "uk_tap_fast",
         ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]
+        for name in (
+            "defer_mfma",
+            "defer_mfma_per_write",
+            "lds_ahead",
+            "lds_kpack_read",
+            "rpf_fetch_late",
+            "rpf_lds_barrier",
+            "rpf_setprio",
+            "split_tail",
+            "uk_chunk_group",
+            "uk_nopad",
+            "uk_xhalo",
+            "vmem_interleave",
+            "xh_dpp",
+            "rpf_pingpong",
+            "pp_pre_mfma",
+            "xh_wait_smem",
+            "pp_b_double",
+            "lds_xor_rowkey",
+            "split_atomic_agent",
+            "split_atomic_pairs",
+            "split_atomic_fast",
+            "epi_store_fast",
+            "split_xcd_remap",
+            "split_streamk",
+            "split_flag_store",
+            "split_zero_first",
+            "xh_subtile",
+            "pp_fetch_deep",
+            "pp_split_fetch",
+            "fb_skip_empty",
+            "pp_end_guard",
+            "epi_lds_barriers",
+            "split_hybrid",
+            "sched_strategy",
+            "split_tail_compact",
+            "split_det",
+            "epi_quad_xpose",
+            "no_agpr",
+            "m_band",
+            "xh_stride_m",
+            "fxh_dma",
+            "xh_yring",
+            "xh_pad",
+            "xh_dlds",
+            "xh_epi_lin",
+            "xh_tap_rsrc",
+        ):  # fwd K-loop / x-halo / split-store knobs, off
+            del fields[name]
+        for name in (
+            "pp_streamk",
+            "pp_sk_mode",
+            "pp_zskip",
+            "pp_boxes",
+            "pp_box_cus",
+            "pp_box_order",
+            "pp_box_det",
+            "dx_interior",
+            "dx_interior_axes",
+            "xh_dx_wmask",
+        ):  # dgrad pp knobs, off
+            del fields[name]
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -845,6 +961,41 @@ def _dgrad_unsplit(base, ident):
 
 
 class TestAotSplitKCover(unittest.TestCase):
+    def test_aot_dgrad_split_k_skips_3d_capabilities(self):
+        """With the 3-D grid enabled (ROCKE_AOT_SPATIAL=2d,3d) the split-K copies
+        are still built for the 2-D capabilities only: their identity has no
+        is_3d, so a copy built for a 3-D capability would take the 2-D label."""
+        from unittest import mock
+
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx("gfx950")
+        geos = []
+        for tm, tn, tk, wm, wn, wt, pipeline in sorted(
+            {g[:7] for g in aj.CACHE_DGRAD_SPLIT_K_GEOMETRIES}
+        ):
+            atom = target.mma.select_largest_k(
+                family="mma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=wt, n=wt
+            )
+            geos.append((tm, tn, tk, wm, wn, wt, pipeline, "cshuffle", atom))
+        with mock.patch.object(aj, "CACHE_SPATIAL_3D", (False, True)):
+            jobs = list(
+                aj._dgrad_jobs(
+                    "gfx950",
+                    "fp16",
+                    target.wave_size,
+                    "mma",
+                    target,
+                    64,
+                    geometries=geos,
+                )
+            )
+        split = [j for j in jobs if j.identity.split_k > 1]
+        assert split
+        assert not any(j.caps.get("is_3d") for j in split)
+        labels = [j.identity.label() for j in jobs]
+        assert len(labels) == len(set(labels))
+
     def test_aot_dgrad_split_k_variants(self):
         """gfx950 builds one split-K (atomic dX) copy of each 8 / 8 cshuffle tilde
         kernel on the ``CACHE_DGRAD_SPLIT_K_GEOMETRIES`` cover; no other arch does.

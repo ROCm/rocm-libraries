@@ -610,6 +610,8 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
+    if idx >= 54 + _GFX942_3D_OFFSET:
+        return _gfx942_3d_spec(idx - _GFX942_3D_OFFSET)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -927,6 +929,577 @@ def _tf32_split_k_spec(idx: int):
         )
     spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
     return replace(spec, split_k=2), arch
+
+
+_GFX942_3D_OFFSET = 32
+
+
+# gfx942 (wave64 MFMA) 3-D NDHWC configs on the 3x3x3 / pad-1 problem the
+# AOT cache builds its 3-D binaries against: the 3-D split A/B addressing
+# (every non-pointwise 3-D spec), bf16 operands through the MFMA path, and the
+# opt-in K-loop knobs layered on top. Keep in lockstep with make_cfg_3d() in
+# conv_implicit_gemm_emit.c. The numbers below are _gfx942_3d_spec's own; it
+# serves parity config N as its config N - _GFX942_3D_OFFSET (they follow the
+# TF32 and MFMA split-K configs 54-85).
+#   54: fp16, groups=1, t256x64x32 w4x1 a16x16x16, mem/cshuffle
+#   55: bf16, groups=2, t256x64x32 w4x1 a16x16x16, mem/cshuffle
+#   56: bf16, groups=1, stride 2, t128x128x32 w2x2 a32x32x8, mem/default
+#   57: bf16, groups=2, 1x1x1 pointwise (no split addressing), t128x64x32 w2x2
+#   58: 55 + xcd_remap=6
+#   59: 55 + xcd_remap=6, m_band=32
+#   60: 54 + xcd_remap=8, waves_per_eu=2
+#   61: 55 + xcd_remap=6 + chiplet_swizzle: rejected by both engines
+#   62: 55 + m_band=32 without xcd_remap: rejected by both engines
+#   63: 55 + split_k=2 (wave64 MFMA atomic split-K: ks/ks_count, atomics into D)
+#   64: 54 + split_k=4
+#   65: 55 + split_k=2, xcd_remap=6, m_band=32
+#   66: 56 + split_k=2 (default epilogue): rejected by both engines
+#   67: 55 + reg_prefetch=1
+#   68: 55 + reg_prefetch=2
+#   69: 55 + reg_prefetch=1, lds_xor
+#   70: 55 + reg_prefetch=1, lds_xor, lds_kpack_read, lds_xor_rowkey, xcd_remap=6, m_band=32
+#   71: 55 + split_k=2, reg_prefetch=1, lds_xor, lds_kpack_read
+#   72: 54 + compv3, reg_prefetch=2, lds_kpack_read (schedule hints, k-packed counts)
+#   73: 55 + lds_xor without a reg_prefetch loop: rejected by both engines
+#   74: 55 + reg_prefetch=1, lds_xor, lds_xor_rowkey without lds_kpack_read: rejected
+#   75: 70 + uniform_k_decode (the uniform-tap loop + plain fallback)
+#   76: 55 + uniform_k_decode (no register prefetch)
+#   77: 55 + uniform_k_decode, reg_prefetch=2, uk_tap_fast, uk_nopad, fb_skip_empty
+#   78: 71 + uniform_k_decode, uk_tap_fast, uk_nopad, fb_skip_empty, xcd_remap=6 (split slices)
+#   79: 55 + uniform_k_decode, reg_prefetch=1, lds_xor, uk_tap_fast, uk_chunk_group=2, uk_nopad
+#   80: 56 + uniform_k_decode, reg_prefetch=1, lds_kpack_read (stride 2, 32x32x8, default epilogue)
+#   81: 57 + uniform_k_decode (pointwise): rejected by both engines
+#   82: 71 + uniform_k_decode, uk_tap_fast, uk_chunk_group=2: rejected by both engines
+#   83: 55 at t256x128x64 w4x2 + split_k=2, uniform_k_decode, reg_prefetch=1, lds_xor,
+#       lds_kpack_read, uk_tap_fast, uk_nopad, fb_skip_empty, xcd_remap=6 (8 waves)
+#   84: 83 + rpf_pingpong=5, vmem_interleave=5, pp_b_double, pp_split_fetch=3
+#   85: 83 + rpf_pingpong=5, vmem_interleave=6, pp_b_double, pp_split_fetch=4
+#   86: 83 + rpf_pingpong=4, rpf_setprio=1, pp_pre_mfma=2
+#   87: 83 + rpf_pingpong=1
+#   88: 83 + rpf_pingpong=3, pp_b_double: rejected by both engines (modes 2 / 3
+#       do not wait for the [mem A] LDS reads)
+#   89: 83 + rpf_pingpong=5, vmem_interleave=5, pp_split_fetch=10
+#   90: 54 + compv3, reg_prefetch=1, vmem_interleave=2, rpf_setprio=1
+#   91: 83 + rpf_pingpong=5 without vmem_interleave: rejected by both engines
+#   92: 84 + split_tail, split_atomic_pairs, split_det=2
+#   93: 84 + split_tail, split_atomic_pairs (atomic pair stores, plain stores of full tiles)
+#   94: 85 + split_det=1
+#   95: 83 + split_atomic_pairs
+#   96: 83 + split_tail, split_det=2, m_band=32
+#   97: 84 + uk_chunk_group=2 (split slices in the grouped tap order)
+#   98: 54 + split_k=2, split_det=2 (fp16 D): rejected by both engines
+#   99: 92 + cshuffle_m_chunks=2, epi_lds_barriers
+#  100: 93 + cshuffle_m_chunks=4 (chunked atomic pairs)
+#  101: 83 + cshuffle_m_chunks=2 (chunked packed atomics)
+#  102: 55 + reg_prefetch=1, cshuffle_m_chunks=2, epi_lds_barriers (chunked store)
+#  103: 54 + cshuffle_m_chunks=2 (fp16 D): rejected by both engines
+#  104: 85 without xcd_remap + split_xcd_remap=6, split_atomic_pairs, split_det=3
+#       (per-slice f32 slabs)
+#  105: 83 + split_det=3, cshuffle_m_chunks=2
+#  106: 84 without xcd_remap + split_xcd_remap=6
+#  107: 83 + split_det=3, split_tail: rejected by both engines
+#  108: t256x256x32 w4x2, split_k=2, uniform_k_decode, reg_prefetch=1, lds_xor,
+#       uk_tap_fast, cshuffle_m_chunks=4, uk_nopad, vmem_interleave=5,
+#       lds_kpack_read, uk_chunk_group=2, rpf_pingpong=5, lds_xor_rowkey,
+#       split_atomic_pairs, pp_split_fetch=10, fb_skip_empty, split_hybrid=16,
+#       split_det=3
+#  109: 108 with split_hybrid=8, split_det=2
+#  110: 84 without xcd_remap + split_streamk (one segment per tile touched)
+#  111: 83 without xcd_remap + split_hybrid=4, split_det=1
+#  112: 110 + split_det=2: rejected by both engines
+#  113: 108 with split_streamk in place of split_hybrid: rejected by both engines
+#  114: 55 + uniform_k_decode, reg_prefetch=1, xcd_remap=6, lds_xor, uk_xhalo=8,
+#       rpf_setprio=2, lds_xor_rowkey, xh_wait_smem, epi_quad_xpose=4, xh_stride_m,
+#       fxh_dma=1036, lds_kpack_read (the wave-private x-halo DMA loop and the
+#       quad-transpose epilogue)
+#  115: 114 with uk_xhalo=4, rpf_setprio=1, no_agpr, m_band=32, fxh_dma=2016
+#  116: 114 + uk_tap_fast
+#  117: 114 with epi_quad_xpose=3
+#  118: 55 + xh_stride_m without uk_xhalo: rejected by both engines
+#  119: 116 + xh_yring=14 (the input-row ring, early reload)
+#  120: 116 + xh_yring=2
+#  121-123: 55 + reg_prefetch=1 with rpf_lds_barrier / rpf_fetch_late / sched_strategy
+#  124-127: 56 / 55 + lds_ahead / defer_mfma / defer_mfma_per_write
+#  128-130: 55 + the plain uk_xhalo loop (defer_mfma, lds_ahead, chunk groups)
+#  131-132: 55 + the plain uk_xhalo loop with xh_stride_m
+#  133-134: 55 + split_k 2 with split_atomic_agent (+ split_atomic_pairs)
+#  135-141: 55 + split_atomic_fast, epi_store_fast, split_flag_store / split_zero_first
+#  142-143: 55 + split_tail_compact (+ split_zero_first)
+#  144-145: 84 / 87 + pp_end_guard
+#  146-147: 55 / 54 + split_addr_k_decode
+#  148-150: 115 / 119 / 114 + xh_pad (the x-halo DMA loop on padded inputs)
+#  151: 55 on the 2-D 16x16 problem + split_k=2, split_atomic (the wave64 MFMA
+#       atomic split-K on a 2-D problem)
+#  152: 55 + split_k=2, split_atomic: rejected by both engines (3-D)
+#  153: 151 without split_atomic (the two-stage workspace split) +
+#       uniform_k_decode: rejected by both engines (an atomic-split K loop)
+#  154: 57 + epi_quad_xpose=1 (the quad-transpose store through the pointwise
+#       D address)
+#  155: 114 with warp_m=1 (one wave: the x-halo B DMA list of the
+#       wave-private loop without the 4-wave form; a 65-segment wave range)
+#  156: 114 with tile_n=128 (the same B DMA list with four waves)
+#  157: 57 + split_k=2: rejected by both engines (pointwise atomic split)
+#  158: 111 with split_det=0 + split_zero_first: rejected by both engines
+#       (split_hybrid runs the stream-K loop)
+#  159: 94 without xcd_remap + split_xcd_remap=6: rejected by both engines
+#       (split_det 1 owner dispatched before its slices)
+def _gfx942_3d_spec(idx: int):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    def prob(groups=1, f=3, s=1):
+        pad = (f - 1) // 2
+        return ConvProblem(
+            N=1,
+            Di=16,
+            Hi=16,
+            Wi=16,
+            C=128,
+            K=128,
+            Z=f,
+            Y=f,
+            X=f,
+            sD=s,
+            sH=s,
+            sW=s,
+            pD=pad,
+            pH=pad,
+            pW=pad,
+            dD=1,
+            dH=1,
+            dW=1,
+            groups=groups,
+        )
+
+    def data(dt):
+        return ConvDataSpec(dtype_a=dt, dtype_b=dt, dtype_d=dt)
+
+    t256 = dict(
+        tile_m=256,
+        tile_n=64,
+        tile_k=32,
+        warp_m=4,
+        warp_n=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        pipeline="mem",
+        epilogue="cshuffle",
+    )
+    cfgs = {
+        54: (prob(), "fp16", t256),
+        55: (prob(groups=2), "bf16", t256),
+        56: (
+            prob(s=2),
+            "bf16",
+            dict(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=8,
+                pipeline="mem",
+                epilogue="default",
+            ),
+        ),
+        57: (
+            prob(groups=2, f=1),
+            "bf16",
+            dict(
+                tile_m=128,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                vector_size_a=8,
+                vector_size_b=8,
+                vector_size_c=8,
+                pipeline="mem",
+                epilogue="cshuffle",
+            ),
+        ),
+    }
+    knobs = {
+        58: (55, dict(xcd_remap=6)),
+        59: (55, dict(xcd_remap=6, m_band=32)),
+        60: (54, dict(xcd_remap=8, waves_per_eu=2)),
+        61: (55, dict(xcd_remap=6, chiplet_swizzle=True)),
+        62: (55, dict(m_band=32)),
+        63: (55, dict(split_k=2)),
+        64: (54, dict(split_k=4)),
+        65: (55, dict(split_k=2, xcd_remap=6, m_band=32)),
+        66: (56, dict(split_k=2)),
+        67: (55, dict(reg_prefetch=1)),
+        68: (55, dict(reg_prefetch=2)),
+        69: (55, dict(reg_prefetch=1, lds_xor=True)),
+        70: (
+            55,
+            dict(
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                lds_xor_rowkey=True,
+                xcd_remap=6,
+                m_band=32,
+            ),
+        ),
+        71: (55, dict(split_k=2, reg_prefetch=1, lds_xor=True, lds_kpack_read=True)),
+        72: (54, dict(pipeline="compv3", reg_prefetch=2, lds_kpack_read=True)),
+        73: (55, dict(lds_xor=True)),
+        74: (55, dict(reg_prefetch=1, lds_xor=True, lds_xor_rowkey=True)),
+        75: (
+            55,
+            dict(
+                uniform_k_decode=True,
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                lds_xor_rowkey=True,
+                xcd_remap=6,
+                m_band=32,
+            ),
+        ),
+        76: (55, dict(uniform_k_decode=True)),
+        77: (
+            55,
+            dict(
+                uniform_k_decode=True,
+                reg_prefetch=2,
+                uk_tap_fast=True,
+                uk_nopad=True,
+                fb_skip_empty=True,
+            ),
+        ),
+        78: (
+            55,
+            dict(
+                split_k=2,
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                uniform_k_decode=True,
+                uk_tap_fast=True,
+                uk_nopad=True,
+                fb_skip_empty=True,
+                xcd_remap=6,
+            ),
+        ),
+        79: (
+            55,
+            dict(
+                uniform_k_decode=True,
+                reg_prefetch=1,
+                lds_xor=True,
+                uk_tap_fast=True,
+                uk_chunk_group=2,
+                uk_nopad=True,
+            ),
+        ),
+        80: (56, dict(uniform_k_decode=True, reg_prefetch=1, lds_kpack_read=True)),
+        81: (57, dict(uniform_k_decode=True)),
+        82: (
+            55,
+            dict(
+                split_k=2,
+                reg_prefetch=1,
+                lds_xor=True,
+                lds_kpack_read=True,
+                uniform_k_decode=True,
+                uk_tap_fast=True,
+                uk_chunk_group=2,
+            ),
+        ),
+        90: (
+            54,
+            dict(pipeline="compv3", reg_prefetch=1, vmem_interleave=2, rpf_setprio=1),
+        ),
+    }
+    _s3 = dict(
+        tile_n=128,
+        tile_k=64,
+        warp_n=2,
+        split_k=2,
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        lds_xor=True,
+        lds_kpack_read=True,
+        uk_tap_fast=True,
+        uk_nopad=True,
+        fb_skip_empty=True,
+        xcd_remap=6,
+    )
+    _pp = {
+        83: {},
+        84: dict(rpf_pingpong=5, vmem_interleave=5, pp_b_double=True, pp_split_fetch=3),
+        85: dict(rpf_pingpong=5, vmem_interleave=6, pp_b_double=True, pp_split_fetch=4),
+        86: dict(rpf_pingpong=4, rpf_setprio=1, pp_pre_mfma=2),
+        87: dict(rpf_pingpong=1),
+        88: dict(rpf_pingpong=3, pp_b_double=True),
+        89: dict(rpf_pingpong=5, vmem_interleave=5, pp_split_fetch=10),
+        91: dict(rpf_pingpong=5),
+    }
+    _p84 = dict(rpf_pingpong=5, vmem_interleave=5, pp_b_double=True, pp_split_fetch=3)
+    _p85 = dict(rpf_pingpong=5, vmem_interleave=6, pp_b_double=True, pp_split_fetch=4)
+    _pp.update(
+        {
+            92: dict(_p84, split_tail=True, split_atomic_pairs=True, split_det=2),
+            93: dict(_p84, split_tail=True, split_atomic_pairs=True),
+            94: dict(_p85, split_det=1),
+            95: dict(split_atomic_pairs=True),
+            96: dict(split_tail=True, split_det=2, m_band=32),
+            97: dict(_p84, uk_chunk_group=2),
+        }
+    )
+    knobs[98] = (54, dict(split_k=2, split_det=2))
+    _pp.update(
+        {
+            99: dict(
+                _p84,
+                split_tail=True,
+                split_atomic_pairs=True,
+                split_det=2,
+                cshuffle_m_chunks=2,
+                epi_lds_barriers=True,
+            ),
+            100: dict(
+                _p84, split_tail=True, split_atomic_pairs=True, cshuffle_m_chunks=4
+            ),
+            101: dict(cshuffle_m_chunks=2),
+        }
+    )
+    knobs[102] = (55, dict(reg_prefetch=1, cshuffle_m_chunks=2, epi_lds_barriers=True))
+    _pp.update(
+        {
+            104: dict(
+                _p85,
+                xcd_remap=0,
+                split_xcd_remap=6,
+                split_atomic_pairs=True,
+                split_det=3,
+            ),
+            105: dict(split_det=3, cshuffle_m_chunks=2),
+            106: dict(_p84, xcd_remap=0, split_xcd_remap=6),
+            107: dict(split_det=3, split_tail=True),
+        }
+    )
+    knobs[103] = (54, dict(cshuffle_m_chunks=2))
+    _s8 = dict(
+        tile_n=256,
+        tile_k=32,
+        warp_n=2,
+        split_k=2,
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        lds_xor=True,
+        uk_tap_fast=True,
+        cshuffle_m_chunks=4,
+        uk_nopad=True,
+        vmem_interleave=5,
+        lds_kpack_read=True,
+        uk_chunk_group=2,
+        rpf_pingpong=5,
+        lds_xor_rowkey=True,
+        split_atomic_pairs=True,
+        pp_split_fetch=10,
+        fb_skip_empty=True,
+        split_hybrid=16,
+        split_det=3,
+    )
+    knobs[108] = (55, _s8)
+    knobs[109] = (55, dict(_s8, split_hybrid=8, split_det=2))
+    knobs[113] = (55, dict(_s8, split_hybrid=0, split_streamk=True, split_det=0))
+    _s4 = dict(
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        xcd_remap=6,
+        lds_xor=True,
+        uk_xhalo=8,
+        rpf_setprio=2,
+        lds_xor_rowkey=True,
+        xh_wait_smem=True,
+        epi_quad_xpose=4,
+        xh_stride_m=True,
+        fxh_dma=1036,
+        lds_kpack_read=True,
+    )
+    knobs[114] = (55, _s4)
+    knobs[115] = (
+        55,
+        dict(_s4, uk_xhalo=4, rpf_setprio=1, no_agpr=True, m_band=32, fxh_dma=2016),
+    )
+    knobs[116] = (55, dict(_s4, uk_tap_fast=True))
+    knobs[117] = (55, dict(_s4, epi_quad_xpose=3))
+    knobs[118] = (55, dict(xh_stride_m=True))
+    knobs[119] = (55, dict(_s4, uk_tap_fast=True, xh_yring=14))
+    knobs[120] = (55, dict(_s4, uk_tap_fast=True, xh_yring=2))
+    # 121-123: reg_prefetch=1 loop knobs (rpf_lds_barrier, rpf_fetch_late) and
+    # the scheduler strategy attribute.
+    knobs[121] = (55, dict(reg_prefetch=1, rpf_lds_barrier=True))
+    knobs[122] = (55, dict(uniform_k_decode=True, reg_prefetch=1, rpf_fetch_late=True))
+    knobs[123] = (
+        55,
+        dict(
+            reg_prefetch=1, rpf_fetch_late=True, rpf_lds_barrier=True, sched_strategy=2
+        ),
+    )
+    # 124-127: lds_ahead / defer_mfma (+ defer_mfma_per_write) K-loop schedules.
+    _lah = dict(
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        xcd_remap=6,
+        lds_xor=True,
+        uk_tap_fast=True,
+        lds_kpack_read=True,
+        lds_ahead=True,
+    )
+    knobs[124] = (56, dict(_lah, pipeline="compv4", defer_mfma=3, vmem_interleave=4))
+    knobs[125] = (
+        56,
+        dict(
+            pipeline="compv3",
+            reg_prefetch=1,
+            lds_ahead=True,
+            defer_mfma=2,
+            defer_mfma_per_write=3,
+        ),
+    )
+    knobs[126] = (56, dict(pipeline="compv3", reg_prefetch=2, lds_ahead=True))
+    knobs[127] = (55, dict(reg_prefetch=1, defer_mfma=1, rpf_setprio=2))
+    # 128-130: the plain (register-staged) uk_xhalo loop, with defer_mfma.
+    _xp = dict(
+        uniform_k_decode=True,
+        reg_prefetch=1,
+        xcd_remap=6,
+        lds_xor=True,
+        uk_xhalo=8,
+        rpf_setprio=2,
+        lds_xor_rowkey=True,
+        xh_wait_smem=True,
+        epi_quad_xpose=4,
+        lds_kpack_read=True,
+    )
+    knobs[128] = (
+        55,
+        dict(_xp, defer_mfma=2, vmem_interleave=2, no_agpr=True, m_band=32),
+    )
+    knobs[129] = (
+        55,
+        dict(
+            _xp,
+            uk_xhalo=4,
+            rpf_setprio=0,
+            uk_tap_fast=True,
+            uk_chunk_group=2,
+            lds_ahead=True,
+            defer_mfma=2,
+            vmem_interleave=2,
+        ),
+    )
+    knobs[130] = (55, dict(_xp, epi_quad_xpose=0))
+    # 133-134: split_atomic_agent (device-scope packed atomics), plain and
+    # with lane-contiguous pairs.
+    knobs[133] = (55, dict(split_k=2, split_atomic_agent=True))
+    knobs[134] = (55, dict(split_k=2, split_atomic_agent=True, split_atomic_pairs=True))
+    # 135: split_atomic_fast (the in-bounds tile's unchecked pair walk).
+    knobs[135] = (55, dict(split_k=2, split_atomic_pairs=True, split_atomic_fast=True))
+    # 136-137: epi_store_fast (the packed in-bounds tile's constant-step
+    # store), plain and on the split-K binary (predicate only).
+    knobs[136] = (55, dict(epi_store_fast=True))
+    knobs[137] = (
+        55,
+        dict(reg_prefetch=1, epi_store_fast=True, split_k=2, split_atomic_pairs=True),
+    )
+    # 138-141: split_flag_store / split_zero_first (no zeroed D), with
+    # split_tail and with pair lanes.
+    knobs[138] = (55, dict(split_k=2, split_flag_store=True))
+    knobs[139] = (55, dict(split_k=2, split_zero_first=True))
+    knobs[140] = (55, dict(split_k=2, split_zero_first=True, split_tail=True))
+    knobs[141] = (
+        55,
+        dict(reg_prefetch=1, split_k=2, split_flag_store=True, split_atomic_pairs=True),
+    )
+    # 142-143: split_tail_compact (the flat grid decoded into block ids),
+    # plain and with split_zero_first.
+    knobs[142] = (55, dict(split_k=2, split_tail=True, split_tail_compact=True))
+    knobs[143] = (
+        55,
+        dict(
+            split_k=2, split_tail=True, split_tail_compact=True, split_zero_first=True
+        ),
+    )
+    # 131-132: the plain uk_xhalo loop with xh_stride_m (the A store's _xa
+    # map, each tap's fragments shifted from the previous tap's).
+    knobs[131] = (55, dict(_xp, xh_stride_m=True, defer_mfma=2, vmem_interleave=2))
+    knobs[132] = (
+        55,
+        dict(
+            _xp,
+            xh_stride_m=True,
+            epi_quad_xpose=3,
+            uk_xhalo=4,
+            uk_tap_fast=True,
+            uk_chunk_group=2,
+            lds_ahead=True,
+        ),
+    )
+    _pp.update(
+        {
+            110: dict(_p84, xcd_remap=0, split_streamk=True),
+            111: dict(xcd_remap=0, split_hybrid=4, split_det=1),
+            112: dict(_p84, xcd_remap=0, split_streamk=True, split_det=2),
+            # 144-145: pp_end_guard (the uniform-tap prefetch masked past the
+            # loop's end) on 84 and on the rpf_pingpong 1 loop (87).
+            144: dict(_p84, pp_end_guard=True),
+            145: dict(rpf_pingpong=1, pp_end_guard=True),
+        }
+    )
+    # 146-147: split_addr_k_decode (the tile's tap decoded once from its k
+    # origin) on the plain 3-D split-addressing loop, grouped and not.
+    knobs[146] = (55, dict(split_addr_k_decode=True))
+    knobs[147] = (54, dict(split_addr_k_decode=True))
+    knobs[148] = (55, dict(knobs[115][1], xh_pad=True))
+    knobs[149] = (55, dict(knobs[119][1], xh_pad=True))
+    knobs[150] = (55, dict(_s4, xh_pad=True))
+    # 151-152: split_atomic, which selects the atomic split-K form on a 2-D
+    # wave64 problem (a 3-D split is atomic already, so 152 is rejected).
+    cfgs[151] = (
+        _cp(N=1, Hi=16, Wi=16, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2),
+        "bf16",
+        dict(t256, split_k=2, split_atomic=True),
+    )
+    knobs[152] = (55, dict(split_k=2, split_atomic=True))
+    cfgs[153] = (
+        cfgs[151][0],
+        "bf16",
+        dict(t256, split_k=2, uniform_k_decode=True),
+    )
+    if idx in _pp:
+        knobs[idx] = (55, dict(_s3, **_pp[idx]))
+    knobs[154] = (57, dict(epi_quad_xpose=1))
+    knobs[155] = (55, dict(_s4, warp_m=1))
+    knobs[156] = (55, dict(_s4, tile_n=128))
+    knobs[157] = (57, dict(split_k=2))
+    knobs[158] = (55, dict(_s3, xcd_remap=0, split_hybrid=4, split_zero_first=True))
+    knobs[159] = (
+        55,
+        dict(_s3, **_p85, split_det=1, xcd_remap=0, split_xcd_remap=6),
+    )
+    extra = {}
+    if idx in knobs:
+        idx, extra = knobs[idx]
+    if idx not in cfgs:
+        raise SystemExit(f"unknown config index {idx}")
+    p, dt, kw = cfgs[idx]
+    kw = dict(kw, **extra)
+    return ImplicitGemmConvSpec(problem=p, data=data(dt), **kw), "gfx942"
 
 
 def main() -> int:

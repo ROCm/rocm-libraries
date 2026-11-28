@@ -40,15 +40,42 @@ static rocke_value_t* rocke_i_block_id_axis(rocke_ir_builder_t* b, const char* a
 
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b)
 {
+    if(b != NULL && b->block_id_override[0] != NULL)
+        return b->block_id_override[0];
     return rocke_i_block_id_axis(b, "x");
 }
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b)
 {
+    if(b != NULL && b->block_id_override[1] != NULL)
+        return b->block_id_override[1];
     return rocke_i_block_id_axis(b, "y");
 }
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b)
 {
+    if(b != NULL && b->block_id_override[2] != NULL)
+        return b->block_id_override[2];
     return rocke_i_block_id_axis(b, "z");
+}
+
+/* Python IRBuilder.grid_dim; the refusal texts are the Python engine's. */
+rocke_value_t* rocke_b_grid_dim(rocke_ir_builder_t* b, const char* axis, int block_size)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!axis)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "grid_dim axis must be x, y, or z, got None");
+    if(strcmp(axis, "x") != 0 && strcmp(axis, "y") != 0 && strcmp(axis, "z") != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "grid_dim axis must be x, y, or z, got '%s'", axis);
+    if(block_size < 1)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "grid_dim block_size must be >= 1, got %d", block_size);
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "axis", axis);
+    rocke_attr_set_int(b, &a, "block_size", block_size);
+    return rocke_i_op1(b, ROCKE_OP_GPU_GRID_DIM, NULL, 0, rocke_i32(), &a, "gdim");
 }
 
 /* gfx1250 workgroup clusters. A launch without a cluster shape is a 1x1x1
@@ -712,6 +739,21 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
                                  rocke_value_t* expect,
                                  const char* scope)
 {
+    rocke_b_global_flag_wait_eq_ord(b, ptr, idx, expect, scope, NULL);
+}
+
+void rocke_b_global_flag_wait_eq_ord(rocke_ir_builder_t* b,
+                                     rocke_value_t* ptr,
+                                     rocke_value_t* idx,
+                                     rocke_value_t* expect,
+                                     const char* scope,
+                                     const char* ordering)
+{
+    if(ordering != NULL && strcmp(ordering, "acquire") != 0 && strcmp(ordering, "monotonic") != 0)
+    {
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "unknown flag wait ordering '%s'", ordering);
+        return;
+    }
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
     if(!rocke_i_live(b))
@@ -749,6 +791,8 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
     ops[2] = expect;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "scope", scope);
+    if(ordering != NULL && strcmp(ordering, "acquire") != 0)
+        rocke_attr_set_str(b, &a, "ordering", ordering);
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, ops, 3, &a);
 }
 
@@ -828,6 +872,16 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* value,
                                                  const char* ordering)
 {
+    return rocke_b_global_atomic_add_pk_bf16_ex(b, ptr, idx, value, ordering, NULL);
+}
+
+rocke_value_t* rocke_b_global_atomic_add_pk_bf16_ex(rocke_ir_builder_t* b,
+                                                    rocke_value_t* ptr,
+                                                    rocke_value_t* idx,
+                                                    rocke_value_t* value,
+                                                    const char* ordering,
+                                                    const char* syncscope)
+{
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
     if(!rocke_i_live(b))
@@ -853,6 +907,8 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
     rocke_attr_set_str(b, &a, "elem_type", "bf16");
     rocke_attr_set_int(b, &a, "vec", 2);
     rocke_attr_set_str(b, &a, "ordering", ordering);
+    if(syncscope != NULL)
+        rocke_attr_set_str(b, &a, "syncscope", syncscope);
     return rocke_i_op1(
         b, ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16, ops, 3, value->type, &a, "atom_bf16");
 }
