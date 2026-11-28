@@ -80,11 +80,16 @@ Definitions:
     - {}
     - { stride_b: 0 }
 
+  - &api_real_precisions
+    - *hpa_half_precision
+    - { <<: *hpa_bf16_precision, gpu_arch_exclude: '' }
+    - *single_precision
+
 Tests:
 - name: matmul_bad_arg
   category: pre_checkin
   function:
-    - matmul_bad_arg: *real_precisions
+    - matmul_bad_arg: *api_real_precisions
   transA: N
   transB: N
 
@@ -93,7 +98,7 @@ Tests:
 - name: matmul_general_batch_bad_arg
   category: pre_checkin
   function:
-    - matmul_mul: *real_precisions
+    - matmul_mul: *api_real_precisions
   transA: N
   transB: N
   batch_count: 3
@@ -2146,7 +2151,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '11\d{2}|120\d{1}'
+  gpu_arch_exclude: '1030|11\d{2}|120\d{1}'
 
 - name: matmul_groupedgemm
   category: pre_checkin
@@ -2161,7 +2166,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [0, 2]
-  gpu_arch_exclude: '11\d{2}|120\d{1}'
+  gpu_arch_exclude: '1030|11\d{2}|120\d{1}'
 
 - name: matmul_groupedgemm_f8_fnuz
   category: pre_checkin
@@ -2224,7 +2229,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -2240,7 +2245,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -2257,7 +2262,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_bias_gelu_aux_fp16
   category: pre_checkin
@@ -2482,7 +2487,7 @@ Tests:
   gradient: 1
   activation_type: gelu
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_drelu_fp16
   category: pre_checkin
@@ -2498,12 +2503,17 @@ Tests:
   gradient: 1
   activation_type: relu
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_bias_stride
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    # The bf16 entry carries its own gpu_arch_exclude (1030), which overrides the
+    # test-level value, so repeat the gfx11/gfx12 exclusion for it.
+    matmul:
+      - *hpa_half_precision
+      - { <<: *hpa_bf16_precision, gpu_arch_exclude: '1030|11\d\d|12[^5]\d' }
+      - *single_precision
   matrix_size:
     - {M: 128, N: 128, K: 128, bias_stride: 128}
     - {M: 128, N: 128, K: 128, bias_stride: 150}
@@ -2534,7 +2544,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_dgelu_bias_bf16
   category: pre_checkin
@@ -2606,7 +2616,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_drelu_bias_bf16
   category: pre_checkin
@@ -2661,7 +2671,7 @@ Tests:
   bias_type: f32_r
   bias_source: a
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_bgrada_bf16
   category: pre_checkin
@@ -2864,7 +2874,7 @@ Tests:
   bias_type: [f16_r, f32_r]
   bias_source: b
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_bgradb_16_f32d_NT
   category: pre_checkin
@@ -3745,7 +3755,7 @@ Tests:
   alpha: 1
   beta: 2.0
   unit_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 - name: matmul_heuristic_all_solutions_no_workspace
   category: nightly
@@ -5756,7 +5766,7 @@ Tests:
   initialization: integer_exact
   unit_check: 1
   fast_check: 1
-  gpu_arch_exclude: '11\d\d|12[^5]\d'
+  gpu_arch_exclude: '1030|11\d\d|12[^5]\d'
 
 # gfx942 and gfx950 offer a bf16 bias gradient only from B with B transposed, and
 # none in f32. gfx1250 offers the bf16 one in every layout, also none in f32.

@@ -413,6 +413,8 @@ namespace
         ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
         if(std::string(props.gcnArchName).find("gfx1250") != std::string::npos)
             GTEST_SKIP() << "gfx1250 handles never use rocRoller";
+        if(std::string(props.gcnArchName).find("gfx1030") != std::string::npos)
+            GTEST_SKIP() << "gfx1030 has no rocRoller kernels";
 
         using HandlePtr = std::unique_ptr<void, decltype(&hipblasLtDestroy)>;
         auto createWith = [](const char* useRocRoller) {
