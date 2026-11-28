@@ -64,3 +64,13 @@ TEST(SplitPlacement, MessageNamesTheOperand)
     EXPECT_NE(c.find("C cannot be shared in an M split"), std::string::npos) << c;
     EXPECT_NE(c.find("each device has its own C slice"), std::string::npos) << c;
 }
+
+TEST(SplitPlacement, BatchSplitSharesOnlyD)
+{
+    for(auto p : {"RRRR", "RRRS"})
+        EXPECT_EQ(splitBatchPlacementError(p), "") << p;
+    for(auto p : {"SRRR", "RSRR", "RRSR", "SSSS", "SRRS"})
+        EXPECT_NE(splitBatchPlacementError(p).find("batch split"), std::string::npos) << p;
+    for(auto p : {"", "RRR", "RRRX"})
+        EXPECT_NE(splitBatchPlacementError(p).find("4 letters"), std::string::npos) << p;
+}

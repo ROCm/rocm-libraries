@@ -893,22 +893,22 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         if globalParameters["SplitDevices"] > 1:
             param("split-devices",        globalParameters["SplitDevices"])
             splitDim = globalParameters["SplitDim"]
-            if splitDim not in ("M", "N"):
-                printExit("SplitDim must be M or N, got %r" % (splitDim,))
+            if splitDim not in ("M", "N", "B"):
+                printExit("SplitDim must be M, N or B, got %r" % (splitDim,))
             param("split-dim",            splitDim)
             if globalParameters["SplitFreeRun"]:
                 param("split-free-run",   True)
-            # Only the operand the split does not cut (B for M, A for N) and D can be shared; the
-            # client applies the same rule (client/include/SplitPlacement.hpp).
-            uncut = "B" if splitDim == "M" else "A"
+            # Only the operand the split does not cut (B for M, A for N, none for the batch) and D
+            # can be shared; the client applies the same rule (client/include/SplitPlacement.hpp).
+            shareable = {"M": ("B", "D"), "N": ("A", "D"), "B": ("D",)}[splitDim]
             placement = ""
             for tensor in "ABCD":
                 value = globalParameters["SplitPlacement" + tensor]
                 if value not in ("Replicated", "Shared"):
                     printExit("SplitPlacement%s must be Replicated or Shared, got %r" % (tensor, value))
-                if value == "Shared" and tensor not in (uncut, "D"):
-                    printExit("SplitPlacement%s cannot be Shared with SplitDim %s: only %s and D can be"
-                              " shared" % (tensor, splitDim, uncut))
+                if value == "Shared" and tensor not in shareable:
+                    printExit("SplitPlacement%s cannot be Shared with SplitDim %s: only %s can be"
+                              " shared" % (tensor, splitDim, " and ".join(shareable)))
                 placement += value[0]
             param("split-placement",      placement)
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])

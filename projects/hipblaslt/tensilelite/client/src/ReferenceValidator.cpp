@@ -82,11 +82,12 @@ namespace TensileLite
                && args.count("split-placement") && args.count("split-dim"))
             {
                 auto const placement = args["split-placement"].as<std::string>();
-                auto const splitN    = args["split-dim"].as<std::string>() == "N";
+                auto const splitDim  = args["split-dim"].as<std::string>();
+                // A batch split cuts both operands, so neither can be shared.
                 if(placement.size() == 4)
                 {
-                    m_sharedA = splitN && placement[0] == 'S';
-                    m_sharedB = !splitN && placement[1] == 'S';
+                    m_sharedA = splitDim == "N" && placement[0] == 'S';
+                    m_sharedB = splitDim == "M" && placement[1] == 'S';
                 }
             }
 
