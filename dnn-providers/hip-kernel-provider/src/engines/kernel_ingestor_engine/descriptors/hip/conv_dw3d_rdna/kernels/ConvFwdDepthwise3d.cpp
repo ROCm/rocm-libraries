@@ -16,9 +16,15 @@
 // Compile-time parameters common to both:
 //   DW_DTYPE            0 = fp32, 1 = fp16, 2 = bf16
 //   DW_NDHWC            0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
+//   DW_HAS_BIAS         1 = add bias[k] (one value per output channel, the dtype of the data)
+//                       to every output before it is stored; the kernel then takes the bias
+//                       pointer after `out`
 
 #ifndef DW_GENERIC
 #define DW_GENERIC 0
+#endif
+#ifndef DW_HAS_BIAS
+#define DW_HAS_BIAS 0
 #endif
 
 #if !DW_GENERIC
@@ -131,6 +137,9 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     ConvFwdDepthwise3d(const data_t* __restrict__ in,
                        const data_t* __restrict__ wei,
                        data_t* __restrict__ out,
+#if DW_HAS_BIAS
+                       const data_t* __restrict__ bias,
+#endif
                        int N,
                        int C,
                        int Di,
@@ -304,6 +313,9 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
         }
     }
 
+#if DW_HAS_BIAS
+    const float bv = to_float(bias[k]);
+#endif
     for(int o = 0; o < DW_TD; ++o)
     {
         const int d_o = do0 + o;
@@ -319,12 +331,16 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
                 const int wo = wo0 + t;
                 if(wo >= Wo)
                     break;
+                float v = acc[o][a][t];
+#if DW_HAS_BIAS
+                v += bv;
+#endif
 #if DW_NDHWC
                 out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
-                    = from_float(acc[o][a][t]);
+                    = from_float(v);
 #else
                 out[(((static_cast<long long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo]
-                    = from_float(acc[o][a][t]);
+                    = from_float(v);
 #endif
             }
         }
@@ -387,6 +403,9 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
     ConvFwdDepthwise3d(const data_t* __restrict__ in,
                        const data_t* __restrict__ wei,
                        data_t* __restrict__ out,
+#if DW_HAS_BIAS
+                       const data_t* __restrict__ bias,
+#endif
                        int N,
                        int C,
                        int Di,
@@ -480,17 +499,22 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
         }
     }
 
+#if DW_HAS_BIAS
+    const float bv = to_float(bias[k]);
+#endif
     for(int t = 0; t < DWG_TW; ++t)
     {
         const int wo = wo0 + t;
         if(wo >= Wo)
             break;
+        float v = acc[t];
+#if DW_HAS_BIAS
+        v += bv;
+#endif
 #if DW_NDHWC
-        out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
-            = from_float(acc[t]);
+        out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k] = from_float(v);
 #else
-        out[(((static_cast<long long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo]
-            = from_float(acc[t]);
+        out[(((static_cast<long long>(n) * K + k) * Do + d_o) * Ho + ho) * Wo + wo] = from_float(v);
 #endif
     }
 }

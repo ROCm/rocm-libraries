@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "db3ea7d5-b535-4a36-a2b6-67b0c4df13f5",
+  "name": "hipkernel:hip_conv_fwd_bias_dw3d_rdna",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.hip_conv_fwd_bias_dw3d_rdna.graph_match"
+  },
+  "metadata": "97890106-87b1-474f-b01b-ef8f332d5cdd",
+  "sort_kernel_catalog": {
+    "default": "f3d9144a-3de6-4c29-beeb-ca38eaf817d6"
+  }
+}

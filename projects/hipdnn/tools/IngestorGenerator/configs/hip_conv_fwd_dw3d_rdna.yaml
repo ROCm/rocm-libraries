@@ -7,7 +7,7 @@
 # stride 1 or 2 and H / W dilation 1: NCDHW with the uniform-k grid, one or two output depths
 # per thread (two needs depth stride and dilation 1); NDHWC with one. One generic variant per
 # dtype and layout takes filter, stride and dilation as launch arguments for every other
-# problem. The native matcher (HipConvFwdDw3dRdnaNative.cpp, geometryOf) picks one variant per
+# problem. The native matcher (ConvRdnaDw3d.cpp, geometryOf) picks one variant per
 # graph; the tile rules here must match it.
 
 dialect: packaged
