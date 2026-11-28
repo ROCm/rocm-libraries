@@ -670,6 +670,48 @@ def test_resolve_plain_tensor_scoped_field_from_its_own_entry():
     print("  PASS: resolve_plain_tensor_scoped_field_from_its_own_entry")
 
 
+def test_resolve_dims_placeholder_never_falls_back_to_top_level():
+    """A tensor-scoped placeholder whose first path segment is dims, strides or
+    data_type resolves only from the tensor's own values.tensors[] entry."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import expand
+
+    template = {
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": "${case.dims}",
+                "alignment": "${case.dims.0}",
+            }
+        ],
+    }
+    values = {
+        "dims": {"0": 16},
+        "tensors": [{"uid": 0, "dims": [2, 3]}],
+    }
+
+    expanded = expand(template, values)
+    alignment = expanded["tensors"][0]["alignment"]
+    assert (
+        alignment == "${UNRESOLVED:dims.0}"
+    ), f"dims.0 fell back to top-level values: {alignment!r}"
+    assert expanded["tensors"][0]["dims"] == [2, 3]
+    print("  PASS: resolve_dims_placeholder_never_falls_back_to_top_level")
+
+
+def test_walk_dotted_path_rejects_empty_segments():
+    """An empty path, or a leading, trailing or doubled dot, never resolves,
+    even where the object holds an empty key."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import UNRESOLVED, walk_dotted_path
+
+    obj = {"": {"a": 3}, "a": {"": {"b": 2}, "b": 1}}
+    for path in ("", ".a", "a.", "a..b"):
+        assert walk_dotted_path(obj, path) is UNRESOLVED, path
+    assert walk_dotted_path(obj, "a.b") == 1
+    print("  PASS: walk_dotted_path_rejects_empty_segments")
+
+
 def test_case_ids():
     """Case ids are stable, bounded, and unique even for input-range-only diffs."""
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -4319,6 +4361,8 @@ def main() -> int:
         test_inventory_keys_are_forward_slash_normalized,
         test_round_trip_expansion,
         test_resolve_plain_tensor_scoped_field_from_its_own_entry,
+        test_resolve_dims_placeholder_never_falls_back_to_top_level,
+        test_walk_dotted_path_rejects_empty_segments,
         test_case_ids,
         test_place_and_verify,
         test_place_keeps_manual_cases,

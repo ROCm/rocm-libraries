@@ -672,7 +672,7 @@ def walk_dotted_path(obj, path):
     lookupJsonPath(). Returns ``UNRESOLVED`` if any segment fails to resolve."""
     cur = obj
     for tok in path.split("."):
-        if isinstance(cur, dict) and tok in cur:
+        if tok and isinstance(cur, dict) and tok in cur:
             cur = cur[tok]
         else:
             return UNRESOLVED
@@ -687,6 +687,8 @@ def _resolve(path, case_values, tensor_uid):
             resolved = walk_dotted_path(tv, path)
             if resolved is not UNRESOLVED:
                 return resolved
+        if path.split(".", 1)[0] in TENSOR_ALWAYS:
+            return f"${{UNRESOLVED:{path}}}"
     resolved = walk_dotted_path(case_values, path)
     if resolved is UNRESOLVED:
         return f"${{UNRESOLVED:{path}}}"
