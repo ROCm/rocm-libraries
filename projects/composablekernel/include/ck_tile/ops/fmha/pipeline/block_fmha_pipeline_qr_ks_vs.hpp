@@ -506,7 +506,8 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t k1_loops = kN0 / kK1;
         // Number of k0 iterations prefetched ahead of the current compute iteration.
         // The skip decision must be made this many iterations before the last k0 loop.
-        constexpr index_t kK0PrefetchDepth = 2;
+        // A single k0 loop stages the whole head dim at once.
+        constexpr index_t kK0PrefetchDepth = k0_loops > 1 ? 2 : 1;
         const index_t gemm0_tail_k_iters   = [&]() {
             if constexpr(kUsePartialKForGemm0Tail)
             {
@@ -600,7 +601,8 @@ struct BlockFmhaPipelineQRKSVS
                 move_tile_window(k_dram_window, {0, kK0});
                 clear_tile(s_acc); // initialize C
                 store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
-                k_block_tile = load_tile(k_dram_window);
+                if constexpr(k0_loops > 1)
+                    k_block_tile = load_tile(k_dram_window);
             }
             auto k_scale_block_tile = load_k_scale_block_tile();
 
@@ -763,17 +765,20 @@ struct BlockFmhaPipelineQRKSVS
             { // tail
                 block_sync_lds();
                 run_gemm_0(number<k0_loops - kK0PrefetchDepth>{});
-                if(!skip_last_k0_loop)
+                if constexpr(k0_loops > 1)
                 {
-                    block_sync_lds();
+                    if(!skip_last_k0_loop)
+                    {
+                        block_sync_lds();
 
-                    store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
+                        store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
 
-                    k_scale_block_tile = load_k_scale_block_tile();
+                        k_scale_block_tile = load_k_scale_block_tile();
 
-                    block_sync_lds();
+                        block_sync_lds();
 
-                    run_gemm_0(number<k0_loops - 1>{});
+                        run_gemm_0(number<k0_loops - 1>{});
+                    }
                 }
             }
             if constexpr(kVPrefetch == VPrefetchPoint::AfterGemm0Tail)

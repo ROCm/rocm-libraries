@@ -317,6 +317,15 @@ add_test(
 set_tests_properties(test_ck_tile_fmha_fwd_codegen PROPERTIES
     LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS")
 
+# gfx1151 has its own forward tile table; the other gfx115 targets keep the family one.
+add_test(
+    NAME test_ck_tile_fmha_fwd_gfx1151_codegen
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_fwd_gfx1151_codegen.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(test_ck_tile_fmha_fwd_gfx1151_codegen PROPERTIES
+    LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS")
+
 # Umbrella target to build and run all ck_tile fmha tests
 # Usage: ninja ck_tile_fmha_tests
 add_custom_target(ck_tile_fmha_tests
