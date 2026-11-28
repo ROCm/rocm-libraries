@@ -832,7 +832,7 @@ CK_TILE_DEVICE uint8_t cast_to_f8_from_f16(fp16_t v, [[maybe_unused]] unsigned i
 
     if constexpr(saturate)
     {
-        if((val.i32val & 0x7FFF) != 0x7FFF)
+        if((val.i32val & 0x7FFF) <= 0x7C00)
         {
             val.half_vec[0] = (interpret == fp8_interpretation::E4M3_OCP)
                                   ? __builtin_amdgcn_fmed3h(val.half_vec[0], 448.0, -448.0)

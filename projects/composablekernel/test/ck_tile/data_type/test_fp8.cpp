@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cmath>
+#include <string>
 
 template <typename T>
 class ConvertTest : public ::testing::Test
@@ -680,6 +681,100 @@ TYPED_TEST(ExplicitFP8Formats, FiniteValuesRetainTheirEncodingOnDevice)
                   ck_tile::bit_cast<uint8_t>(ck_tile::type_convert<TypeParam>(input[i])));
         EXPECT_EQ(decoded[i], input[i]);
         EXPECT_EQ(std::signbit(decoded[i]), std::signbit(input[i]));
+    }
+}
+
+__global__ void convert_f16_nan_to_f8(const uint16_t* input, uint8_t* out)
+{
+    const auto i   = threadIdx.x;
+    const auto x   = ck_tile::bit_cast<ck_tile::fp16_t>(input[i]);
+    out[4 * i + 0] = ck_tile::fp16_to_fp8_rtn_raw<ck_tile::fp8_t>(x);
+    out[4 * i + 1] = ck_tile::fp16_to_fp8_sr_raw<ck_tile::fp8_t>(x);
+    out[4 * i + 2] = ck_tile::fp16_to_fp8_rtn_raw<ck_tile::bf8_t>(x);
+    out[4 * i + 3] = ck_tile::fp16_to_fp8_sr_raw<ck_tile::bf8_t>(x);
+}
+
+TEST(ConvertFp16NanOnGfx125, NanInputsProduceFp8Nan)
+{
+    hipDeviceProp_t prop{};
+    int dev = 0;
+    ASSERT_EQ(hipGetDevice(&dev), hipSuccess);
+    ASSERT_EQ(hipGetDeviceProperties(&prop, dev), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx125") == std::string::npos)
+    {
+        GTEST_SKIP() << "fp16 -> fp8 hardware conversion is only used on gfx125";
+    }
+
+    // quiet NaN (+/-), signaling NaN, NaN with minimal payload
+    const std::array<uint16_t, 4> input = {0x7E00, 0xFE00, 0x7D00, 0x7C01};
+    std::array<uint8_t, 16> out{};
+
+    ck_tile::DeviceMem input_device(sizeof(input));
+    ck_tile::DeviceMem out_device(sizeof(out));
+    input_device.ToDevice(input.data());
+    hipLaunchKernelGGL(convert_f16_nan_to_f8,
+                       dim3(1),
+                       dim3(input.size()),
+                       0,
+                       nullptr,
+                       static_cast<const uint16_t*>(input_device.GetDeviceBuffer()),
+                       static_cast<uint8_t*>(out_device.GetDeviceBuffer()));
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    out_device.FromDevice(out.data());
+
+    for(std::size_t i = 0; i < input.size(); ++i)
+    {
+        SCOPED_TRACE(input[i]);
+        // e4m3 OCP NaN: all magnitude bits set
+        EXPECT_EQ(out[4 * i + 0] & 0x7F, 0x7F) << "fp8 rtn";
+        EXPECT_EQ(out[4 * i + 1] & 0x7F, 0x7F) << "fp8 sr";
+        // e5m2 NaN: exponent all ones with nonzero mantissa
+        EXPECT_EQ(out[4 * i + 2] & 0x7C, 0x7C) << "bf8 rtn";
+        EXPECT_NE(out[4 * i + 2] & 0x03, 0) << "bf8 rtn";
+        EXPECT_EQ(out[4 * i + 3] & 0x7C, 0x7C) << "bf8 sr";
+        EXPECT_NE(out[4 * i + 3] & 0x03, 0) << "bf8 sr";
+    }
+}
+
+TEST(ConvertFp16NanOnGfx125, InfAndOverflowSaturateToMaxNormal)
+{
+    hipDeviceProp_t prop{};
+    int dev = 0;
+    ASSERT_EQ(hipGetDevice(&dev), hipSuccess);
+    ASSERT_EQ(hipGetDeviceProperties(&prop, dev), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx125") == std::string::npos)
+    {
+        GTEST_SKIP() << "fp16 -> fp8 hardware conversion is only used on gfx125";
+    }
+
+    // +inf, -inf, +max fp16 (65504), -max fp16
+    const std::array<uint16_t, 4> input  = {0x7C00, 0xFC00, 0x7BFF, 0xFBFF};
+    const std::array<uint8_t, 4> fp8_ref = {0x7E, 0xFE, 0x7E, 0xFE};
+    const std::array<uint8_t, 4> bf8_ref = {0x7B, 0xFB, 0x7B, 0xFB};
+    std::array<uint8_t, 16> out{};
+
+    ck_tile::DeviceMem input_device(sizeof(input));
+    ck_tile::DeviceMem out_device(sizeof(out));
+    input_device.ToDevice(input.data());
+    hipLaunchKernelGGL(convert_f16_nan_to_f8,
+                       dim3(1),
+                       dim3(input.size()),
+                       0,
+                       nullptr,
+                       static_cast<const uint16_t*>(input_device.GetDeviceBuffer()),
+                       static_cast<uint8_t*>(out_device.GetDeviceBuffer()));
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    out_device.FromDevice(out.data());
+
+    for(std::size_t i = 0; i < input.size(); ++i)
+    {
+        SCOPED_TRACE(input[i]);
+        EXPECT_EQ(out[4 * i + 0], fp8_ref[i]) << "fp8 rtn";
+        EXPECT_EQ(out[4 * i + 1], fp8_ref[i]) << "fp8 sr";
+        EXPECT_EQ(out[4 * i + 2], bf8_ref[i]) << "bf8 rtn";
+        EXPECT_EQ(out[4 * i + 3], bf8_ref[i]) << "bf8 sr";
     }
 }
 
