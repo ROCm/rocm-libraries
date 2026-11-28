@@ -26,6 +26,7 @@ Config uses:
 import os
 
 import pytest
+import yaml
 
 from config_harness import emit_kernels_from_config
 
@@ -56,3 +57,16 @@ def test_r4_sparse_gfx942_emits_assembly():
         assert ".amdgcn_target" in src, f"Kernel {base!r} missing .amdgcn_target"
         assert "gfx942" in src, f"Kernel {base!r} missing gfx942 arch marker"
         assert base.startswith("Cijk_"), f"Unexpected basename: {base!r}"
+
+
+def test_sparse_metadata_without_shadow_limit_emits_assembly(tmp_path):
+    with open(_CONFIG) as source:
+        config = yaml.safe_load(source)
+    params = config["BenchmarkProblems"][0][1]["ForkParameters"]
+    params.append({"Use64bShadowLimit": [False]})
+    path = tmp_path / "sparse-no-shadow.yaml"
+    path.write_text(yaml.safe_dump(config))
+    results = emit_kernels_from_config(str(path), limit=8, arch=_ARCH)
+    assert results
+    assert all(err == 0 for _, _, err in results)
+    assert all("sgprSrdMetadata+2" in src for _, src, _ in results)
