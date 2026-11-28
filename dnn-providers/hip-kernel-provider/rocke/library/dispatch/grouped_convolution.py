@@ -681,14 +681,16 @@ def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
         return (tiles, max(1, req.G), max(1, ident.split_k))
     from kernels.common.conv_args import ConvArgs
 
-    gx, gy, gz = ConvArgs.from_problem(
-        _gemm_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
-    ).grid()
     # A group-merged instance's one workgroup covers group_merge conv groups
     # (_group_merge_fits in kernel_identity.py), so there are group_merge times
-    # fewer z-slices than the unmerged grid() above computes; admission already
-    # requires group_merge to divide the group count.
-    return (gx, gy, gz // max(1, ident.group_merge))
+    # fewer slices on the group axis; admission already requires group_merge to
+    # divide the group count. Group-fast raster swaps the group and M-tile axes.
+    return ConvArgs.from_problem(
+        _gemm_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
+    ).grid(
+        group_merge=ident.group_merge,
+        group_fast_raster=ident.group_fast_raster,
+    )
 
 
 def _block(spec: ConvInstanceSpec) -> tuple[int, int, int]:

@@ -610,6 +610,8 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
+    if idx in _RDNA4_CFGS or idx in _RDNA4_SPLIT_CFGS:
+        return _rdna4_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -927,6 +929,116 @@ def _tf32_split_k_spec(idx: int):
         )
     spec, arch = _tf32_spec({82: 54, 83: 56}[idx])
     return replace(spec, split_k=2), arch
+
+
+# The RDNA4 forward knobs (gfx1201 WMMA 16x16x16, wave32). Base: a 64x64x32
+# tile over 2x2 waves, mem pipeline, cshuffle epilogue, on _RDNA4 (cpg 64, a
+# multiple of every tile_k below). Keep in lockstep with make_cfg_rdna4() in
+# conv_implicit_gemm_emit.c.
+#   86: tile_k 128 (the RDNA4 tile_k axis), fp16
+#   87: config 86 in bf16
+#   88: uniform_k_decode, fp16
+#   89: uniform_k_decode, bf16, grouped (2 groups of cpg 64)
+#   90: uniform_k_decode with split_k=2 on the RDNA4 base: the decode starts
+#       at the slice's k_lo and ends at its k_hi
+#   91: uniform_k_decode on a pointwise (1x1, stride 1, pad 0) problem: rejected
+#       by both engines
+#   92: regt_prefetch 1, fp16
+#   93: regt_prefetch 1 over uniform_k_decode, bf16
+#   94: regt_prefetch 1, grouped, fp16 (the masked group-based descriptors)
+#   95: regt_prefetch 1 on gfx1250 (config 41 unsplit): rejected by both
+#       engines (gfx12 RDNA only)
+#   96: lds_swizzle, fp16
+#   97: lds_swizzle at tile_k 64, bf16
+#   98: lds_swizzle + regt_prefetch 1 + uniform_k_decode on a 128x64 tile, fp16
+#   99: lds_swizzle, grouped, fp16 (the swizzle over the group-offset tiles)
+#  100: lds_swizzle with lds_k_pad=0: rejected by both engines
+#  101: lds_swizzle + regt_prefetch 1 + uniform_k_decode at tile_k 128, fp16
+#  102: group_fast_raster, grouped, fp16 (the group on y, the M tile on z)
+#  103: group_fast_raster + uniform_k_decode + lds_swizzle + regt_prefetch 1,
+#       grouped, bf16
+#  104: group_fast_raster on an ungrouped problem, fp16 (only the M tile moves)
+#  105: group_fast_raster on the gfx1250 split-K binary (config 41): rejected by
+#       both engines
+_RDNA4 = dict(N=2, Hi=14, Wi=14, C=64, K=128, fy=3, fx=3, pH=1, pW=1)
+_RDNA4_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2)
+_BF16 = ConvDataSpec("bf16", "bf16", "bf16")
+_RDNA4_CFGS = {
+    86: (_RDNA4, dict(tile_k=128), "gfx1201"),
+    87: (_RDNA4, dict(tile_k=128, data=_BF16), "gfx1201"),
+    88: (_RDNA4, dict(uniform_k_decode=True), "gfx1201"),
+    89: (_RDNA4_GROUPED, dict(uniform_k_decode=True, data=_BF16), "gfx1201"),
+    90: (_RDNA4, dict(uniform_k_decode=True, split_k=2), "gfx1201"),
+    91: (
+        dict(_RDNA4, fy=1, fx=1, pH=0, pW=0),
+        dict(uniform_k_decode=True),
+        "gfx1201",
+    ),
+    92: (_RDNA4, dict(regt_prefetch=1), "gfx1201"),
+    93: (_RDNA4, dict(regt_prefetch=1, uniform_k_decode=True, data=_BF16), "gfx1201"),
+    94: (_RDNA4_GROUPED, dict(regt_prefetch=1), "gfx1201"),
+    96: (_RDNA4, dict(lds_swizzle=True), "gfx1201"),
+    97: (_RDNA4, dict(lds_swizzle=True, tile_k=64, data=_BF16), "gfx1201"),
+    98: (
+        _RDNA4,
+        dict(
+            tile_m=128,
+            lds_swizzle=True,
+            regt_prefetch=1,
+            uniform_k_decode=True,
+        ),
+        "gfx1201",
+    ),
+    99: (_RDNA4_GROUPED, dict(lds_swizzle=True), "gfx1201"),
+    100: (_RDNA4, dict(lds_swizzle=True, lds_k_pad=0), "gfx1201"),
+    101: (
+        _RDNA4,
+        dict(tile_k=128, lds_swizzle=True, regt_prefetch=1, uniform_k_decode=True),
+        "gfx1201",
+    ),
+    102: (_RDNA4_GROUPED, dict(group_fast_raster=True), "gfx1201"),
+    103: (
+        _RDNA4_GROUPED,
+        dict(
+            group_fast_raster=True,
+            uniform_k_decode=True,
+            lds_swizzle=True,
+            regt_prefetch=1,
+            data=_BF16,
+        ),
+        "gfx1201",
+    ),
+    104: (_RDNA4, dict(group_fast_raster=True), "gfx1201"),
+}
+
+
+# Rejected configs built on the gfx1250 split-K binary (config 41) rather than
+# on the RDNA4 base: the gfx12-RDNA-only knobs refuse a gfx1250 target.
+_RDNA4_SPLIT_CFGS = (95, 105)
+
+
+def _rdna4_spec(idx: int):
+    base = dict(
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=16,
+        wave_size=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+    )
+    if idx == 95:
+        spec, arch = _split_k_spec(41)
+        return replace(spec, split_k=1, regt_prefetch=1), arch
+    if idx == 105:
+        spec, arch = _split_k_spec(41)
+        return replace(spec, group_fast_raster=True), arch
+    prob, kw, arch = _RDNA4_CFGS[idx]
+    return ImplicitGemmConvSpec(problem=_cp(**prob), **dict(base, **kw)), arch
 
 
 def main() -> int:

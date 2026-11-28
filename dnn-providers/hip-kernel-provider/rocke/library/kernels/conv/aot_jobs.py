@@ -159,6 +159,18 @@ from kernels.conv.kernel_identity import KernelIdentity, current_llvm_flavor
 
 CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
 CACHE_TILE_K: Tuple[int, ...] = (16, 32, 64)
+# ---- RDNA4 deep-K tiles ------------------------------------------------------
+# The gfx12 RDNA targets (gfx1200 / gfx1201 and their generic target) also
+# build the forward geometries above at tile_k 128: few-wave tiles over a deep
+# reduction (small grids, wide channels) halve their K-loop barriers there and
+# lead those rows. Appended after the base product (see :func:`_geometries`),
+# so the geometry order and the enumeration chunks of every other target are
+# unchanged.
+CACHE_RDNA4_ARCHS: Tuple[str, ...] = ("gfx1200", "gfx1201", "gfx12-generic")
+CACHE_RDNA4_EXTRA_TILE_K: Tuple[int, ...] = (128,)
+# Only the forward direction walks that axis: its tile_k 128 kernels are
+# GPU-verified (the listed rows); dgrad's are not, so the axis stays off there.
+CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS: Tuple[str, ...] = ("fwd",)
 CACHE_WARP_MN: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
 
@@ -530,6 +542,596 @@ CACHE_FWD_SPLIT_K_CLUSTER_VEC = 8
 CACHE_FWD_SPLIT_K_ARCHS: Tuple[str, ...] = FWD_SPLIT_K_ARCHS
 CACHE_FWD_SPLIT_K_CLUSTER_FLAVORS: Tuple[str, ...] = ("llvm23",)
 
+# ---- RDNA4 forward rows ------------------------------------------------------
+# What the RDNA4 targets (CACHE_RDNA4_ARCHS) add to the forward grid is listed
+# kernel by kernel: the tile_k 128 kernels of the base grid
+# (CACHE_RDNA4_EXTRA_TILE_K) and the knob kernels are built only where a row
+# below names them. The rows are the configurations that led a forward corpus
+# row on these targets or were among its finalists; the rest of the tile_k 128
+# product and of the knob twins is left out to bound the cache. Every listed
+# kernel is grouped, with 16x16 WMMA warp tiles and the cshuffle epilogue; the
+# other targets build none of them.
+CACHE_FWD_RDNA4_VEC = 8
+# tile_k 128 kernels without a knob: (tile_m, tile_n, warp_m, warp_n,
+# pipeline, group_merge). group_merge 0 is the plain kernel with
+# CACHE_FWD_RDNA4_VEC-wide vectors and the plain K loop; Gm > 1 the
+# group-merged kernel of CACHE_FWD_GROUP_MERGES (vector widths derived by the
+# builder), plain K loop.
+CACHE_FWD_RDNA4_DEEP_K_ROWS: Tuple[tuple, ...] = (
+    (16, 16, 1, 1, "mem", 0),
+    (16, 16, 1, 1, "wavelet", 0),
+    (16, 32, 1, 1, "wavelet", 0),
+    (16, 32, 1, 2, "mem", 0),
+    (16, 32, 1, 2, "wavelet", 0),
+    (16, 64, 1, 1, "wavelet", 0),
+    (16, 64, 1, 2, "wavelet", 0),
+    (16, 64, 1, 4, "mem", 0),
+    (16, 64, 1, 4, "wavelet", 0),
+    (16, 128, 1, 2, "wavelet", 0),
+    (16, 128, 1, 4, "wavelet", 0),
+    (32, 16, 1, 1, "wavelet", 0),
+    (32, 16, 2, 1, "mem", 8),
+    (32, 16, 2, 1, "mem", 16),
+    (32, 16, 2, 1, "wavelet", 0),
+    (32, 16, 2, 1, "wavelet", 16),
+    (32, 32, 1, 1, "wavelet", 0),
+    (32, 32, 1, 2, "wavelet", 0),
+    (32, 32, 2, 1, "mem", 0),
+    (32, 32, 2, 1, "wavelet", 0),
+    (32, 32, 2, 2, "mem", 0),
+    (32, 32, 2, 2, "mem", 8),
+    (32, 32, 2, 2, "mem", 16),
+    (32, 32, 2, 2, "wavelet", 0),
+    (32, 64, 1, 2, "wavelet", 0),
+    (32, 64, 1, 4, "mem", 0),
+    (32, 64, 1, 4, "wavelet", 0),
+    (32, 64, 2, 1, "wavelet", 0),
+    (32, 64, 2, 2, "mem", 0),
+    (32, 64, 2, 2, "wavelet", 0),
+    (32, 64, 2, 4, "mem", 0),
+    (32, 64, 2, 4, "wavelet", 0),
+    (32, 128, 1, 2, "wavelet", 0),
+    (32, 128, 1, 4, "wavelet", 0),
+    (32, 128, 1, 8, "wavelet", 0),
+    (32, 128, 2, 1, "wavelet", 0),
+    (32, 128, 2, 2, "wavelet", 0),
+    (32, 128, 2, 4, "wavelet", 0),
+    (32, 128, 2, 8, "wavelet", 0),
+    (64, 16, 2, 1, "wavelet", 0),
+    (64, 16, 4, 1, "mem", 8),
+    (64, 16, 4, 1, "mem", 16),
+    (64, 16, 4, 1, "wavelet", 8),
+    (64, 16, 4, 1, "wavelet", 16),
+    (64, 32, 1, 2, "wavelet", 0),
+    (64, 32, 2, 1, "wavelet", 0),
+    (64, 32, 2, 2, "wavelet", 0),
+    (64, 32, 4, 1, "wavelet", 0),
+    (64, 32, 4, 2, "mem", 0),
+    (64, 32, 4, 2, "mem", 8),
+    (64, 32, 4, 2, "mem", 16),
+    (64, 32, 4, 2, "mem", 32),
+    (64, 32, 4, 2, "wavelet", 0),
+    (64, 32, 4, 2, "wavelet", 16),
+    (64, 64, 1, 2, "wavelet", 0),
+    (64, 64, 1, 4, "wavelet", 0),
+    (64, 64, 2, 1, "wavelet", 0),
+    (64, 64, 2, 2, "mem", 0),
+    (64, 64, 2, 2, "wavelet", 0),
+    (64, 64, 2, 4, "mem", 0),
+    (64, 64, 2, 4, "wavelet", 0),
+    (64, 64, 4, 1, "mem", 0),
+    (64, 64, 4, 1, "wavelet", 0),
+    (64, 64, 4, 2, "mem", 0),
+    (64, 64, 4, 2, "wavelet", 0),
+    (64, 64, 4, 4, "mem", 0),
+    (64, 128, 1, 8, "mem", 0),
+    (64, 128, 2, 4, "mem", 0),
+    (64, 128, 4, 2, "mem", 0),
+    (128, 16, 4, 1, "mem", 16),
+    (128, 16, 8, 1, "mem", 8),
+    (128, 16, 8, 1, "mem", 16),
+    (128, 64, 4, 2, "mem", 0),
+    (128, 64, 4, 4, "mem", 0),
+    (128, 64, 8, 2, "mem", 0),
+)
+# Knob kernels (ImplicitGemmConvSpec uniform_k_decode "ukd", lds_swizzle
+# "lxs", regt_prefetch "rtp1", group_fast_raster "gfr"; mem pipeline,
+# CACHE_FWD_RDNA4_VEC-wide vectors): (tile_m, tile_n, tile_k, warp_m, warp_n,
+# uniform_k_decode, lds_swizzle, regt_prefetch, group_fast_raster). The
+# group-fast raster kernels serve grouped problems only
+# (identity_supports_problem).
+CACHE_FWD_RDNA4_KNOB_ROWS: Tuple[Tuple[int, ...], ...] = (
+    (16, 16, 32, 1, 1, 1, 0, 0, 0),
+    (16, 16, 64, 1, 1, 1, 0, 0, 0),
+    (16, 32, 32, 1, 1, 1, 1, 0, 0),
+    (16, 32, 32, 1, 2, 1, 0, 0, 0),
+    (16, 32, 32, 1, 2, 1, 1, 0, 0),
+    (16, 32, 64, 1, 1, 1, 0, 0, 0),
+    (16, 32, 64, 1, 1, 1, 1, 0, 0),
+    (16, 32, 64, 1, 2, 1, 0, 0, 0),
+    (16, 32, 64, 1, 2, 1, 1, 0, 0),
+    (16, 32, 128, 1, 2, 1, 0, 0, 0),
+    (16, 32, 128, 1, 2, 1, 1, 0, 0),
+    (16, 64, 64, 1, 2, 1, 1, 0, 0),
+    (16, 64, 64, 1, 4, 1, 0, 0, 0),
+    (16, 64, 64, 1, 4, 1, 1, 0, 0),
+    (16, 64, 64, 1, 4, 1, 1, 1, 0),
+    (16, 64, 128, 1, 4, 1, 0, 0, 0),
+    (16, 64, 128, 1, 4, 1, 1, 0, 0),
+    (16, 64, 128, 1, 4, 1, 1, 1, 0),
+    (16, 128, 64, 1, 4, 1, 1, 0, 0),
+    (16, 128, 128, 1, 8, 1, 1, 1, 0),
+    (32, 16, 32, 2, 1, 1, 0, 0, 0),
+    (32, 16, 32, 2, 1, 1, 1, 0, 0),
+    (32, 16, 32, 2, 1, 1, 1, 0, 1),
+    (32, 32, 16, 1, 1, 1, 0, 0, 0),
+    (32, 32, 16, 1, 2, 1, 1, 0, 0),
+    (32, 32, 16, 2, 1, 1, 1, 0, 0),
+    (32, 32, 32, 1, 1, 1, 0, 0, 0),
+    (32, 32, 32, 1, 1, 1, 1, 0, 0),
+    (32, 32, 32, 1, 2, 1, 1, 0, 0),
+    (32, 32, 32, 2, 1, 1, 1, 0, 0),
+    (32, 32, 32, 2, 2, 1, 0, 0, 0),
+    (32, 32, 32, 2, 2, 1, 1, 0, 0),
+    (32, 32, 32, 2, 2, 1, 1, 1, 0),
+    (32, 32, 64, 1, 1, 1, 0, 0, 0),
+    (32, 32, 64, 1, 1, 1, 1, 0, 0),
+    (32, 32, 64, 1, 2, 1, 0, 0, 0),
+    (32, 32, 64, 1, 2, 1, 1, 0, 0),
+    (32, 32, 64, 2, 1, 1, 0, 0, 0),
+    (32, 32, 64, 2, 1, 1, 1, 0, 0),
+    (32, 32, 64, 2, 2, 1, 0, 0, 0),
+    (32, 32, 64, 2, 2, 1, 1, 0, 0),
+    (32, 32, 64, 2, 2, 1, 1, 1, 0),
+    (32, 32, 128, 2, 1, 1, 1, 0, 0),
+    (32, 32, 128, 2, 2, 1, 0, 0, 0),
+    (32, 32, 128, 2, 2, 1, 1, 0, 0),
+    (32, 32, 128, 2, 2, 1, 1, 1, 0),
+    (32, 64, 32, 1, 1, 1, 1, 0, 0),
+    (32, 64, 32, 1, 4, 1, 1, 0, 0),
+    (32, 64, 32, 2, 2, 1, 1, 0, 0),
+    (32, 64, 64, 1, 2, 1, 0, 0, 0),
+    (32, 64, 64, 1, 4, 1, 0, 0, 0),
+    (32, 64, 64, 1, 4, 1, 1, 0, 0),
+    (32, 64, 64, 1, 4, 1, 1, 1, 0),
+    (32, 64, 64, 2, 1, 1, 1, 0, 0),
+    (32, 64, 64, 2, 2, 1, 0, 0, 0),
+    (32, 64, 64, 2, 2, 1, 1, 0, 0),
+    (32, 64, 64, 2, 2, 1, 1, 1, 0),
+    (32, 64, 64, 2, 4, 1, 0, 0, 0),
+    (32, 64, 64, 2, 4, 1, 1, 0, 0),
+    (32, 64, 64, 2, 4, 1, 1, 1, 0),
+    (32, 64, 128, 1, 2, 1, 1, 0, 0),
+    (32, 64, 128, 1, 4, 1, 0, 0, 0),
+    (32, 64, 128, 1, 4, 1, 1, 1, 0),
+    (32, 64, 128, 2, 1, 1, 1, 0, 0),
+    (32, 64, 128, 2, 2, 1, 1, 0, 0),
+    (32, 64, 128, 2, 2, 1, 1, 1, 0),
+    (32, 64, 128, 2, 4, 1, 0, 0, 0),
+    (32, 64, 128, 2, 4, 1, 1, 0, 0),
+    (32, 64, 128, 2, 4, 1, 1, 1, 0),
+    (32, 128, 32, 1, 1, 1, 1, 0, 0),
+    (32, 128, 32, 1, 4, 1, 1, 0, 0),
+    (32, 128, 32, 2, 2, 1, 1, 1, 0),
+    (32, 128, 64, 1, 4, 1, 0, 0, 0),
+    (32, 128, 64, 1, 4, 1, 1, 0, 0),
+    (32, 128, 128, 1, 4, 1, 1, 0, 0),
+    (32, 128, 128, 1, 4, 1, 1, 1, 0),
+    (32, 128, 128, 1, 8, 1, 0, 0, 0),
+    (32, 128, 128, 1, 8, 1, 1, 0, 0),
+    (32, 128, 128, 1, 8, 1, 1, 1, 0),
+    (32, 128, 128, 2, 4, 1, 0, 0, 0),
+    (32, 128, 128, 2, 4, 1, 1, 1, 0),
+    (32, 256, 64, 1, 4, 1, 0, 0, 0),
+    (32, 256, 64, 1, 8, 1, 0, 0, 0),
+    (64, 16, 32, 2, 1, 1, 1, 0, 0),
+    (64, 16, 64, 2, 1, 1, 0, 0, 0),
+    (64, 16, 64, 2, 1, 1, 1, 0, 0),
+    (64, 16, 64, 4, 1, 1, 0, 0, 0),
+    (64, 16, 64, 4, 1, 1, 1, 0, 0),
+    (64, 16, 128, 4, 1, 1, 0, 0, 0),
+    (64, 32, 16, 1, 1, 1, 0, 0, 0),
+    (64, 32, 16, 1, 1, 1, 1, 0, 0),
+    (64, 32, 16, 1, 2, 1, 1, 0, 0),
+    (64, 32, 16, 2, 1, 1, 0, 0, 0),
+    (64, 32, 16, 2, 1, 1, 1, 0, 0),
+    (64, 32, 32, 1, 1, 1, 1, 0, 0),
+    (64, 32, 32, 1, 2, 1, 1, 0, 0),
+    (64, 32, 32, 2, 1, 1, 1, 0, 0),
+    (64, 32, 32, 2, 2, 1, 0, 0, 0),
+    (64, 32, 32, 2, 2, 1, 1, 0, 0),
+    (64, 32, 32, 2, 2, 1, 1, 1, 0),
+    (64, 32, 32, 4, 1, 1, 0, 0, 0),
+    (64, 32, 32, 4, 1, 1, 1, 0, 0),
+    (64, 32, 32, 4, 1, 1, 1, 1, 0),
+    (64, 32, 64, 1, 1, 1, 1, 0, 0),
+    (64, 32, 64, 2, 1, 1, 0, 0, 0),
+    (64, 32, 64, 2, 1, 1, 1, 0, 0),
+    (64, 32, 64, 2, 1, 1, 1, 1, 1),
+    (64, 32, 64, 2, 2, 1, 0, 0, 0),
+    (64, 32, 64, 2, 2, 1, 1, 0, 0),
+    (64, 32, 64, 2, 2, 1, 1, 1, 0),
+    (64, 32, 64, 4, 1, 0, 0, 0, 1),
+    (64, 32, 64, 4, 1, 1, 0, 0, 0),
+    (64, 32, 64, 4, 1, 1, 1, 0, 0),
+    (64, 32, 64, 4, 1, 1, 1, 1, 0),
+    (64, 32, 64, 4, 1, 1, 1, 1, 1),
+    (64, 32, 64, 4, 2, 1, 0, 0, 0),
+    (64, 32, 64, 4, 2, 1, 1, 0, 0),
+    (64, 32, 64, 4, 2, 1, 1, 1, 0),
+    (64, 32, 128, 2, 2, 1, 0, 0, 0),
+    (64, 32, 128, 2, 2, 1, 1, 0, 0),
+    (64, 32, 128, 2, 2, 1, 1, 1, 0),
+    (64, 32, 128, 4, 1, 1, 1, 0, 0),
+    (64, 32, 128, 4, 1, 1, 1, 1, 0),
+    (64, 32, 128, 4, 2, 1, 0, 0, 0),
+    (64, 32, 128, 4, 2, 1, 1, 0, 0),
+    (64, 32, 128, 4, 2, 1, 1, 1, 0),
+    (64, 64, 16, 1, 4, 1, 1, 0, 0),
+    (64, 64, 16, 4, 1, 1, 1, 0, 0),
+    (64, 64, 32, 1, 2, 1, 1, 0, 0),
+    (64, 64, 32, 1, 4, 1, 0, 0, 0),
+    (64, 64, 32, 1, 4, 1, 1, 0, 0),
+    (64, 64, 32, 1, 4, 1, 1, 1, 0),
+    (64, 64, 32, 2, 1, 1, 0, 0, 0),
+    (64, 64, 32, 2, 1, 1, 1, 0, 0),
+    (64, 64, 32, 2, 2, 1, 1, 0, 0),
+    (64, 64, 32, 2, 2, 1, 1, 1, 0),
+    (64, 64, 32, 4, 1, 1, 1, 0, 0),
+    (64, 64, 32, 4, 1, 1, 1, 1, 0),
+    (64, 64, 32, 4, 2, 1, 1, 0, 0),
+    (64, 64, 64, 1, 2, 1, 0, 0, 0),
+    (64, 64, 64, 1, 2, 1, 1, 0, 0),
+    (64, 64, 64, 1, 4, 1, 0, 0, 0),
+    (64, 64, 64, 1, 4, 1, 1, 0, 0),
+    (64, 64, 64, 1, 4, 1, 1, 1, 0),
+    (64, 64, 64, 2, 1, 0, 0, 0, 1),
+    (64, 64, 64, 2, 1, 1, 0, 0, 0),
+    (64, 64, 64, 2, 1, 1, 1, 0, 0),
+    (64, 64, 64, 2, 1, 1, 1, 0, 1),
+    (64, 64, 64, 2, 2, 0, 0, 0, 1),
+    (64, 64, 64, 2, 2, 1, 0, 0, 0),
+    (64, 64, 64, 2, 2, 1, 1, 0, 0),
+    (64, 64, 64, 2, 2, 1, 1, 0, 1),
+    (64, 64, 64, 2, 2, 1, 1, 1, 0),
+    (64, 64, 64, 2, 4, 1, 1, 1, 0),
+    (64, 64, 64, 4, 1, 1, 0, 0, 0),
+    (64, 64, 64, 4, 1, 1, 1, 0, 0),
+    (64, 64, 64, 4, 1, 1, 1, 1, 0),
+    (64, 64, 64, 4, 2, 0, 0, 0, 1),
+    (64, 64, 64, 4, 2, 1, 0, 0, 0),
+    (64, 64, 64, 4, 2, 1, 1, 0, 0),
+    (64, 64, 64, 4, 2, 1, 1, 1, 0),
+    (64, 64, 128, 1, 4, 1, 1, 0, 0),
+    (64, 64, 128, 1, 4, 1, 1, 1, 0),
+    (64, 64, 128, 2, 2, 1, 0, 0, 0),
+    (64, 64, 128, 2, 2, 1, 1, 0, 0),
+    (64, 64, 128, 2, 2, 1, 1, 0, 1),
+    (64, 64, 128, 2, 2, 1, 1, 1, 0),
+    (64, 64, 128, 2, 4, 0, 0, 0, 1),
+    (64, 64, 128, 2, 4, 1, 0, 0, 0),
+    (64, 64, 128, 2, 4, 1, 1, 0, 0),
+    (64, 64, 128, 2, 4, 1, 1, 0, 1),
+    (64, 64, 128, 2, 4, 1, 1, 1, 0),
+    (64, 64, 128, 4, 1, 1, 0, 0, 0),
+    (64, 64, 128, 4, 1, 1, 1, 0, 0),
+    (64, 64, 128, 4, 1, 1, 1, 1, 0),
+    (64, 64, 128, 4, 2, 1, 0, 0, 0),
+    (64, 64, 128, 4, 2, 1, 1, 0, 0),
+    (64, 64, 128, 4, 2, 1, 1, 1, 0),
+    (64, 64, 128, 4, 4, 1, 0, 0, 0),
+    (64, 64, 128, 4, 4, 1, 1, 0, 0),
+    (64, 64, 128, 4, 4, 1, 1, 0, 1),
+    (64, 64, 128, 4, 4, 1, 1, 1, 0),
+    (64, 128, 16, 1, 2, 1, 0, 0, 0),
+    (64, 128, 16, 1, 4, 1, 1, 0, 0),
+    (64, 128, 16, 1, 4, 1, 1, 1, 0),
+    (64, 128, 16, 2, 2, 1, 1, 0, 0),
+    (64, 128, 16, 2, 2, 1, 1, 1, 0),
+    (64, 128, 32, 1, 4, 1, 0, 0, 0),
+    (64, 128, 32, 1, 4, 1, 1, 0, 0),
+    (64, 128, 32, 1, 4, 1, 1, 1, 0),
+    (64, 128, 32, 1, 8, 1, 0, 0, 0),
+    (64, 128, 32, 2, 2, 1, 1, 0, 0),
+    (64, 128, 32, 2, 2, 1, 1, 1, 0),
+    (64, 128, 32, 2, 4, 1, 0, 0, 0),
+    (64, 128, 32, 2, 4, 1, 1, 0, 0),
+    (64, 128, 32, 2, 4, 1, 1, 1, 0),
+    (64, 128, 32, 4, 1, 1, 0, 0, 0),
+    (64, 128, 64, 1, 4, 0, 0, 1, 0),
+    (64, 128, 64, 1, 4, 1, 0, 0, 0),
+    (64, 128, 64, 1, 4, 1, 1, 0, 0),
+    (64, 128, 64, 1, 4, 1, 1, 1, 0),
+    (64, 128, 64, 1, 8, 1, 0, 0, 0),
+    (64, 128, 64, 1, 8, 1, 1, 0, 0),
+    (64, 128, 64, 1, 8, 1, 1, 1, 0),
+    (64, 128, 64, 2, 2, 1, 0, 0, 0),
+    (64, 128, 64, 2, 2, 1, 1, 0, 0),
+    (64, 128, 64, 2, 2, 1, 1, 1, 0),
+    (64, 128, 64, 2, 4, 1, 0, 0, 0),
+    (64, 128, 64, 2, 4, 1, 1, 0, 0),
+    (64, 128, 64, 2, 4, 1, 1, 1, 0),
+    (64, 128, 64, 4, 2, 1, 0, 0, 0),
+    (64, 128, 64, 4, 2, 1, 1, 0, 0),
+    (64, 128, 64, 4, 2, 1, 1, 1, 0),
+    (64, 128, 128, 1, 4, 1, 0, 0, 0),
+    (64, 128, 128, 1, 4, 1, 1, 0, 0),
+    (64, 128, 128, 1, 8, 1, 1, 1, 0),
+    (64, 128, 128, 2, 2, 1, 0, 0, 0),
+    (64, 128, 128, 2, 2, 1, 1, 1, 0),
+    (64, 128, 128, 2, 4, 1, 0, 0, 0),
+    (64, 128, 128, 2, 4, 1, 1, 0, 0),
+    (64, 128, 128, 2, 4, 1, 1, 1, 0),
+    (64, 128, 128, 2, 8, 1, 1, 0, 0),
+    (64, 128, 128, 4, 2, 1, 0, 0, 0),
+    (64, 128, 128, 4, 2, 1, 1, 1, 0),
+    (64, 128, 128, 4, 4, 1, 0, 0, 0),
+    (64, 128, 128, 4, 4, 1, 1, 1, 0),
+    (64, 256, 16, 1, 4, 1, 1, 0, 0),
+    (64, 256, 32, 1, 4, 1, 1, 0, 0),
+    (64, 256, 32, 1, 4, 1, 1, 1, 0),
+    (64, 256, 32, 1, 8, 1, 1, 1, 0),
+    (64, 256, 32, 2, 2, 1, 1, 1, 0),
+    (64, 256, 64, 1, 8, 1, 0, 0, 0),
+    (64, 256, 64, 1, 8, 1, 1, 0, 0),
+    (64, 256, 64, 1, 8, 1, 1, 1, 0),
+    (64, 256, 64, 2, 4, 1, 0, 0, 0),
+    (64, 256, 64, 2, 4, 1, 1, 0, 0),
+    (64, 256, 64, 2, 4, 1, 1, 1, 0),
+    (64, 256, 64, 2, 8, 1, 1, 1, 0),
+    (64, 256, 64, 4, 2, 1, 1, 1, 0),
+    (64, 256, 64, 4, 4, 1, 1, 1, 0),
+    (128, 16, 32, 2, 1, 1, 1, 0, 0),
+    (128, 32, 16, 1, 1, 1, 1, 0, 0),
+    (128, 32, 16, 1, 2, 1, 1, 0, 0),
+    (128, 32, 16, 2, 1, 1, 0, 0, 0),
+    (128, 32, 16, 2, 1, 1, 1, 0, 0),
+    (128, 32, 32, 1, 2, 1, 1, 0, 0),
+    (128, 32, 32, 2, 1, 1, 0, 0, 0),
+    (128, 32, 32, 2, 1, 1, 1, 0, 0),
+    (128, 32, 32, 2, 2, 1, 0, 0, 0),
+    (128, 32, 32, 2, 2, 1, 1, 0, 0),
+    (128, 32, 32, 2, 2, 1, 1, 0, 1),
+    (128, 32, 32, 2, 2, 1, 1, 1, 0),
+    (128, 32, 32, 4, 1, 1, 0, 0, 0),
+    (128, 32, 32, 4, 1, 1, 0, 0, 1),
+    (128, 32, 32, 4, 1, 1, 1, 0, 0),
+    (128, 32, 32, 4, 1, 1, 1, 1, 0),
+    (128, 32, 64, 2, 2, 1, 0, 0, 0),
+    (128, 32, 64, 2, 2, 1, 1, 0, 0),
+    (128, 32, 64, 2, 2, 1, 1, 1, 0),
+    (128, 32, 64, 4, 1, 1, 0, 0, 0),
+    (128, 32, 64, 4, 1, 1, 1, 0, 0),
+    (128, 32, 64, 4, 1, 1, 1, 1, 0),
+    (128, 32, 64, 4, 1, 1, 1, 1, 1),
+    (128, 32, 64, 4, 2, 1, 1, 0, 0),
+    (128, 32, 64, 8, 1, 1, 1, 0, 0),
+    (128, 32, 64, 8, 1, 1, 1, 1, 0),
+    (128, 32, 128, 4, 1, 1, 1, 0, 0),
+    (128, 32, 128, 4, 2, 1, 0, 0, 0),
+    (128, 32, 128, 4, 2, 1, 1, 1, 0),
+    (128, 32, 128, 8, 1, 1, 1, 0, 0),
+    (128, 32, 128, 8, 2, 1, 1, 1, 0),
+    (128, 64, 16, 1, 4, 1, 1, 0, 0),
+    (128, 64, 16, 2, 2, 1, 1, 0, 0),
+    (128, 64, 16, 4, 1, 1, 1, 0, 0),
+    (128, 64, 32, 1, 4, 1, 1, 0, 0),
+    (128, 64, 32, 1, 4, 1, 1, 1, 0),
+    (128, 64, 32, 2, 1, 1, 1, 0, 0),
+    (128, 64, 32, 2, 2, 1, 0, 0, 0),
+    (128, 64, 32, 2, 2, 1, 1, 0, 0),
+    (128, 64, 32, 2, 2, 1, 1, 1, 0),
+    (128, 64, 32, 2, 4, 1, 1, 0, 0),
+    (128, 64, 32, 4, 1, 1, 0, 0, 0),
+    (128, 64, 32, 4, 1, 1, 1, 0, 0),
+    (128, 64, 32, 4, 1, 1, 1, 1, 0),
+    (128, 64, 32, 4, 2, 1, 0, 0, 0),
+    (128, 64, 32, 4, 2, 1, 1, 0, 0),
+    (128, 64, 32, 4, 2, 1, 1, 1, 0),
+    (128, 64, 32, 8, 1, 1, 0, 0, 1),
+    (128, 64, 32, 8, 1, 1, 1, 0, 0),
+    (128, 64, 64, 1, 4, 1, 0, 0, 0),
+    (128, 64, 64, 1, 4, 1, 1, 1, 0),
+    (128, 64, 64, 2, 2, 1, 0, 0, 0),
+    (128, 64, 64, 2, 2, 1, 1, 0, 0),
+    (128, 64, 64, 2, 2, 1, 1, 0, 1),
+    (128, 64, 64, 2, 2, 1, 1, 1, 0),
+    (128, 64, 64, 2, 2, 1, 1, 1, 1),
+    (128, 64, 64, 2, 4, 1, 0, 0, 0),
+    (128, 64, 64, 2, 4, 1, 1, 1, 0),
+    (128, 64, 64, 4, 1, 1, 0, 0, 0),
+    (128, 64, 64, 4, 1, 1, 1, 0, 0),
+    (128, 64, 64, 4, 1, 1, 1, 1, 0),
+    (128, 64, 64, 4, 1, 1, 1, 1, 1),
+    (128, 64, 64, 4, 2, 0, 0, 1, 1),
+    (128, 64, 64, 4, 2, 1, 0, 0, 0),
+    (128, 64, 64, 4, 2, 1, 0, 0, 1),
+    (128, 64, 64, 4, 2, 1, 1, 0, 0),
+    (128, 64, 64, 4, 2, 1, 1, 1, 0),
+    (128, 64, 64, 4, 2, 1, 1, 1, 1),
+    (128, 64, 64, 4, 4, 1, 0, 0, 0),
+    (128, 64, 64, 4, 4, 1, 1, 1, 0),
+    (128, 64, 64, 8, 1, 1, 0, 0, 0),
+    (128, 64, 64, 8, 1, 1, 1, 0, 0),
+    (128, 64, 64, 8, 1, 1, 1, 1, 0),
+    (128, 64, 64, 8, 2, 1, 0, 0, 0),
+    (128, 64, 64, 8, 2, 1, 1, 1, 0),
+    (128, 64, 128, 2, 4, 1, 0, 0, 0),
+    (128, 64, 128, 2, 4, 1, 1, 0, 0),
+    (128, 64, 128, 2, 4, 1, 1, 1, 0),
+    (128, 64, 128, 4, 2, 1, 0, 0, 0),
+    (128, 64, 128, 4, 2, 1, 1, 0, 0),
+    (128, 64, 128, 4, 2, 1, 1, 1, 0),
+    (128, 64, 128, 4, 4, 1, 0, 0, 0),
+    (128, 64, 128, 4, 4, 1, 1, 0, 0),
+    (128, 64, 128, 4, 4, 1, 1, 1, 0),
+    (128, 64, 128, 8, 1, 1, 0, 0, 0),
+    (128, 64, 128, 8, 1, 1, 1, 1, 0),
+    (128, 64, 128, 8, 2, 1, 0, 0, 0),
+    (128, 64, 128, 8, 4, 1, 1, 1, 0),
+    (128, 128, 16, 1, 4, 1, 0, 0, 0),
+    (128, 128, 16, 1, 4, 1, 1, 1, 0),
+    (128, 128, 16, 2, 2, 1, 0, 0, 0),
+    (128, 128, 16, 2, 2, 1, 1, 1, 0),
+    (128, 128, 32, 1, 4, 1, 0, 0, 0),
+    (128, 128, 32, 1, 4, 1, 1, 0, 0),
+    (128, 128, 32, 1, 4, 1, 1, 1, 0),
+    (128, 128, 32, 1, 8, 1, 1, 1, 0),
+    (128, 128, 32, 2, 2, 1, 0, 0, 0),
+    (128, 128, 32, 2, 2, 1, 1, 0, 0),
+    (128, 128, 32, 2, 2, 1, 1, 1, 0),
+    (128, 128, 32, 2, 4, 1, 1, 0, 0),
+    (128, 128, 32, 2, 4, 1, 1, 1, 0),
+    (128, 128, 32, 4, 1, 1, 1, 0, 0),
+    (128, 128, 32, 4, 1, 1, 1, 1, 0),
+    (128, 128, 32, 4, 2, 1, 0, 0, 0),
+    (128, 128, 32, 4, 2, 1, 1, 0, 0),
+    (128, 128, 32, 4, 2, 1, 1, 1, 0),
+    (128, 128, 32, 4, 4, 1, 1, 0, 0),
+    (128, 128, 32, 4, 4, 1, 1, 1, 0),
+    (128, 128, 32, 8, 1, 1, 1, 1, 0),
+    (128, 128, 32, 8, 2, 1, 1, 1, 0),
+    (128, 128, 64, 1, 4, 1, 0, 0, 0),
+    (128, 128, 64, 1, 4, 1, 1, 1, 0),
+    (128, 128, 64, 1, 8, 1, 1, 0, 0),
+    (128, 128, 64, 1, 8, 1, 1, 1, 0),
+    (128, 128, 64, 2, 4, 1, 0, 0, 0),
+    (128, 128, 64, 2, 4, 1, 1, 0, 0),
+    (128, 128, 64, 2, 4, 1, 1, 1, 0),
+    (128, 128, 64, 2, 8, 1, 1, 1, 0),
+    (128, 128, 64, 4, 2, 1, 0, 0, 0),
+    (128, 128, 64, 4, 2, 1, 1, 0, 0),
+    (128, 128, 64, 4, 2, 1, 1, 1, 0),
+    (128, 128, 64, 4, 4, 1, 0, 0, 0),
+    (128, 128, 64, 4, 4, 1, 1, 0, 0),
+    (128, 128, 64, 4, 4, 1, 1, 1, 0),
+    (128, 128, 64, 8, 1, 1, 0, 0, 0),
+    (128, 128, 64, 8, 1, 1, 1, 0, 0),
+    (128, 128, 64, 8, 1, 1, 1, 1, 0),
+    (128, 128, 64, 8, 2, 1, 1, 0, 0),
+    (128, 128, 64, 8, 2, 1, 1, 1, 0),
+    (128, 128, 128, 1, 8, 1, 1, 0, 0),
+    (128, 128, 128, 1, 8, 1, 1, 1, 0),
+    (128, 128, 128, 2, 4, 1, 1, 0, 0),
+    (128, 128, 128, 2, 4, 1, 1, 1, 0),
+    (128, 128, 128, 2, 8, 1, 1, 0, 0),
+    (128, 128, 128, 2, 8, 1, 1, 1, 0),
+    (128, 128, 128, 4, 2, 1, 1, 1, 0),
+    (128, 128, 128, 4, 4, 1, 1, 0, 0),
+    (128, 128, 128, 4, 4, 1, 1, 1, 0),
+    (128, 128, 128, 4, 8, 1, 1, 1, 0),
+    (128, 128, 128, 8, 1, 1, 1, 0, 0),
+    (128, 128, 128, 8, 1, 1, 1, 1, 0),
+    (128, 128, 128, 8, 2, 1, 1, 0, 0),
+    (128, 128, 128, 8, 2, 1, 1, 1, 0),
+    (128, 256, 16, 1, 8, 1, 1, 0, 0),
+    (128, 256, 16, 1, 8, 1, 1, 1, 0),
+    (128, 256, 16, 2, 4, 1, 1, 1, 0),
+    (128, 256, 32, 1, 8, 1, 0, 0, 0),
+    (128, 256, 32, 1, 8, 1, 1, 0, 0),
+    (128, 256, 32, 1, 8, 1, 1, 1, 0),
+    (128, 256, 32, 2, 4, 1, 0, 0, 0),
+    (128, 256, 32, 2, 4, 1, 1, 0, 0),
+    (128, 256, 32, 2, 4, 1, 1, 1, 0),
+    (128, 256, 32, 2, 8, 1, 0, 0, 0),
+    (128, 256, 32, 2, 8, 1, 1, 0, 0),
+    (128, 256, 32, 2, 8, 1, 1, 1, 0),
+    (128, 256, 32, 4, 2, 1, 0, 0, 0),
+    (128, 256, 32, 4, 2, 1, 1, 0, 0),
+    (128, 256, 32, 4, 2, 1, 1, 1, 0),
+    (128, 256, 64, 1, 8, 1, 0, 0, 0),
+    (128, 256, 64, 1, 8, 1, 1, 0, 0),
+    (128, 256, 64, 1, 8, 1, 1, 1, 0),
+    (128, 256, 64, 2, 4, 0, 0, 1, 0),
+    (128, 256, 64, 2, 4, 1, 0, 0, 0),
+    (128, 256, 64, 2, 4, 1, 0, 1, 0),
+    (128, 256, 64, 2, 4, 1, 1, 0, 0),
+    (128, 256, 64, 2, 4, 1, 1, 1, 0),
+    (128, 256, 64, 2, 8, 1, 0, 0, 0),
+    (128, 256, 64, 2, 8, 1, 1, 0, 0),
+    (128, 256, 64, 2, 8, 1, 1, 1, 0),
+    (128, 256, 64, 4, 2, 1, 0, 0, 0),
+    (128, 256, 64, 4, 2, 1, 1, 0, 0),
+    (128, 256, 64, 4, 2, 1, 1, 1, 0),
+    (128, 256, 64, 4, 4, 1, 0, 0, 0),
+    (128, 256, 64, 4, 4, 1, 1, 0, 0),
+    (128, 256, 64, 4, 4, 1, 1, 1, 0),
+    (128, 256, 64, 4, 8, 1, 1, 1, 0),
+    (256, 32, 16, 1, 2, 1, 1, 0, 0),
+    (256, 32, 16, 2, 1, 1, 1, 0, 0),
+    (256, 32, 32, 2, 2, 1, 0, 0, 0),
+    (256, 32, 32, 2, 2, 1, 1, 0, 0),
+    (256, 32, 32, 2, 2, 1, 1, 1, 0),
+    (256, 32, 32, 4, 1, 1, 0, 0, 0),
+    (256, 32, 32, 4, 1, 1, 1, 0, 0),
+    (256, 32, 32, 4, 1, 1, 1, 1, 0),
+    (256, 32, 64, 4, 1, 1, 0, 0, 0),
+    (256, 32, 64, 4, 1, 1, 1, 0, 0),
+    (256, 32, 64, 4, 1, 1, 1, 1, 0),
+    (256, 32, 64, 4, 2, 1, 0, 0, 0),
+    (256, 32, 64, 4, 2, 1, 1, 0, 0),
+    (256, 32, 64, 4, 2, 1, 1, 1, 0),
+    (256, 32, 64, 8, 1, 1, 0, 0, 0),
+    (256, 32, 64, 8, 1, 1, 1, 0, 0),
+    (256, 32, 64, 8, 1, 1, 1, 1, 0),
+    (256, 64, 16, 4, 1, 1, 1, 0, 0),
+    (256, 64, 32, 2, 2, 1, 1, 0, 0),
+    (256, 64, 32, 2, 2, 1, 1, 0, 1),
+    (256, 64, 32, 2, 2, 1, 1, 1, 0),
+    (256, 64, 32, 2, 4, 1, 1, 0, 0),
+    (256, 64, 32, 4, 1, 1, 0, 0, 0),
+    (256, 64, 32, 4, 1, 1, 1, 0, 0),
+    (256, 64, 32, 4, 1, 1, 1, 1, 0),
+    (256, 64, 32, 4, 2, 1, 0, 0, 0),
+    (256, 64, 32, 4, 2, 1, 0, 0, 1),
+    (256, 64, 32, 4, 2, 1, 1, 0, 0),
+    (256, 64, 32, 4, 2, 1, 1, 1, 0),
+    (256, 64, 32, 8, 1, 1, 0, 0, 0),
+    (256, 64, 32, 8, 1, 1, 1, 0, 0),
+    (256, 64, 32, 8, 1, 1, 1, 1, 0),
+    (256, 64, 64, 2, 4, 1, 1, 0, 0),
+    (256, 64, 64, 4, 2, 1, 0, 0, 0),
+    (256, 64, 64, 4, 2, 1, 1, 0, 0),
+    (256, 64, 64, 4, 2, 1, 1, 1, 0),
+    (256, 64, 64, 4, 2, 1, 1, 1, 1),
+    (256, 64, 64, 8, 1, 1, 0, 0, 0),
+    (256, 64, 64, 8, 1, 1, 1, 0, 0),
+    (256, 64, 64, 8, 1, 1, 1, 1, 0),
+    (256, 64, 64, 8, 2, 1, 0, 0, 0),
+    (256, 64, 64, 8, 2, 1, 0, 0, 1),
+    (256, 64, 64, 8, 2, 1, 1, 0, 0),
+    (256, 64, 64, 8, 2, 1, 1, 1, 0),
+    (256, 128, 16, 2, 4, 1, 1, 0, 0),
+    (256, 128, 16, 4, 2, 1, 0, 0, 0),
+    (256, 128, 16, 4, 2, 1, 1, 0, 0),
+    (256, 128, 16, 4, 2, 1, 1, 1, 0),
+    (256, 128, 32, 2, 4, 1, 0, 0, 0),
+    (256, 128, 32, 2, 4, 1, 1, 0, 0),
+    (256, 128, 32, 2, 4, 1, 1, 1, 0),
+    (256, 128, 32, 4, 2, 1, 0, 0, 0),
+    (256, 128, 32, 4, 2, 1, 1, 0, 0),
+    (256, 128, 32, 4, 2, 1, 1, 1, 0),
+    (256, 128, 32, 4, 4, 1, 0, 0, 0),
+    (256, 128, 32, 4, 4, 1, 1, 0, 0),
+    (256, 128, 32, 4, 4, 1, 1, 1, 0),
+    (256, 128, 32, 8, 1, 1, 0, 0, 0),
+    (256, 128, 32, 8, 1, 1, 1, 0, 0),
+    (256, 128, 32, 8, 1, 1, 1, 1, 0),
+    (256, 128, 32, 8, 2, 1, 1, 0, 0),
+    (256, 128, 64, 2, 4, 1, 1, 1, 0),
+    (256, 128, 64, 4, 2, 1, 0, 0, 0),
+    (256, 128, 64, 4, 2, 1, 1, 1, 0),
+    (256, 128, 64, 4, 4, 1, 0, 0, 0),
+    (256, 128, 64, 4, 4, 1, 1, 0, 0),
+    (256, 128, 64, 4, 4, 1, 1, 1, 0),
+    (256, 128, 64, 8, 1, 1, 0, 0, 0),
+    (256, 128, 64, 8, 1, 1, 1, 1, 0),
+    (256, 128, 64, 8, 2, 1, 0, 0, 0),
+    (256, 128, 64, 8, 2, 1, 1, 0, 0),
+    (256, 128, 64, 8, 2, 1, 1, 1, 0),
+    (256, 128, 64, 8, 4, 1, 1, 1, 0),
+)
+
 # ---- wgrad stream-K axis (opt-in) -------------------------------------------
 # Stream-K (WgradConvSpec.streamk) bakes its launch mode and its partial-sum
 # reduction into the kernel; the CTA pool -- and with it the whole iteration
@@ -675,14 +1277,23 @@ def _geometries(
 
     ``direction`` selects the grid: wgrad gets the filter-shaped tile and warp
     extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
-    base grid; WMMA wgrad then adds the
-    :data:`CACHE_WGRAD_DEEPK_GEOMETRIES` after it; targets whose LDS cannot hold
-    them (a 64x64x512 16-bit tile pair is 128 KB) are filtered by
-    :func:`_spec_is_valid`, not by a per-arch list. It must be threaded through
-    wherever a geometry list is built for a direction, or the chunk bounds stop matching the list the worker
-    walks.
+    base grid. The RDNA4 targets (:data:`CACHE_RDNA4_ARCHS`) walk the same
+    grid again at :data:`CACHE_RDNA4_EXTRA_TILE_K` after it, for the
+    directions in :data:`CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS` (forward only).
+    WMMA wgrad then adds the :data:`CACHE_WGRAD_DEEPK_GEOMETRIES` after the
+    grid; targets whose LDS cannot hold them (a 64x64x512 16-bit tile pair is
+    128 KB) are filtered by :func:`_spec_is_valid`, not by a per-arch list. It
+    must be threaded through wherever a geometry list is built for a
+    direction, or the chunk bounds stop matching the list the worker walks.
     """
     tile_mn, warp_mn = _grid_axes(direction)
+    tile_ks = [_TILE_K]
+    if (
+        target.gfx in CACHE_RDNA4_ARCHS
+        and direction in CACHE_RDNA4_EXTRA_TILE_K_DIRECTIONS
+    ):
+        # The RDNA4 tile_k axis (CACHE_RDNA4_EXTRA_TILE_K), after the base grid.
+        tile_ks.append(CACHE_RDNA4_EXTRA_TILE_K)
     for (
         tile_m,
         tile_n,
@@ -692,15 +1303,18 @@ def _geometries(
         wt,
         pipeline,
         epilogue,
-    ) in itertools.product(
-        tile_mn,
-        tile_mn,
-        _TILE_K,
-        warp_mn,
-        warp_mn,
-        _WARP_TILE_MN,
-        _PIPELINES,
-        _EPILOGUES,
+    ) in itertools.chain.from_iterable(
+        itertools.product(
+            tile_mn,
+            tile_mn,
+            tile_k_axis,
+            warp_mn,
+            warp_mn,
+            _WARP_TILE_MN,
+            _PIPELINES,
+            _EPILOGUES,
+        )
+        for tile_k_axis in tile_ks
     ):
         if warp_m * wt > tile_m or warp_n * wt > tile_n:
             continue
@@ -1038,12 +1652,35 @@ def _fwd_jobs(
     ):
         if not _aot_pipeline("fwd", pipeline):
             continue
+        geometry = (
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            wt,
+            pipeline,
+            epilogue,
+            atom,
+        )
+        # tile_k 128 on the RDNA4 targets: only the CACHE_FWD_RDNA4_DEEP_K_ROWS
+        # kernels of this geometry.
+        deep_k = _fwd_rdna4_deep_k(arch, tile_k)
+        deep_merges = _fwd_deep_k_merges(geometry) if deep_k else ()
         # fwd's A (X) and B (W) are both contiguous along cpg, so they share
         # one width; D (Y) runs along kpg.
         for vec_ab, vec_c in itertools.product(_VECS, _VECS):
             for (unroll_k, async_dma), caps in itertools.product(
                 _fwd_k_loops(pipeline), _layout_caps()
             ):
+                if deep_k and not (
+                    0 in deep_merges
+                    and vec_ab == vec_c == CACHE_FWD_RDNA4_VEC
+                    and not unroll_k
+                    and not async_dma
+                    and caps["grouped"]
+                ):
+                    continue
                 grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,
@@ -1080,7 +1717,7 @@ def _fwd_jobs(
                     spec_kwargs=cfg,
                     caps=caps,
                 )
-        yield from _fwd_merged_jobs(
+        for job in _fwd_merged_jobs(
             arch,
             da,
             db,
@@ -1088,7 +1725,13 @@ def _fwd_jobs(
             flavor,
             wave_size,
             (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
-        )
+        ):
+            if not deep_k or (
+                job.spec_kwargs["group_merge"] in deep_merges
+                and not job.spec_kwargs["unroll_k"]
+            ):
+                yield job
+        yield from _fwd_rdna4_jobs(arch, da, db, dd, flavor, wave_size, geometry)
         if _fwd_split_target(arch):
             yield from _fwd_split_jobs(
                 arch,
@@ -1100,6 +1743,102 @@ def _fwd_jobs(
                 (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
                 cluster=_fwd_split_cluster_target(target, flavor),
             )
+
+
+def _fwd_rdna4_deep_k(arch: str, tile_k: int) -> bool:
+    """Whether a forward geometry is on the RDNA4 tile_k 128 axis, where only
+    the :data:`CACHE_FWD_RDNA4_DEEP_K_ROWS` kernels are built."""
+    return arch in CACHE_RDNA4_ARCHS and tile_k in CACHE_RDNA4_EXTRA_TILE_K
+
+
+def _fwd_deep_k_merges(geometry: tuple) -> Tuple[int, ...]:
+    """The ``group_merge`` values :data:`CACHE_FWD_RDNA4_DEEP_K_ROWS` lists for
+    a tile_k 128 geometry (a :func:`_geometries` tuple; 0 = the plain
+    kernel). Shared by :func:`_fwd_jobs` and :func:`count_jobs`."""
+    tile_m, tile_n, _tk, warp_m, warp_n, wt, pipeline, epilogue, _atom = geometry
+    if wt != 16 or epilogue != "cshuffle":
+        return ()
+    return tuple(
+        gm
+        for tm, tn, wm, wn, pipe, gm in CACHE_FWD_RDNA4_DEEP_K_ROWS
+        if (tm, tn, wm, wn, pipe) == (tile_m, tile_n, warp_m, warp_n, pipeline)
+        and (gm == 0 or (gm in _FWD_GROUP_MERGES and _fwd_merged_geometry(geometry)))
+    )
+
+
+def _fwd_rdna4_knob_sets(arch: str, geometry: tuple) -> List[dict]:
+    """The :data:`CACHE_FWD_RDNA4_KNOB_ROWS` knob sets of one forward geometry
+    (a :func:`_geometries` tuple), as spec kwargs past the tile. Shared by
+    :func:`_fwd_rdna4_jobs` and :func:`count_jobs`."""
+    if arch not in CACHE_RDNA4_ARCHS:
+        return []
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    if atom.family != "wmma" or wt != 16 or pipeline != "mem" or epilogue != "cshuffle":
+        return []
+    out = []
+    for tm, tn, tk, wm, wn, ukd, lxs, rtp, gfr in CACHE_FWD_RDNA4_KNOB_ROWS:
+        if (tm, tn, tk, wm, wn) != (tile_m, tile_n, tile_k, warp_m, warp_n):
+            continue
+        knobs: dict = {}
+        if ukd:
+            knobs["uniform_k_decode"] = True
+        if rtp:
+            knobs["regt_prefetch"] = rtp
+        if lxs:
+            knobs["lds_swizzle"] = True
+        if gfr:
+            knobs["group_fast_raster"] = True
+        out.append(knobs)
+    return out
+
+
+def _fwd_rdna4_jobs(
+    arch: str,
+    da: str,
+    db: str,
+    dd: str,
+    flavor: str,
+    wave_size: int,
+    geometry: tuple,
+) -> Iterator[BuildJob]:
+    """The RDNA4 forward knob kernels of one geometry
+    (:func:`_fwd_rdna4_knob_sets`), at ``CACHE_FWD_RDNA4_VEC`` widths."""
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    vec = CACHE_FWD_RDNA4_VEC
+    for knobs in _fwd_rdna4_knob_sets(arch, geometry):
+        cfg = dict(
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_tile_m=wt,
+            warp_tile_n=wt,
+            warp_tile_k=atom.k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            wave_size=wave_size,
+            vector_size_a=vec,
+            vector_size_b=vec,
+            vector_size_c=vec,
+        )
+        yield BuildJob(
+            identity=KernelIdentity(
+                arch=arch,
+                direction="fwd",
+                algorithm="implicit_gemm",
+                llvm_flavor=flavor,
+                dtype_a=da,
+                dtype_b=db,
+                dtype_d=dd,
+                grouped=True,
+                **cfg,
+                **knobs,
+            ),
+            direction="fwd",
+            spec_kwargs={**cfg, **knobs},
+            caps=dict(grouped=True),
+        )
 
 
 def _fwd_split_target(arch: str) -> bool:
@@ -2233,9 +2972,13 @@ def count_jobs(
             if not _aot_pipeline(direction, pipeline):
                 continue
             if direction == "fwd":
-                total += vecs * len(_fwd_k_loops(pipeline)) * layouts
-                if _fwd_merged_geometry(geo):
-                    total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
+                if _fwd_rdna4_deep_k(target.gfx, geo[2]):
+                    total += len(_fwd_deep_k_merges(geo))
+                else:
+                    total += vecs * len(_fwd_k_loops(pipeline)) * layouts
+                    if _fwd_merged_geometry(geo):
+                        total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
+                total += len(_fwd_rdna4_knob_sets(target.gfx, geo))
                 if fwd_split and _fwd_split_geometry(geo):
                     total += len(_fwd_split_vecs(geo[8])) ** 2
                 if fwd_cluster and _fwd_split_cluster_geometry(geo):

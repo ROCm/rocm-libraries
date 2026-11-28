@@ -295,6 +295,14 @@ absolute `k_out`. With `groups == 1` the group terms vanish (`cpg == C`,
 
 **Why this is faster:** With `Y=X=1`, `sH=sW=1`, `pH=pW=0` the embed transforms reduce to identity (`hi=ho`, `wi=wo`), the filter-unmerge produces `y=x=0` trivially, and the pad guards are always true. The implicit descriptor computes the same values but still emits the full VALU sequence (magic divisions, multiplications, bounds comparisons). Flat arithmetic emits one `mul` and one `add` per operand (plus the group-base `add` when `groups > 1`) — zero dead instructions.
 
+### RDNA4 forward knobs (gfx1200 / gfx1201)
+
+- The RDNA4 AOT grid adds a tile_k 128 axis after the base geometries (forward only); other arches are unchanged.
+- `uniform_k_decode` (`ukd`, gfx12 RDNA only, as are `lds_swizzle` and `group_fast_raster` below): a K loop that carries the tile's `(c0, x, y)` as scalar iteration arguments when `cpg % tile_k == 0` (no magic division per load), followed by the plain loop for the other problems; WMMA `mem`, 2-D.
+- `regt_prefetch = 1` (`rtp1`, gfx12 RDNA only): the next K tile's global loads are issued into registers before the current tile's MMAs and stored to LDS after them; tiles past the reduction end read zero. Combines with `uniform_k_decode`.
+- `lds_swizzle` (`lxs`): unpadded A/B LDS rows whose 8-element chunks are XOR-permuted per row (`lds_col_xor_params`), applied by the tile stores and the fragment reads alike; WMMA `mem`, sync loaders, `tile_k` 16..128.
+- `group_fast_raster` (`gfr`): the group on `blockIdx.y` and the M tile on `blockIdx.z` (launch grid `(N tiles, groups, M tiles)`), so the groups of one pixel tile run back to back; grouped problems only, not with split-K, `chiplet_swizzle` or `wavelet`.
+
 ---
 
 ## Next steps

@@ -487,7 +487,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     rocke_value_t* warp_n_idx_v = rocke_b_mod(b, warp_id_v, c_warps_n);
     rocke_value_t* warp_k_idx_v = rocke_b_const_i32(b, 0);
 
-    rocke_value_t* block_m_off_b = rocke_b_mul(b, rocke_b_block_id_y(b), c_tile_m);
+    /* group_fast_raster: bind(block_m_axis="z"); the group then rides on y. */
+    rocke_value_t* block_m_off_b = rocke_b_mul(
+        b, spec->group_fast_raster ? rocke_b_block_id_z(b) : rocke_b_block_id_y(b), c_tile_m);
     rocke_value_t* block_n_off_b = rocke_b_mul(b, rocke_b_block_id_x(b), c_tile_n);
     rocke_value_t* block_k_off_b = rocke_b_const_i32(b, 0);
 
@@ -600,7 +602,11 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
          * Bind subexpressions in Python's left-to-right order to pin SSA ids.
          * Split-K: the group is the z quotient decoded above. */
-        ctx->group_idx = ctx->fwd_split ? split_group_z : rocke_b_block_id_z(b);
+        if(ctx->fwd_split)
+            ctx->group_idx = split_group_z;
+        else /* group_fast_raster: the group rides on y, the M tile on z. */
+            ctx->group_idx
+                = spec->group_fast_raster ? rocke_b_block_id_y(b) : rocke_b_block_id_z(b);
         /* AOT: the runtime p_kpg param (was const_i32(p.kpg)). Merged: the
          * merged kpg, which is Gm exactly (depthwise only), so c_gm. */
         ctx->k_out_group_base
@@ -637,6 +643,26 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
             return false;
         }
+    }
+
+    /* lds_swizzle: the XOR parameters (lds_col_xor_params) shared by the tile
+     * stores (CoalescedTileLoader.col_xor) and the fragment reads. */
+    if(spec->lds_swizzle)
+    {
+        if(overrides != NULL
+           && (overrides->a_load_override != NULL || overrides->a_operand_override != NULL))
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "lds_swizzle does not support loader / operand overrides");
+            return false;
+        }
+        if(rocke_lds_col_xor_params(ctx->block_k, 8, ctx->lds_col_xor) != ROCKE_OK)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "lds_swizzle: no XOR swizzle for tile_k %d", ctx->block_k);
+            return false;
+        }
+        ctx->has_lds_col_xor = true;
     }
 
     /* smem_alloc A_smem / B_smem with storage_shape(rows) = (rows, row_stride) */
@@ -890,6 +916,16 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* CoalescedTileLoader(..., elem_dtype=ir_dtype_a / ir_dtype_b) */
         ctx->a_sync_loader.elem_dtype = ctx->ir_dtype_a;
         ctx->b_sync_loader.elem_dtype = ctx->ir_dtype_b;
+        /* CoalescedTileLoader(..., col_xor=lds_col_xor) under lds_swizzle. */
+        if(ctx->has_lds_col_xor
+           && (rocke_coalesced_tile_loader_set_col_xor(&ctx->a_sync_loader, ctx->lds_col_xor)
+                   != ROCKE_OK
+               || rocke_coalesced_tile_loader_set_col_xor(&ctx->b_sync_loader, ctx->lds_col_xor)
+                      != ROCKE_OK))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "lds_swizzle: col_xor refused by the tile loader");
+            return false;
+        }
         ctx->have_sync_loaders = true;
     }
 
@@ -998,7 +1034,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
             /* Merged: g is the merged group and the merged kpg is Gm, so the
              * same expression yields k_out = merged_group*Gm + g_n. Split-K
              * reuses the decoded group (z also carries the slice). */
-            rocke_value_t* bid_z = ctx.fwd_split ? ctx.group_idx : rocke_b_block_id_z(b);
+            rocke_value_t* bid_z = (ctx.fwd_split || spec->group_fast_raster)
+                                       ? ctx.group_idx
+                                       : rocke_b_block_id_z(b);
             ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
         }
         else
@@ -1048,6 +1086,16 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
     {
         rocke_conv_emit_kloop_wavelet(&ctx);
+    }
+    else if(spec->uniform_k_decode)
+    {
+        /* uniform per-tile reduction decode (+ the plain loop) */
+        rocke_conv_emit_kloop_uniform_decode(&ctx);
+    }
+    else if(spec->regt_prefetch)
+    {
+        /* register-prefetch K loop */
+        rocke_conv_emit_kloop_regt_prefetch(&ctx);
     }
     else if(!ctx.async_dma)
     {

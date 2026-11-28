@@ -591,6 +591,12 @@ typedef struct rocke_conv_build_ctx
     rocke_value_t* split_ystep; /* dH * A_stride_hi */
     rocke_value_t* split_xstep; /* dW * A_stride_wi */
     rocke_value_t* split_group_base; /* group_idx * cpg (c_gm merged), NULL when ungrouped */
+
+    /* spec.lds_swizzle (forward): the rocke_lds_col_xor_params tuple shared by
+     * the sync tile stores (CoalescedTileLoader.col_xor) and the WMMA fragment
+     * reads. Zeroed by the ctx memset, so every other path stays unswizzled. */
+    bool has_lds_col_xor;
+    int lds_col_xor[4];
 } rocke_conv_build_ctx_t;
 
 /* Python mul_u24: x * y with both operands masked to 24 bits so the backend
@@ -727,6 +733,21 @@ rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               int frag_len,
                                               const rocke_type_t* smem_dtype);
 
+/* _emit_frag_smem_load(..., col_xor=) on an XOR-swizzled tile
+ * (CoalescedTileLoader.col_xor): col_xor is the rocke_lds_col_xor_params
+ * tuple, or NULL for the plain read (identical to
+ * rocke_conv_emit_frag_smem_load). Each 8-element chunk's column is permuted
+ * by rocke_swizzle_lds_col of the lane's in-atom row. */
+rocke_value_t* rocke_conv_emit_frag_smem_load_xor(rocke_ir_builder_t* b,
+                                                  rocke_value_t* src,
+                                                  rocke_value_t* mn_in_atom,
+                                                  rocke_value_t* k_in_atom,
+                                                  rocke_value_t* atom_mn_base,
+                                                  rocke_value_t* k_tile_base,
+                                                  int frag_len,
+                                                  const rocke_type_t* smem_dtype,
+                                                  const int* col_xor);
+
 /* _apply_accumulator_epilogue(b, epilogue, accs[n], out_accs[n]): apply the
  * static fp32 ConvAccumulatorEpilogue per-lane then re-pack. Identity copies
  * through. Writes out_accs (length num_accs). */
@@ -813,6 +834,14 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
 /* spec.unroll_k branch (lines 1276-1310): double-buffered Python-unrolled
  * software pipeline (ping-pong A_smem/A_smem2). */
 void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
+
+/* spec.uniform_k_decode branch: the uniform per-tile reduction decode loop
+ * (cpg % tile_k == 0) followed by the plain loop for the other problems. */
+void rocke_conv_emit_kloop_uniform_decode(rocke_conv_build_ctx_t* ctx);
+
+/* spec.regt_prefetch branch: the register-prefetch K loop (next tile's loads
+ * issued before the MMAs, stored to LDS after them). */
+void rocke_conv_emit_kloop_regt_prefetch(rocke_conv_build_ctx_t* ctx);
 
 /* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync.
  * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
