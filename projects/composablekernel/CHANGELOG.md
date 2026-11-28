@@ -18,6 +18,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 
+* Fixed CK Tile `Generic2dBlockShape` launching 2-4x too many threads for rows narrower than a wave (`ThreadPerBlock_N` below the warp size): the extra waves recomputed rows and wrote rows of the next workgroup in the RMSNorm, LayerNorm, smooth-quant and add-RMSNorm-quant kernels. A block now has exactly `ThreadPerBlock_M * ThreadPerBlock_N` threads, each wave holding several rows ([#15811](https://github.com/ROCm/rocm-libraries/issues/15811)).
+
 ### Known issues
 
 ### Upcoming changes
