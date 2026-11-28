@@ -3,6 +3,18 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER 3.40.0
+
+### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
 ### Optimized
@@ -36,10 +48,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Improved kernel launches to detect invalid launch configuration.
-
 * Fixed failure of GETRS for batch_count > 64 * 1024
 * Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
-* Improved kernel launches to detect invalid launch configuration.
 * Fixed sparse functions potentially not using the stream set in the handle.
 
 

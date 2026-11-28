@@ -3,6 +3,17 @@
 Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/index.html).
 
 
+## (Unreleased) hipSOLVER 3.10.0
+
+### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
 ## hipSOLVER 3.9.0 for ROCm 10.3.0
 
 ### Resolved issues
@@ -16,17 +27,17 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 
 * Added functions:
   * gelsBatched
-    * hipsolverXXgelsBatched_bufferSize
-    * hipsolverXXgelsBatched
+    * hipsolverSgelsBatched_bufferSize, hipsolverDgelsBatched_bufferSize, hipsolverCgelsBatched_bufferSize, hipsolverZgelsBatched_bufferSize
+    * hipsolverSgelsBatched, hipsolverDgelsBatched, hipsolverCgelsBatched, hipsolverZgelsBatched
   * geqrfBatched
     * hipsolverSgeqrfBatched_bufferSize, hipsolverDgeqrfBatched_bufferSize, hipsolverCgeqrfBatched_bufferSize, hipsolverZgeqrfBatched_bufferSize
     * hipsolverSgeqrfBatched, hipsolverDgeqrfBatched, hipsolverCgeqrfBatched, hipsolverZgeqrfBatched
   * getrfBatched
-    * hipsolverSgetrfBatched_bufferSize, hipsolverDgetrfBatched_bufferSize, hipsolverCgetrfBatched_bufferSize, and hipsolverZgetrfBatched_bufferSize
-    * hipsolverSgetrfBatched, hipsolverDgetrfBatched, hipsolverCgetrfBatched, and hipsolverZgetrfBatched
+    * hipsolverSgetrfBatched_bufferSize, hipsolverDgetrfBatched_bufferSize, hipsolverCgetrfBatched_bufferSize, hipsolverZgetrfBatched_bufferSize
+    * hipsolverSgetrfBatched, hipsolverDgetrfBatched, hipsolverCgetrfBatched, hipsolverZgetrfBatched
   * getriBatched
-    * hipsolverXgetriBatched_bufferSize
-    * hipsolverXgetriBatched
+    * hipsolverSgetriBatched_bufferSize, hipsolverDgetriBatched_bufferSize, hipsolverCgetriBatched_bufferSize, hipsolverZgetriBatched_bufferSize
+    * hipsolverSgetriBatched, hipsolverDgetriBatched, hipsolverCgetriBatched, hipsolverZgetriBatched
   * getrsBatched
     * hipsolverSgetrsBatched_bufferSize, hipsolverDgetrsBatched_bufferSize, hipsolverCgetrsBatched_bufferSize, hipsolverZgetrsBatched_bufferSize
     * hipsolverSgetrsBatched, hipsolverDgetrsBatched, hipsolverCgetrsBatched, hipsolverZgetrsBatched
