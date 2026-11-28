@@ -24,7 +24,97 @@
 #include "logging.h"
 #include "node_factory.h"
 #include "tuning_helper.h"
-#include <numeric>
+
+#include <algorithm>
+#include <array>
+
+namespace
+{
+    constexpr std::array<size_t, 3> xyz{0, 1, 2};
+    constexpr std::array<size_t, 3> xzy{0, 2, 1};
+    constexpr std::array<size_t, 3> yxz{1, 0, 2};
+    constexpr std::array<size_t, 3> yzx{1, 2, 0};
+    constexpr std::array<size_t, 3> zxy{2, 0, 1};
+
+    data_set_t in_frame(data_set_t layout, const std::array<size_t, 3>& order)
+    {
+        layout.reorder_axes(order, axis_scope::length_only);
+        return layout;
+    }
+
+    std::array<size_t, 4> strides_3d(const data_set_t& layout)
+    {
+        return {layout.axis_stride(0),
+                layout.axis_stride(1),
+                layout.axis_stride(2),
+                layout.axis_stride(3)};
+    }
+
+    // Pack in the requested physical order without changing the logical frame.
+    std::array<size_t, 4> packed_3d_strides(const data_set_t&            layout,
+                                            const std::array<size_t, 3>& order)
+    {
+        std::array<size_t, 4> strides;
+        strides[order[0]] = 1;
+        strides[order[1]] = layout.axis_span(order[0]);
+        strides[order[2]] = strides[order[1]] * layout.axis_span(order[1]);
+        strides[3]        = strides[order[2]] * layout.axis_span(order[2]);
+        return strides;
+    }
+
+    auto rtrt_temp_strides(const data_set_t& layout)
+    {
+        // The first transpose is in the [X, Z, Y] frame, with Z packed first.
+        const auto          base = packed_3d_strides(layout, yxz);
+        std::vector<size_t> strides(layout.get_full_rank());
+        std::copy(base.begin(), base.end(), strides.begin());
+        for(size_t axis = 4; axis < strides.size(); ++axis)
+            strides[axis] = strides[axis - 1] * layout.axis_span(axis - 1);
+        return strides;
+    }
+
+    data_set_t fold_sbcr_plane(const data_set_t& stage, bool solutionEndpoint)
+    {
+        // Fold only the two transverse axes. The original outer batch stays separate.
+        const auto inner = stage.axis_span(1);
+        const auto outer = stage.axis_span(2);
+        // A minimal solution-map key may force SBCR on a strided endpoint. Keep its
+        // legacy projection through the first plane stride; packed stages must agree.
+        if(!solutionEndpoint)
+            assert(outer == 1 || stage.axis_stride(2) == inner * stage.axis_stride(1));
+
+        const auto lower      = stage.lower();
+        const auto upper      = stage.upper();
+        const auto planeLower = lower[1] + inner * lower[2];
+        const auto folded
+            = data_set_t({lower[0], planeLower, lower[3]},
+                         {upper[0], planeLower + inner * outer, upper[3]},
+                         {stage.axis_stride(0), stage.axis_stride(1), stage.axis_stride(3)},
+                         2);
+        const auto offsets = stage.num_planes() == 1
+                                 ? std::array<size_t, 2>{stage.get_offset(), 0}
+                                 : std::array<size_t, 2>{stage.get_offset(data_part::REAL),
+                                                         stage.get_offset(data_part::IMAGINARY)};
+        return folded.with_element_type(stage.has_array_type() ? stage.get_array_type()
+                                                               : rocfft_array_type_unset,
+                                        stage.get_precision(),
+                                        offsets);
+    }
+
+    void assign_rows_then_z(const TreeNode& parent, TreeNode& rows, TreeNode& z)
+    {
+        rows.set_strides(io_data_label::INPUT, parent.input_layout());
+        rows.set_strides(io_data_label::OUTPUT, parent.output_layout());
+        rows.AssignParams();
+
+        auto strides = parent.output_layout().strides_and_distances();
+        std::rotate(strides.begin(), strides.begin() + 2, strides.begin() + 3);
+        strides.back() = rows.output_distance();
+        z.set_strides(io_data_label::INPUT, strides);
+        z.set_strides(io_data_label::OUTPUT, strides);
+        z.AssignParams();
+    }
+}
 
 /*****************************************************
  * 3D_RTRT  *
@@ -48,36 +138,35 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         determined_scheme_node2 = child_scheme_trees[2]->curScheme;
     }
 
-    // 2d fft
-    NodeMetaData xyPlanData(this);
-    xyPlanData.length       = length;
-    xyPlanData.dimension    = 2;
-    xyPlanData.outputLength = xyPlanData.length;
+    // 2D FFT: select XY and keep Z as a batch axis.
+    NodeMetaData xyPlanData(input_layout().get_data_set_for_len_axes({0, 1}),
+                            output_layout().get_data_set_for_len_axes({0, 1}),
+                            this);
     auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
     xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
-    // first transpose
-    auto trans1Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
-    trans1Plan->length = length;
-    std::swap(trans1Plan->length[1], trans1Plan->length[2]);
-    trans1Plan->outputLength = trans1Plan->length;
-    trans1Plan->dimension    = 2;
+    // XY_Z uses the [X, Z, Y] frame and writes a Z-first temporary.
+    const auto outputXZY = in_frame(output_layout(), xzy);
+    auto temp = outputXZY.with_element_type(rocfft_array_type_complex_interleaved, get_precision());
+    temp.set_strides_and_distances(rtrt_temp_strides(temp));
+    auto trans1Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z,
+                                                        this,
+                                                        outputXZY.get_data_set_for_len_axes({0, 1}),
+                                                        temp.get_data_set_for_len_axes({0, 1}));
 
-    // z fft
-    NodeMetaData zPlanData(this);
-    zPlanData.dimension = 1;
-    zPlanData.length.push_back(length[2]);
-    zPlanData.length.push_back(length[0]);
-    zPlanData.length.push_back(length[1]);
-    zPlanData.outputLength = zPlanData.length;
-    auto zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node2);
+    // Z FFT: selecting Z gives [Z, X, Y].
+    const auto   tempZ = temp.get_data_set_for_len_axes({1});
+    NodeMetaData zPlanData(tempZ, tempZ, this);
+    auto         zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node2);
     zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
-    // second transpose
-    auto trans2Plan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-    trans2Plan->length       = zPlan->length;
-    trans2Plan->outputLength = trans2Plan->length;
-    trans2Plan->dimension    = 2;
+    // Z_XY uses [Z, X, Y], with Y remaining a batch axis.
+    temp.reorder_axes(yxz, axis_scope::length_only);
+    auto trans2Plan = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_TRANSPOSE_Z_XY,
+        this,
+        temp.get_data_set_for_len_axes({0, 1}),
+        in_frame(output_layout(), zxy).get_data_set_for_len_axes({0, 1}));
 
     // --------------------------------
     // Fuse Shims
@@ -112,52 +201,34 @@ void RTRT3DNode::AssignParams_internal()
     assert(childNodes.size() == 4);
 
     // B -> B
-    auto& xyPlan     = childNodes[0];
-    xyPlan->inStride = inStride;
-    xyPlan->iDist    = iDist;
-
-    xyPlan->outStride = outStride;
-    xyPlan->oDist     = oDist;
+    auto& xyPlan = childNodes[0];
+    xyPlan->set_strides(io_data_label::INPUT, input_layout());
+    auto outputStrides = output_layout().strides_and_distances();
+    xyPlan->set_strides(io_data_label::OUTPUT, outputStrides);
 
     xyPlan->AssignParams();
 
     // B -> T
     auto& trans1Plan     = childNodes[1];
-    trans1Plan->inStride = xyPlan->outStride;
-    std::swap(trans1Plan->inStride[1], trans1Plan->inStride[2]);
-    trans1Plan->iDist = xyPlan->oDist;
-
-    trans1Plan->outStride.push_back(trans1Plan->length[1]);
-    trans1Plan->outStride.push_back(1);
-    trans1Plan->outStride.push_back(trans1Plan->length[0] * trans1Plan->outStride[0]);
-    trans1Plan->oDist = trans1Plan->length[2] * trans1Plan->outStride[2];
-
-    for(size_t index = 3; index < length.size(); index++)
-    {
-        trans1Plan->outStride.push_back(trans1Plan->oDist);
-        trans1Plan->oDist *= length[index];
-    }
+    auto  transposeInput = xyPlan->output_layout().strides_and_distances();
+    std::swap(transposeInput[1], transposeInput[2]);
+    trans1Plan->set_strides(io_data_label::INPUT, transposeInput);
+    auto tempStrides = rtrt_temp_strides(trans1Plan->output_layout());
+    trans1Plan->set_strides(io_data_label::OUTPUT, tempStrides);
 
     // T -> T
-    auto& zPlan     = childNodes[2];
-    zPlan->inStride = trans1Plan->outStride;
-    std::swap(zPlan->inStride[0], zPlan->inStride[1]);
-    zPlan->iDist = trans1Plan->oDist;
-
-    zPlan->outStride = zPlan->inStride;
-    zPlan->oDist     = zPlan->iDist;
+    auto& zPlan = childNodes[2];
+    std::swap(tempStrides[0], tempStrides[1]);
+    zPlan->set_strides(io_data_label::INPUT, tempStrides);
+    zPlan->set_strides(io_data_label::OUTPUT, tempStrides);
 
     zPlan->AssignParams();
 
     // T -> B
-    auto& trans2Plan     = childNodes[3];
-    trans2Plan->inStride = zPlan->outStride;
-    trans2Plan->iDist    = zPlan->oDist;
-
-    trans2Plan->outStride = outStride;
-    std::swap(trans2Plan->outStride[1], trans2Plan->outStride[2]);
-    std::swap(trans2Plan->outStride[0], trans2Plan->outStride[1]);
-    trans2Plan->oDist = oDist;
+    auto& trans2Plan = childNodes[3];
+    trans2Plan->set_strides(io_data_label::INPUT, zPlan->output_layout());
+    std::rotate(outputStrides.begin(), outputStrides.begin() + 2, outputStrides.begin() + 3);
+    trans2Plan->set_strides(io_data_label::OUTPUT, outputStrides);
 }
 
 /*****************************************************
@@ -179,25 +250,22 @@ void TRTRTR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         }
     }
 
-    std::vector<size_t> cur_length = length;
+    auto stage = input_layout();
 
     for(int i = 0; i < 6; i += 2)
     {
-        // transpose Z_XY
-        auto trans_plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-        trans_plan->length = cur_length;
-        trans_plan->outputLength = trans_plan->length;
-        trans_plan->dimension    = 2;
+        // Transpose in the current frame and rebase the packed temporary for the row FFT.
+        auto temp = stage.with_element_type(rocfft_array_type_complex_interleaved, get_precision());
+        temp.set_strides_and_distances(packed_3d_strides(temp, yzx));
+        auto trans_plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY,
+                                                            this,
+                                                            stage.get_data_set_for_len_axes({0, 1}),
+                                                            temp.get_data_set_for_len_axes({0, 1}));
 
-        std::swap(cur_length[0], cur_length[1]);
-        std::swap(cur_length[1], cur_length[2]);
-
-        // row ffts
-        NodeMetaData row_plan_data(this);
-        row_plan_data.length       = cur_length;
-        row_plan_data.dimension    = 1;
-        row_plan_data.outputLength = row_plan_data.length;
-        // skip the decide scheme part in node factory
+        temp.reorder_axes(yzx, axis_scope::length_only);
+        const auto&  rowOutput = i == 4 ? output_layout() : temp;
+        NodeMetaData row_plan_data(
+            temp.get_data_set_for_len_axes({0}), rowOutput.get_data_set_for_len_axes({0}), this);
         ComputeScheme determined_scheme
             = (noSolution) ? CS_NONE : child_scheme_trees[i + 1]->curScheme;
         auto row_plan = NodeFactory::CreateExplicitNode(row_plan_data, this, determined_scheme);
@@ -206,6 +274,7 @@ void TRTRTR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         // TR
         childNodes.emplace_back(std::move(trans_plan));
         childNodes.emplace_back(std::move(row_plan));
+        stage = std::move(temp);
     }
 
     // --------------------------------
@@ -257,45 +326,21 @@ void TRTRTR3DNode::AssignParams_internal()
 {
     assert(childNodes.size() == 6);
 
+    const auto* stage = &input_layout();
     for(int i = 0; i < 6; i += 2)
     {
         auto& trans_plan = childNodes[i];
-        if(i == 0)
-        {
-            trans_plan->inStride = inStride;
-            trans_plan->iDist    = iDist;
-        }
-        else
-        {
-            trans_plan->inStride = childNodes[i - 1]->outStride;
-            trans_plan->iDist    = childNodes[i - 1]->oDist;
-        }
+        trans_plan->set_strides(io_data_label::INPUT, *stage);
+        const auto temp = packed_3d_strides(trans_plan->output_layout(), yzx);
+        trans_plan->set_strides(io_data_label::OUTPUT, temp);
 
-        trans_plan->outStride.push_back(1);
-        trans_plan->outStride.push_back(trans_plan->outStride[0] * trans_plan->length[1]);
-        trans_plan->outStride.push_back(trans_plan->outStride[1] * trans_plan->length[2]);
-        trans_plan->oDist = trans_plan->outStride[2] * trans_plan->length[0];
-
-        auto& row_plan     = childNodes[i + 1];
-        row_plan->inStride = trans_plan->outStride;
-        row_plan->iDist    = trans_plan->oDist;
-
-        std::swap(trans_plan->outStride[1], trans_plan->outStride[2]);
-        std::swap(trans_plan->outStride[0], trans_plan->outStride[1]);
-
-        if(i == 4)
-        {
-            row_plan->outStride = outStride;
-            row_plan->oDist     = oDist;
-        }
-        else
-        {
-            row_plan->outStride.push_back(1);
-            row_plan->outStride.push_back(row_plan->outStride[0] * row_plan->length[0]);
-            row_plan->outStride.push_back(row_plan->outStride[1] * row_plan->length[1]);
-            row_plan->oDist = row_plan->outStride[2] * row_plan->length[2];
-        }
+        auto&                       row_plan = childNodes[i + 1];
+        const std::array<size_t, 4> rowStrides{temp[1], temp[2], temp[0], temp[3]};
+        row_plan->set_strides(io_data_label::INPUT, rowStrides);
+        row_plan->set_strides(io_data_label::OUTPUT,
+                              i == 4 ? strides_3d(output_layout()) : rowStrides);
         row_plan->AssignParams();
+        stage = &row_plan->output_layout();
     }
 }
 
@@ -306,23 +351,25 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 {
     bool noSolution = child_scheme_trees.empty();
 
-    std::vector<size_t> cur_length = length;
-
     // NB:
     //   The idea is to change the SBRC from doing XZ-plane to doing XY-plane
     //   Some problems are still faster with 3D_RC so they never go here
-    bool is906    = is_device_gcn_arch(deviceProp, "gfx906");
-    bool is908    = is_device_gcn_arch(deviceProp, "gfx908");
-    bool is90a    = is_device_gcn_arch(deviceProp, "gfx90a");
-    bool isDouble = (precision == rocfft_precision_double);
+    bool       is906         = is_device_gcn_arch(deviceProp, "gfx906");
+    bool       is908         = is_device_gcn_arch(deviceProp, "gfx908");
+    bool       is90a         = is_device_gcn_arch(deviceProp, "gfx90a");
+    const auto nodePrecision = get_precision();
+    bool       isDouble      = (nodePrecision == rocfft_precision_double);
 
     // specific flags for lengths
-    bool has50           = (length[0] == 50 || length[1] == 50 || length[2] == 50);
-    bool has64           = (length[0] == 64 || length[1] == 64 || length[2] == 64);
-    bool has100          = (length[0] == 100 || length[1] == 100 || length[2] == 100);
-    bool has200          = (length[0] == 200 || length[1] == 200 || length[2] == 200);
-    bool hasPow2         = (IsPo2(length[0]) || IsPo2(length[1]) || IsPo2(length[2]));
-    bool isDiagonalTrans = is_diagonal_sbrc_3D_length(length[0]) && is_cube_size(length);
+    const auto x         = input_length(0);
+    const auto y         = input_length(1);
+    const auto z         = input_length(2);
+    bool       has50     = (x == 50 || y == 50 || z == 50);
+    bool       has64     = (x == 64 || y == 64 || z == 64);
+    bool       has100    = (x == 100 || y == 100 || z == 100);
+    bool       has200    = (x == 200 || y == 200 || z == 200);
+    bool       hasPow2   = (IsPo2(x) || IsPo2(y) || IsPo2(z));
+    bool isDiagonalTrans = is_diagonal_sbrc_3D_length(x) && data_rank() == 3 && x == y && y == z;
 
     //   none of diagonal is better by Z_XY (every arch)
     //   both 50, 100 are worse by Z_XY (every arch)
@@ -347,19 +394,23 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         }
     }
 
-    size_t total_sbrc = 0;
+    auto        stage      = input_layout();
+    const auto& nextFrame  = use_ZXY_sbrc ? yzx : zxy;
+    const auto& lastFrame  = use_ZXY_sbrc ? zxy : yzx;
+    size_t      total_sbrc = 0;
     for(int i = 0; i < 3; ++i)
     {
         // If we have an sbrc kernel for this length, use it,
         // otherwise, fall back to row FFT+transpose
-        bool have_sbrc = pool.has_SBRC_kernel(cur_length.front(), precision);
+        const auto len       = stage.axis_span(0);
+        bool       have_sbrc = pool.has_SBRC_kernel(len, nodePrecision);
         // ensure the kernel would be tile-aligned
         if(have_sbrc)
         {
             auto kernel = pool.get_kernel(
-                FMKey(cur_length[0], precision, CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
+                FMKey(len, nodePrecision, CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
 
-            size_t otherDim = use_ZXY_sbrc ? cur_length[1] : cur_length[2];
+            size_t otherDim = stage.axis_span(use_ZXY_sbrc ? 1 : 2);
             if(otherDim % kernel.transforms_per_block != 0)
                 have_sbrc = false;
         }
@@ -382,6 +433,16 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             have_sbrc = false;
         }
 
+        // The endpoint has the parent's output range and type, but this scheme still
+        // assigns packed strides in the current frame, even on the last transpose.
+        auto next   = i == 2 ? in_frame(output_layout(), lastFrame)
+                             : stage.with_element_type(rocfft_array_type_complex_interleaved,
+                                                     nodePrecision);
+        auto packed = packed_3d_strides(next, nextFrame);
+        if(!have_sbrc)
+            packed.back() = stage.axis_stride(3);
+        next.set_strides_and_distances(packed);
+
         if(have_sbrc)
         {
             auto sbrcScheme = (use_ZXY_sbrc) ? CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY
@@ -389,134 +450,88 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             if(!noSolution && (child_scheme_trees[childNodes.size()]->curScheme != sbrcScheme))
                 throw std::runtime_error(
                     "BLOCKRC3DNode: Unexpected child scheme from solution map");
-            auto sbrc_node          = NodeFactory::CreateNodeFromScheme(sbrcScheme, this);
-            sbrc_node->length       = cur_length;
-            sbrc_node->outputLength = sbrc_node->length;
+            auto sbrc_node = NodeFactory::CreateNodeFromScheme(sbrcScheme,
+                                                               this,
+                                                               stage.get_data_set_for_len_axes({0}),
+                                                               next.get_data_set_for_len_axes({0}));
             childNodes.emplace_back(std::move(sbrc_node));
         }
         else
         {
-            // row ffts
-            NodeMetaData row_plan_data(this);
-            row_plan_data.length       = cur_length;
-            row_plan_data.dimension    = 1;
-            row_plan_data.outputLength = row_plan_data.length;
+            // The fallback row stays in the same frame and layout.
+            const auto    rows = stage.get_data_set_for_len_axes({0});
+            NodeMetaData  row_plan_data(rows, rows, this);
             ComputeScheme determined_scheme
                 = (noSolution) ? CS_NONE : child_scheme_trees[childNodes.size()]->curScheme;
             auto row_plan = NodeFactory::CreateExplicitNode(row_plan_data, this, determined_scheme);
             row_plan->RecursiveBuildTree(
                 (noSolution) ? nullptr : child_scheme_trees[childNodes.size()].get());
 
-            // transpose XY_Z
+            // The standalone XY_Z uses [X, Z, Y] and has transform rank two.
             auto transScheme = (use_ZXY_sbrc) ? CS_KERNEL_TRANSPOSE_Z_XY : CS_KERNEL_TRANSPOSE_XY_Z;
             if(!noSolution && (child_scheme_trees[childNodes.size() + 1]->curScheme != transScheme))
                 throw std::runtime_error(
                     "BLOCKRC3DNode: Unexpected child scheme from solution map");
-            auto trans_plan    = NodeFactory::CreateNodeFromScheme(transScheme, this);
-            trans_plan->length = cur_length;
-            if(!use_ZXY_sbrc)
-                std::swap(trans_plan->length[1], trans_plan->length[2]);
-            trans_plan->outputLength = trans_plan->length;
-            trans_plan->dimension    = 2;
+            auto trans_plan = NodeFactory::CreateNodeFromScheme(
+                transScheme,
+                this,
+                use_ZXY_sbrc ? stage.get_data_set_for_len_axes({0, 1})
+                             : in_frame(stage, xzy).get_data_set_for_len_axes({0, 1}),
+                use_ZXY_sbrc ? next.get_data_set_for_len_axes({0, 1})
+                             : in_frame(next, xzy).get_data_set_for_len_axes({0, 1}));
 
             // RT
             childNodes.emplace_back(std::move(row_plan));
             childNodes.emplace_back(std::move(trans_plan));
         }
 
-        // Rebase the next partition's input lengths so its transform axis is first.
-        if(use_ZXY_sbrc)
+        // Rebase for the next partition without changing the producer's descriptors.
+        if(i != 2)
         {
-            std::swap(cur_length[1], cur_length[0]);
-            std::swap(cur_length[2], cur_length[1]);
-        }
-        else
-        {
-            std::swap(cur_length[2], cur_length[1]);
-            std::swap(cur_length[1], cur_length[0]);
+            next.reorder_axes(nextFrame, axis_scope::length_only);
+            stage = std::move(next);
         }
     }
 }
 
 void BLOCKRC3DNode::AssignParams_internal()
 {
-    childNodes.front()->inStride = inStride;
-    childNodes.front()->iDist    = iDist;
-
-    std::vector<size_t> prev_outStride;
-    size_t              prev_oDist = 0;
+    auto stage = strides_3d(input_layout());
     for(auto& node : childNodes)
     {
-        // set initial inStride + iDist, or connect it to previous node
-        if(prev_outStride.empty())
-        {
-            node->inStride = inStride;
-            node->iDist    = iDist;
-        }
-        else
-        {
-            node->inStride = prev_outStride;
-            node->iDist    = prev_oDist;
-        }
-
-        // each node is either:
-        // - a fused sbrc+transpose node (for dimensions we have SBRC kernels for)
-        // - a transpose node or a row FFT node (otherwise)
+        const std::array<size_t, 3>* order;
+        bool                         keepDistance = false;
         switch(node->scheme)
         {
         case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
-        {
-            node->outStride = {node->length[2], node->length[2] * node->length[0], 1};
-            node->oDist     = node->outStride[1] * node->length[1];
+            order = &zxy;
             break;
-        }
         case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
-        {
-            node->outStride = {node->length[1] * node->length[2], 1, node->length[1]};
-            node->oDist     = node->outStride[0] * node->length[0];
+            order = &yzx;
             break;
-        }
         case CS_KERNEL_TRANSPOSE_XY_Z:
-        {
-            std::swap(node->inStride[1], node->inStride[2]);
-            node->outStride.push_back(node->length[1]);
-            node->outStride.push_back(1);
-            node->outStride.push_back(node->outStride[0] * node->length[0]);
-            node->oDist = node->iDist;
+            std::swap(stage[1], stage[2]);
+            order        = &yxz;
+            keepDistance = true;
             break;
-        }
         case CS_KERNEL_TRANSPOSE_Z_XY:
-        {
-            node->outStride.push_back(node->length[1] * node->length[2]);
-            node->outStride.push_back(1);
-            node->outStride.push_back(node->length[1]);
-            node->oDist = node->iDist;
+            order        = &yzx;
+            keepDistance = true;
             break;
-        }
         default:
-        {
-            node->outStride = node->inStride;
-            node->oDist     = node->iDist;
+            node->set_strides(io_data_label::INPUT, stage);
+            node->set_strides(io_data_label::OUTPUT, stage);
             node->AssignParams();
-            break;
+            stage = strides_3d(node->output_layout());
+            continue;
         }
-        }
-        // Rebase the strides for the next partition without changing the producer's outStride.
-        prev_outStride = node->outStride;
-        prev_oDist     = node->oDist;
-        if(node->scheme == CS_KERNEL_TRANSPOSE_XY_Z)
-            std::swap(prev_outStride[0], prev_outStride[1]);
-        else if(node->scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z)
-        {
-            std::swap(prev_outStride[2], prev_outStride[1]);
-            std::swap(prev_outStride[1], prev_outStride[0]);
-        }
-        else if(node->scheme == CS_KERNEL_TRANSPOSE_Z_XY
-                || node->scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY)
-        {
-            std::swap(prev_outStride[0], prev_outStride[1]);
-            std::swap(prev_outStride[1], prev_outStride[2]);
-        }
+
+        node->set_strides(io_data_label::INPUT, stage);
+        auto packed = packed_3d_strides(node->output_layout(), *order);
+        if(keepDistance)
+            packed.back() = stage.back();
+        node->set_strides(io_data_label::OUTPUT, packed);
+        stage = {packed[(*order)[0]], packed[(*order)[1]], packed[(*order)[2]], packed[3]};
     }
 }
 
@@ -539,52 +554,50 @@ void BLOCKCR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         }
     }
 
-    // TODO: It works only for 3 SBCR children nodes for now.
-    //       The final logic will be similar to what SBRC has.
-
-    std::vector<size_t> cur_length = length;
+    // In order, transform Z, Y, then X, packing the transformed axis first.
+    auto stage = in_frame(input_layout(), zxy);
     for(int i = 0; i < 3; ++i)
     {
-        auto node = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
-        node->length.push_back(cur_length[2]);
-        node->length.push_back(cur_length[0] * cur_length[1]);
-        node->outputLength = node->length;
-        childNodes.emplace_back(std::move(node));
-        std::swap(cur_length[1], cur_length[2]);
-        std::swap(cur_length[1], cur_length[0]);
+        auto next = i == 2 ? output_layout()
+                           : stage.with_element_type(rocfft_array_type_complex_interleaved,
+                                                     get_precision());
+        if(i != 2)
+            next.set_strides_and_distances(packed_3d_strides(next, xyz));
+        childNodes.emplace_back(
+            NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR,
+                                              this,
+                                              fold_sbcr_plane(stage, !noSolution && i == 0),
+                                              fold_sbcr_plane(next, !noSolution && i == 2)));
+        if(i != 2)
+        {
+            next.reorder_axes(zxy, axis_scope::length_only);
+            stage = std::move(next);
+        }
     }
 }
 
 void BLOCKCR3DNode::AssignParams_internal()
 {
-    // TODO: It works only for 3 SBCR children nodes for now.
-    //       The final logic will be similar to what SBRC has.
-
     assert(scheme == CS_3D_BLOCK_CR);
 
-    childNodes[0]->inStride.push_back(inStride[2]);
-    childNodes[0]->inStride.push_back(inStride[0]);
-    childNodes[0]->iDist = iDist;
-
-    childNodes[0]->outStride.push_back(1);
-    childNodes[0]->outStride.push_back(childNodes[0]->length[0]);
-    childNodes[0]->oDist = childNodes[0]->outStride[1] * childNodes[0]->length[1];
-
-    childNodes[1]->inStride.push_back(childNodes[1]->length[1]);
-    childNodes[1]->inStride.push_back(1);
-    childNodes[1]->iDist = childNodes[0]->oDist;
-
-    childNodes[1]->outStride.push_back(1);
-    childNodes[1]->outStride.push_back(childNodes[1]->length[0]);
-    childNodes[1]->oDist = childNodes[1]->outStride[1] * childNodes[1]->length[1];
-
-    childNodes[2]->inStride.push_back(childNodes[2]->length[1]);
-    childNodes[2]->inStride.push_back(1);
-    childNodes[2]->iDist = childNodes[1]->oDist;
-
-    childNodes[2]->outStride.push_back(outStride[0]);
-    childNodes[2]->outStride.push_back(outStride[1]);
-    childNodes[2]->oDist = oDist;
+    std::array<size_t, 3> inputStrides{input_stride(2), input_stride(0), input_distance()};
+    for(size_t i = 0; i < childNodes.size(); ++i)
+    {
+        auto& node = childNodes[i];
+        node->set_strides(io_data_label::INPUT, inputStrides);
+        if(i == 2)
+        {
+            node->set_strides(io_data_label::OUTPUT,
+                              std::array{output_stride(0), output_stride(1), output_distance()});
+        }
+        else
+        {
+            const auto s = node->output_length(0);
+            const auto d = s * node->output_length(1);
+            node->set_strides(io_data_label::OUTPUT, std::array<size_t, 3>{1, s, d});
+            inputStrides = {childNodes[i + 1]->input_length(1), 1, d};
+        }
+    }
 }
 
 /*****************************************************
@@ -605,56 +618,28 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         determined_scheme_node1 = child_scheme_trees[1]->curScheme;
     }
 
-    // 2d fft
-    NodeMetaData xyPlanData(this);
-    xyPlanData.length.push_back(length[0]);
-    xyPlanData.length.push_back(length[1]);
-    xyPlanData.dimension = 2;
-    xyPlanData.length.push_back(length[2]);
-    for(size_t index = 3; index < length.size(); index++)
-    {
-        xyPlanData.length.push_back(length[index]);
-    }
-    xyPlanData.outputLength = xyPlanData.length;
+    // 2D FFT: select XY, leaving Z as a leading batch axis.
+    NodeMetaData xyPlanData(input_layout().get_data_set_for_len_axes({0, 1}),
+                            output_layout().get_data_set_for_len_axes({0, 1}),
+                            this);
     auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
     xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
-    // z col fft
-    NodeMetaData zPlanData(this);
-    zPlanData.length.push_back(length[2]);
-    zPlanData.dimension = 1;
-    zPlanData.length.push_back(length[0]);
-    zPlanData.length.push_back(length[1]);
-    for(size_t index = 3; index < length.size(); index++)
-    {
-        zPlanData.length.push_back(length[index]);
-    }
-    zPlanData.outputLength = zPlanData.length;
-
-    // use explicit SBCC kernel if available
+    // Z columns view the row result in [Z, X, Y] order.
+    const auto                columns = output_layout().get_data_set_for_len_axes({2});
     std::unique_ptr<TreeNode> zPlan;
-
-    if(determined_scheme_node1 != CS_NONE)
+    if(determined_scheme_node1 == CS_NONE && pool.has_SBCC_kernel(input_length(2), get_precision()))
     {
-        zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node1);
-        zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
-        zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
+        zPlan = NodeFactory::CreateNodeFromScheme(
+            CS_KERNEL_STOCKHAM_BLOCK_CC, this, columns, columns);
     }
     else
     {
-        if(pool.has_SBCC_kernel(length[2], precision))
-        {
-            zPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
-            zPlan->length = zPlanData.length;
-            zPlan->outputLength = zPlan->length;
-            zPlan->dimension    = 1;
-        }
-        else
-        {
-            zPlan                    = NodeFactory::CreateExplicitNode(zPlanData, this);
-            zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
-            zPlan->RecursiveBuildTree(nullptr);
-        }
+        NodeMetaData zPlanData(columns, columns, this);
+        zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node1);
+        zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
+        zPlan->RecursiveBuildTree(determined_scheme_node1 == CS_NONE ? nullptr
+                                                                     : child_scheme_trees[1].get());
     }
 
     // RC
@@ -664,29 +649,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
 void RC3DNode::AssignParams_internal()
 {
-    auto& xyPlan = childNodes[0];
-    auto& zPlan  = childNodes[1];
-
-    xyPlan->inStride = inStride;
-    xyPlan->iDist    = iDist;
-
-    xyPlan->outStride = outStride;
-    xyPlan->oDist     = oDist;
-
-    xyPlan->AssignParams();
-
-    zPlan->inStride.push_back(outStride[2]);
-    zPlan->inStride.push_back(outStride[0]);
-    zPlan->inStride.push_back(outStride[1]);
-    for(size_t index = 3; index < length.size(); index++)
-        zPlan->inStride.push_back(outStride[index]);
-
-    zPlan->iDist = xyPlan->oDist;
-
-    zPlan->outStride = zPlan->inStride;
-    zPlan->oDist     = zPlan->iDist;
-
-    zPlan->AssignParams();
+    assign_rows_then_z(*this, *childNodes[0], *childNodes[1]);
 }
 
 /*****************************************************
@@ -694,16 +657,20 @@ void RC3DNode::AssignParams_internal()
  *****************************************************/
 size_t PP3DNode::GetPPOffDim() const
 {
-    auto key
-        = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
-    if(!pool.has_function(key, batch))
+    auto key = PPFMKey(input_length(0),
+                       input_length(1),
+                       input_length(2),
+                       get_precision(),
+                       GetRootPlanTransformType(),
+                       scheme);
+    if(!pool.has_function(key, batch_count()))
         throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
 
     // CS_3D_PP will have two corresponding kernels in
     // the function pool, both will have the same off-dim
     // value, and at least of one them must be an SBCC PP
     auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
-    auto kernel       = pool.get_kernel(key, child_scheme, batch);
+    auto kernel       = pool.get_kernel(key, child_scheme, batch_count());
 
     return kernel.pp_params.off_dim;
 }
@@ -727,48 +694,21 @@ void PP3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         // x row fft + partial pass along y
         // partial pass along y + z col fft
 
-        // Create node for x row fft + partial pass(es) along y
-        NodeMetaData xPartialPassPlanData(this);
-        xPartialPassPlanData.length.push_back(length[0]);
-        xPartialPassPlanData.length.push_back(length[1]);
-        // technically 1 < dimension < 2 for x node.
-        xPartialPassPlanData.dimension = 1;
-        xPartialPassPlanData.length.push_back(length[2]);
-        for(size_t index = 3; index < length.size(); index++)
-        {
-            xPartialPassPlanData.length.push_back(length[index]);
-        }
-
-        // use explicit SBRR partial-pass kernel
-        std::unique_ptr<TreeNode> xPartialPassPlan;
-
-        xPartialPassPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP, this);
-        xPartialPassPlan->length = xPartialPassPlanData.length;
-        xPartialPassPlan->outputLength = xPartialPassPlan->length;
-        xPartialPassPlan->dimension    = 1;
+        // Rank-one FFT along X, with Y and Z kept separate for the partial passes.
+        auto xPartialPassPlan
+            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP,
+                                                this,
+                                                input_layout().get_data_set_for_len_axes({0}),
+                                                output_layout().get_data_set_for_len_axes({0}));
         xPartialPassPlan->ppOffDim     = ppOffDim;
         xPartialPassPlan->allowInplace = true;
         xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 
-        // Create node for partial pass(es) along y + z col fft
-        NodeMetaData zPartialPassPlanData(this);
-        zPartialPassPlanData.length.push_back(length[2]);
-        // technically 1 < dimension < 2 for z node.
-        zPartialPassPlanData.dimension = 1;
-        zPartialPassPlanData.length.push_back(length[0]);
-        zPartialPassPlanData.length.push_back(length[1]);
-        for(size_t index = 3; index < length.size(); index++)
-        {
-            zPartialPassPlanData.length.push_back(length[index]);
-        }
-
-        // use explicit SBCC partial-pass kernel
-        std::unique_ptr<TreeNode> zPartialPassPlan;
-
-        zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP_BLOCK_CC, this);
-        zPartialPassPlan->length       = zPartialPassPlanData.length;
-        zPartialPassPlan->outputLength = zPartialPassPlan->length;
-        zPartialPassPlan->dimension    = 1;
+        // Rank-one FFT along Z takes the [Z, X, Y] view of the row result.
+        const auto columns          = output_layout().get_data_set_for_len_axes({2});
+        auto       zPartialPassPlan = NodeFactory::CreateNodeFromScheme(
+            CS_KERNEL_STOCKHAM_PP_BLOCK_CC, this, columns, columns);
+        // ppOffDim names the root axis (Y), not its index in the child's view.
         zPartialPassPlan->ppOffDim     = ppOffDim;
         zPartialPassPlan->allowInplace = false;
         zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
@@ -807,29 +747,7 @@ void PP3DNode::AssignParams_internal()
     {
         // xy plan is a x row 1D-FFT + plus partial pass(es) along y
         // z plan is partial pass(es) along y + z col 1D-FFT.
-        auto& xyPlan = childNodes[0];
-        auto& zPlan  = childNodes[1];
-
-        xyPlan->inStride = inStride;
-        xyPlan->iDist    = iDist;
-
-        xyPlan->outStride = outStride;
-        xyPlan->oDist     = oDist;
-
-        xyPlan->AssignParams();
-
-        zPlan->inStride.push_back(outStride[2]);
-        zPlan->inStride.push_back(outStride[0]);
-        zPlan->inStride.push_back(outStride[1]);
-        for(size_t index = 3; index < length.size(); index++)
-            zPlan->inStride.push_back(outStride[index]);
-
-        zPlan->iDist = xyPlan->oDist;
-
-        zPlan->outStride = zPlan->inStride;
-        zPlan->oDist     = zPlan->iDist;
-
-        zPlan->AssignParams();
+        assign_rows_then_z(*this, *childNodes[0], *childNodes[1]);
         break;
     }
     case 2: // work along z will be split between x and y
@@ -858,7 +776,7 @@ FMKey SBRCTranspose3DNode::GetKernelKey() const
     if(sbrcTranstype == SBRC_TRANSPOSE_TYPE::NONE)
     {
         // find the base kernel at first
-        FMKey baseKey(length[0], precision, scheme, TILE_ALIGNED);
+        FMKey baseKey(input_length(0), get_precision(), scheme, TILE_ALIGNED);
         // if we have the base kernel, then we set the exact sbrc_trans_type and return the real key
         // if we don't, then we simply return a key with NONE sbrc_trans_type
         // which will make KernelCheck() trigger an exception
@@ -869,7 +787,7 @@ FMKey SBRCTranspose3DNode::GetKernelKey() const
         }
     }
 
-    return FMKey(length[0], precision, scheme, sbrcTranstype);
+    return FMKey(input_length(0), get_precision(), scheme, sbrcTranstype);
 }
 
 bool SBRCTranspose3DNode::KernelCheck(std::vector<FMKey>& kernel_keys)
@@ -893,7 +811,8 @@ bool SBRCTranspose3DNode::KernelCheck(std::vector<FMKey>& kernel_keys)
 void SBRCTranspose3DNode::TuneDirectRegType()
 {
     // half precision has not been tested yet, disable it for now.
-    if(precision == rocfft_precision_half)
+    const auto nodePrecision = get_precision();
+    if(nodePrecision == rocfft_precision_half)
     {
         dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
         return;
@@ -906,7 +825,7 @@ void SBRCTranspose3DNode::TuneDirectRegType()
         //     {64,dp}, {81,dp}, {100,dp} are bad
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {49, 128}}, {rocfft_precision_double, {64, 81, 100}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, nodePrecision, input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     else if(is_device_gcn_arch(deviceProp, "gfx908"))
@@ -917,7 +836,7 @@ void SBRCTranspose3DNode::TuneDirectRegType()
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {81, 100, 128, 192, 200, 512}},
                {rocfft_precision_double, {81, 512}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, nodePrecision, input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     else if(is_device_gcn_arch(deviceProp, "gfx90a"))
@@ -928,7 +847,7 @@ void SBRCTranspose3DNode::TuneDirectRegType()
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {49, 64, 81, 125, 128, 192, 200, 512}},
                {rocfft_precision_double, {64, 81, 100, 125}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, nodePrecision, input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     // we don't enable the features for others

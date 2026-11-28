@@ -77,7 +77,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         std::vector<unsigned int> factors;
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
-        auto precision = static_cast<unsigned int>(node.precision);
+        auto precision = static_cast<unsigned int>(node.get_precision());
 
         specs.emplace(itype,
                       factors,
@@ -113,7 +113,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         std::vector<unsigned int> factors1d;
         std::vector<unsigned int> factors2d;
 
-        auto precision = static_cast<unsigned int>(node.precision);
+        auto precision = static_cast<unsigned int>(node.get_precision());
 
         // need to break down factors into first dim and second dim
         size_t len0_remain = view.lengths()[0];
@@ -195,10 +195,10 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                         specs2d ? *specs2d : *specs,
                                         node.scheme,
                                         node.direction,
-                                        node.precision,
+                                        node.get_precision(),
                                         node.placement,
-                                        node.inArrayType,
-                                        node.outArrayType,
+                                        node.input_array_type(),
+                                        node.output_array_type(),
                                         unit_stride,
                                         node.largeTwdBase,
                                         node.ltwdSteps,
@@ -222,10 +222,10 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             kernel_name,
                             node.scheme,
                             node.direction,
-                            node.precision,
+                            node.get_precision(),
                             node.placement,
-                            node.inArrayType,
-                            node.outArrayType,
+                            node.input_array_type(),
+                            node.output_array_type(),
                             unit_stride,
                             node.largeTwdBase,
                             node.ltwdSteps,
@@ -286,12 +286,12 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 
     // buffer pointers
     kargs.append_ptr(data.bufIn[0]);
-    if(array_type_is_planar(data.node->inArrayType))
+    if(array_type_is_planar(data.node->input_array_type()))
         kargs.append_ptr(data.bufIn[1]);
     if(data.node->placement == rocfft_placement_notinplace)
     {
         kargs.append_ptr(data.bufOut[0]);
-        if(array_type_is_planar(data.node->outArrayType))
+        if(array_type_is_planar(data.node->output_array_type()))
             kargs.append_ptr(data.bufOut[1]);
     }
 

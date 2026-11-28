@@ -31,8 +31,8 @@ class RealTransCmplxNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit RealTransCmplxNode(TreeNode* p)
-        : InternalNode(p)
+    RealTransCmplxNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_REAL_TRANSFORM_USING_CMPLX;
     }
@@ -48,8 +48,8 @@ class RealTransEvenNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit RealTransEvenNode(TreeNode* p)
-        : InternalNode(p)
+    RealTransEvenNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_REAL_TRANSFORM_EVEN;
     }
@@ -76,8 +76,8 @@ class Real2DEvenNode : public InternalNode
     };
 
 protected:
-    explicit Real2DEvenNode(TreeNode* p)
-        : InternalNode(p)
+    Real2DEvenNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_REAL_2D_EVEN;
     }
@@ -115,8 +115,8 @@ class Real3DEvenNode : public InternalNode
                                         const bool&          is_default_contiguous_layout);
 
 protected:
-    explicit Real3DEvenNode(TreeNode* p)
-        : InternalNode(p)
+    Real3DEvenNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_REAL_3D_EVEN;
     }
@@ -146,8 +146,8 @@ class Real3DPPNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit Real3DPPNode(TreeNode* p)
-        : InternalNode(p)
+    Real3DPPNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_REAL_3D_PP;
     }
@@ -167,8 +167,8 @@ class RealTransDataCopyNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    RealTransDataCopyNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    RealTransDataCopyNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         /************
         * Placement
@@ -213,8 +213,8 @@ class PrePostKernelNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    PrePostKernelNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    PrePostKernelNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         need_twd_table = true;
         twd_no_radices = true;

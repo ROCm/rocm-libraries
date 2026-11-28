@@ -654,17 +654,8 @@ NodeMetaData
     rocfft_plan_t::get_single_dev_exec_plan_metadata(const rocfft_location_t& exec_plan_location,
                                                      std::vector<data_set_t>& exec_plan_io_layouts)
 {
-    NodeMetaData root_plan(nullptr);
-    root_plan.dimension         = desc.rank();
-    root_plan.batch             = desc.batch();
-    root_plan.precision         = precision;
-    root_plan.direction         = ((transformType == rocfft_transform_type_complex_forward)
-                           || (transformType == rocfft_transform_type_real_forward))
-                                      ? -1
-                                      : 1;
-    root_plan.inArrayType       = desc.input_layout.get_array_type();
-    root_plan.outArrayType      = desc.output_layout.get_array_type();
-    root_plan.rootTransformType = transformType;
+    BufferPtr input_buffer, output_buffer;
+    auto      root_placement = placement;
     // root plan's data layouts and placement may be different than the calling plan's
     std::optional<data_set_t> root_plan_input_layout, root_plan_output_layout;
     if(desc.has_undistributed_io_on_current_location()
@@ -674,12 +665,11 @@ NodeMetaData
         // lone bricks for some reason): use the calling plan's own parameters
         root_plan_input_layout  = desc.undistributed_layout_for(io_data_label::INPUT);
         root_plan_output_layout = desc.undistributed_layout_for(io_data_label::OUTPUT);
-        root_plan.placement     = placement;
-        root_plan.input_buffer  = BufferPtr::user_input(0, desc.get_local_comm_rank());
-        if(root_plan.placement == rocfft_placement_inplace)
-            root_plan.output_buffer = root_plan.input_buffer;
+        input_buffer            = BufferPtr::user_input(0, desc.get_local_comm_rank());
+        if(root_placement == rocfft_placement_inplace)
+            output_buffer = input_buffer;
         else
-            root_plan.output_buffer = BufferPtr::user_output(0, desc.get_local_comm_rank());
+            output_buffer = BufferPtr::user_output(0, desc.get_local_comm_rank());
     }
     else
     {
@@ -690,8 +680,7 @@ NodeMetaData
         // in-place operations are used instead.
         for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
         {
-            auto& root_plan_io_buffer
-                = io == io_data_label::INPUT ? root_plan.input_buffer : root_plan.output_buffer;
+            auto& root_plan_io_buffer = io == io_data_label::INPUT ? input_buffer : output_buffer;
             auto& root_plan_io_layout
                 = io == io_data_label::INPUT ? root_plan_input_layout : root_plan_output_layout;
             if(root_plan_io_layout)
@@ -711,10 +700,9 @@ NodeMetaData
                 auto& root_plan_other_io_layout = other(io) == io_data_label::INPUT
                                                       ? root_plan_input_layout
                                                       : root_plan_output_layout;
-                auto& root_plan_other_io_buffer = other(io) == io_data_label::INPUT
-                                                      ? root_plan.input_buffer
-                                                      : root_plan.output_buffer;
-                auto  tmp = root_plan_io_layout->get_other_inplace_data_set_for(
+                auto& root_plan_other_io_buffer
+                    = other(io) == io_data_label::INPUT ? input_buffer : output_buffer;
+                auto tmp = root_plan_io_layout->get_other_inplace_data_set_for(
                     other(io), transformType, desc.innermost_length_is_odd(other(io)));
                 // If tmp has a value set, in-place operations can be done using that layout
                 // - if the plan was configured in-place by the user
@@ -729,7 +717,7 @@ NodeMetaData
                 {
                     // execution plan may and can operate in-place.
                     root_plan_other_io_layout = std::move(*tmp);
-                    root_plan.placement       = rocfft_placement_inplace;
+                    root_placement            = rocfft_placement_inplace;
                     root_plan_other_io_buffer = root_plan_io_buffer;
                 }
                 else
@@ -741,7 +729,7 @@ NodeMetaData
                                                       ? desc.input_layout
                                                       : desc.output_layout;
                     root_plan_other_io_layout   = other_io_layout.get_packed_data_set();
-                    root_plan.placement         = rocfft_placement_notinplace;
+                    root_placement              = rocfft_placement_notinplace;
                     const auto tmp_size         = root_plan_other_io_layout->buffer_size_bytes();
                     root_plan_other_io_buffer
                         = tempBuffers.emplace(desc.get_current_location(), tmp_size);
@@ -756,39 +744,37 @@ NodeMetaData
         // from the current location. Temporary buffers on current device are used for input
         // and output of the execution plan. In-place default layout operations are
         // used to minimize the library's memory footprint.
-        root_plan.placement    = rocfft_placement_inplace;
+        root_placement         = rocfft_placement_inplace;
         root_plan_input_layout = desc.input_layout.get_packed_data_set(
             transformType == rocfft_transform_type_real_forward);
         root_plan_output_layout = desc.output_layout.get_packed_data_set(
             transformType == rocfft_transform_type_real_inverse);
 
-        const auto tmp_size    = std::max(root_plan_input_layout->buffer_size_bytes(),
+        const auto tmp_size = std::max(root_plan_input_layout->buffer_size_bytes(),
                                        root_plan_output_layout->buffer_size_bytes());
-        root_plan.input_buffer = root_plan.output_buffer
-            = tempBuffers.emplace(desc.get_current_location(), tmp_size);
+        input_buffer = output_buffer = tempBuffers.emplace(desc.get_current_location(), tmp_size);
     }
     // I/O should both be fully defined at this point
     for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
     {
         const auto& io_is_defined = io == io_data_label::INPUT
-                                        ? (root_plan_input_layout && root_plan.input_buffer)
-                                        : (root_plan_output_layout && root_plan.output_buffer);
+                                        ? (root_plan_input_layout && input_buffer)
+                                        : (root_plan_output_layout && output_buffer);
         if(!io_is_defined)
             throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " failed to define the " + to_str(io)
                                    + " layout and/or the corresponding buffer for the "
                                      "single-device execution plan item");
     }
 
-    root_plan.length       = root_plan_input_layout->lengths();
-    root_plan.inStride     = root_plan_input_layout->strides();
-    root_plan.iDist        = root_plan_input_layout->distance();
-    root_plan.outputLength = root_plan_output_layout->lengths();
-    root_plan.outStride    = root_plan_output_layout->strides();
-    root_plan.oDist        = root_plan_output_layout->distance();
-
-    root_plan.deviceProp = get_curr_device_prop();
-
     exec_plan_io_layouts = {*root_plan_input_layout, *root_plan_output_layout};
+    NodeMetaData root_plan(
+        std::move(*root_plan_input_layout), std::move(*root_plan_output_layout), nullptr);
+    root_plan.direction         = dft_is_forward(transformType) ? -1 : 1;
+    root_plan.rootTransformType = transformType;
+    root_plan.placement         = root_placement;
+    root_plan.input_buffer      = input_buffer;
+    root_plan.output_buffer     = output_buffer;
+    root_plan.deviceProp        = get_curr_device_prop();
 
     return root_plan;
 }
@@ -817,46 +803,21 @@ static std::unique_ptr<ExecPlan> transpose_brick(int                        loca
     execPlan.inputPtr  = inputPtr;
     execPlan.outputPtr = outputPtr;
 
-    // transpose 2D
-    switch(length.size())
-    {
-    case 2:
-    {
-        execPlan.rootPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, nullptr);
-
-        execPlan.rootPlan->length    = length;
-        execPlan.rootPlan->dimension = 2;
-
-        execPlan.rootPlan->outStride = strideOut;
-        break;
-    }
-    case 3:
-    {
-        execPlan.rootPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, nullptr);
-
-        execPlan.rootPlan->length    = length;
-        execPlan.rootPlan->dimension = 3;
-
-        execPlan.rootPlan->outStride = strideOut;
-        break;
-    }
-        // 4D is required if we have a 3D problem + batch
-    case 4:
-    {
-        execPlan.rootPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, nullptr);
-
-        execPlan.rootPlan->length    = length;
-        execPlan.rootPlan->dimension = 4;
-
-        execPlan.rootPlan->outStride = strideOut;
-        break;
-    }
-    default:
+    const auto rank = length.size();
+    if(rank < 2 || rank > 4)
         throw std::runtime_error("unsupported transpose_brick dimension");
-    }
-
-    execPlan.rootPlan->outputLength = execPlan.rootPlan->length;
-
+    // Brick packing includes every brick axis, even its batch axis, in the
+    // transpose geometry. The kernel's separate outer batch is a singleton.
+    const auto brick_layout = [&](const std::vector<size_t>& strides, size_t offset) {
+        return data_set_t::full_range(length, strides, 1, 0)
+            .with_element_type(
+                arrayType, precision, {offset, array_type_is_planar(arrayType) ? offset : 0});
+    };
+    execPlan.rootPlan = NodeFactory::CreateNodeFromScheme(rank == 2 ? CS_KERNEL_TRANSPOSE
+                                                                    : CS_KERNEL_TRANSPOSE_XY_Z,
+                                                          nullptr,
+                                                          brick_layout(strideIn, offsetIn),
+                                                          brick_layout(strideOut, offsetOut));
     execPlan.rootPlan->loadOps  = std::move(loadOps);
     execPlan.rootPlan->storeOps = std::move(storeOps);
 
@@ -868,16 +829,7 @@ static std::unique_ptr<ExecPlan> transpose_brick(int                        loca
     execPlan.rootPlan->obIn  = OB_USER_IN;
     execPlan.rootPlan->obOut = OB_USER_OUT;
 
-    execPlan.oLength            = execPlan.rootPlan->length;
-    execPlan.rootPlan->inStride = strideIn;
-
-    execPlan.rootPlan->precision = precision;
     execPlan.rootPlan->placement = rocfft_placement_notinplace;
-    execPlan.rootPlan->iOffset   = offsetIn;
-    execPlan.rootPlan->oOffset   = offsetOut;
-
-    execPlan.rootPlan->inArrayType  = arrayType;
-    execPlan.rootPlan->outArrayType = arrayType;
 
     execPlan.execSeq.push_back(execPlan.rootPlan.get());
 
@@ -1479,9 +1431,6 @@ std::unique_ptr<ExecPlan>
                 }
             }
         }
-
-        execPlan.iLength = rootPlanData.length;
-        execPlan.oLength = rootPlanData.outputLength;
 
         // setup isUnitStride values
         execPlan.rootPlan->inStrideUnit  = BufferIsUnitStride(execPlan, OB_USER_IN);
@@ -2160,32 +2109,10 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
                 item_dependencies.push_back(item);
         }
 
-        // TODO: make NodeMetaData use data_set_t structs and transfer them unscathed
-        NodeMetaData rootPlanData(nullptr);
-        auto         ilengths_with_batches   = ibrick.layout.lengths_and_batches();
-        auto         olengths_with_batches   = obrick.layout.lengths_and_batches();
-        auto         istrides_with_distances = ibrick.layout.strides_and_distances();
-        auto         ostrides_with_distances = obrick.layout.strides_and_distances();
-
-        rootPlanData.batch = ilengths_with_batches.back();
-        rootPlanData.iDist = istrides_with_distances.back();
-        rootPlanData.oDist = ostrides_with_distances.back();
-        ilengths_with_batches.pop_back();
-        olengths_with_batches.pop_back();
-        istrides_with_distances.pop_back();
-        ostrides_with_distances.pop_back();
-
-        rootPlanData.dimension         = ibrick.layout.get_len_rank();
-        rootPlanData.length            = ilengths_with_batches;
-        rootPlanData.outputLength      = olengths_with_batches;
-        rootPlanData.inStride          = istrides_with_distances;
-        rootPlanData.outStride         = ostrides_with_distances;
+        NodeMetaData rootPlanData(ibrick.layout, obrick.layout, nullptr);
         rootPlanData.direction         = dft_is_forward(fft_operations.fft_type) ? -1 : 1;
         rootPlanData.rootTransformType = fft_operations.fft_type;
         rootPlanData.placement         = fft_operations.placement;
-        rootPlanData.precision         = fft_operations.precision;
-        rootPlanData.inArrayType       = fft_operations.input.field.get_array_type();
-        rootPlanData.outArrayType      = fft_operations.output.field.get_array_type();
         // scoping device for device properties
         {
             rocfft_scoped_device dev(item_loc.device);
@@ -2234,35 +2161,22 @@ size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx
                                            const std::optional<StoreOps>& storeOps,
                                            const std::vector<size_t>&     antecedents)
 {
-    auto transformLengths = lengths;
-    auto transformStride  = stride;
-
-    // move the dimension-we-want-to-transform to the front
-    std::swap(transformLengths.front(), transformLengths[dimIdx]);
-    std::swap(transformStride.front(), transformStride[dimIdx]);
-
-    NodeMetaData rootPlanData(nullptr);
-
-    rootPlanData.batch = transformLengths.back();
-    rootPlanData.iDist = transformStride.back();
-    rootPlanData.oDist = transformStride.back();
-    transformLengths.pop_back();
-    transformStride.pop_back();
-
-    rootPlanData.dimension    = 1;
-    rootPlanData.length       = transformLengths;
-    rootPlanData.outputLength = transformLengths;
-    rootPlanData.inStride     = transformStride;
-    rootPlanData.outStride    = transformStride;
-    rootPlanData.direction    = transformType == rocfft_transform_type_complex_forward
+    // Swap (rather than rotate) the selected transform axis with axis 0. This
+    // also preserves the legacy ordering of the remaining batch axes.
+    auto layout = data_set_t(std::vector<size_t>(lengths.size(), 0), lengths, stride)
+                      .with_element_type(rocfft_array_type_complex_interleaved, precision);
+    std::vector<size_t> order(layout.get_len_rank());
+    std::iota(order.begin(), order.end(), 0);
+    std::swap(order.front(), order[dimIdx]);
+    layout.reorder_axes(order, axis_scope::length_only);
+    auto         fft_layout = layout.get_data_set_for_len_axes({0});
+    NodeMetaData rootPlanData(fft_layout, fft_layout, nullptr);
+    rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
                                      || transformType == rocfft_transform_type_real_forward
-                                    ? -1
-                                    : 1;
+                                 ? -1
+                                 : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
-    rootPlanData.precision         = precision;
-    rootPlanData.inArrayType       = rocfft_array_type_complex_interleaved;
-    rootPlanData.outArrayType      = rocfft_array_type_complex_interleaved;
     rootPlanData.rootTransformType = transformType;
     rootPlanData.deviceProp        = get_curr_device_prop();
     rootPlanData.input_buffer      = input;
@@ -5126,46 +5040,26 @@ bool BufferIsUnitStride(ExecPlan& execPlan, OperatingBuffer buf)
     if(execPlan.isUnitStride.find(buf) != execPlan.isUnitStride.end())
         return execPlan.isUnitStride.at(buf);
 
-    auto stride = (buf == OB_USER_IN) ? execPlan.rootPlan->inStride : execPlan.rootPlan->outStride;
-    auto length = (buf == OB_USER_IN) ? execPlan.iLength : execPlan.oLength;
-    auto dist   = (buf == OB_USER_IN) ? execPlan.rootPlan->iDist : execPlan.rootPlan->oDist;
-    size_t curStride = 1;
-    do
+    const auto& node   = *execPlan.rootPlan;
+    const auto& layout = buf == OB_USER_IN ? node.input_layout() : node.output_layout();
+    size_t      stride = 1;
+    for(size_t axis = 0; axis < node.data_rank(); ++axis)
     {
-        if(stride.front() != curStride)
+        if(layout.axis_stride(axis) != stride)
             return false;
-        curStride *= length.front();
-        stride.erase(stride.begin());
-        length.erase(length.begin());
-    } while(!stride.empty());
-
-    // NB: users may input incorrect i/o-dist value for inplace transform
-    //     however, when the batch-size is 1, we can simply make it permissive
-    //     since the dist is not used in single batch. But note that we still need
-    //     to pass the above do-while to ensure all the previous strides are valid.
-    bool result = (execPlan.rootPlan->batch == 1) || (curStride == dist);
+        stride *= layout.axis_span(axis);
+    }
+    // An unused outer batch distance need not equal the packed distance.
+    const bool result = node.batch_count() == 1 || stride == layout.axis_stride(node.data_rank());
 
     execPlan.isUnitStride[buf] = result;
     return result;
 }
 
-void TreeNode::CopyNodeData(const TreeNode& srcNode)
+void TreeNode::CopyNodeAttributes(const TreeNode& srcNode)
 {
-    dimension       = srcNode.dimension;
-    batch           = srcNode.batch;
-    length          = srcNode.length;
-    outputLength    = srcNode.outputLength;
-    inStride        = srcNode.inStride;
-    outStride       = srcNode.outStride;
-    iDist           = srcNode.iDist;
-    oDist           = srcNode.oDist;
-    iOffset         = srcNode.iOffset;
-    oOffset         = srcNode.oOffset;
     placement       = srcNode.placement;
-    precision       = srcNode.precision;
     direction       = srcNode.direction;
-    inArrayType     = srcNode.inArrayType;
-    outArrayType    = srcNode.outArrayType;
     allowInplace    = srcNode.allowInplace;
     allowOutofplace = srcNode.allowOutofplace;
 
@@ -5186,25 +5080,6 @@ void TreeNode::CopyNodeData(const TreeNode& srcNode)
     //   The src ebtype could be incorrect in the new node
     //   so we don't copy this value, the target node already sets its value
     // ebtype      = srcNode.ebtype;
-}
-
-void TreeNode::CopyNodeData(const NodeMetaData& data)
-{
-    dimension    = data.dimension;
-    batch        = data.batch;
-    length       = data.length;
-    outputLength = data.outputLength;
-    inStride     = data.inStride;
-    outStride    = data.outStride;
-    iDist        = data.iDist;
-    oDist        = data.oDist;
-    iOffset      = data.iOffset;
-    oOffset      = data.oOffset;
-    placement    = data.placement;
-    precision    = data.precision;
-    direction    = data.direction;
-    inArrayType  = data.inArrayType;
-    outArrayType = data.outArrayType;
 }
 
 bool TreeNode::isPlacementAllowed(rocfft_result_placement test_placement) const
@@ -5239,11 +5114,6 @@ const LeafNode& TreeNode::getLeafNode() const
 
 // Tree node builders
 
-// NB:
-// Don't assign inArrayType and outArrayType when building any tree node.
-// That should be done in buffer assignment stage or
-// TraverseTreeAssignPlacementsLogicA().
-
 void TreeNode::RecursiveBuildTree(SchemeTree* solution_scheme)
 {
     // Some-Common-Work...
@@ -5277,14 +5147,6 @@ void TreeNode::SanityCheck(SchemeTree* solution_scheme, std::vector<FMKey>& kern
     if((obIn != obOut) && (placement != rocfft_placement_notinplace))
         throw std::runtime_error("[obIn,obOut] mismatch placement out-of-place");
 
-    // Check length and stride and dimension:
-    if(length.size() != inStride.size())
-        throw std::runtime_error("length.size() mismatch inStride.size()");
-    if(length.size() != outStride.size())
-        throw std::runtime_error("length.size() mismatch outStride.size()");
-    if(length.size() < dimension)
-        throw std::runtime_error("not enough length[] for dimension");
-
     // make sure the tree has the same decomposition way as in solution map
     if(solution_scheme)
     {
@@ -5296,7 +5158,7 @@ void TreeNode::SanityCheck(SchemeTree* solution_scheme, std::vector<FMKey>& kern
         switch(solution_scheme->curScheme)
         {
         case CS_REAL_TRANSFORM_EVEN:
-            if(inStride.front() != 1 || outStride.front() != 1)
+            if(input_stride(0) != 1 || output_stride(0) != 1)
                 throw std::runtime_error("scheme-decomposition error: CS_REAL_TRANSFORM_EVEN "
                                          "schemes cannot be used with non-unit strides");
             break;
@@ -5332,12 +5194,13 @@ void TreeNode::SanityCheck(SchemeTree* solution_scheme, std::vector<FMKey>& kern
 
 bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_Z_XY()
 {
-    if(pool.has_SBRC_kernel(length[0], precision))
+    if(pool.has_SBRC_kernel(input_length(0), get_precision()))
     {
         auto kernel = pool.get_kernel(
-            FMKey(length[0], precision, CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
+            FMKey(input_length(0), get_precision(), CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
         size_t bwd = kernel.transforms_per_block;
-        if((length[1] >= bwd) && (length[2] >= bwd) && (length[1] * length[2] % bwd == 0))
+        if((input_length(1) >= bwd) && (input_length(2) >= bwd)
+           && (input_length(1) * input_length(2) % bwd == 0))
             return true;
     }
 
@@ -5346,11 +5209,11 @@ bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_Z_XY()
 
 bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_XY_Z()
 {
-    if(pool.has_SBRC_kernel(length[0], precision))
+    if(pool.has_SBRC_kernel(input_length(0), get_precision()))
     {
-        if((length[0] == length[2]) // limit to original "cubic" case
-           && (length[0] / 2 + 1 == length[1])
-           && !IsPo2(length[0]) // Need more investigation for diagonal transpose
+        if((input_length(0) == input_length(2)) // limit to original "cubic" case
+           && (input_length(0) / 2 + 1 == input_length(1))
+           && !IsPo2(input_length(0)) // Need more investigation for diagonal transpose
         )
             return true;
     }
@@ -5359,10 +5222,10 @@ bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_XY_Z()
 
 bool TreeNode::fuse_CS_KERNEL_STK_R2C_TRANSPOSE()
 {
-    if(pool.has_SBRC_kernel(length[0], precision)) // kernel available
+    if(pool.has_SBRC_kernel(input_length(0), get_precision())) // kernel available
     {
-        if((length[0] * 2 == length[1]) // limit to original "cubic" case
-           && (length.size() == 2 || length[1] == length[2]) // 2D or 3D
+        if((input_length(0) * 2 == input_length(1)) // limit to original "cubic" case
+           && (data_rank() == 2 || input_length(1) == input_length(2)) // 2D or 3D
         )
             return true;
     }
@@ -5428,28 +5291,16 @@ void TreeNode::RefreshTree()
     // real data as complex
     const bool isRealEvenNode = scheme == CS_REAL_TRANSFORM_EVEN || scheme == CS_REAL_2D_EVEN
                                 || scheme == CS_REAL_3D_EVEN || scheme == CS_REAL_3D_PP;
-    if(isRealEvenNode && direction == -1)
-        this->inArrayType = rocfft_array_type_real;
-    else
-        this->inArrayType = first->inArrayType;
-
-    if(isRealEvenNode && direction == 1)
-        this->outArrayType = rocfft_array_type_real;
-    else
-        this->outArrayType = last->outArrayType;
+    set_array_type(io_data_label::INPUT,
+                   isRealEvenNode && direction == -1 ? rocfft_array_type_real
+                                                     : first->input_array_type());
+    set_array_type(io_data_label::OUTPUT,
+                   isRealEvenNode && direction == 1 ? rocfft_array_type_real
+                                                    : last->output_array_type());
 }
 
 void TreeNode::AssignParams()
 {
-    if((length.size() != inStride.size()) || (length.size() != outStride.size()))
-        throw std::runtime_error("length size mismatches stride size");
-
-    for(auto& child : childNodes)
-    {
-        child->inStride.clear();
-        child->outStride.clear();
-    }
-
     AssignParams_internal();
 }
 
@@ -5510,7 +5361,7 @@ void CheckFuseShimForArch(ExecPlan& execPlan)
         for(auto& fusion : fusions)
         {
             if(fusion->fuseType == FT_STOCKHAM_WITH_TRANS
-               && fusion->FirstFuseNode()->length[0] == 168)
+               && fusion->FirstFuseNode()->input_length(0) == 168)
             {
                 fusion->OverwriteFusableFlag(false);
 
@@ -5533,7 +5384,6 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
     {
         // fused Bluestein stages writing to OB_TEMP_BLUESTEIN write at an offset
         // reserved for the transform of the chirp signal (padded_length elements)
-        // TODO: revise this once offsets are handled natively in data_set_t struct
         auto obOut_elem_count
             = blue && blue->get_conv_buf_layout(io_data_label::OUTPUT)
                   ? blue->get_conv_buf_layout(io_data_label::OUTPUT)->buffer_element_count()
@@ -5565,26 +5415,35 @@ void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
     while(i--)
         indentStr += "    ";
 
+    const auto  projected_input  = inner_batch_layout || input_preprocessed
+                                       ? std::optional{execution_layout_for(io_data_label::INPUT)}
+                                       : std::nullopt;
+    const auto  projected_output = inner_batch_layout
+                                       ? std::optional{execution_layout_for(io_data_label::OUTPUT)}
+                                       : std::nullopt;
+    const auto& in               = projected_input ? *projected_input : input_layout();
+    const auto& out              = projected_output ? *projected_output : output_layout();
+    const auto  batch_axis       = data_rank();
     os << "\n" << indentStr << "scheme: " << PrintScheme(scheme);
-    os << "\n" << indentStr << "dimension: " << dimension;
-    os << "\n" << indentStr << "batch: " << batch;
+    os << "\n" << indentStr << "dimension: " << length_rank();
+    os << "\n" << indentStr << "batch: " << in.axis_span(batch_axis);
     os << "\n" << indentStr << "length: ";
-    for(const auto val : length)
+    bool spans_differ = false;
+    for(size_t axis = 0; axis < batch_axis; ++axis)
     {
-        os << " " << val;
+        os << " " << in.axis_span(axis);
+        spans_differ |= in.axis_span(axis) != out.axis_span(axis);
     }
-    if(detailed || outputLength != length)
+    if(detailed || spans_differ)
     {
         os << "\n" << indentStr << "outputLength:";
-        for(const auto val : outputLength)
-        {
-            os << " " << val;
-        }
+        for(size_t axis = 0; axis < batch_axis; ++axis)
+            os << " " << out.axis_span(axis);
     }
 
     os << "\n" << indentStr << "iStrides: ";
-    for(size_t i = 0; i < inStride.size(); i++)
-        os << inStride[i] << " ";
+    for(size_t axis = 0; axis < batch_axis; ++axis)
+        os << in.axis_stride(axis) << " ";
 
     if(blue && blue->get_conv_buf_layout(io_data_label::INPUT).has_value())
     {
@@ -5595,8 +5454,8 @@ void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
     }
 
     os << "\n" << indentStr << "oStrides: ";
-    for(size_t i = 0; i < outStride.size(); i++)
-        os << outStride[i] << " ";
+    for(size_t axis = 0; axis < batch_axis; ++axis)
+        os << out.axis_stride(axis) << " ";
 
     if(blue && blue->get_conv_buf_layout(io_data_label::OUTPUT).has_value())
     {
@@ -5606,26 +5465,29 @@ void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
             os << osb[i] << " ";
     }
 
-    if(iOffset)
-    {
-        os << "\n" << indentStr;
-        os << "iOffset: " << iOffset;
-    }
-    if(oOffset)
-    {
-        os << "\n" << indentStr;
-        os << "oOffset: " << oOffset;
-    }
+    const auto print_offsets = [&](const char* label, const data_set_t& layout) {
+        const bool planar = layout.num_planes() == 2;
+        const auto first  = layout.get_offset(planar ? data_part::REAL : data_part::ALL);
+        const auto second = planar ? layout.get_offset(data_part::IMAGINARY) : first;
+        if(first || second)
+        {
+            os << "\n" << indentStr << label << first;
+            if(second != first)
+                os << " " << second;
+        }
+    };
+    print_offsets("iOffset: ", in);
+    print_offsets("oOffset: ", out);
 
     os << "\n" << indentStr;
-    os << "iDist: " << iDist;
+    os << "iDist: " << in.axis_stride(batch_axis);
     if(blue && blue->get_conv_buf_layout(io_data_label::INPUT).has_value())
     {
         os << "\n" << indentStr;
         os << "iDistBlue: " << blue->get_conv_buf_layout(io_data_label::INPUT)->distance();
     }
     os << "\n" << indentStr;
-    os << "oDist: " << oDist;
+    os << "oDist: " << out.axis_stride(batch_axis);
     if(blue && blue->get_conv_buf_layout(io_data_label::OUTPUT).has_value())
     {
         os << "\n" << indentStr;
@@ -5639,13 +5501,13 @@ void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
     os << "placement: " << PrintPlacement(placement);
 
     os << "\n" << indentStr;
-    os << precision_name(precision) << "-precision";
+    os << precision_name(get_precision()) << "-precision";
 
     os << std::endl << indentStr;
     os << "array type: ";
-    os << PrintArrayType(inArrayType);
+    os << PrintArrayType(input_array_type());
     os << " -> ";
-    os << PrintArrayType(outArrayType);
+    os << PrintArrayType(output_array_type());
 
     if(large1D)
     {
@@ -5656,13 +5518,14 @@ void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
     if(twiddles)
     {
         os << "\n"
-           << indentStr << "twiddle table length: " << twiddles_size / complex_type_size(precision);
+           << indentStr
+           << "twiddle table length: " << twiddles_size / complex_type_size(get_precision());
     }
     if(twiddles_large)
     {
         os << "\n"
-           << indentStr
-           << "large twiddle table length: " << twiddles_large_size / complex_type_size(precision);
+           << indentStr << "large twiddle table length: "
+           << twiddles_large_size / complex_type_size(get_precision());
     }
     if(blue)
         os << "\n" << indentStr << "lengthBlue: " << blue->get_padded_length();
@@ -5735,17 +5598,17 @@ void TreeNode::RecursiveFindChildNodes(const ComputeScheme&    findScheme,
 
 void TreeNode::RecursiveCopyNodeData(const TreeNode& srcNode)
 {
-    CopyNodeData(srcNode);
-
     if(childNodes.size() != srcNode.childNodes.size())
         throw std::runtime_error("Invalid copy of source tree data");
 
-    std::size_t i = 0;
-    for(auto& child : childNodes)
-    {
-        child->CopyNodeData(*srcNode.childNodes[i]);
-        ++i;
-    }
+    const auto copy = [](TreeNode& dst, const TreeNode& src) {
+        dst.CopyNodeAttributes(src);
+        dst.reset_layout(io_data_label::INPUT, src.input_layout());
+        dst.reset_layout(io_data_label::OUTPUT, src.output_layout());
+    };
+    copy(*this, srcNode);
+    for(size_t i = 0; i < childNodes.size(); ++i)
+        copy(*childNodes[i], *srcNode.childNodes[i]);
 }
 
 void TreeNode::RecursiveRemoveNode(TreeNode* node)
@@ -5916,8 +5779,8 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
     // gfx1250 hotswap fails with function pointer callbacks, so they
     // can't work there either.
     const bool need_legacy_callbacks
-        = !array_type_is_planar(load_node->inArrayType)
-          && !array_type_is_planar(store_node->outArrayType) && !have_load_spirv_cb
+        = !array_type_is_planar(load_node->input_array_type())
+          && !array_type_is_planar(store_node->output_array_type()) && !have_load_spirv_cb
           && !have_store_spirv_cb && strncmp(execPlan.deviceProp.gcnArchName, "gfx1250", 7) != 0;
 
     // Only spend time compiling legacy callback kernel if it's
@@ -5974,21 +5837,31 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
                             : (PrintKernelSchemeAbbr(probNode.scheme) + "_");
 
     // C2R uses the output length as the solution key.
-    const bool useOutputLength = array_type_is_complex(probNode.inArrayType)
-                                 && probNode.outArrayType == rocfft_array_type_real;
-    const auto& probLength = useOutputLength ? probNode.outputLength : probNode.length;
-    for(size_t i = 0; i < probNode.dimension; ++i)
+    const bool useOutputLength = array_type_is_complex(probNode.input_array_type())
+                                 && probNode.output_array_type() == rocfft_array_type_real;
+    const auto projected_input
+        = probNode.inner_batch_layout || probNode.input_preprocessed
+              ? std::optional{probNode.execution_layout_for(io_data_label::INPUT)}
+              : std::nullopt;
+    const auto projected_output
+        = probNode.inner_batch_layout
+              ? std::optional{probNode.execution_layout_for(io_data_label::OUTPUT)}
+              : std::nullopt;
+    const auto& in      = projected_input ? *projected_input : probNode.input_layout();
+    const auto& out     = projected_output ? *projected_output : probNode.output_layout();
+    const auto& problem = useOutputLength ? out : in;
+    for(size_t i = 0; i < probNode.length_rank(); ++i)
     {
         const size_t axis = useOutputLength ? probNode.LegacySBRCOutputAxis(i) : i;
-        token += std::to_string(probLength[axis]) + "_";
+        token += std::to_string(problem.axis_span(axis)) + "_";
     }
 
     std::string precision_str;
-    if(probNode.precision == rocfft_precision_single)
+    if(probNode.get_precision() == rocfft_precision_single)
         precision_str = "sp_";
-    else if(probNode.precision == rocfft_precision_double)
+    else if(probNode.get_precision() == rocfft_precision_double)
         precision_str = "dp_";
-    else if(probNode.precision == rocfft_precision_half)
+    else if(probNode.get_precision() == rocfft_precision_half)
         precision_str = "half_";
     else
         throw std::runtime_error("tree node has invalid precision");
@@ -5996,8 +5869,8 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
     token += precision_str;
     token += (probNode.placement == rocfft_placement_inplace) ? "ip_" : "op_";
 
-    bool is_real_trans = ((probNode.inArrayType == rocfft_array_type_real)
-                          || (probNode.outArrayType == rocfft_array_type_real));
+    bool is_real_trans = ((probNode.input_array_type() == rocfft_array_type_real)
+                          || (probNode.output_array_type() == rocfft_array_type_real));
     bool is_fwd        = (probNode.direction == -1);
 
     if(is_real_trans)
@@ -6013,21 +5886,25 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
         token += (is_fwd) ? "_fwd" : "_bwd";
     }
 
-    token += "_batch_" + std::to_string(probNode.batch);
+    token += "_batch_" + std::to_string(in.axis_span(probNode.data_rank()));
 
     token += "_istride";
-    for(size_t i = 0; i < probNode.inStride.size(); ++i)
-        token += "_" + std::to_string(probNode.inStride[i]);
+    for(size_t i = 0; i < probNode.data_rank(); ++i)
+        token += "_" + std::to_string(in.axis_stride(i));
 
     // Keep the serialized output axis order used by existing solution maps.
     token += "_ostride";
-    for(size_t i = 0; i < probNode.outStride.size(); ++i)
-        token += "_" + std::to_string(probNode.outStride[probNode.LegacySBRCOutputAxis(i)]);
+    for(size_t i = 0; i < probNode.data_rank(); ++i)
+        token += "_" + std::to_string(out.axis_stride(probNode.LegacySBRCOutputAxis(i)));
 
-    token += "_idist_" + std::to_string(probNode.iDist);
-    token += "_odist_" + std::to_string(probNode.oDist);
-    token += "_ioffset_" + std::to_string(probNode.iOffset);
-    token += "_ooffset_" + std::to_string(probNode.oOffset);
+    token += "_idist_" + std::to_string(in.axis_stride(probNode.data_rank()));
+    token += "_odist_" + std::to_string(out.axis_stride(probNode.data_rank()));
+    token
+        += "_ioffset_"
+           + std::to_string(in.get_offset(in.num_planes() == 2 ? data_part::REAL : data_part::ALL));
+    token += "_ooffset_"
+             + std::to_string(
+                 out.get_offset(out.num_planes() == 2 ? data_part::REAL : data_part::ALL));
 
     full_token = token;
 }
@@ -6212,9 +6089,6 @@ void ProcessNode(ExecPlan& execPlan)
 
     execPlan.rootPlan->RecursiveBuildTree(rootScheme);
 
-    assert(execPlan.rootPlan->length.size() == execPlan.rootPlan->inStride.size());
-    assert(execPlan.rootPlan->length.size() == execPlan.rootPlan->outStride.size());
-
     // collect leaf-nodes to execSeq and fuseShims
     execPlan.rootPlan->CollectLeaves(execPlan.execSeq, execPlan.fuseShims);
 
@@ -6314,8 +6188,7 @@ void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent, b
           "*********"
        << std::endl;
 
-    const size_t N = product(execPlan.rootPlan->length.begin(), execPlan.rootPlan->length.end())
-                     * execPlan.rootPlan->batch;
+    const size_t N = execPlan.rootPlan->input_layout().logical_count();
     os << indentStr << "Work buffer size: " << execPlan.workBufSize << std::endl;
     os << indentStr << "Work buffer ratio: " << (double)execPlan.workBufSize / (double)N
        << std::endl;
@@ -6342,9 +6215,9 @@ void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent, b
         {
             const auto& view = node->getLeafNode().GetKernelView();
             os << indentStr << "Kernel args: " << PrintScheme(node->scheme)
-               << " dim=" << node->dimension << " kint=" << (view.itype == KIntType::U32 ? 32 : 64)
-               << " batch=" << view.batch << " idist=" << view.iDist << " odist=" << view.oDist
-               << " length=";
+               << " dim=" << node->length_rank()
+               << " kint=" << (view.itype == KIntType::U32 ? 32 : 64) << " batch=" << view.batch
+               << " idist=" << view.iDist << " odist=" << view.oDist << " length=";
             print_vector(view.lengths());
             os << " output=";
             print_vector(view.output_lengths());

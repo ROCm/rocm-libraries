@@ -20,14 +20,66 @@
 
 #include "fuse_shim.h"
 #include "../../shared/arithmetic.h"
+#include "../../shared/array_predicate.h"
 #include "function_pool.h"
 #include "node_factory.h"
+
+#include <array>
+#include <numeric>
+
+namespace
+{
+    constexpr std::array<size_t, 2> swap_01{1, 0};
+    constexpr std::array<size_t, 3> swap_01_3d{1, 0, 2};
+    constexpr std::array<size_t, 3> swap_12_3d{0, 2, 1};
+    constexpr std::array<size_t, 3> rotate_left_3{1, 2, 0};
+    constexpr std::array<size_t, 3> rotate_right_3{2, 0, 1};
+
+    // Fusion takes the buffer's type but retains the offsets of the copied node.
+    data_set_t
+        with_edge_type(const data_set_t& shape, rocfft_array_type type, const data_set_t& original)
+    {
+        const bool planar = original.num_planes() == 2;
+        const auto first  = original.get_offset(planar ? data_part::REAL : data_part::ALL);
+        const auto second = array_type_is_planar(type)
+                                ? (planar ? original.get_offset(data_part::IMAGINARY) : first)
+                                : 0;
+        return shape.with_element_type(type, original.get_precision(), {first, second});
+    }
+
+    // Map the leading stride slots explicitly where the fused kernel uses a
+    // different order. Some variants retain the copied node's higher strides.
+    void set_edge_strides(data_set_t&             layout,
+                          const data_set_t&       edge,
+                          std::span<const size_t> order               = {},
+                          bool                    keep_higher_strides = false)
+    {
+        const auto distance_axis = layout.get_full_rank() - 1;
+        const auto count         = keep_higher_strides ? order.size() : distance_axis;
+        for(size_t axis = 0; axis < count; ++axis)
+            layout.set_axis_stride(axis,
+                                   edge.axis_stride(axis < order.size() ? order[axis] : axis));
+        layout.set_axis_stride(distance_axis, edge.axis_stride(edge.get_full_rank() - 1));
+    }
+
+    void reset_real_even_output(TreeNode& parent, const TreeNode& fused)
+    {
+        // Keep the parent's rank, including when the fused SBRC uses a 3D
+        // kernel for a 2D plan.
+        for(size_t axis = 0; axis < parent.data_rank(); ++axis)
+            parent.set_axis_stride(io_data_label::OUTPUT,
+                                   axis,
+                                   axis < fused.data_rank() ? fused.output_stride(axis) : 0);
+        parent.set_axis_stride(io_data_label::OUTPUT, parent.data_rank(), fused.output_distance());
+        parent.set_array_type(io_data_label::OUTPUT, fused.output_array_type());
+    }
+}
 
 bool canOptimizeWithStride(TreeNode* stockham)
 {
     // for 3D pow2 sizes, manipulating strides looks like it loses to
     // diagonal transpose
-    if(IsPo2(stockham->length[0]) && stockham->length.size() >= 3)
+    if(IsPo2(stockham->input_length(0)) && stockham->data_rank() >= 3)
         return false;
     size_t numTrans = stockham->pool.get_kernel(stockham->GetKernelKey()).transforms_per_block;
 
@@ -37,8 +89,8 @@ bool canOptimizeWithStride(TreeNode* stockham)
     // TODO: the threshold may be set dependent one what kind of transport is the fused kernel
     //   eg. different value for TRANSPOSE, Z_XY, and XY_Z...
     //   for example, 21504 -t 1 --precision double works quite good with minRows==2
-    size_t minRows = (stockham->precision == rocfft_precision_single
-                      || stockham->precision == rocfft_precision_half)
+    size_t minRows = (stockham->get_precision() == rocfft_precision_single
+                      || stockham->get_precision() == rocfft_precision_half)
                          ? 8
                          : 4;
     return numTrans >= minRows;
@@ -113,22 +165,17 @@ bool TRFuseShim::CheckSchemeFusable()
         return false;
 
     // verify that the transpose output lengths match the FFT input lengths
-    auto transposeOutputLengths = transpose->length;
-    if(transpose->scheme == CS_KERNEL_TRANSPOSE)
-        std::swap(transposeOutputLengths[0], transposeOutputLengths[1]);
-    else if(transpose->scheme == CS_KERNEL_TRANSPOSE_Z_XY)
-    {
-        std::swap(transposeOutputLengths[0], transposeOutputLengths[1]);
-        std::swap(transposeOutputLengths[1], transposeOutputLengths[2]);
-    }
-    else
-    {
-        // must be XY_Z
-        std::swap(transposeOutputLengths[1], transposeOutputLengths[2]);
-        std::swap(transposeOutputLengths[0], transposeOutputLengths[1]);
-    }
-    if(stockham->length != transposeOutputLengths)
+    const auto rank = transpose->data_rank();
+    if(stockham->data_rank() != rank)
         return false;
+    const std::span<const size_t> order
+        = transpose->scheme == CS_KERNEL_TRANSPOSE        ? std::span<const size_t>(swap_01)
+          : transpose->scheme == CS_KERNEL_TRANSPOSE_Z_XY ? std::span<const size_t>(rotate_left_3)
+                                                          : std::span<const size_t>(rotate_right_3);
+    for(size_t axis = 0; axis < rank; ++axis)
+        if(stockham->input_length(axis)
+           != transpose->input_length(axis < order.size() ? order[axis] : axis))
+            return false;
 
     firstFusedNode = 0;
     lastFusedNode  = 1;
@@ -144,43 +191,39 @@ std::unique_ptr<TreeNode> TRFuseShim::FuseKernels()
     if(!PlacementFusable(transpose->obIn, transpose->obOut, stockham->obOut))
         return nullptr;
 
-    auto fused = NodeFactory::CreateNodeFromScheme(stockham->scheme, stockham->parent);
-    fused->CopyNodeData(*stockham);
+    auto input = with_edge_type(
+        stockham->input_layout(), transpose->input_array_type(), stockham->input_layout());
+    auto        output = stockham->output_layout();
+    const auto& edge   = transpose->input_layout();
+    if(transpose->scheme == CS_KERNEL_TRANSPOSE)
+        set_edge_strides(input, edge, swap_01);
+    else if(transpose->scheme == CS_KERNEL_TRANSPOSE_Z_XY)
+    {
+        // The fused Stockham kernel traverses the two inner batch axes in
+        // the opposite order, on both sides.
+        std::array<size_t, KERN_ARGS_ARRAY_WIDTH> axes;
+        auto order = std::span(axes).first(input.get_batch_rank());
+        std::iota(order.begin(), order.end(), 0);
+        std::swap(order[0], order[1]);
+        input.reorder_axes(order, axis_scope::batch_only);
+        output.reorder_axes(order, axis_scope::batch_only);
+        set_edge_strides(input, edge, swap_01_3d, true);
+    }
+    else
+        set_edge_strides(input, edge, rotate_right_3, true);
+
+    auto fused = NodeFactory::CreateNodeFromScheme(
+        stockham->scheme, stockham->parent, std::move(input), std::move(output));
+    fused->CopyNodeAttributes(*stockham);
     // actually no need to check kernel exists, we already have the kernel with the same length/scheme
     std::vector<FMKey> kernelkey = {stockham->GetKernelKey()};
     if(!fused->KernelCheck(kernelkey))
         return nullptr;
 
-    fused->placement   = rocfft_placement_notinplace;
-    fused->inArrayType = transpose->inArrayType;
-    fused->obIn        = transpose->obIn;
-    fused->iDist       = transpose->iDist;
+    fused->placement = rocfft_placement_notinplace;
+    fused->obIn      = transpose->obIn;
     fused->comments.push_back("TRFuseShim: fused " + PrintScheme(transpose->scheme)
                               + " and following " + PrintScheme(stockham->scheme));
-
-    if(transpose->scheme == CS_KERNEL_TRANSPOSE)
-    {
-        fused->inStride = transpose->inStride;
-        std::swap(fused->inStride[0], fused->inStride[1]);
-    }
-    else if(transpose->scheme == CS_KERNEL_TRANSPOSE_Z_XY)
-    {
-        // give stockham kernel Z_XY-transposed inputs and outputs
-        fused->inStride[0] = transpose->inStride[1];
-        fused->inStride[1] = transpose->inStride[0];
-        fused->inStride[2] = transpose->inStride[2];
-
-        std::swap(fused->outStride[1], fused->outStride[2]);
-        std::swap(fused->length[1], fused->length[2]);
-        std::swap(fused->outputLength[1], fused->outputLength[2]);
-    }
-    else
-    {
-        // give stockham kernel XY_Z-transposed inputs
-        fused->inStride[0] = transpose->inStride[2];
-        fused->inStride[1] = transpose->inStride[0];
-        fused->inStride[2] = transpose->inStride[1];
-    }
 
     return fused;
 }
@@ -203,8 +246,14 @@ bool RTFuseShim::CheckSchemeFusable()
 
     if((transpose->scheme != CS_KERNEL_TRANSPOSE && transpose->scheme != CS_KERNEL_TRANSPOSE_Z_XY
         && transpose->scheme != CS_KERNEL_TRANSPOSE_XY_Z)
-       || transpose->length != stockham->length || transpose->inStride != stockham->outStride)
+       || transpose->data_rank() != stockham->data_rank())
         return false;
+
+    // Both legacy stride vectors were empty here, before AssignParams.
+    // Placeholder strides from descriptor construction are not a fusion test.
+    for(size_t axis = 0; axis < stockham->data_rank(); ++axis)
+        if(transpose->input_length(axis) != stockham->input_length(axis))
+            return false;
 
     // NB: Same as TR, can't get rid of a transpose that also does large twiddle multiplication
     if(transpose->large1D)
@@ -227,33 +276,28 @@ std::unique_ptr<TreeNode> RTFuseShim::FuseKernels()
     if(!PlacementFusable(stockham->obIn, stockham->obOut, transpose->obOut))
         return nullptr;
 
-    // should be stockham
-    auto fused = NodeFactory::CreateNodeFromScheme(stockham->scheme, stockham->parent);
-    fused->CopyNodeData(*stockham);
+    // The transpose has the same spans as the Stockham node, but the
+    // fused Stockham still has only its original transform axes.
+    auto output = with_edge_type(
+        stockham->output_layout(), transpose->output_array_type(), stockham->output_layout());
+    if(transpose->scheme == CS_KERNEL_TRANSPOSE_XY_Z)
+        set_edge_strides(output, transpose->output_layout(), rotate_left_3, true);
+    else
+        set_edge_strides(output, transpose->output_layout());
+
+    auto fused = NodeFactory::CreateNodeFromScheme(
+        stockham->scheme, stockham->parent, stockham->input_layout(), std::move(output));
+    fused->CopyNodeAttributes(*stockham);
     // actually no need to check kernel exists, we already have the kernel with the same length/scheme
     std::vector<FMKey> kernelkey = {stockham->GetKernelKey()};
     if(!fused->KernelCheck(kernelkey))
         return nullptr;
 
-    fused->placement    = rocfft_placement_notinplace;
-    fused->outArrayType = transpose->outArrayType;
-    fused->obOut        = transpose->obOut;
-    fused->oDist        = transpose->oDist;
+    fused->placement = rocfft_placement_notinplace;
+    fused->obOut     = transpose->obOut;
     fused->comments.push_back("RTFuseShim: fused " + PrintScheme(stockham->scheme)
                               + " and following " + PrintScheme(transpose->scheme));
 
-    if(transpose->scheme == CS_KERNEL_TRANSPOSE || transpose->scheme == CS_KERNEL_TRANSPOSE_Z_XY)
-    {
-        fused->outStride = transpose->outStride;
-    }
-    else
-    {
-        // make stockham write XY_Z-transposed outputs
-        fused->outStride[0] = transpose->outStride[1];
-        fused->outStride[1] = transpose->outStride[2];
-        fused->outStride[2] = transpose->outStride[0];
-    }
-    fused->outputLength      = transpose->outputLength;
     fused->legacyOutputOrder = transpose->legacyOutputOrder;
 
     return fused;
@@ -293,21 +337,22 @@ std::unique_ptr<TreeNode> RT_ZXY_FuseShim::FuseKernels()
     if(!PlacementFusable(stockham->obIn, stockham->obOut, transpose->obOut))
         return nullptr;
 
-    auto fused
-        = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY, stockham->parent);
-    fused->CopyNodeData(*stockham);
+    auto output = with_edge_type(
+        stockham->input_layout(), transpose->output_array_type(), stockham->output_layout());
+    set_edge_strides(output, transpose->output_layout());
+    auto fused = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY,
+                                                   stockham->parent,
+                                                   stockham->input_layout(),
+                                                   std::move(output));
+    fused->CopyNodeAttributes(*stockham);
     // check if kernel exists, since the fused kernel uses different scheme other than stockham
     if(!fused->KernelCheck())
         return nullptr;
 
-    fused->placement    = rocfft_placement_notinplace;
-    fused->outArrayType = transpose->outArrayType;
-    fused->obOut        = transpose->obOut;
-    fused->oDist        = transpose->oDist;
-    fused->outStride    = transpose->outStride;
+    fused->placement = rocfft_placement_notinplace;
+    fused->obOut     = transpose->obOut;
     fused->comments.push_back("RT_ZXY_FuseShim: fused " + PrintScheme(CS_KERNEL_STOCKHAM)
                               + " and following " + PrintScheme(CS_KERNEL_TRANSPOSE_Z_XY));
-    fused->outputLength = fused->length;
 
     return fused;
 }
@@ -352,20 +397,21 @@ std::unique_ptr<TreeNode> RT_XYZ_FuseShim::FuseKernels()
     if(!PlacementFusable(stockham->obIn, stockham->obOut, transXYZ->obOut))
         return nullptr;
 
-    auto fused
-        = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z, stockham->parent);
-    fused->CopyNodeData(*stockham);
+    auto output = with_edge_type(
+        stockham->input_layout(), transXYZ->output_array_type(), stockham->output_layout());
+    // Map the standalone transpose's output strides back to the Stockham axes.
+    set_edge_strides(output, transXYZ->output_layout(), rotate_left_3);
+    auto fused = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z,
+                                                   stockham->parent,
+                                                   stockham->input_layout(),
+                                                   std::move(output));
+    fused->CopyNodeAttributes(*stockham);
     // check if kernel exists, since the fused kernel uses different scheme other than stockham
     if(!fused->KernelCheck())
         return nullptr;
 
-    fused->placement    = rocfft_placement_notinplace;
-    fused->outArrayType = transXYZ->outArrayType;
-    fused->obOut        = transXYZ->obOut;
-    fused->oDist        = transXYZ->oDist;
-    // The legacy fused kernel took these strides in [2, 0, 1] output order.
-    fused->outStride    = {transXYZ->outStride[1], transXYZ->outStride[2], transXYZ->outStride[0]};
-    fused->outputLength = fused->length;
+    fused->placement = rocfft_placement_notinplace;
+    fused->obOut     = transXYZ->obOut;
     fused->comments.push_back("RT_XYZ_FuseShim: fused " + PrintScheme(CS_KERNEL_STOCKHAM)
                               + " and following " + PrintScheme(CS_KERNEL_TRANSPOSE_XY_Z));
     return fused;
@@ -437,15 +483,18 @@ std::unique_ptr<TreeNode> R2CTrans_FuseShim::FuseKernels()
     if(!PlacementFusable(r2c->obIn, r2c->obOut, transpose->obOut))
         return nullptr;
 
-    auto fused = NodeFactory::CreateNodeFromScheme(CS_KERNEL_R_TO_CMPLX_TRANSPOSE, r2c->parent);
-    fused->CopyNodeData(*r2c);
+    // Preserve the transpose rank, with the real post-kernel's complex input span.
+    auto input = with_edge_type(transpose->input_layout().with_axis_span(0, r2c->input_length(0)),
+                                r2c->input_array_type(),
+                                r2c->input_layout());
+    set_edge_strides(input, r2c->input_layout());
+    auto output = with_edge_type(
+        transpose->output_layout(), transpose->output_array_type(), r2c->output_layout());
+    auto fused = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_R_TO_CMPLX_TRANSPOSE, r2c->parent, std::move(input), std::move(output));
+    fused->CopyNodeAttributes(*r2c);
     // no need to check kernel exists, this scheme uses a built-in kernel
-    fused->placement    = rocfft_placement_notinplace;
-    fused->outArrayType = transpose->outArrayType;
-    // fused->obOut            = transpose->obOut;
-    fused->oDist = transpose->oDist;
-    // Keep the copied R2C output lengths; the strides are already in the same order.
-    fused->outStride = transpose->outStride;
+    fused->placement = rocfft_placement_notinplace;
     fused->comments.push_back("R2CTrans_FuseShim: fused " + PrintScheme(CS_KERNEL_R_TO_CMPLX)
                               + " and following " + PrintScheme(transpose->scheme));
 
@@ -459,17 +508,14 @@ std::unique_ptr<TreeNode> R2CTrans_FuseShim::FuseKernels()
     }
     else
     {
-        fused->obOut   = r2c->obOut; // already done in CopyNodeData, but just leave it tidy
         nextLeaf->obIn = fused->obOut; // so we still don't break buffer flow of [r2c-trans]-next
         nextLeaf->placement = (nextLeaf->obIn == nextLeaf->obOut) ? rocfft_placement_inplace
                                                                   : rocfft_placement_notinplace;
     }
-    fused->dimension = transpose->dimension;
 
     // The fusion crosses subtrees. The real-even parent and the fused
     // kernel share the same axis order, but write with the transpose strides.
-    r2c->parent->outStride = fused->outStride;
-    r2c->parent->oDist     = fused->oDist;
+    reset_real_even_output(*r2c->parent, *fused);
 
     return fused;
 }
@@ -529,30 +575,26 @@ std::unique_ptr<TreeNode> TransC2R_FuseShim::FuseKernels()
     if(!PlacementFusable(transpose->obIn, transpose->obOut, c2r->obOut))
         return nullptr;
 
-    auto fused
-        = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_CMPLX_TO_R, transpose->parent);
-    fused->CopyNodeData(*transpose);
-    if(transpose->scheme == CS_KERNEL_TRANSPOSE_XY_Z)
-    {
-        // Move the Hermitian axis from the middle to the end for the fused kernel.
-        std::swap(fused->inStride[1], fused->inStride[2]);
-        std::swap(fused->length[1], fused->length[2]);
-    }
+    auto       input = transpose->input_layout();
+    const bool is_3d = transpose->scheme == CS_KERNEL_TRANSPOSE_XY_Z;
+    if(is_3d)
+        input.reorder_axes(swap_12_3d, axis_scope::length_only);
+
+    // In the fused frame the Hermitian axis is last among the transform
+    // axes, and the output has the standalone C2R's complex span there.
+    const auto& c2r_output = c2r->output_layout();
+    auto        output
+        = with_edge_type(input.with_axis_span(input.get_len_rank() - 1, c2r->output_length(0)),
+                         c2r->output_array_type(),
+                         transpose->output_layout());
+    const auto order
+        = is_3d ? std::span<const size_t>(rotate_left_3) : std::span<const size_t>(swap_01);
+    set_edge_strides(output, c2r_output, order);
+    auto fused = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_TRANSPOSE_CMPLX_TO_R, transpose->parent, std::move(input), std::move(output));
+    fused->CopyNodeAttributes(*transpose);
     // no need to check kernel exists, this scheme uses a built-in kernel
-    fused->placement    = rocfft_placement_notinplace;
-    fused->outArrayType = c2r->outArrayType;
-    // fused->obOut            = c2r->obOut; // move to later with comment
-    fused->oDist        = c2r->oDist;
-    fused->outStride    = c2r->outStride;
-    fused->outputLength = c2r->outputLength;
-    fused->dimension    = transpose->dimension;
-    // Move the standalone C2R's leading real-transform axis to the end.
-    std::rotate(fused->outStride.begin(),
-                fused->outStride.begin() + 1,
-                fused->outStride.begin() + fused->dimension);
-    std::rotate(fused->outputLength.begin(),
-                fused->outputLength.begin() + 1,
-                fused->outputLength.begin() + fused->dimension);
+    fused->placement = rocfft_placement_notinplace;
     fused->comments.push_back("TransC2R_FuseShim: fused " + PrintScheme(transpose->scheme)
                               + " and following " + PrintScheme(CS_KERNEL_CMPLX_TO_R));
 
@@ -566,17 +608,19 @@ std::unique_ptr<TreeNode> TransC2R_FuseShim::FuseKernels()
     }
     else
     {
-        fused->obOut   = transpose->obOut; // already done in CopyNodeData, but just leave it tidy
         nextLeaf->obIn = fused->obOut; // so we still don't break buffer flow of [trans-c2r]-next
         nextLeaf->placement = (nextLeaf->obIn == nextLeaf->obOut) ? rocfft_placement_inplace
                                                                   : rocfft_placement_notinplace;
     }
 
-    // The fusion crosses subtrees. The parent still sees the standalone C2R's
-    // output axes, not the fused kernel's permuted view of the same buffer.
-    c2r->parent->length   = c2r->outputLength;
-    c2r->parent->inStride = c2r->outStride;
-    c2r->parent->iDist    = fused->oDist;
+    // The parent keeps its Hermitian layout. Its incoming edge now holds
+    // the preprocessed data in the standalone C2R's (unpermuted) frame.
+    std::array<size_t, KERN_ARGS_ARRAY_WIDTH> strides;
+    auto incoming = std::span(strides).first(c2r_output.get_full_rank());
+    for(size_t axis = 0; axis < incoming.size(); ++axis)
+        incoming[axis] = c2r_output.axis_stride(axis);
+    c2r->parent->input_preprocessed = true;
+    c2r->parent->set_strides(io_data_label::INPUT, incoming);
 
     return fused;
 }
@@ -632,31 +676,27 @@ std::unique_ptr<TreeNode> STK_R2CTrans_FuseShim::FuseKernels()
     if(!PlacementFusable(stockham->obIn, stockham->obOut, transpose->obOut))
         return nullptr;
 
+    auto output = with_edge_type(
+        r2c->output_layout(), transpose->output_array_type(), stockham->output_layout());
+    set_edge_strides(output, transpose->output_layout());
     auto fused = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY,
-                                                   stockham->parent);
-    fused->CopyNodeData(*stockham);
+                                                   stockham->parent,
+                                                   stockham->input_layout(),
+                                                   std::move(output));
+    fused->CopyNodeAttributes(*stockham);
     // check if kernel exists, since the fused kernel uses different scheme other than stockham
     if(!fused->KernelCheck())
         return nullptr;
 
-    fused->placement    = rocfft_placement_notinplace;
-    fused->outArrayType = transpose->outArrayType;
-    fused->obOut        = transpose->obOut;
-    fused->oDist        = transpose->oDist;
-    fused->outStride    = transpose->outStride;
+    fused->placement = rocfft_placement_notinplace;
+    fused->obOut     = transpose->obOut;
     fused->comments.push_back("STK_R2CTrans_FuseShim: fused " + PrintScheme(CS_KERNEL_STOCKHAM)
                               + ", " + PrintScheme(CS_KERNEL_R_TO_CMPLX) + " and following "
                               + PrintScheme(transpose->scheme));
 
-    fused->outputLength = r2c->outputLength;
-
     // The fusion crosses subtrees; the real-even parent keeps the same axes
     // but now writes with the transpose strides.
-    auto* realEven      = r2c->parent;
-    realEven->outStride = fused->outStride;
-    realEven->oDist     = fused->oDist;
-    // Adjust strides in case this uses a 3D kernel for a 2D plan.
-    realEven->outStride.resize(realEven->length.size());
+    reset_real_even_output(*r2c->parent, *fused);
 
     return fused;
 }

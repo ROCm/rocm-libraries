@@ -25,6 +25,25 @@
 #include "node_factory.h"
 #include "repo.h"
 
+#include <array>
+
+namespace
+{
+    constexpr std::array<size_t, 2> yx{1, 0};
+
+    // Pack Y first while describing the buffer in the [X, Y] frame.
+    auto packed_y_strides(const data_set_t& xy)
+    {
+        std::vector<size_t> strides(xy.get_full_rank());
+        strides[0] = xy.axis_span(1);
+        strides[1] = 1;
+        strides[2] = xy.axis_span(0) * strides[0];
+        for(size_t axis = 3; axis < strides.size(); ++axis)
+            strides[axis] = xy.axis_span(axis - 1) * strides[axis - 1];
+        return strides;
+    }
+}
+
 /*****************************************************
  * 2D_RTRT  *
  *****************************************************/
@@ -47,53 +66,31 @@ void RTRT2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         determined_scheme_node2 = child_scheme_trees[2]->curScheme;
     }
 
-    // first row fft
-    NodeMetaData row1PlanData(this);
-    row1PlanData.length.push_back(length[0]);
-    row1PlanData.dimension = 1;
-    row1PlanData.length.push_back(length[1]);
-    for(size_t index = 2; index < length.size(); index++)
-    {
-        row1PlanData.length.push_back(length[index]);
-    }
-    row1PlanData.outputLength = row1PlanData.length;
+    // First row FFT: transform X without changing the stage's axis order.
+    NodeMetaData row1PlanData(input_layout().get_data_set_for_len_axes({0}),
+                              output_layout().get_data_set_for_len_axes({0}),
+                              this);
     auto row1Plan = NodeFactory::CreateExplicitNode(row1PlanData, this, determined_scheme_node0);
     row1Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
-    // first transpose
-    auto trans1Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-    trans1Plan->length.push_back(length[0]);
-    trans1Plan->length.push_back(length[1]);
-    trans1Plan->dimension = 2;
-    for(size_t index = 2; index < length.size(); index++)
-    {
-        trans1Plan->length.push_back(length[index]);
-    }
-    trans1Plan->outputLength = trans1Plan->length;
+    auto temp
+        = output_layout().with_element_type(rocfft_array_type_complex_interleaved, get_precision());
+    temp.set_strides_and_distances(packed_y_strides(temp));
+    auto trans1Plan
+        = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this, output_layout(), temp);
 
-    // second row fft
-    NodeMetaData row2PlanData(this);
-    row2PlanData.length.push_back(length[1]);
-    row2PlanData.dimension = 1;
-    row2PlanData.length.push_back(length[0]);
-    for(size_t index = 2; index < length.size(); index++)
-    {
-        row2PlanData.length.push_back(length[index]);
-    }
-    row2PlanData.outputLength = row2PlanData.length;
+    // Second row FFT: selecting Y puts it first and moves X into batch.
+    const auto   tempY = temp.get_data_set_for_len_axes({1});
+    NodeMetaData row2PlanData(tempY, tempY, this);
     auto row2Plan = NodeFactory::CreateExplicitNode(row2PlanData, this, determined_scheme_node2);
     row2Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
-    // second transpose
-    auto trans2Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-    trans2Plan->length.push_back(length[1]);
-    trans2Plan->length.push_back(length[0]);
-    trans2Plan->dimension = 2;
-    for(size_t index = 2; index < length.size(); index++)
-    {
-        trans2Plan->length.push_back(length[index]);
-    }
-    trans2Plan->outputLength = trans2Plan->length;
+    // Second transpose: both sides describe [Y, X].
+    auto outputYX = output_layout();
+    outputYX.reorder_axes(yx, axis_scope::length_only);
+    temp.reorder_axes(yx, axis_scope::length_only);
+    auto trans2Plan = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_TRANSPOSE, this, std::move(temp), std::move(outputYX));
 
     // --------------------------------
     // Fuse Shims
@@ -123,42 +120,29 @@ void RTRT2DNode::AssignParams_internal()
     // (such nodes and their descendants are all 1D only)
     assert(!blue && "RTRT2DNode does not propagate Bluestein parameters to its children");
 
-    auto& row1Plan      = childNodes[0];
-    row1Plan->inStride  = inStride;
-    row1Plan->iDist     = iDist;
-    row1Plan->outStride = outStride;
-    row1Plan->oDist     = oDist;
+    auto& row1Plan = childNodes[0];
+    row1Plan->set_strides(io_data_label::INPUT, input_layout());
+    row1Plan->set_strides(io_data_label::OUTPUT, output_layout());
 
     row1Plan->AssignParams();
 
-    auto& trans1Plan     = childNodes[1];
-    trans1Plan->inStride = row1Plan->outStride;
-    trans1Plan->iDist    = row1Plan->oDist;
-    trans1Plan->outStride.push_back(trans1Plan->length[1]);
-    trans1Plan->outStride.push_back(1);
-    trans1Plan->oDist = trans1Plan->length[0] * trans1Plan->outStride[0];
+    auto& trans1Plan = childNodes[1];
+    trans1Plan->set_strides(io_data_label::INPUT, row1Plan->output_layout());
+    auto tempStrides = packed_y_strides(trans1Plan->output_layout());
+    trans1Plan->set_strides(io_data_label::OUTPUT, tempStrides);
 
-    for(size_t index = 2; index < length.size(); index++)
-    {
-        trans1Plan->outStride.push_back(trans1Plan->oDist);
-        trans1Plan->oDist *= length[index];
-    }
-
-    auto& row2Plan     = childNodes[2];
-    row2Plan->inStride = trans1Plan->outStride;
-    std::swap(row2Plan->inStride[0], row2Plan->inStride[1]);
-    row2Plan->iDist     = trans1Plan->oDist;
-    row2Plan->outStride = row2Plan->inStride;
-    row2Plan->oDist     = row2Plan->iDist;
+    auto& row2Plan = childNodes[2];
+    std::swap(tempStrides[0], tempStrides[1]);
+    row2Plan->set_strides(io_data_label::INPUT, tempStrides);
+    row2Plan->set_strides(io_data_label::OUTPUT, tempStrides);
 
     row2Plan->AssignParams();
 
-    auto& trans2Plan      = childNodes[3];
-    trans2Plan->inStride  = row2Plan->outStride;
-    trans2Plan->iDist     = row2Plan->oDist;
-    trans2Plan->outStride = outStride;
-    std::swap(trans2Plan->outStride[0], trans2Plan->outStride[1]);
-    trans2Plan->oDist = oDist;
+    auto& trans2Plan = childNodes[3];
+    trans2Plan->set_strides(io_data_label::INPUT, row2Plan->output_layout());
+    auto outputStrides = output_layout().strides_and_distances();
+    std::swap(outputStrides[0], outputStrides[1]);
+    trans2Plan->set_strides(io_data_label::OUTPUT, outputStrides);
 }
 
 /*****************************************************
@@ -180,30 +164,18 @@ void RC2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         determined_scheme_node0 = child_scheme_trees[0]->curScheme;
     }
 
-    // row fft
-    NodeMetaData rowPlanData(this);
-    rowPlanData.length.push_back(length[0]);
-    rowPlanData.dimension = 1;
-    rowPlanData.length.push_back(length[1]);
-    for(size_t index = 2; index < length.size(); index++)
-    {
-        rowPlanData.length.push_back(length[index]);
-    }
-    rowPlanData.outputLength = rowPlanData.length;
+    // Row FFT along X.
+    NodeMetaData rowPlanData(input_layout().get_data_set_for_len_axes({0}),
+                             output_layout().get_data_set_for_len_axes({0}),
+                             this);
     auto rowPlan = NodeFactory::CreateExplicitNode(rowPlanData, this, determined_scheme_node0);
     rowPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
-    // column fft
-    auto colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
-    colPlan->length.push_back(length[1]);
-    colPlan->dimension = 1;
-    colPlan->length.push_back(length[0]);
-    colPlan->large1D = 0; // No twiddle factor in sbcc kernel
-    for(size_t index = 2; index < length.size(); index++)
-    {
-        colPlan->length.push_back(length[index]);
-    }
-    colPlan->outputLength      = colPlan->length;
+    // Column FFT along Y, using the [Y, X] view of the row result.
+    const auto columns = output_layout().get_data_set_for_len_axes({1});
+    auto       colPlan
+        = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this, columns, columns);
+    colPlan->large1D           = 0; // No twiddle factor in sbcc kernel
     colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // RC
@@ -216,22 +188,17 @@ void RC2DNode::AssignParams_internal()
     auto& rowPlan = childNodes[0];
     auto& colPlan = childNodes[1];
 
-    rowPlan->inStride = inStride;
-    rowPlan->iDist    = iDist;
-
-    rowPlan->outStride = outStride;
-    rowPlan->oDist     = oDist;
+    rowPlan->set_strides(io_data_label::INPUT, input_layout());
+    auto outputStrides = output_layout().strides_and_distances();
+    rowPlan->set_strides(io_data_label::OUTPUT, outputStrides);
 
     rowPlan->AssignParams();
 
-    colPlan->inStride = rowPlan->outStride;
-    std::swap(colPlan->inStride[0], colPlan->inStride[1]);
-
-    colPlan->iDist = rowPlan->oDist;
-
-    colPlan->outStride = outStride;
-    std::swap(colPlan->outStride[0], colPlan->outStride[1]);
-    colPlan->oDist = oDist;
+    auto colInputStrides = rowPlan->output_layout().strides_and_distances();
+    std::swap(colInputStrides[0], colInputStrides[1]);
+    colPlan->set_strides(io_data_label::INPUT, colInputStrides);
+    std::swap(outputStrides[0], outputStrides[1]);
+    colPlan->set_strides(io_data_label::OUTPUT, outputStrides);
 }
 
 // Leaf Node..
@@ -247,7 +214,7 @@ bool Single2DNode::CreateDeviceResources()
 
     int    count               = 0;
     size_t cummulative_product = 1;
-    while(cummulative_product != length[0])
+    while(cummulative_product != input_length(0))
     {
         cummulative_product *= kernelFactors[count++];
     }
@@ -256,8 +223,13 @@ bool Single2DNode::CreateDeviceResources()
 
     twd_attach_halfN = (ebtype != EmbeddedType::NONE);
     // create one set of twiddles for each dimension
-    std::tie(twiddles, twiddles_size) = Repo::GetTwiddles2D(
-        length[0], length[1], precision, deviceProp, twd_attach_halfN, radices1, radices2);
+    std::tie(twiddles, twiddles_size) = Repo::GetTwiddles2D(input_length(0),
+                                                            input_length(1),
+                                                            get_precision(),
+                                                            deviceProp,
+                                                            twd_attach_halfN,
+                                                            radices1,
+                                                            radices2);
 
     return CreateLargeTwdTable();
 }

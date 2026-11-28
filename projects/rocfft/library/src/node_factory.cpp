@@ -406,90 +406,104 @@ inline void PrintFailInfo(rocfft_precision precision,
                     << PrintScheme(kernelScheme) << std::endl;
 }
 
-std::unique_ptr<TreeNode> NodeFactory::CreateNodeFromScheme(ComputeScheme s, TreeNode* parent)
+std::unique_ptr<TreeNode> NodeFactory::CreateNodeFromScheme(ComputeScheme s,
+                                                            TreeNode*     parent,
+                                                            data_set_t    input,
+                                                            data_set_t    output)
 {
+    NodeLayouts layouts(std::move(input), std::move(output));
     switch(s)
     {
     // Internal Node
     case CS_REAL_TRANSFORM_USING_CMPLX:
-        return std::unique_ptr<RealTransCmplxNode>(new RealTransCmplxNode(parent));
+        return std::unique_ptr<RealTransCmplxNode>(
+            new RealTransCmplxNode(parent, std::move(layouts)));
     case CS_REAL_TRANSFORM_EVEN:
-        return std::unique_ptr<RealTransEvenNode>(new RealTransEvenNode(parent));
+        return std::unique_ptr<RealTransEvenNode>(
+            new RealTransEvenNode(parent, std::move(layouts)));
     case CS_REAL_2D_EVEN:
-        return std::unique_ptr<Real2DEvenNode>(new Real2DEvenNode(parent));
+        return std::unique_ptr<Real2DEvenNode>(new Real2DEvenNode(parent, std::move(layouts)));
     case CS_REAL_3D_EVEN:
-        return std::unique_ptr<Real3DEvenNode>(new Real3DEvenNode(parent));
+        return std::unique_ptr<Real3DEvenNode>(new Real3DEvenNode(parent, std::move(layouts)));
     case CS_REAL_3D_PP:
-        return std::unique_ptr<Real3DPPNode>(new Real3DPPNode(parent));
+        return std::unique_ptr<Real3DPPNode>(new Real3DPPNode(parent, std::move(layouts)));
     case CS_BLUESTEIN:
-        return std::unique_ptr<BluesteinNode>(new BluesteinNode(parent));
+        return std::unique_ptr<BluesteinNode>(new BluesteinNode(parent, std::move(layouts)));
     case CS_L1D_TRTRT:
-        return std::unique_ptr<TRTRT1DNode>(new TRTRT1DNode(parent));
+        return std::unique_ptr<TRTRT1DNode>(new TRTRT1DNode(parent, std::move(layouts)));
     case CS_L1D_CC:
-        return std::unique_ptr<CC1DNode>(new CC1DNode(parent));
+        return std::unique_ptr<CC1DNode>(new CC1DNode(parent, std::move(layouts)));
     case CS_L1D_CRT:
-        return std::unique_ptr<CRT1DNode>(new CRT1DNode(parent));
+        return std::unique_ptr<CRT1DNode>(new CRT1DNode(parent, std::move(layouts)));
     case CS_2D_RTRT:
-        return std::unique_ptr<RTRT2DNode>(new RTRT2DNode(parent));
+        return std::unique_ptr<RTRT2DNode>(new RTRT2DNode(parent, std::move(layouts)));
     case CS_2D_RC:
-        return std::unique_ptr<RC2DNode>(new RC2DNode(parent));
+        return std::unique_ptr<RC2DNode>(new RC2DNode(parent, std::move(layouts)));
     case CS_3D_RTRT:
-        return std::unique_ptr<RTRT3DNode>(new RTRT3DNode(parent));
+        return std::unique_ptr<RTRT3DNode>(new RTRT3DNode(parent, std::move(layouts)));
     case CS_3D_TRTRTR:
-        return std::unique_ptr<TRTRTR3DNode>(new TRTRTR3DNode(parent));
+        return std::unique_ptr<TRTRTR3DNode>(new TRTRTR3DNode(parent, std::move(layouts)));
     case CS_3D_BLOCK_RC:
-        return std::unique_ptr<BLOCKRC3DNode>(new BLOCKRC3DNode(parent));
+        return std::unique_ptr<BLOCKRC3DNode>(new BLOCKRC3DNode(parent, std::move(layouts)));
     case CS_3D_BLOCK_CR:
-        return std::unique_ptr<BLOCKCR3DNode>(new BLOCKCR3DNode(parent));
+        return std::unique_ptr<BLOCKCR3DNode>(new BLOCKCR3DNode(parent, std::move(layouts)));
     case CS_3D_RC:
-        return std::unique_ptr<RC3DNode>(new RC3DNode(parent));
+        return std::unique_ptr<RC3DNode>(new RC3DNode(parent, std::move(layouts)));
     case CS_3D_PP:
-        return std::unique_ptr<PP3DNode>(new PP3DNode(parent));
+        return std::unique_ptr<PP3DNode>(new PP3DNode(parent, std::move(layouts)));
 
     // Leaf Node that need to check external kernel file
     case CS_KERNEL_STOCKHAM:
-        return std::unique_ptr<Stockham1DNode>(new Stockham1DNode(parent, s));
+        return std::unique_ptr<Stockham1DNode>(new Stockham1DNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_PP:
-        return std::unique_ptr<StockhamPP1DNode>(new StockhamPP1DNode(parent, s));
+        return std::unique_ptr<StockhamPP1DNode>(
+            new StockhamPP1DNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_BLOCK_CC:
-        return std::unique_ptr<SBCCNode>(new SBCCNode(parent, s));
+        return std::unique_ptr<SBCCNode>(new SBCCNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_PP_BLOCK_CC:
-        return std::unique_ptr<SBCCPPNode>(new SBCCPPNode(parent, s));
+        return std::unique_ptr<SBCCPPNode>(new SBCCPPNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_BLOCK_RC:
-        return std::unique_ptr<SBRCNode>(new SBRCNode(parent, s));
+        return std::unique_ptr<SBRCNode>(new SBRCNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_BLOCK_CR:
-        return std::unique_ptr<SBCRNode>(new SBCRNode(parent, s));
+        return std::unique_ptr<SBCRNode>(new SBCRNode(parent, s, std::move(layouts)));
     case CS_KERNEL_2D_SINGLE:
-        return std::unique_ptr<Single2DNode>(new Single2DNode(parent, s));
+        return std::unique_ptr<Single2DNode>(new Single2DNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
-        return std::unique_ptr<SBRCTransXY_ZNode>(new SBRCTransXY_ZNode(parent, s));
+        return std::unique_ptr<SBRCTransXY_ZNode>(
+            new SBRCTransXY_ZNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
-        return std::unique_ptr<SBRCTransZ_XYNode>(new SBRCTransZ_XYNode(parent, s));
+        return std::unique_ptr<SBRCTransZ_XYNode>(
+            new SBRCTransZ_XYNode(parent, s, std::move(layouts)));
     case CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY:
-        return std::unique_ptr<RealCmplxTransZ_XYNode>(new RealCmplxTransZ_XYNode(parent, s));
+        return std::unique_ptr<RealCmplxTransZ_XYNode>(
+            new RealCmplxTransZ_XYNode(parent, s, std::move(layouts)));
 
     // Leaf Node that doesn't need to check external kernel file
     case CS_KERNEL_R_TO_CMPLX:
     case CS_KERNEL_R_TO_CMPLX_TRANSPOSE:
     case CS_KERNEL_CMPLX_TO_R:
     case CS_KERNEL_TRANSPOSE_CMPLX_TO_R:
-        return std::unique_ptr<PrePostKernelNode>(new PrePostKernelNode(parent, s));
+        return std::unique_ptr<PrePostKernelNode>(
+            new PrePostKernelNode(parent, s, std::move(layouts)));
     case CS_KERNEL_TRANSPOSE:
     case CS_KERNEL_TRANSPOSE_XY_Z:
     case CS_KERNEL_TRANSPOSE_Z_XY:
-        return std::unique_ptr<TransposeNode>(new TransposeNode(parent, s));
+        return std::unique_ptr<TransposeNode>(new TransposeNode(parent, s, std::move(layouts)));
     case CS_KERNEL_COPY_R_TO_CMPLX:
     case CS_KERNEL_COPY_HERM_TO_CMPLX:
     case CS_KERNEL_COPY_CMPLX_TO_HERM:
     case CS_KERNEL_COPY_CMPLX_TO_R:
-        return std::unique_ptr<RealTransDataCopyNode>(new RealTransDataCopyNode(parent, s));
+        return std::unique_ptr<RealTransDataCopyNode>(
+            new RealTransDataCopyNode(parent, s, std::move(layouts)));
     case CS_KERNEL_CHIRP:
     case CS_KERNEL_PAD_MUL:
     case CS_KERNEL_FFT_MUL:
     case CS_KERNEL_RES_MUL:
-        return std::unique_ptr<BluesteinComponentNode>(new BluesteinComponentNode(parent, s));
+        return std::unique_ptr<BluesteinComponentNode>(
+            new BluesteinComponentNode(parent, s, std::move(layouts)));
     case CS_KERNEL_BLUESTEIN_SINGLE:
-        return std::unique_ptr<BluesteinSingleNode>(new BluesteinSingleNode(parent, s));
+        return std::unique_ptr<BluesteinSingleNode>(
+            new BluesteinSingleNode(parent, s, std::move(layouts)));
     default:
         throw std::runtime_error("Scheme assertion failed, node not implemented:" + PrintScheme(s));
         return nullptr;
@@ -502,19 +516,7 @@ std::unique_ptr<TreeNode> NodeFactory::CreateExplicitNode(NodeMetaData& nodeData
 {
     function_pool pool{nodeData.deviceProp};
 
-    // when creating tree from solution map, scheme is L1D but not root
-    // NB:
-    //   Why we need this:
-    //   Ideally, decide-scheme functions don't assign/change any lengths data,
-    //   it should be assigned before. But that is not the case for L1D, when
-    //   deciding L1D scheme, it appends an extra temporary length indicating
-    //   how to "factorize" the large 1D, and then pop in later in "build-tree."
-    //   But when we are creating tree from solution map, we already have the
-    //   determined_scheme; however, if we don't do the decide-node-scheme,
-    //   we lose that factor-length, and the later "pop" casues error. So
-    //   we should still call the decide-node-scheme here as long as we know
-    //   it's a L1D. (But not for the root-node, root-node calls the decide
-    //   function anyway, before we try looking up solutions)
+    // Solution-map subplans still need the factor chosen by the 1D heuristic.
     if((determined_scheme == CS_L1D_TRTRT || determined_scheme == CS_L1D_CC
         || determined_scheme == CS_L1D_CRT)
        && (parent != nullptr))
@@ -532,8 +534,11 @@ std::unique_ptr<TreeNode> NodeFactory::CreateExplicitNode(NodeMetaData& nodeData
     if(determined_scheme == CS_NONE)
         throw std::runtime_error("DecideNodeScheme Failed!: CS_NONE");
 
-    auto node = CreateNodeFromScheme(determined_scheme, parent);
-    node->CopyNodeData(nodeData);
+    auto node = CreateNodeFromScheme(
+        determined_scheme, parent, nodeData.input_layout(), nodeData.output_layout());
+    node->length_factor = nodeData.length_factor;
+    node->placement     = nodeData.placement;
+    node->direction     = nodeData.direction;
     return node;
 }
 
@@ -568,13 +573,13 @@ ComputeScheme NodeFactory::DecideNodeScheme(const function_pool& pool,
                                             TreeNode*            parent)
 {
     if((parent == nullptr)
-       && ((nodeData.inArrayType == rocfft_array_type_real)
-           || (nodeData.outArrayType == rocfft_array_type_real)))
+       && ((nodeData.input_array_type() == rocfft_array_type_real)
+           || (nodeData.output_array_type() == rocfft_array_type_real)))
     {
         return DecideRealScheme(pool, nodeData);
     }
 
-    switch(nodeData.dimension)
+    switch(nodeData.length_rank())
     {
     case 1:
         return Decide1DScheme(pool, nodeData, parent);
@@ -592,20 +597,21 @@ ComputeScheme NodeFactory::DecideNodeScheme(const function_pool& pool,
 ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaData& nodeData)
 {
     // use size in real units to decide what scheme to use
-    const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
-    const auto& realStride = nodeData.direction == -1 ? nodeData.inStride : nodeData.outStride;
-    const auto& realDist   = nodeData.direction == -1 ? nodeData.iDist : nodeData.oDist;
-    const auto  isEven     = [](size_t val) { return val % 2 == 0; };
+    const auto& real
+        = nodeData.direction == -1 ? nodeData.input_layout() : nodeData.output_layout();
+    bool even_strides = true;
+    for(size_t axis = 1; axis < real.get_full_rank(); ++axis)
+        even_strides &= real.axis_stride(axis) % 2 == 0;
 
     // For even-length optimization, we treat real data as
     // complex-interleaved, so fastest dimension stride must be 1 for
     // both input and output.  Subsequent strides + dist on the real
     // side must all be expressible as complex stride + dist; that
     // is, they must all be even.
-    if(isEven(realLength[0]) && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
-       && std::all_of(realStride.begin() + 1, realStride.end(), isEven) && isEven(realDist))
+    if(real.axis_span(0) % 2 == 0 && nodeData.input_stride(0) == 1 && nodeData.output_stride(0) == 1
+       && even_strides)
     {
-        switch(nodeData.dimension)
+        switch(nodeData.length_rank())
         {
         case 1:
             return CS_REAL_TRANSFORM_EVEN;
@@ -631,23 +637,25 @@ ComputeScheme
     ComputeScheme scheme = CS_NONE;
 
     // Build a node for a 1D FFT
-    if(!SupportedLength(pool, nodeData.precision, nodeData.length[0]))
+    if(!SupportedLength(pool, nodeData.get_precision(), nodeData.input_length(0)))
         return CS_BLUESTEIN;
 
-    if(pool.has_function(FMKey(nodeData.length[0], nodeData.precision)))
+    if(pool.has_function(FMKey(nodeData.input_length(0), nodeData.get_precision())))
     {
         // 2-kernel plans for lengths > 4k can still do better at
         // smaller batch size due to using more CUs.  So prefer
         // single-kernel only if we launch enough workgroups for all
         // CUs
-        if(nodeData.length[0] > 4096)
+        if(nodeData.input_length(0) > 4096)
         {
-            auto kernel = pool.get_kernel(FMKey(nodeData.length[0], nodeData.precision));
+            auto kernel
+                = pool.get_kernel(FMKey(nodeData.input_length(0), nodeData.get_precision()));
 
             // higher dimensions and batch is the effective batch for
             // the kernel
-            const auto totalBatch
-                = product(nodeData.length.begin() + 1, nodeData.length.end()) * nodeData.batch;
+            auto totalBatch = nodeData.batch_count();
+            for(size_t axis = 1; axis < nodeData.data_rank(); ++axis)
+                totalBatch *= nodeData.input_length(axis);
 
             // Bluestein would have chosen this kernel for
             // single-kernel Bluestein, so continue using it for
@@ -667,19 +675,19 @@ ComputeScheme
     size_t divLength1 = 1;
     bool   failed     = false;
 
-    if(IsPo2(nodeData.length[0])) // multiple kernels involving transpose
+    if(IsPo2(nodeData.input_length(0))) // multiple kernels involving transpose
     {
         // TODO: wrap the below into a function and check with LDS size
         size_t block_threshold = 262144;
-        if(nodeData.length[0] <= block_threshold)
+        if(nodeData.input_length(0) <= block_threshold)
         {
             // Enable block compute under these conditions
-            if(nodeData.precision == rocfft_precision_single
-               || nodeData.precision == rocfft_precision_half)
+            if(nodeData.get_precision() == rocfft_precision_single
+               || nodeData.get_precision() == rocfft_precision_half)
             {
-                if(map1DLengthSingle.find(nodeData.length[0]) != map1DLengthSingle.end())
+                if(map1DLengthSingle.find(nodeData.input_length(0)) != map1DLengthSingle.end())
                 {
-                    divLength1 = map1DLengthSingle.at(nodeData.length[0]);
+                    divLength1 = map1DLengthSingle.at(nodeData.input_length(0));
                 }
                 else
                 {
@@ -688,9 +696,9 @@ ComputeScheme
             }
             else
             {
-                if(map1DLengthDouble.find(nodeData.length[0]) != map1DLengthDouble.end())
+                if(map1DLengthDouble.find(nodeData.input_length(0)) != map1DLengthDouble.end())
                 {
-                    divLength1 = map1DLengthDouble.at(nodeData.length[0]);
+                    divLength1 = map1DLengthDouble.at(nodeData.input_length(0));
                 }
                 else
                 {
@@ -699,7 +707,8 @@ ComputeScheme
             }
             // for gfx906, 512 CC/RC isn't as fast, so use CRT
             // with a nicer length
-            if(is_device_gcn_arch(nodeData.deviceProp, "gfx906") && nodeData.length[0] == 262144)
+            if(is_device_gcn_arch(nodeData.deviceProp, "gfx906")
+               && nodeData.input_length(0) == 262144)
             {
                 divLength1 = 64;
                 scheme     = CS_L1D_CRT;
@@ -712,7 +721,7 @@ ComputeScheme
         else
         {
             // get largest pow2 1D length
-            auto largest = pool.get_largest_pow2_length(nodeData.precision);
+            auto largest = pool.get_largest_pow2_length(nodeData.get_precision());
 
             // need to ignore len 1, or we're going into a infinity decomposition loop
             // basically not gonna happen unless someone builds only a len1 kernel...
@@ -720,14 +729,14 @@ ComputeScheme
             {
                 failed = true;
             }
-            else if(nodeData.length[0] > largest * largest)
+            else if(nodeData.input_length(0) > largest * largest)
             {
-                divLength1 = nodeData.length[0] / largest;
+                divLength1 = nodeData.input_length(0) / largest;
             }
             else
             {
                 size_t in_x = 0;
-                size_t len  = nodeData.length[0];
+                size_t len  = nodeData.input_length(0);
                 while(len != 1)
                 {
                     len >>= 1;
@@ -741,12 +750,12 @@ ComputeScheme
     }
     else // if not Pow2
     {
-        if(nodeData.precision == rocfft_precision_single
-           || nodeData.precision == rocfft_precision_half)
+        if(nodeData.get_precision() == rocfft_precision_single
+           || nodeData.get_precision() == rocfft_precision_half)
         {
-            if(map1DLengthSingle.find(nodeData.length[0]) != map1DLengthSingle.end())
+            if(map1DLengthSingle.find(nodeData.input_length(0)) != map1DLengthSingle.end())
             {
-                divLength1 = map1DLengthSingle.at(nodeData.length[0]);
+                divLength1 = map1DLengthSingle.at(nodeData.input_length(0));
                 scheme     = CS_L1D_CC;
             }
             else
@@ -754,15 +763,16 @@ ComputeScheme
                 failed = true;
             }
         }
-        else if(nodeData.precision == rocfft_precision_double)
+        else if(nodeData.get_precision() == rocfft_precision_double)
         {
-            if(map1DLengthDouble.find(nodeData.length[0]) != map1DLengthDouble.end())
+            if(map1DLengthDouble.find(nodeData.input_length(0)) != map1DLengthDouble.end())
             {
-                divLength1 = map1DLengthDouble.at(nodeData.length[0]);
+                divLength1 = map1DLengthDouble.at(nodeData.input_length(0));
                 scheme     = CS_L1D_CC;
 
                 // hack for special case of 43008. On gfx90a, 224 is better
-                if(nodeData.length[0] == 43008 && is_device_gcn_arch(nodeData.deviceProp, "gfx90a"))
+                if(nodeData.input_length(0) == 43008
+                   && is_device_gcn_arch(nodeData.deviceProp, "gfx90a"))
                 {
                     divLength1 = 224;
                 }
@@ -777,7 +787,7 @@ ComputeScheme
         {
             scheme = CS_L1D_TRTRT;
 
-            auto it = map1DLengthTRTRT.find(nodeData.length[0]);
+            auto it = map1DLengthTRTRT.find(nodeData.input_length(0));
             if(it != map1DLengthTRTRT.end())
             {
                 divLength1 = it->second;
@@ -785,18 +795,18 @@ ComputeScheme
             }
             else
             {
-                divLength1
-                    = get_explicitly_supported_factor(pool, nodeData.precision, nodeData.length[0]);
+                divLength1 = get_explicitly_supported_factor(
+                    pool, nodeData.get_precision(), nodeData.input_length(0));
                 if(divLength1 == 0)
                 {
                     // We need to recurse.  Note, for CS_L1D_TRTRT,
                     // divLength0 has to be explicitly supported
                     auto divLength0 = get_largest_supported_factor(
-                        pool, nodeData.precision, nodeData.length[0]);
+                        pool, nodeData.get_precision(), nodeData.input_length(0));
 
                     // should ignore factor 1 or we're going into a infinity decomposition loop,
                     // (an example is to run len-81 when we build only pow2 kernels, we'll be here)
-                    divLength1 = (divLength0 <= 1) ? 0 : nodeData.length[0] / divLength0;
+                    divLength1 = (divLength0 <= 1) ? 0 : nodeData.input_length(0) / divLength0;
                 }
                 failed = divLength1 == 0;
             }
@@ -806,14 +816,11 @@ ComputeScheme
     if(failed)
     {
         // can't find the length in map1DLengthSingle/Double.
-        PrintFailInfo(nodeData.precision, nodeData.length[0], scheme);
+        PrintFailInfo(nodeData.get_precision(), nodeData.input_length(0), scheme);
         return CS_NONE;
     }
 
-    // NOTE: we temporarily save the divLength1 at the end of length vector
-    // and then get and pop later when building node
-    // size_t divLength0 = length[0] / divLength1;
-    nodeData.length.emplace_back(divLength1);
+    nodeData.length_factor = divLength1;
 
     return scheme;
 }
@@ -823,7 +830,9 @@ ComputeScheme NodeFactory::Decide2DScheme(const function_pool& pool, NodeMetaDat
     // First choice is 2D_SINGLE kernel, if the problem will fit into LDS.
     // Next best is CS_2D_RC. Last resort is RTRT.
     if(use_CS_2D_SINGLE(pool,
-                        nodeData,
+                        nodeData.input_length(0),
+                        nodeData.input_length(1),
+                        nodeData.get_precision(),
                         rocfft_array_type_complex_interleaved,
                         rocfft_array_type_complex_interleaved))
         return CS_KERNEL_2D_SINGLE; // the node has all build info
@@ -839,17 +848,18 @@ static bool Apply_SBCR(const function_pool& pool, NodeMetaData& nodeData)
     // NB:
     //   We enable SBCR for limited problem sizes in kernel-generator.py.
     //   Will enable it for non-unit stride cases later.
-    return (((is_device_gcn_arch(nodeData.deviceProp, "gfx908")
-              || is_device_gcn_arch(nodeData.deviceProp, "gfx90a"))
-             && pool.has_SBCR_kernel(nodeData.length[0], nodeData.precision)
-             && pool.has_SBCR_kernel(nodeData.length[1], nodeData.precision)
-             && pool.has_SBCR_kernel(nodeData.length[2], nodeData.precision)
-             && (nodeData.placement == rocfft_placement_notinplace)
-             && (nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1 // unit strides
-                 && nodeData.inStride[1] == nodeData.length[0]
-                 && nodeData.outStride[1] == nodeData.length[0]
-                 && nodeData.inStride[2] == nodeData.inStride[1] * nodeData.length[1]
-                 && nodeData.outStride[2] == nodeData.outStride[1] * nodeData.length[1])));
+    return ((
+        (is_device_gcn_arch(nodeData.deviceProp, "gfx908")
+         || is_device_gcn_arch(nodeData.deviceProp, "gfx90a"))
+        && pool.has_SBCR_kernel(nodeData.input_length(0), nodeData.get_precision())
+        && pool.has_SBCR_kernel(nodeData.input_length(1), nodeData.get_precision())
+        && pool.has_SBCR_kernel(nodeData.input_length(2), nodeData.get_precision())
+        && (nodeData.placement == rocfft_placement_notinplace)
+        && (nodeData.input_stride(0) == 1 && nodeData.output_stride(0) == 1 // unit strides
+            && nodeData.input_stride(1) == nodeData.input_length(0)
+            && nodeData.output_stride(1) == nodeData.input_length(0)
+            && nodeData.input_stride(2) == nodeData.input_stride(1) * nodeData.input_length(1)
+            && nodeData.output_stride(2) == nodeData.output_stride(1) * nodeData.input_length(1))));
 }
 
 ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaData& nodeData)
@@ -873,9 +883,9 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
     else if(MultiDimFuseKernelsAvailable)
     {
         // conditions to choose which scheme
-        if((nodeData.length[0] * nodeData.length[1] * nodeData.length[2]) <= 2048)
+        if((nodeData.input_length(0) * nodeData.input_length(1) * nodeData.input_length(2)) <= 2048)
             return CS_KERNEL_3D_SINGLE;
-        else if(nodeData.length[2] <= 256)
+        else if(nodeData.input_length(2) <= 256)
             return CS_3D_RC;
         else
             return CS_3D_RTRT;
@@ -891,10 +901,14 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
         // Peek the 1st child but not really add it in.
         // Give up if 1st child is 2D_RTRT (means the poor RTRT_TRT)
         // Switch to TRTRTR as the last resort.
-        NodeMetaData child0 = nodeData;
-        child0.length       = nodeData.length;
-        child0.dimension    = 2;
-        auto childScheme    = DecideNodeScheme(pool, child0, nullptr);
+        NodeMetaData child0(nodeData.input_layout().get_data_set_for_len_axes({0, 1}),
+                            nodeData.output_layout().get_data_set_for_len_axes({0, 1}),
+                            nullptr);
+        child0.deviceProp        = nodeData.deviceProp;
+        child0.placement         = nodeData.placement;
+        child0.direction         = nodeData.direction;
+        child0.rootTransformType = nodeData.rootTransformType;
+        auto childScheme         = DecideNodeScheme(pool, child0, nullptr);
 
         // TODO: investigate those SBCC kernels (84,108,112,168)
         //       in 3D C2C transforms, using 3D_RTRT (2D_RC + TRT) is slower than
@@ -904,7 +918,7 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
             = {{rocfft_precision_single, {84, 112, 168}},
                {rocfft_precision_double, {84, 108, 112, 168}}};
         if(childScheme == CS_2D_RC
-           && length_excepted(exceptions, nodeData.precision, nodeData.length[1])
+           && length_excepted(exceptions, nodeData.get_precision(), nodeData.input_length(1))
            && (nodeData.rootTransformType == rocfft_transform_type_complex_forward
                || nodeData.rootTransformType == rocfft_transform_type_complex_inverse))
         {
@@ -922,23 +936,20 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
 }
 
 bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
-                                   const NodeMetaData&  nodeData,
+                                   size_t               length0,
+                                   size_t               length1,
+                                   rocfft_precision     precision,
                                    rocfft_array_type    inArrayType,
                                    rocfft_array_type    outArrayType)
 {
-    if(!pool.has_function(
-           FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE)))
+    if(!pool.has_function(FMKey(length0, length1, precision, CS_KERNEL_2D_SINGLE)))
         return false;
 
     // Get actual LDS size, to check if we can run a 2D_SINGLE
     // kernel that will fit the problem into LDS.
-    auto ldsSize = nodeData.deviceProp.sharedMemPerBlock;
+    auto ldsSize = pool.deviceProp->sharedMemPerBlock;
 
-    auto kernel = pool.get_kernel(
-        FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE));
-
-    auto length0 = nodeData.length[0];
-    auto length1 = nodeData.length[1];
+    auto kernel = pool.get_kernel(FMKey(length0, length1, precision, CS_KERNEL_2D_SINGLE));
 
     // For larger LDS, account properly for real-complex usage and
     // aim for occupancy-2
@@ -954,8 +965,8 @@ bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
                 && outArrayType == rocfft_array_type_real)
             ++length1;
 
-        auto ldsUsage = length0 * length1 * kernel.transforms_per_block
-                        * complex_type_size(nodeData.precision);
+        auto ldsUsage
+            = length0 * length1 * kernel.transforms_per_block * complex_type_size(precision);
 
         if(ldsUsage > ldsSize / 2)
             return false;
@@ -966,8 +977,8 @@ bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
     // 2D_SINGLE solutions are faster despite being occupancy-1.
     else
     {
-        auto ldsUsage = length0 * length1 * kernel.transforms_per_block
-                        * complex_type_size(nodeData.precision);
+        auto ldsUsage
+            = length0 * length1 * kernel.transforms_per_block * complex_type_size(precision);
         if(1.5 * ldsUsage > ldsSize)
             return false;
     }
@@ -979,10 +990,10 @@ bool NodeFactory::use_CS_2D_RC(const function_pool& pool, NodeMetaData& nodeData
 {
     // Do not allow SBCC for (192,y) problems, not the
     // fastest compute scheme for this configuration.
-    if(nodeData.length[1] == 192)
+    if(nodeData.input_length(1) == 192)
         return false;
-    else if(pool.has_SBCC_kernel(nodeData.length[1], nodeData.precision))
-        return nodeData.length[0] >= 56;
+    else if(pool.has_SBCC_kernel(nodeData.input_length(1), nodeData.get_precision()))
+        return nodeData.input_length(0) >= 56;
 
     return false;
 }
@@ -990,14 +1001,17 @@ bool NodeFactory::use_CS_2D_RC(const function_pool& pool, NodeMetaData& nodeData
 size_t NodeFactory::count_3D_SBRC_nodes(const function_pool& pool, NodeMetaData& nodeData)
 {
     size_t sbrc_dimensions = 0;
-    for(unsigned int i = 0; i < nodeData.length.size(); ++i)
+    for(unsigned int i = 0; i < nodeData.data_rank(); ++i)
     {
-        if(pool.has_SBRC_kernel(nodeData.length[i], nodeData.precision))
+        if(pool.has_SBRC_kernel(nodeData.input_length(i), nodeData.get_precision()))
         {
             // make sure the SBRC kernel on that dimension would be tile-aligned
-            auto kernel = pool.get_kernel(FMKey(
-                nodeData.length[i], nodeData.precision, CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
-            if(nodeData.length[(i + 2) % nodeData.length.size()] % kernel.transforms_per_block == 0)
+            auto kernel = pool.get_kernel(FMKey(nodeData.input_length(i),
+                                                nodeData.get_precision(),
+                                                CS_KERNEL_STOCKHAM_BLOCK_RC,
+                                                TILE_ALIGNED));
+            if(nodeData.input_length((i + 2) % nodeData.data_rank()) % kernel.transforms_per_block
+               == 0)
                 ++sbrc_dimensions;
         }
     }
@@ -1007,7 +1021,7 @@ size_t NodeFactory::count_3D_SBRC_nodes(const function_pool& pool, NodeMetaData&
 bool NodeFactory::use_CS_3D_BLOCK_RC(const function_pool& pool, NodeMetaData& nodeData)
 {
     // TODO: SBRC hasn't worked for inner batch (i/oDist == 1)
-    if(nodeData.iDist == 1 || nodeData.oDist == 1)
+    if(nodeData.input_distance() == 1 || nodeData.output_distance() == 1)
         return false;
 
     return count_3D_SBRC_nodes(pool, nodeData) >= 2;
@@ -1016,22 +1030,26 @@ bool NodeFactory::use_CS_3D_BLOCK_RC(const function_pool& pool, NodeMetaData& no
 bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData)
 {
     // TODO: SBCC hasn't worked for inner batch (i/oDist == 1)
-    if(nodeData.iDist == 1 || nodeData.oDist == 1)
+    if(nodeData.input_distance() == 1 || nodeData.output_distance() == 1)
         return false;
 
     // Peek the first child
     // Give up if 1st child is 2D_RTRT (means the poor RTRT_C),
-    NodeMetaData child0 = nodeData;
-    child0.length       = nodeData.length;
-    child0.dimension    = 2;
-    auto childScheme    = DecideNodeScheme(pool, child0, nullptr);
+    NodeMetaData child0(nodeData.input_layout().get_data_set_for_len_axes({0, 1}),
+                        nodeData.output_layout().get_data_set_for_len_axes({0, 1}),
+                        nullptr);
+    child0.deviceProp        = nodeData.deviceProp;
+    child0.placement         = nodeData.placement;
+    child0.direction         = nodeData.direction;
+    child0.rootTransformType = nodeData.rootTransformType;
+    auto childScheme         = DecideNodeScheme(pool, child0, nullptr);
 
     // if first 2 dimensions can be handled with 2D_SINGLE, just run
     // with this 2-kernel plan.
     if(childScheme == CS_KERNEL_2D_SINGLE)
         return true;
 
-    FMKey key(nodeData.length[2], nodeData.precision, CS_KERNEL_STOCKHAM_BLOCK_CC);
+    FMKey key(nodeData.input_length(2), nodeData.get_precision(), CS_KERNEL_STOCKHAM_BLOCK_CC);
     if(!pool.has_function(key))
         return false;
 
@@ -1043,15 +1061,18 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
     // this size is rejected by the following conservative threshold (#-elems)
     // however it can use 3D_RC and get much better performance
     std::vector<size_t> special_case{56, 336, 336};
-    if(nodeData.length == special_case && nodeData.precision == rocfft_precision_double)
+    if(nodeData.data_rank() == 3 && nodeData.input_length(0) == special_case[0]
+       && nodeData.input_length(1) == special_case[1] && nodeData.input_length(2) == special_case[2]
+       && nodeData.get_precision() == rocfft_precision_double)
         return true;
 
     // x-dim should be >= the blockwidth, or it might perform worse..
-    if(nodeData.length[0] < kernel.transforms_per_block)
+    if(nodeData.input_length(0) < kernel.transforms_per_block)
         return false;
 
     // we don't want a too-large 3D block, sbcc along z-dim might be bad
-    if((nodeData.length[0] * nodeData.length[1] * nodeData.length[2]) >= (128 * 128 * 128))
+    if((nodeData.input_length(0) * nodeData.input_length(1) * nodeData.input_length(2))
+       >= (128 * 128 * 128))
         return false;
 
     if(childScheme == CS_2D_RTRT)
@@ -1066,36 +1087,24 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
 
 // Partial pass is currently restricted to unit stride, and non-planar array types.
 auto check_pp_restrictions = [](const NodeMetaData& nodeData) -> bool {
-    size_t checkiDist = 0, checkoDist = 0;
-
-    auto inputLength  = nodeData.length;
-    auto outputLength = nodeData.outputLength;
-
-    // real-to-complex iDist check is in real units,
-    // which is outputLength[0] * 2 * product of other lengths
-    if(nodeData.placement == rocfft_placement_inplace
-       && nodeData.inArrayType == rocfft_array_type_real)
+    const auto in_type  = nodeData.input_array_type();
+    const auto out_type = nodeData.output_array_type();
+    const auto inplace  = nodeData.placement == rocfft_placement_inplace;
+    // In-place real buffers reserve room for the extra Hermitian bin.
+    auto checkiDist = inplace && in_type == rocfft_array_type_real ? 2 * nodeData.output_length(0)
+                                                                   : nodeData.input_length(0);
+    auto checkoDist = inplace && out_type == rocfft_array_type_real ? 2 * nodeData.input_length(0)
+                                                                    : nodeData.output_length(0);
+    for(size_t axis = 1; axis < nodeData.data_rank(); ++axis)
     {
-        inputLength[0] = outputLength[0] * 2;
+        checkiDist *= nodeData.input_length(axis);
+        checkoDist *= nodeData.output_length(axis);
     }
-    checkiDist = product(inputLength.begin(), inputLength.end());
-
-    // complex-to-real oDist check is in real units,
-    // which is inputLength[0] * 2 * product of other lengths
-    if(nodeData.placement == rocfft_placement_inplace
-       && nodeData.outArrayType == rocfft_array_type_real)
-    {
-        outputLength[0] = inputLength[0] * 2;
-    }
-    checkoDist = product(outputLength.begin(), outputLength.end());
-
-    bool distCondition   = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
-    bool strideCondition = (nodeData.inStride.size() && nodeData.inStride[0] == 1)
-                           && (nodeData.outStride.size() && nodeData.outStride[0] == 1);
-    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar)
-                              && (nodeData.inArrayType != rocfft_array_type_hermitian_planar)
-                              && (nodeData.outArrayType != rocfft_array_type_complex_planar)
-                              && (nodeData.outArrayType != rocfft_array_type_hermitian_planar);
+    const bool distCondition
+        = nodeData.input_distance() == checkiDist && nodeData.output_distance() == checkoDist;
+    const bool strideCondition = nodeData.input_stride(0) == 1 && nodeData.output_stride(0) == 1;
+    const bool arrayTypeCondition
+        = !array_type_is_planar(in_type) && !array_type_is_planar(out_type);
 
     return (distCondition && strideCondition && arrayTypeCondition);
 };
@@ -1104,13 +1113,13 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
 {
     if(!pool.has_function(
 
-           PPFMKey(nodeData.length[0],
-                   nodeData.length[1],
-                   nodeData.length[2],
-                   nodeData.precision,
+           PPFMKey(nodeData.input_length(0),
+                   nodeData.input_length(1),
+                   nodeData.input_length(2),
+                   nodeData.get_precision(),
                    nodeData.rootTransformType,
                    CS_3D_PP),
-           nodeData.batch))
+           nodeData.batch_count()))
         return false;
 
     return check_pp_restrictions(nodeData);
@@ -1118,7 +1127,8 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
 
 bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
 {
-    const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
+    const auto& real
+        = nodeData.direction == -1 ? nodeData.input_layout() : nodeData.output_layout();
 
     const bool is_default_contiguous_layout
         = nodeData.is_using_default_contiguous_layout_for(io_data_label::INPUT)
@@ -1129,13 +1139,13 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
         return false;
 
     // Now check if we have the kernels for partial-pass
-    if(!pool.has_function(PPFMKey(realLength[0],
-                                  realLength[1],
-                                  realLength[2],
-                                  nodeData.precision,
+    if(!pool.has_function(PPFMKey(real.axis_span(0),
+                                  real.axis_span(1),
+                                  real.axis_span(2),
+                                  nodeData.get_precision(),
                                   nodeData.rootTransformType,
                                   CS_REAL_3D_PP),
-                          nodeData.batch))
+                          nodeData.batch_count()))
         return false;
 
     return check_pp_restrictions(nodeData);

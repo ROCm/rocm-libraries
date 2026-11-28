@@ -776,8 +776,8 @@ void EnumerateKernelConfigs(const ExecPlan& execPlan)
 
         size_t bench_ssn = 0;
         bool   check_dup = false;
-        bool   is_single = execPlan.rootPlan->precision == rocfft_precision_single;
-        size_t len       = curNode->length[0];
+        bool   is_single = execPlan.rootPlan->get_precision() == rocfft_precision_single;
+        size_t len       = curNode->input_length(0);
         bool   is_2D     = curNode->scheme == CS_KERNEL_2D_SINGLE;
         bool   is_sbcc   = curNode->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC;
         bool   is_sbrc   = curNode->scheme == CS_KERNEL_STOCKHAM_BLOCK_RC;
@@ -812,13 +812,13 @@ void EnumerateKernelConfigs(const ExecPlan& execPlan)
 
         // enumerate !
         auto kernel_configs = (is_2D)
-                                  ? Supported2DKernelConfigs(len, curNode->length[1], node_id)
+                                  ? Supported2DKernelConfigs(len, curNode->input_length(1), node_id)
                                   : SupportedKernelConfigs(
                                       len, node_id, is_single, is_sbcc, is_sbrc, is_sbcr, large1D);
         for(KernelConfig config : kernel_configs)
         {
             // We can set the ebType and direction here. But we still don't know static_dim, aryType,
-            // placement until buffer-assignment and collapse-dim. We'll get them later. (PowX.cpp)
+            // placement until buffer assignment and kernel-view preparation. We'll get them later.
             config.ebType    = execPlan.execSeq[node_id]->ebtype;
             config.direction = execPlan.execSeq[node_id]->direction;
 

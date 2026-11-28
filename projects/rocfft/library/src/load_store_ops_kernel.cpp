@@ -28,7 +28,7 @@ void StoreOps::append_args(RTCKernelArgs& kargs, TreeNode& node) const
 {
     if(scale_factor != 1.0)
     {
-        switch(node.precision)
+        switch(node.get_precision())
         {
         case rocfft_precision_single:
             kargs.append_float(scale_factor);

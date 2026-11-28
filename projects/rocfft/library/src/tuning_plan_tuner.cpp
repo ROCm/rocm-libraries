@@ -103,8 +103,7 @@ void EnumerateTrees(ExecPlan& execPlan)
 {
     std::string archName = get_arch_name(execPlan.deviceProp);
 
-    // NB:
-    //  Get Root's token before build tree. Since Real-Transform may modify the length.
+    // Capture the root's problem tokens before building its decomposition.
     std::string root_min_token, root_full_token;
     GetNodeToken(*execPlan.rootPlan, root_min_token, root_full_token);
 
@@ -117,9 +116,7 @@ void EnumerateTrees(ExecPlan& execPlan)
         if(not_supported_tuning_prob_schemes.count(execPlan.rootPlan->scheme) != 0)
             return;
 
-        assert(execPlan.rootPlan->length.size() == execPlan.rootPlan->dimension);
-        assert(execPlan.rootPlan->length.size() == execPlan.rootPlan->inStride.size());
-        assert(execPlan.rootPlan->length.size() == execPlan.rootPlan->outStride.size());
+        assert(execPlan.rootPlan->data_rank() == execPlan.rootPlan->length_rank());
 
         execPlan.rootPlan->CollectLeaves(execPlan.execSeq, execPlan.fuseShims);
 

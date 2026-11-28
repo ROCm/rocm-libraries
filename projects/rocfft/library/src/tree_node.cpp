@@ -82,16 +82,118 @@ TreeNode::~TreeNode()
     }
 }
 
-NodeMetaData::NodeMetaData(TreeNode* refNode)
+NodeLayouts::NodeLayouts(data_set_t input, data_set_t output)
+    : layouts{std::move(input), std::move(output)}
 {
-    if(refNode != nullptr)
+    if(!length_rank() || !input_layout().get_batch_rank()
+       || !input_layout().is_dimensionally_consistent_with(output_layout())
+       || !input_layout().same_batch_range(output_layout()))
+        throw std::invalid_argument("Incompatible input and output node axes");
+    if(!input_layout().has_precision() || !output_layout().has_precision()
+       || input_layout().get_precision() != output_layout().get_precision())
+        throw std::invalid_argument("Incompatible input and output node precision");
+}
+
+static size_t layout_index(io_data_label io)
+{
+    switch(io)
     {
-        precision         = refNode->precision;
-        batch             = refNode->batch;
+    case io_data_label::INPUT:
+        return 0;
+    case io_data_label::OUTPUT:
+        return 1;
+    default:
+        throw std::invalid_argument("Invalid node layout label");
+    }
+}
+
+const data_set_t& NodeLayouts::layout_for(io_data_label io) const
+{
+    return layouts[layout_index(io)];
+}
+
+data_set_t& NodeLayouts::mutable_layout_for(io_data_label io)
+{
+    return layouts[layout_index(io)];
+}
+
+NodeMetaData::NodeMetaData(data_set_t input, data_set_t output, TreeNode* refNode)
+    : NodeLayouts(std::move(input), std::move(output))
+{
+    if(refNode)
+    {
         direction         = refNode->direction;
         rootTransformType = refNode->GetRootPlanTransformType();
         deviceProp        = refNode->deviceProp;
     }
+}
+
+bool NodeMetaData::is_using_default_contiguous_layout_for(io_data_label io) const
+{
+    const auto& layout = layout_for(io);
+    size_t      stride = 1;
+    for(size_t axis = 0; axis < layout.get_full_rank(); ++axis)
+    {
+        if(layout.axis_span(axis) != 1 && layout.axis_stride(axis) != stride)
+            return false;
+        stride *= layout.axis_span(axis);
+    }
+    return true;
+}
+
+void TreeNode::reset_layout(io_data_label io, const data_set_t& layout)
+{
+    mutable_layout_for(io).reset_inbuffer(layout);
+}
+
+void TreeNode::set_strides(io_data_label io, std::span<const size_t> strides)
+{
+    mutable_layout_for(io).set_strides_and_distances(strides);
+}
+
+void TreeNode::set_strides(io_data_label io, const data_set_t& source)
+{
+    auto& layout = mutable_layout_for(io);
+    if(layout.get_full_rank() != source.get_full_rank())
+        throw std::invalid_argument("Wrong number of strides and distances for node");
+    for(size_t axis = 0; axis < layout.get_full_rank(); ++axis)
+        layout.set_axis_stride(axis, source.axis_stride(axis));
+}
+
+void TreeNode::set_axis_stride(io_data_label io, size_t axis, size_t stride)
+{
+    mutable_layout_for(io).set_axis_stride(axis, stride);
+}
+
+void TreeNode::set_array_type_and_offsets(io_data_label                io,
+                                          rocfft_array_type            type,
+                                          const std::array<size_t, 2>& offsets)
+{
+    mutable_layout_for(io).set_array_type_and_offsets(type, offsets);
+}
+
+void TreeNode::set_array_type(io_data_label io, rocfft_array_type type)
+{
+    auto&      layout = mutable_layout_for(io);
+    const auto first
+        = layout.get_offset(layout.num_planes() == 2 ? data_part::REAL : data_part::ALL);
+    const auto second = array_type_is_planar(type) && layout.num_planes() == 2
+                            ? layout.get_offset(data_part::IMAGINARY)
+                            : 0;
+    layout.set_array_type_and_offsets(type, {first, second});
+}
+
+data_set_t TreeNode::execution_layout_for(io_data_label io) const
+{
+    auto layout = layout_for(io);
+    if(inner_batch_layout)
+    {
+        const std::array<size_t, 2> order{1, 0};
+        layout.reorder_axes(order, axis_scope::batch_only);
+    }
+    if(input_preprocessed && io == io_data_label::INPUT)
+        return layout.with_axis_span(0, output_length(0) / 2);
+    return layout;
 }
 
 bool LeafNode::CreateLargeTwdTable()
@@ -99,7 +201,7 @@ bool LeafNode::CreateLargeTwdTable()
     if(large1D != 0)
     {
         std::tie(twiddles_large, twiddles_large_size)
-            = Repo::GetTwiddles1D(large1D, 0, precision, deviceProp, largeTwdBase, false, {});
+            = Repo::GetTwiddles1D(large1D, 0, get_precision(), deviceProp, largeTwdBase, false, {});
     }
 
     return true;
@@ -109,7 +211,7 @@ size_t LeafNode::GetTwiddleTableLength()
 {
     // length used by twiddle table is length[0] by default
     // could be override by some special schemes
-    return length[0];
+    return input_length(0);
 }
 
 FMKey LeafNode::GetKernelKey() const
@@ -218,9 +320,9 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
         kernel_keys.erase(kernel_keys.begin());
 
         // check if the assigned key is consistent with the node information
-        if((length[0] != assignedKey.lengths[0])
-           || (dimension == 2 && length[1] != assignedKey.lengths[1])
-           || (precision != assignedKey.precision) || (scheme != assignedKey.scheme)
+        if((input_length(0) != assignedKey.lengths[0])
+           || (length_rank() == 2 && input_length(1) != assignedKey.lengths[1])
+           || (get_precision() != assignedKey.precision) || (scheme != assignedKey.scheme)
            || (ebtype != assignedKey.kernel_config.ebType))
         {
             if(LOG_TRACE_ENABLED())
@@ -295,7 +397,7 @@ bool LeafNode::CreateDeviceResources()
     if(NeedsChirp())
     {
         std::tie(chirp, chirp_size)
-            = Repo::GetChirp(blue->get_transform_length(), precision, deviceProp);
+            = Repo::GetChirp(blue->get_transform_length(), get_precision(), deviceProp);
     }
 
     if(need_twd_table)
@@ -305,7 +407,7 @@ bool LeafNode::CreateDeviceResources()
         size_t twd_len                    = GetTwiddleTableLength();
         std::tie(twiddles, twiddles_size) = Repo::GetTwiddles1D(twd_len,
                                                                 GetTwiddleTableLengthLimit(),
-                                                                precision,
+                                                                get_precision(),
                                                                 deviceProp,
                                                                 0,
                                                                 twd_attach_halfN,
@@ -323,13 +425,13 @@ bool LeafNode::CreatePartialPassDeviceResources(size_t off_dim_length)
     std::tie(twiddles_off_dim, twiddles_off_dim_size)
         = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
                               GetTwiddleTableLengthLimit(),
-                              precision,
+                              get_precision(),
                               deviceProp,
                               0,
                               twd_attach_halfN,
                               kernelFactorsPP);
     std::tie(twiddles_pp, twiddles_pp_size)
-        = Repo::GetTwiddlesPP(off_dim_length, precision, deviceProp);
+        = Repo::GetTwiddlesPP(off_dim_length, get_precision(), deviceProp);
 
     return LeafNode::CreateDeviceResources();
 }
@@ -342,7 +444,7 @@ void LeafNode::SetupGridParam(GridParam& gp)
     auto key = GetKernelKey();
 
     // common: sum up the value;
-    gp.lds_bytes = lds * complex_type_size(precision);
+    gp.lds_bytes = lds * complex_type_size(get_precision());
     if(scheme == CS_KERNEL_STOCKHAM && ebtype == EmbeddedType::NONE)
     {
         if(pool.has_function(key))
@@ -443,27 +545,38 @@ void LeafNode::BuildKernelView()
     // Preserve the old division between kernel length axes and axes whose
     // transforms can be treated as batches. In particular, partial passes
     // and the multi-kernel fused Bluestein stages use fixed argument axes.
-    size_t length_rank = length.size();
+    size_t pinned_rank = data_rank();
     switch(scheme)
     {
     case CS_KERNEL_STOCKHAM:
     case CS_KERNEL_STOCKHAM_BLOCK_CC:
         if(GetBluesteinType() != BT_MULTI_KERNEL_FUSED)
-            length_rank = scheme == CS_KERNEL_STOCKHAM ? 1 : 2;
+            pinned_rank = scheme == CS_KERNEL_STOCKHAM ? 1 : 2;
         break;
     case CS_KERNEL_R_TO_CMPLX:
     case CS_KERNEL_R_TO_CMPLX_TRANSPOSE:
     case CS_KERNEL_CMPLX_TO_R:
     case CS_KERNEL_TRANSPOSE_CMPLX_TO_R:
-        length_rank = std::min(length_rank, dimension);
+        pinned_rank = std::min(pinned_rank, length_rank());
         break;
     default:
         break;
     }
 
-    const auto batch_rank = length.size() + 1 - length_rank;
-    std::array layouts{data_set_t::full_range(length, inStride, batch, iDist, batch_rank),
-                       data_set_t::full_range(outputLength, outStride, batch, oDist, batch_rank)};
+    const auto batch_rank = input_layout().get_full_rank() - pinned_rank;
+    const auto project    = [&](const data_set_t& source) {
+        data_set_t layout;
+        layout.len_axes.resize(pinned_rank);
+        layout.batch_axes.resize(batch_rank);
+        for(size_t axis = 0; axis < layout.get_full_rank(); ++axis)
+        {
+            // Distance-one CC uses the reverse order of its two batch axes.
+            const auto source_axis = inner_batch_layout && axis >= 1 ? 3 - axis : axis;
+            layout[axis] = {0, source.axis_span(source_axis), source.axis_stride(source_axis)};
+        }
+        return layout;
+    };
+    std::array layouts{project(input_layout()), project(output_layout())};
     auto& [in, out] = layouts;
     if(batch_rank > 1)
     {
@@ -473,8 +586,9 @@ void LeafNode::BuildKernelView()
             // AIFFT-591 preserved the old eligibility test for these fusions.
             // Only the spans (not the output strides) are temporarily permuted.
             std::array<size_t, 3> spans;
-            const auto            count = std::min(spans.size(), outputLength.size());
-            std::copy_n(outputLength.begin(), count, spans.begin());
+            const auto            count = std::min(spans.size(), data_rank());
+            for(size_t axis = 0; axis < count; ++axis)
+                spans[axis] = out.axis_span(axis);
             PermuteOutputAxes(legacyOutputOrder, {spans.data(), count});
             for(size_t axis = 0; axis < count; ++axis)
                 out[axis].upper = spans[axis];

@@ -50,6 +50,12 @@ enum class data_part
     IMAGINARY
 };
 
+enum class axis_scope
+{
+    length_only,
+    batch_only,
+};
+
 /**
  * @return `io_data_label::OUTPUT` for the argument value `io_data_label::INPUT` and vice versa.
  * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT`
@@ -215,6 +221,27 @@ struct data_set_t
      * @throw An `std::invalid_argument` is thrown if `part` does not suit the array type.
      */
     size_t get_offset(data_part part = data_part::ALL) const;
+
+    // Axis indices are flattened: length axes first, then batch axes.
+    size_t axis_span(size_t axis) const;
+    size_t axis_stride(size_t axis) const;
+    bool   same_logical_range(const data_set_t& other) const;
+    bool   same_batch_range(const data_set_t& other) const;
+
+    // Set in-buffer properties without changing logical ranges or the embedding.
+    void set_strides_and_distances(std::span<const size_t> values);
+    void set_axis_stride(size_t axis, size_t stride);
+    void reset_inbuffer(const data_set_t& other);
+
+    // Derive a new stage range or give a new stage its element type.
+    data_set_t with_axis_span(size_t axis, size_t span) const;
+    data_set_t with_element_type(rocfft_array_type            type,
+                                 rocfft_precision             precision,
+                                 const std::array<size_t, 2>& offsets = {0, 0}) const;
+
+    // Orders are relative to scope, and move spans, strides and embedding axes together.
+    std::vector<size_t> axes_by_increasing_inbuffer_strides(axis_scope scope) const;
+    void                reorder_axes(std::span<const size_t> order, axis_scope scope);
     /**
      * @return The spans of the logical index range along all its axes (length followed by batch axes).
      */
@@ -376,20 +403,50 @@ struct data_set_t
 
     /**
      * @param[in] new_array_type array type to be given to the returned object.
-     * @return A copy of this object relabeled with `new_array_type`. Only relabeling
-     * is supported, i.e., the array type must be unchanged or switch between the
-     * Hermitian and complex variants of the same format (interleaved or planar).
-     * The precision is never changed and the offsets are kept (allowed relabels never
-     * change the number of planes).
-     * @note Reinterpreting complex data as Hermitian asserts that the stored data is
-     * the non-redundant part of a Hermitian-symmetric whole (the data set this object
-     * describes or is part of), the rest being implied by the symmetry (e.g., after the
-     * last complex transform of a multi-dimensional real forward transform). This
-     * structure cannot verify it: that is the caller's responsibility.
+     * @return A copy of this object reinterpreted as `new_array_type`, describing
+     * the very same buffer bytes. The precision is never changed.
+     * - Between non-real array types of the same format (interleaved or planar), or
+     *   from real to real, this is a relabel: axes and offsets are kept.
+     * - From real to interleaved complex/Hermitian: the bounds of length axis 0 are
+     *   halved (its stride stays 1), all other strides and distances and the offset
+     *   are halved, i.e., real element `2k` (resp. `2k + 1`) is the real (resp.
+     *   imaginary) part of complex element `k`.
+     * - From interleaved complex/Hermitian to real: the reverse, i.e., the bounds
+     *   of length axis 0, all other strides and distances and the offset are doubled.
+     * - From real to planar complex/Hermitian: with stride `s` along length axis 0
+     *   and offset `o`, the bounds of length axis 0 are halved, its stride becomes
+     *   `2s` and the offsets become `{o, o + s}`; nothing else changes, i.e., real
+     *   element `2k` (resp. `2k + 1`) is element `k` of the real (resp. imaginary) part.
+     * - From planar complex/Hermitian to real: the reverse, i.e., the bounds of
+     *   length axis 0 are doubled, its stride is halved and the offset becomes
+     *   `get_offset(data_part::REAL)`.
+     *
+     * @note A planar object obtained from real data describes two planes within
+     * the real data's buffer: callers must give both planes that same buffer.
+     * Likewise, reinterpreting planar data as real data is only meaningful if both
+     * planes lie in the same buffer, which this function cannot verify.
+     *
+     * Embedded objects are supported iff their length axis 0 is the embedding data
+     * set's length axis 0: the embedding map is kept and `get_embedding_data_set()`
+     * of the result is the reinterpreted `get_embedding_data_set()` of this object
+     * (up to the complex counterpart of a Hermitian array type, see
+     * `get_embedding_data_set`).
+     * @note Reinterpreting complex (or real) data as Hermitian asserts that the stored
+     * data is the non-redundant part of a Hermitian-symmetric whole (the data set this
+     * object describes or is part of), the rest being implied by the symmetry (e.g.,
+     * after the last complex transform of a multi-dimensional real forward transform).
+     * This structure cannot verify it: that is the caller's responsibility.
      * @throw An `std::invalid_argument` is thrown if this object's array type or
-     * `new_array_type` is unset, or if the request switches between interleaved and
-     * planar formats. An `std::logic_error` is thrown for requests between real and
-     * complex/Hermitian array types (not implemented yet).
+     * `new_array_type` is unset, if the request switches between interleaved and
+     * planar formats, or, for requests between real and complex/Hermitian array
+     * types, if this object is embedded with a length axis 0 that is not the
+     * embedding's, or if:
+     * - (real to complex/Hermitian) any bound of length axis 0 is odd;
+     * - (real and interleaved) the stride of length axis 0 is not 1, or (from
+     *   real only) any other stride or distance, or the offset is odd;
+     * - (planar to real) the stride of length axis 0 is odd or
+     *   `get_offset(data_part::IMAGINARY) != get_offset(data_part::REAL) + stride / 2`
+     *   for that stride.
      */
     data_set_t reinterpret_as(rocfft_array_type new_array_type) const;
 
@@ -633,6 +690,40 @@ struct data_set_t
      */
     bool is_embedded() const;
 
+    /**
+     * @brief Splits a length axis into two length axes describing the same data.
+     *
+     * Length axis `dim`, of logical range [lower, upper) and in-buffer stride `s`, is
+     * replaced by an inner length axis of full range [0, factor) and stride `s` (at
+     * index `dim`) followed by an outer length axis of range [lower / factor,
+     * upper / factor) and stride `factor * s` (at index `dim + 1`); former length axes
+     * of index `> dim` are shifted by one. Logical coordinate `i` along `dim` maps to
+     * `(i % factor, i / factor)` so every element keeps its in-buffer offset. Batch
+     * axes are unchanged. If this object is embedded, the corresponding axis of the
+     * embedding data set is split alike, i.e., the returned object's embedding layout
+     * is the current embedding layout split along its corresponding axis.
+     *
+     * @param[in] dim index of the length axis to split.
+     * @param[in] factor span of the inner axis. If omitted, the divisor of the logical
+     * span `L = upper - lower` closest to `sqrt(L)` is used, ties going to the smaller
+     * one (equivalently, the largest divisor `d` of `L` such that `d * d <= L`).
+     * @return The split data set.
+     *
+     * @note A partial range along `dim` is representable after the split iff `lower`
+     * and `upper` are both multiples of `factor`.
+     *
+     * @throw An `std::invalid_argument` is thrown if any of the following is detected:
+     *
+     * - `dim` is not smaller than `get_len_rank()`;
+     *
+     * - `factor` is omitted and `L` has no divisor other than 1 and `L` (`L` is 0, 1 or prime);
+     *
+     * - `factor` is 1, not smaller than `L`, or does not divide `L`;
+     *
+     * - `lower` (hence `upper`) is not a multiple of `factor`.
+     */
+    data_set_t split_length_axis(size_t dim, std::optional<size_t> factor = std::nullopt) const;
+
     //-------------------------------------------------------------------------
     //                        DEFAULT COPIES AND MOVES
     //-------------------------------------------------------------------------
@@ -836,7 +927,8 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
-    // LeafNode builds its kernel-only layouts from legacy length/stride members.
+    friend class TreeNode;
+    // Kernel geometry uses an independent descriptor with ABI-specific ranks.
     friend class LeafNode;
     // rocfft-internal-test drives private members directly (see tests/data_set_test_access.h),
     // e.g., reorder_length_axes, or setting array types and precisions as friends do.

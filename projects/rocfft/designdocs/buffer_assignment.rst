@@ -105,6 +105,20 @@ successful, we retry with a second temp buffer.
 Implementation
 ==============
 
+Each planner node owns an input and an output data set. The child
+builders choose the logical length and batch ranges before buffer
+assignment. These ranges remain fixed; assignment and padding can
+change strides, array types, and buffer offsets. Input and output
+share the order and ranges of their batch axes, even when a stage
+changes the length of a transform axis.
+
+The initial stride assignment provides provisional layouts for the
+buffer-fit checks. Winning candidates reassign those strides to match
+their chosen buffers, and padding adjusts temporary-buffer strides
+after fusion. The leaf kernel view is prepared from that final layout
+without changing the logical ranges. Execution applies each plane's
+offset to its own buffer pointer.
+
 A structure storing a try
 -------------------------
 
@@ -202,7 +216,7 @@ The exhaustive search is implemented in pseudocode like:
    - add OB_TEMP_BLUESTEIN to availableBuffers set, if plan uses Bluestein
    - initialize a winnerCandidates list to save all valid results.
    - initialize a dummyRoot of PlacementTrace as tree root, this dummyRoot pretends it's a parent of the first node (in execSeq).
-     So dummyRoot.outBuf = rootPlan->obIn, and dummyRoot.oType = rootPlan->inArrayType
+     So dummyRoot.outBuf = rootPlan->obIn, and dummyRoot.oType = rootPlan->input_array_type()
 
    // The 1st round try
    - call Enumerate(&dummyRoot, execPlan, 0, dummyRoot.outBuf, dummyRoot.oType)

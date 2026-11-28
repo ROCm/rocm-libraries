@@ -39,8 +39,9 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
        && node.scheme != CS_KERNEL_TRANSPOSE_Z_XY)
         return generator;
 
-    unsigned int tileX = node.precision == rocfft_precision_single ? 64 : 32;
-    unsigned int tileY = node.precision == rocfft_precision_single ? 16 : 32;
+    const auto   precision = node.get_precision();
+    unsigned int tileX     = precision == rocfft_precision_single ? 64 : 32;
+    unsigned int tileY     = precision == rocfft_precision_single ? 16 : 32;
 
     // grid Y counts rows on dims Y+Z, sliced into tiles of tileX.
     // grid Z counts any dims beyond Y+Z, plus batch
@@ -99,9 +100,9 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
                          tileX,
                          tileY,
                          length.size(),
-                         node.precision,
-                         node.inArrayType,
-                         node.outArrayType,
+                         precision,
+                         node.input_array_type(),
+                         node.output_array_type(),
                          largeTwdSteps,
                          node.direction,
                          diagonal,
@@ -131,10 +132,10 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs = make_launch_args();
     const auto&   view  = data.node->GetKernelView();
     kargs.append_ptr(data.bufIn[0]);
-    if(array_type_is_planar(data.node->inArrayType))
+    if(array_type_is_planar(data.node->input_array_type()))
         kargs.append_ptr(data.bufIn[1]);
     kargs.append_ptr(data.bufOut[0]);
-    if(array_type_is_planar(data.node->outArrayType))
+    if(array_type_is_planar(data.node->output_array_type()))
         kargs.append_ptr(data.bufOut[1]);
     kargs.append_ptr(data.node->twiddles_large);
 
@@ -165,7 +166,7 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     kargs.append_kint(view.oDist);
 
     // pass gridX, gridY and gridZ to restore a 3-D GPU grid, if needed for large grids
-    unsigned int tileX     = data.node->precision == rocfft_precision_single ? 64 : 32;
+    unsigned int tileX     = data.node->get_precision() == rocfft_precision_single ? 64 : 32;
     unsigned int gridYrows = lengths[1] * (num_lengths > 2 ? lengths[2] : 1);
     auto         highdim   = std::min<size_t>(num_lengths, 3);
 

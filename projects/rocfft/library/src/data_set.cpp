@@ -243,6 +243,75 @@ size_t data_set_t::get_offset(data_part part) const
     return offsets[part == data_part::IMAGINARY ? 1 : 0];
 }
 
+size_t data_set_t::axis_span(size_t axis) const
+{
+    return (*this)[axis].logical_span();
+}
+
+size_t data_set_t::axis_stride(size_t axis) const
+{
+    return (*this)[axis].inbuffer_stride;
+}
+
+bool data_set_t::same_batch_range(const data_set_t& other) const
+{
+    return std::equal(batch_axes.begin(),
+                      batch_axes.end(),
+                      other.batch_axes.begin(),
+                      other.batch_axes.end(),
+                      [](const auto& a, const auto& b) { return a.has_same_logical_range_as(b); });
+}
+
+bool data_set_t::same_logical_range(const data_set_t& other) const
+{
+    return same_batch_range(other)
+           && std::equal(
+               len_axes.begin(),
+               len_axes.end(),
+               other.len_axes.begin(),
+               other.len_axes.end(),
+               [](const auto& a, const auto& b) { return a.has_same_logical_range_as(b); });
+}
+
+void data_set_t::set_strides_and_distances(std::span<const size_t> values)
+{
+    if(values.size() != get_full_rank())
+        throw std::invalid_argument("Wrong number of strides and distances");
+    for(size_t i = 0; i < values.size(); ++i)
+        (*this)[i].inbuffer_stride = values[i];
+}
+
+void data_set_t::set_axis_stride(size_t axis, size_t stride)
+{
+    (*this)[axis].inbuffer_stride = stride;
+}
+
+void data_set_t::reset_inbuffer(const data_set_t& other)
+{
+    if(!same_logical_range(other))
+        throw std::invalid_argument("Cannot change the logical range of a data set");
+    for(size_t i = 0; i < get_full_rank(); ++i)
+        (*this)[i].inbuffer_stride = other.axis_stride(i);
+    set_array_type_and_offsets(other.array_type, other.offsets);
+}
+
+data_set_t data_set_t::with_axis_span(size_t axis, size_t span) const
+{
+    auto result        = *this;
+    result[axis].upper = result[axis].lower + span;
+    return result;
+}
+
+data_set_t data_set_t::with_element_type(rocfft_array_type            type,
+                                         rocfft_precision             p,
+                                         const std::array<size_t, 2>& new_offsets) const
+{
+    auto result = *this;
+    result.set_array_type_and_offsets(type, new_offsets);
+    result.set_precision(p);
+    return result;
+}
+
 std::vector<size_t> data_set_t::lengths_and_batches() const
 {
     std::vector<size_t> ret(get_full_rank());
@@ -431,16 +500,83 @@ data_set_t data_set_t::reinterpret_as(rocfft_array_type new_array_type) const
 {
     if(array_type == rocfft_array_type_unset || new_array_type == rocfft_array_type_unset)
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " requires set array types.");
-    if(array_type_is_real(array_type) != array_type_is_real(new_array_type))
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + ": reinterpreting real data as complex data (or vice versa)"
-                                 " is not implemented yet.");
-    if(!same_format_up_to_hermitian(array_type, new_array_type))
+    if(array_type_is_real(array_type) == array_type_is_real(new_array_type))
+    {
+        if(!same_format_up_to_hermitian(array_type, new_array_type))
+            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                        + " cannot switch between interleaved and planar formats.");
+        // allowed relabels keep the number of planes, hence the offsets
+        auto ret = *this;
+        ret.set_array_type_and_offsets(new_array_type, offsets);
+        return ret;
+    }
+
+    const bool to_complex = array_type_is_real(array_type);
+    // real <-> complex/hermitian: length axis 0 is split/merged, so it must be the
+    // embedding's length axis 0 for get_embedding_data_set() to commute with this
+    if(embedding && (*embedding)[0] != 0)
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                    + " cannot switch between interleaved and planar formats.");
-    // allowed relabels keep the number of planes, hence the offsets
-    auto ret = *this;
-    ret.set_array_type_and_offsets(new_array_type, offsets);
+                                    + " requires length axis 0 of an embedded data set to be"
+                                      " the embedding's length axis 0.");
+
+    if(array_type_is_planar(to_complex ? new_array_type : array_type))
+    {
+        // Real elements 2k and 2k + 1 are element k in planes 0 and 1, respectively.
+        // Other strides and distances stay in real-element units.
+        auto ret = *this;
+        if(to_complex)
+        {
+            if(len_axes[0].lower % 2 != 0 || len_axes[0].upper % 2 != 0)
+                throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                            + " requires even bounds along length axis 0 to"
+                                              " reinterpret real data as planar data.");
+            ret.len_axes[0].lower /= 2;
+            ret.len_axes[0].upper /= 2;
+            ret.len_axes[0].inbuffer_stride *= 2;
+            ret.set_array_type_and_offsets(new_array_type,
+                                           {offsets[0], offsets[0] + len_axes[0].inbuffer_stride});
+        }
+        else
+        {
+            if(len_axes[0].inbuffer_stride % 2 != 0
+               || offsets[1] != offsets[0] + len_axes[0].inbuffer_stride / 2)
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + " requires an even stride along length axis 0 and planes offset by half of"
+                      " it to reinterpret planar data as real data.");
+            ret.len_axes[0].lower *= 2;
+            ret.len_axes[0].upper *= 2;
+            ret.len_axes[0].inbuffer_stride /= 2;
+            ret.set_array_type_and_offsets(new_array_type, {offsets[0], 0});
+        }
+        return ret;
+    }
+
+    // real element 2k (resp. 2k + 1) is the real (resp. imaginary) part of complex
+    // element k: positions in real units are twice the positions in complex units
+    if(len_axes[0].inbuffer_stride != 1)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires a unit stride along length axis 0 to"
+                                      " reinterpret between real and interleaved data.");
+    if(to_complex)
+    {
+        bool all_even
+            = len_axes[0].lower % 2 == 0 && len_axes[0].upper % 2 == 0 && offsets[0] % 2 == 0;
+        for(size_t dim = 1; dim < get_full_rank(); dim++)
+            all_even &= (*this)[dim].inbuffer_stride % 2 == 0;
+        if(!all_even)
+            throw std::invalid_argument(
+                ROCFFT_CURRENT_FUNCTION
+                + " requires even bounds along length axis 0 and even other strides,"
+                  " distances and offset to reinterpret real data as interleaved data.");
+    }
+    const auto convert    = [to_complex](size_t x) { return to_complex ? x / 2 : 2 * x; };
+    auto       ret        = *this;
+    ret.len_axes[0].lower = convert(len_axes[0].lower);
+    ret.len_axes[0].upper = convert(len_axes[0].upper);
+    for(size_t dim = 1; dim < get_full_rank(); dim++)
+        ret[dim].inbuffer_stride = convert((*this)[dim].inbuffer_stride);
+    ret.set_array_type_and_offsets(new_array_type, {convert(offsets[0]), 0});
     return ret;
 }
 
@@ -658,34 +794,49 @@ std::vector<size_t> data_set_t::length_axes_by_increasing_strides(bool pin_inner
 
 void data_set_t::reorder_length_axes(const std::vector<size_t>& len_axis_order)
 {
-    std::vector<size_t> current_order(get_len_rank(), 0);
-    std::iota(current_order.begin(), current_order.end(), 0);
-    if(!std::is_permutation(len_axis_order.begin(),
-                            len_axis_order.end(),
-                            current_order.begin(),
-                            current_order.end()))
-    {
-        throw std::invalid_argument("Invalid re-ordering of length axes requested to "
-                                    + ROCFFT_CURRENT_FUNCTION);
-    }
-    if(current_order != len_axis_order) // nothing to do otherwise
-    {
-        const auto len_axis_copy = len_axes;
-        for(size_t dim = 0; dim < get_len_rank(); dim++)
-            len_axes[dim] = len_axis_copy[len_axis_order[dim]];
+    reorder_axes(len_axis_order, axis_scope::length_only);
+}
 
-        if(embedding)
-        {
-            // Update map according to new order
-            for(auto& axis_idx : *embedding)
-            {
-                if(axis_idx >= get_len_rank())
-                    continue; // batch axes are unmodified herein
-                axis_idx = std::distance(
-                    len_axis_order.begin(),
-                    std::find(len_axis_order.begin(), len_axis_order.end(), axis_idx));
-            }
-        }
+std::vector<size_t> data_set_t::axes_by_increasing_inbuffer_strides(axis_scope scope) const
+{
+    const auto&         axes = scope == axis_scope::length_only ? len_axes : batch_axes;
+    std::vector<size_t> order(axes.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return std::tie(axes[a].inbuffer_stride, a) < std::tie(axes[b].inbuffer_stride, b);
+    });
+    return order;
+}
+
+void data_set_t::reorder_axes(std::span<const size_t> order, axis_scope scope)
+{
+    const bool length = scope == axis_scope::length_only;
+    auto&      axes   = length ? len_axes : batch_axes;
+    if(order.size() != axes.size())
+        throw std::invalid_argument("Wrong number of axes to reorder");
+    bool identity = true;
+    for(size_t i = 0; i < order.size(); ++i)
+    {
+        if(order[i] >= order.size()
+           || std::find(order.begin(), order.begin() + i, order[i]) != order.begin() + i)
+            throw std::invalid_argument("Invalid axis permutation");
+        identity &= order[i] == i;
+    }
+    if(identity)
+        return;
+
+    const auto old = axes;
+    for(size_t i = 0; i < order.size(); ++i)
+        axes[i] = old[order[i]];
+
+    if(embedding)
+    {
+        const size_t first = length ? 0 : get_len_rank();
+        for(auto& axis : *embedding)
+            if(axis >= first && axis - first < order.size())
+                axis = first
+                       + std::distance(order.begin(),
+                                       std::find(order.begin(), order.end(), axis - first));
     }
 }
 
@@ -1066,5 +1217,54 @@ std::vector<size_t> data_set_t::corresponding_axes_in_embedding() const
         ret.push_back(std::distance(embedding->begin(),
                                     std::find(embedding->begin(), embedding->end(), len_idx)));
 
+    return ret;
+}
+
+data_set_t data_set_t::split_length_axis(size_t dim, std::optional<size_t> factor) const
+{
+    if(dim >= get_len_rank())
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " got length axis index "
+                                    + std::to_string(dim) + " for a layout of "
+                                    + std::to_string(get_len_rank()) + " length axes.");
+    const auto& axis = len_axes[dim];
+    const auto  span = axis.logical_span();
+    if(!factor)
+    {
+        // the largest divisor d with d * d <= span is the one closest to sqrt(span)
+        factor = 1;
+        for(size_t d = 2; d * d <= span; d++)
+            if(span % d == 0)
+                factor = d;
+        if(*factor == 1)
+            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " found no non-trivial factor of "
+                                        + std::to_string(span) + " (length axis "
+                                        + std::to_string(dim) + ").");
+    }
+    if(*factor <= 1 || *factor >= span || span % *factor != 0)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + ": " + std::to_string(*factor)
+                                    + " is not a non-trivial factor of " + std::to_string(span)
+                                    + " (length axis " + std::to_string(dim) + ").");
+    if(axis.lower % *factor != 0)
+        throw std::invalid_argument(
+            ROCFFT_CURRENT_FUNCTION + ": partial range [" + std::to_string(axis.lower) + ", "
+            + std::to_string(axis.upper) + ") along length axis " + std::to_string(dim)
+            + " is not aligned on multiples of " + std::to_string(*factor) + ".");
+
+    data_set_t ret    = *this;
+    ret.len_axes[dim] = axis_t{0, *factor, axis.inbuffer_stride};
+    ret.len_axes.insert(
+        ret.len_axes.begin() + dim + 1,
+        axis_t{axis.lower / *factor, axis.upper / *factor, *factor * axis.inbuffer_stride});
+    if(embedding)
+    {
+        // flattened axis indices past dim shift by one; dim's embedding axis is split alike
+        ret.embedding->clear();
+        for(const auto axis_idx : *embedding)
+        {
+            ret.embedding->push_back(axis_idx > dim ? axis_idx + 1 : axis_idx);
+            if(axis_idx == dim)
+                ret.embedding->push_back(dim + 1);
+        }
+    }
     return ret;
 }

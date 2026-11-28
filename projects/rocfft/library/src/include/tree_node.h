@@ -434,50 +434,98 @@ private:
     std::vector<std::shared_ptr<InternalTempBuffer>> buffers;
 };
 
-// The mininal tree node data needed to decide the scheme
-struct NodeMetaData
+// The input and output ranges are established together at construction. The
+// transform may change length spans, but batch coordinates identify the same
+// independent transform on both sides.
+class NodeLayouts
 {
-    size_t                  batch     = 1;
-    size_t                  dimension = 1;
-    std::vector<size_t>     length;
-    std::vector<size_t>     outputLength;
-    std::vector<size_t>     inStride, outStride;
-    size_t                  iDist = 0, oDist = 0;
-    size_t                  iOffset = 0, oOffset = 0;
+public:
+    NodeLayouts(data_set_t input, data_set_t output);
+
+    const data_set_t& input_layout() const
+    {
+        return layouts[0];
+    }
+    const data_set_t& output_layout() const
+    {
+        return layouts[1];
+    }
+    const data_set_t& layout_for(io_data_label io) const;
+
+    size_t length_rank() const
+    {
+        return input_layout().get_len_rank();
+    }
+    // Axis count before the outermost batch, which is a separate ABI argument.
+    size_t data_rank() const
+    {
+        return input_layout().get_full_rank() - 1;
+    }
+    size_t batch_count() const
+    {
+        return input_length(data_rank());
+    }
+    size_t input_length(size_t axis) const
+    {
+        return input_layout().axis_span(axis);
+    }
+    size_t output_length(size_t axis) const
+    {
+        return output_layout().axis_span(axis);
+    }
+    size_t input_stride(size_t axis) const
+    {
+        return input_layout().axis_stride(axis);
+    }
+    size_t output_stride(size_t axis) const
+    {
+        return output_layout().axis_stride(axis);
+    }
+    size_t input_distance() const
+    {
+        return input_stride(data_rank());
+    }
+    size_t output_distance() const
+    {
+        return output_stride(data_rank());
+    }
+    rocfft_precision get_precision() const
+    {
+        return input_layout().get_precision();
+    }
+    rocfft_array_type input_array_type() const
+    {
+        return input_layout().has_array_type() ? input_layout().get_array_type()
+                                               : rocfft_array_type_unset;
+    }
+    rocfft_array_type output_array_type() const
+    {
+        return output_layout().has_array_type() ? output_layout().get_array_type()
+                                                : rocfft_array_type_unset;
+    }
+
+protected:
+    NodeLayouts(const NodeLayouts&) = default;
+    NodeLayouts(NodeLayouts&&)      = default;
+    data_set_t& mutable_layout_for(io_data_label io);
+
+private:
+    std::array<data_set_t, 2> layouts;
+};
+
+// The minimal tree node data needed to decide the scheme.
+struct NodeMetaData : public NodeLayouts
+{
+    size_t                  length_factor     = 0;
     int                     direction         = -1;
     rocfft_result_placement placement         = rocfft_placement_inplace;
-    rocfft_precision        precision         = rocfft_precision_single;
-    rocfft_array_type       inArrayType       = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType      = rocfft_array_type_unset;
     rocfft_transform_type   rootTransformType = rocfft_transform_type_complex_forward;
     hipDeviceProp_t         deviceProp        = {};
     BufferPtr               input_buffer, output_buffer;
 
-    // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
-    // `outStride`, `iDist`, and `oDist` could (and should) be replaced
-    // by two data_set_t member objects instead.
-    inline data_set_t layout_for(io_data_label io) const
-    {
-        switch(io)
-        {
-        case io_data_label::INPUT:
-            return data_set_t::full_range(length, inStride, batch, iDist);
-        case io_data_label::OUTPUT:
-            return data_set_t::full_range(outputLength, outStride, batch, oDist);
-        default:
-            throw std::invalid_argument("Unknown io data label given to "
-                                        + ROCFFT_CURRENT_FUNCTION);
-        }
-    };
+    bool is_using_default_contiguous_layout_for(io_data_label io) const;
 
-    inline bool is_using_default_contiguous_layout_for(io_data_label io) const
-    {
-        return layout_for(io)
-               == data_set_t::default_full_range(io == io_data_label::INPUT ? length : outputLength,
-                                                 batch);
-    };
-
-    explicit NodeMetaData(TreeNode* refNode);
+    NodeMetaData(data_set_t input, data_set_t output, TreeNode* refNode);
 };
 
 class rocfft_ostream;
@@ -542,22 +590,19 @@ public:
     virtual std::unique_ptr<TreeNode> FuseKernels() = 0;
 };
 
-class TreeNode
+class TreeNode : public NodeLayouts
 {
     friend class NodeFactory;
 
 protected:
-    TreeNode(TreeNode* p)
-        : parent(p)
+    TreeNode(TreeNode* p, NodeLayouts&& layouts)
+        : NodeLayouts(std::move(layouts))
+        , parent(p)
         , deviceProp(p ? p->deviceProp : get_curr_device_prop())
         , pool(deviceProp)
     {
         if(p != nullptr)
-        {
-            precision = p->precision;
-            batch     = p->batch;
             direction = p->direction;
-        }
 
         allowedOutBuf
             = OB_USER_IN | OB_USER_OUT | OB_TEMP | OB_TEMP_CMPLX_FOR_REAL | OB_TEMP_BLUESTEIN;
@@ -572,19 +617,14 @@ public:
     // node type: internal node or leaf node, or un-defined (un-init)
     NodeType nodeType = NT_UNDEFINED;
 
-    // Batch size
-    size_t batch = 1;
+    // Factor selected by the large 1D scheme heuristic, not a logical axis.
+    size_t length_factor = 0;
 
-    // Transform dimension - note this can be different from data dimension, user
-    // provided
-    size_t dimension = 1;
-
-    // Input and output have the same rank and axis order: length[i] and inStride[i]
-    // describe the same axis as outputLength[i] and outStride[i]. Both spans are
-    // always set once the node is built, but can differ in value (e.g. N vs N/2+1).
-    // Transpose changes only strides: an A x B transpose has [A, B] on both sides,
-    // with input strides [1, A] and output strides [B, 1].
-    std::vector<size_t> length, outputLength;
+    // A batch-interleaved L1D_CC leaf uses a different kernel traversal order.
+    bool inner_batch_layout = false;
+    // A fused predecessor has already performed the real-even input preparation.
+    bool       input_preprocessed = false;
+    data_set_t execution_layout_for(io_data_label io) const;
 
     // Preserve the packed output order used by legacy buffer-fit and collapse decisions.
     enum class OutputAxisOrder : uint8_t
@@ -595,12 +635,6 @@ public:
     };
     OutputAxisOrder legacyOutputOrder = OutputAxisOrder::IDENTITY;
     static void     PermuteOutputAxes(OutputAxisOrder order, std::span<size_t> axes);
-
-    // Stride of the FFT in each dimension
-    std::vector<size_t> inStride, outStride;
-
-    // Distance between consecutive batch members:
-    size_t iDist = 0, oDist = 0;
 
     // Encapsulation of Bluestein-specific additional members (stored as an
     // optional instance in TreeNode object, valued only for nodes involved
@@ -710,17 +744,11 @@ public:
     // FFT sub-plans (and their descendants) carry it only in the fused strategy.
     std::optional<BluesteinParams> blue;
 
-    // Offsets to start of data in buffer:
-    size_t iOffset = 0, oOffset = 0;
-
     // Direction of the transform (-1: forward, +1: inverse)
     int direction = -1;
 
     // Data format parameters:
-    rocfft_result_placement placement    = rocfft_placement_inplace;
-    rocfft_precision        precision    = rocfft_precision_single;
-    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType = rocfft_array_type_unset;
+    rocfft_result_placement placement = rocfft_placement_inplace;
 
     // Extra twiddle multiplication for large 1D
     size_t large1D = 0;
@@ -828,11 +856,16 @@ public:
     // Disallow assignment operator:
     TreeNode& operator=(const TreeNode&) = delete;
 
-    // Copy data from another node (to a fused node)
-    void CopyNodeData(const TreeNode& srcNode);
+    void CopyNodeAttributes(const TreeNode& srcNode);
 
-    // Copy data from the NodeMetaData (after deciding scheme)
-    void CopyNodeData(const NodeMetaData& data);
+    void reset_layout(io_data_label io, const data_set_t& layout);
+    void set_strides(io_data_label io, std::span<const size_t> strides);
+    void set_strides(io_data_label io, const data_set_t& layout);
+    void set_axis_stride(io_data_label io, size_t axis, size_t stride);
+    void set_array_type(io_data_label io, rocfft_array_type type);
+    void set_array_type_and_offsets(io_data_label                io,
+                                    rocfft_array_type            type,
+                                    const std::array<size_t, 2>& offsets);
 
     bool isPlacementAllowed(rocfft_result_placement) const;
     bool isOutBufAllowed(OperatingBuffer oB) const;
@@ -928,20 +961,20 @@ public:
     bool IsRootPlanC2CTransform() const
     {
         auto root = GetPlanRoot();
-        return (root->inArrayType != rocfft_array_type_real)
-               && (root->outArrayType != rocfft_array_type_real);
+        return (root->input_array_type() != rocfft_array_type_real)
+               && (root->output_array_type() != rocfft_array_type_real);
     }
     bool IsRootPlanR2CTransform() const
     {
         auto root = GetPlanRoot();
-        return (root->inArrayType == rocfft_array_type_real)
-               && (root->outArrayType != rocfft_array_type_real);
+        return (root->input_array_type() == rocfft_array_type_real)
+               && (root->output_array_type() != rocfft_array_type_real);
     }
     bool IsRootPlanC2RTransform() const
     {
         auto root = GetPlanRoot();
-        return (root->inArrayType != rocfft_array_type_real)
-               && (root->outArrayType == rocfft_array_type_real);
+        return (root->input_array_type() != rocfft_array_type_real)
+               && (root->output_array_type() == rocfft_array_type_real);
     }
 
     // Return the transform type of the root plan.
@@ -976,7 +1009,7 @@ public:
             return axis < 3 ? (axis + 2) % 3 : axis;
         case CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY:
             // ERC can use a 3D kernel on a 2D layout.
-            if(length.size() == 2)
+            if(data_rank() == 2)
                 return axis < 2 ? 1 - axis : axis;
             [[fallthrough]];
         case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
@@ -1005,8 +1038,9 @@ public:
         if(specified_key)
             return *specified_key.get();
 
-        return (dimension == 1) ? FMKey(length[0], precision, scheme)
-                                : FMKey(length[0], length[1], precision, scheme);
+        return length_rank() == 1
+                   ? FMKey(input_length(0), get_precision(), scheme)
+                   : FMKey(input_length(0), input_length(1), get_precision(), scheme);
     }
 
     // Partial pass parent nodes, e.g., CS_3D_PP or CS_REAL_3D_PP, have
@@ -1023,16 +1057,16 @@ public:
             throw std::runtime_error("Invalid parent node for partial pass");
 
         auto transform_type = GetRootPlanTransformType();
-        auto parent_length  = pp_parent_node->length;
+        auto length0        = pp_parent_node->input_length(0);
 
         // For c2r we want the real length, not the complex length for querying the function pool
         if(transform_type == rocfft_transform_type_real_inverse)
-            parent_length[0] = (parent_length[0] - 1) * 2;
+            length0 = (length0 - 1) * 2;
 
-        return PPFMKey(parent_length[0],
-                       parent_length[1],
-                       parent_length[2],
-                       precision,
+        return PPFMKey(length0,
+                       pp_parent_node->input_length(1),
+                       pp_parent_node->input_length(2),
+                       get_precision(),
                        transform_type,
                        pp_parent_node->scheme);
     }
@@ -1044,7 +1078,7 @@ public:
         if(isPartialPassEnabled())
         {
             auto key = GetPPKernelsKey();
-            return pool.get_kernel(key, scheme, batch);
+            return pool.get_kernel(key, scheme, batch_count());
         }
         else
         {
@@ -1060,7 +1094,7 @@ public:
         if(isPartialPassEnabled())
         {
             auto key = GetPPKernelsKey();
-            if(!pool.has_function(key, batch))
+            if(!pool.has_function(key, batch_count()))
             {
                 if(LOG_TRACE_ENABLED())
                     (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
@@ -1120,8 +1154,8 @@ class InternalNode : public TreeNode
     friend class NodeFactory;
 
 protected:
-    explicit InternalNode(TreeNode* p)
-        : TreeNode(p)
+    InternalNode(TreeNode* p, NodeLayouts&& layouts)
+        : TreeNode(p, std::move(layouts))
     {
         nodeType = NT_INTERNAL;
     }
@@ -1155,8 +1189,8 @@ class LeafNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    LeafNode(TreeNode* p, ComputeScheme s)
-        : InternalNode(p)
+    LeafNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         nodeType = NT_LEAF;
         scheme   = s;
@@ -1232,8 +1266,8 @@ class TransposeNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    TransposeNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    TransposeNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         allowInplace      = false;
         legacyOutputOrder = PackedOutputOrder(s);
@@ -2017,9 +2051,6 @@ struct ExecPlan : public MultiPlanItem
     std::vector<GridParam> gridParam;
 
     hipDeviceProp_t deviceProp;
-
-    std::vector<size_t> iLength;
-    std::vector<size_t> oLength;
 
     // Indicates whether this is a standalone chirp plan
     // in multi-kernel Bluestein implementations (buffers
