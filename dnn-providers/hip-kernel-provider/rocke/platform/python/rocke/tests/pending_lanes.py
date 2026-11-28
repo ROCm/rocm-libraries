@@ -184,6 +184,11 @@ _BACKWARD_UNRECORDED_SKIPS = (
     "it joins rocke_library_attention_bwd_cpu_pytest once those cases are "
     "removed or recorded"
 )
+_BACKWARD_DEVICE_CASES = (
+    "its device cases need a GPU: rocke_library_attention_bwd_cpu_pytest deselects "
+    "them (-m 'not gpu'), and the attention backward gfx942 GPU entry is not "
+    "registered yet"
+)
 _BACKWARD_SOURCE_LAYOUT = (
     "it checks the backward compile cache, whose source roots and source hash "
     "assume the source tree (platform/python/rocke beside library/kernels): in "
@@ -778,6 +783,63 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_lse_store_numeric.py",
         whole_file=True,
     ),
+    *_waiting_tests(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_CASES,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_addr.py",
+        "test_probe_on_device_matches_numpy",
+    ),
+    *_waiting_tests(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_CASES,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_band.py",
+        "test_probe_on_device_matches_host",
+    ),
+    *_waiting_tests(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_CASES,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_fwd_chain.py",
+        "test_chain_dropped_dead_row_select_gives_nan",
+        "test_chain_lse_in_log2_units_is_detected",
+        "test_current_forward_reproduces_the_fixture",
+        "test_frozen_fixture",
+        "test_lse_store_forward_chain",
+        "test_probe_forward_chain",
+    ),
+    *_waiting_tests(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_CASES,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_noatomic.py",
+        "test_slice_store_forms_agree",
+        "test_slices_pass_and_repeat_bitwise",
+    ),
+    *_waiting_tests(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_CASES,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_paged_guard.py",
+        "test_negative_control_without_the_guard",
+        "test_out_of_range_block_ids_are_never_dereferenced",
+        "test_valid_tables_are_unchanged_by_the_guard",
+    ),
+    *_waiting_tests(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_CASES,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_run.py",
+        "test_run_allocates_nothing",
+    ),
+    *_waiting_tests(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_DEVICE_CASES,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_sinks.py",
+        "test_atomic_probe_on_device",
+    ),
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
         _with_pinned_resource_gate(_BACKWARD_TOO_SLOW),
@@ -908,6 +970,20 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_convolution_forward_aot_packaging.py",
         "library/tests/test_kernel_label.py",
         "library/tests/test_selector_cpp_parity.py",
+    ),
+    _SCHEDULED_TIERS.waiting(
+        "library/tests/test_conv_dgrad_correctness.py",
+        "its full-sample class is exhaustive: the pull-request entries deselect it "
+        "(-m 'not exhaustive') and rocke_library_conv_dgrad_sweep_gpu_pytest, a "
+        "comprehensive-tier entry, runs it",
+        _LIBRARY,
+        node="TestConvDgradCorrectnessFullSample",
+    ),
+    _TORCH_CASES.waiting(
+        "library/tests/test_attention_bwd_bench.py",
+        "its reference cases compare against torch autograd or build torch tensors, "
+        "and skip without torch",
+        _LIBRARY,
     ),
     _SCHEDULED_TIERS.waiting(
         "library/tests/test_conv_direct_nongrouped_tf32.py",
