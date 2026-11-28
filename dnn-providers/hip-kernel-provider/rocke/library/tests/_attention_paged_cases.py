@@ -254,7 +254,7 @@ def _launch_production_2d(problem, arrays, qq_stride: int, softcap: float) -> No
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,
-        signature=au._tiled_2d_signature(_ARCH, problem.dtype),
+        signature=au.tiled_2d_signature(_ARCH, problem.dtype),
     )
     values = au._attn_values(
         problem=problem,

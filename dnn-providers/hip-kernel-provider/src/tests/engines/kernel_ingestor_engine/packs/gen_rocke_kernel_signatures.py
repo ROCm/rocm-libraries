@@ -14,8 +14,8 @@ kernel takes. RockeKernelSignatures.hpp reads the table; the provider's
 signature and dispatch tests check each pack's C++ list against it.
 
 * unified 2D (gfx942, gfx950), without and with LSE:
-  ``kernels.common.attention_unified._tiled_2d_signature``;
-* unified 3D segment and reduce: ``_tiled_3d_signatures``, strided K/V on
+  ``kernels.common.attention_unified.tiled_2d_signature``;
+* unified 3D segment and reduce: ``tiled_3d_signatures``, strided K/V on
   gfx942 (the only layout that pack launches), paged on gfx950;
 * dense: each arch's ``attention_dense_signature`` for the runtime-shape grid
   form, without and with LSE, and on gfx942 for each persistent work decode.
@@ -33,7 +33,7 @@ hand, from the provider root:
 
 import dataclasses
 
-from kernels.common.attention_unified import _tiled_2d_signature, _tiled_3d_signatures
+from kernels.common.attention_unified import tiled_2d_signature, tiled_3d_signatures
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx942.attention_dense import (
     attention_dense_signature as gfx942_dense_signature,
@@ -74,10 +74,10 @@ def kernarg(parameter: dict) -> tuple[str, int, str]:
 
 def unified_signatures():
     for arch in ("gfx942", "gfx950"):
-        yield f"{arch}.unified_2d", _tiled_2d_signature(arch, "bf16")
-        yield f"{arch}.unified_2d.lse", _tiled_2d_signature(arch, "bf16", emit_lse=True)
+        yield f"{arch}.unified_2d", tiled_2d_signature(arch, "bf16")
+        yield f"{arch}.unified_2d.lse", tiled_2d_signature(arch, "bf16", emit_lse=True)
     for arch, strided_kv in (("gfx942", True), ("gfx950", False)):
-        segment, reduce = _tiled_3d_signatures(arch, "bf16", strided_kv=strided_kv)
+        segment, reduce = tiled_3d_signatures(arch, "bf16", strided_kv=strided_kv)
         yield f"{arch}.unified_3d.segment", segment
         yield f"{arch}.unified_3d.reduce", reduce
 

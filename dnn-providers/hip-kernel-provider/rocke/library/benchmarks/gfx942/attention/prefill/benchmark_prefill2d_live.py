@@ -466,7 +466,7 @@ class CkVariantBench:
         from kernels.common.attention_unified import (
             _enable_i64_kv_addr,
             _tiled_2d_impl,
-            _tiled_2d_signature,
+            tiled_2d_signature,
         )
         from rocke.runtime import KernelLauncher
 
@@ -540,7 +540,7 @@ class CkVariantBench:
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_tiled_2d_signature(ARCH, dtype),
+                    signature=tiled_2d_signature(ARCH, dtype),
                     cache_key=("prefill2d_live_gfx942", key),
                 ),
                 spec,

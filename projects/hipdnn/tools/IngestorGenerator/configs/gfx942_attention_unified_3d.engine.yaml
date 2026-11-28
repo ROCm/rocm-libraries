@@ -382,13 +382,13 @@ launch_surface:
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dAdmission.cpp
 
   - name: kernargs
-    python_source: kernels/common/attention_unified.py:_3d_signature
+    python_source: kernels/common/attention_unified.py:tiled_3d_signatures
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dArguments.hpp:gfx942Unified3dSegmentArguments
     kmd_fields: []
     guard: >
       gfx942Unified3dSegmentArguments() is the ordered 30-argument segment
       list launch() passes (19 base + num_query_heads, num_kv_heads,
-      sliding_window as i32 + 8 strided-KV, _tiled_3d_signatures(gfx942, dtype,
+      sliding_window as i32 + 8 strided-KV, tiled_3d_signatures(gfx942, dtype,
       strided_kv=True)): null sink/block-table/ALiBi/QQ-bias pointers,
       k_scale = v_scale = 1, softcap 0, num_seqs = B, block_table_stride 0,
       the graph's head counts, sliding_window 0, and gfx942StridedKvArguments()

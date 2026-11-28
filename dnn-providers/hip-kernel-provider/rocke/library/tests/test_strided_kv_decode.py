@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
-from kernels.common.attention_unified import _tiled_3d_signatures
+from kernels.common.attention_unified import tiled_3d_signatures
 from rocke.core.golden_file import rerecord_hint, write_golden_json
 from rocke.core.verify import verify
 from rocke.tests.lanes import BUILD_VARIANT, TICKET, import_or_skip_until
@@ -128,7 +128,7 @@ def test_strided_segment_signature_and_identity(arch, dtype):
     assert strided.kernel_name() == paged.kernel_name() + "_stridedkv"
     kernel = module.build_unified_attention_3d_tiled(strided, arch=arch)
     assert not verify(kernel)
-    signature, _ = _tiled_3d_signatures(arch, dtype, strided_kv=True)
+    signature, _ = tiled_3d_signatures(arch, dtype, strided_kv=True)
     assert [p.name for p in kernel.params] == [p["name"] for p in signature]
     assert [p.type.name.replace(" ", "") for p in kernel.params] == [
         p["type"].replace(" ", "") for p in signature

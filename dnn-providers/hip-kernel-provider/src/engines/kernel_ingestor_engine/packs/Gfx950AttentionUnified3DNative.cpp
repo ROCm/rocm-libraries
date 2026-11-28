@@ -483,7 +483,7 @@ double scoreKernel(const MatchContext& /*context*/,
 // ---------------------------------------------------------------------------
 
 /// The segment kernel's signature: 12 pointers (the three scratch outputs first), 4 f32
-/// scalars, three i32 and the runtime shape kernargs (`_tiled_3d_signatures`: head counts and
+/// scalars, three i32 and the runtime shape kernargs (`tiled_3d_signatures`: head counts and
 /// window).
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
@@ -524,7 +524,7 @@ std::vector<KernelArgument> unified3DSegmentSignature()
 }
 
 /// The reduce kernel's signature: the output then the three scratch arrays it folds,
-/// seq_lens and the runtime query head count (`_tiled_3d_signatures`). Names load-bearing as
+/// seq_lens and the runtime query head count (`tiled_3d_signatures`). Names load-bearing as
 /// above; keep them identical to build_unified_attention_reduce_tiled's `b.param` calls. An
 /// LSE-on reduce (@p emitLse) appends lse_ptr.
 std::vector<KernelArgument> unified3DReduceSignature(bool emitLse = false)

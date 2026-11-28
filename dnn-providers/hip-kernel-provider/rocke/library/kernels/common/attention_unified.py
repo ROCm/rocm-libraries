@@ -71,6 +71,38 @@ from rocke.helpers.transforms import (
 from ._attention_additive_bias import append_additive_bias_signature
 from ._lse_store import validate_unified_lse
 
+__all__ = [
+    "UNIFIED_BLOCK_SIZES",
+    "UNIFIED_DTYPES",
+    "UNIFIED_HEAD_SIZES",
+    "Attention3DExecution",
+    "UnifiedAttention2DSpec",
+    "UnifiedAttention3DSpec",
+    "UnifiedAttentionProblem",
+    "UnifiedAttentionReduceSpec",
+    "attention_3d_workspace_nbytes",
+    "build_unified_attention_2d",
+    "build_unified_attention_3d",
+    "build_unified_attention_reduce",
+    "builder_supports_i64_kv_addr",
+    "clear_attention_3d_graph_cache",
+    "gfx942_3d_kv_needs_i64_addr",
+    "gfx942_4warp_launch_grid",
+    "gfx942_gqa_fold_eligible",
+    "kv_addr_width_for_builder",
+    "kv_cache_needs_i64_addr",
+    "prepare_unified_attention_torch",
+    "run_unified_attention_torch",
+    "select_auto_path",
+    "supports_native_unified_attention",
+    "supports_native_unified_attention_3d_tiled",
+    "supports_native_unified_attention_coverage",
+    "supports_native_unified_attention_tiled",
+    "tiled_2d_signature",
+    "tiled_3d_signatures",
+    "unified_lse_path_gate",
+]
+
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
 _apply_softcap = apply_softcap_log2
@@ -4374,14 +4406,14 @@ def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:
     }
 
 
-def _tiled_2d_signature(
+def tiled_2d_signature(
     arch: str,
     dtype: str,
     *,
-    kv_dtype: Optional[str] = None,
+    kv_dtype: str | None = None,
     include_additive_bias: bool = False,
     emit_lse: bool = False,
-):
+) -> list[dict]:
     """Launch signature of the tiled 2D kernels built for ``arch``."""
     spec_cls, _, _ = _tiled_2d_impl(arch)
     return _attn_signature(
@@ -4395,15 +4427,15 @@ def _tiled_2d_signature(
     )
 
 
-def _tiled_3d_signatures(
+def tiled_3d_signatures(
     arch: str,
     dtype: str,
     *,
-    kv_dtype: Optional[str] = None,
+    kv_dtype: str | None = None,
     strided_kv: bool = False,
     include_additive_bias: bool = False,
     emit_lse: bool = False,
-):
+) -> tuple[list[dict], list[dict]]:
     """Launch signatures of the tiled 3D segment and reduce kernels for ``arch``."""
     segment_cls, reduce_cls, _, _, _ = _tiled_3d_impl(arch)
     segment = _3d_signature(
@@ -5776,7 +5808,7 @@ def _get_3d_pipeline(
     # problem.emit_lse matches the built reduce: an explicit tuning spec must
     # agree with it (paged: run_unified_attention_torch; strided:
     # _validate_strided_3d_spec refuses an LSE reduce).
-    seg_signature, red_signature = _tiled_3d_signatures(
+    seg_signature, red_signature = tiled_3d_signatures(
         arch,
         problem.dtype,
         strided_kv=strided_kv,
@@ -5972,7 +6004,7 @@ def _get_2d_launcher(
     launcher = KernelLauncher(
         hsaco=hsaco,
         kernel_name=kname,
-        signature=_tiled_2d_signature(
+        signature=tiled_2d_signature(
             arch,
             problem.dtype,
             include_additive_bias=problem.use_additive_bias,

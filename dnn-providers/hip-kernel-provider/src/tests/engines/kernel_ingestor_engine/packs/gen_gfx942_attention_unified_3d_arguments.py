@@ -7,7 +7,7 @@ Every row is one strided decode case (K and V layouts, batch, Hq, Hkv, scale) an
 the segment kernel's full ordered argument list rocKE would pass for it:
 
 * names and types, in order: ``kernels.common.attention_unified
-  ._tiled_3d_signatures("gfx942", dtype, strided_kv=True)`` (the segment half, with
+  .tiled_3d_signatures("gfx942", dtype, strided_kv=True)`` (the segment half, with
   the spec class's runtime fields num_query_heads, num_kv_heads, sliding_window);
 * the runtime head counts and sliding_window (0):
   ``_runtime_kernarg_values(problem)``;
@@ -39,7 +39,7 @@ from types import SimpleNamespace
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
 from kernels.common.attention_unified import (
     _runtime_kernarg_values,
-    _tiled_3d_signatures,
+    tiled_3d_signatures,
 )
 
 # The buffer each pointer argument takes in _run_3d_tiled_on_stream's seg_vals
@@ -190,7 +190,7 @@ def c_array(values):
 
 def _signatures():
     """rocKE's gfx942 strided segment and reduce signatures (runtime fields included)."""
-    return _tiled_3d_signatures("gfx942", "fp16", strided_kv=True)
+    return tiled_3d_signatures("gfx942", "fp16", strided_kv=True)
 
 
 def arguments(batch, hq, hkv, scale, k_layout, v_layout):

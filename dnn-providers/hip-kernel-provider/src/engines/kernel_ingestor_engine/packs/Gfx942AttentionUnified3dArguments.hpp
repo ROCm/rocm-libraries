@@ -18,7 +18,7 @@
  *        as plain data: scalar values, and which buffer each pointer argument takes.
  *
  * Restates the `seg_vals` dict `kernels/common/attention_unified.py::_run_3d_tiled_on_stream`
- * builds for a strided decode request, in the order of `_tiled_3d_signatures("gfx942",
+ * builds for a strided decode request, in the order of `tiled_3d_signatures("gfx942",
  * dtype, strided_kv=True)`: 12 pointers, 4 f32, 3 i32, the 3 i32 runtime fields
  * (`_runtime_kernarg_fields`: num_query_heads, num_kv_heads, sliding_window), then
  * `StridedKvCacheLayout.arguments()` (`kernels/common/attention_kv_cache.py`) for K then V.

@@ -128,7 +128,7 @@ class RockeComboBench:
             supports_tiled_2d,
         )
         from kernels.common.attention_unified import (
-            _tiled_2d_signature,
+            tiled_2d_signature,
             _enable_i64_kv_addr,
         )
         from rocke.runtime import KernelLauncher
@@ -197,7 +197,7 @@ class RockeComboBench:
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_tiled_2d_signature("gfx950", dtype),
+                    signature=tiled_2d_signature("gfx950", dtype),
                     cache_key=("prefill2d_trace_combo", key),
                 ),
                 spec,

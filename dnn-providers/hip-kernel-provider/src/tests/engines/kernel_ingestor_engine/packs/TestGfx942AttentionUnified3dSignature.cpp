@@ -23,7 +23,7 @@
  * @brief Pins the two kernarg ABIs hipkernel:Gfx942AttentionUnified3d marshals against the
  *        ABIs the rocKE builder declares.
  *
- * segment = `_tiled_3d_signatures("gfx942", dtype, strided_kv=True)` (the segment half)
+ * segment = `tiled_3d_signatures("gfx942", dtype, strided_kv=True)` (the segment half)
  * and reduce = its reduce half (`rocke/library/kernels/common/attention_unified.py`): 19
  * base arguments, 3 i32 runtime fields (num_query_heads, num_kv_heads, sliding_window),
  * then 8 strided-K/V arguments; and 5 pointers then the i32 num_query_heads. Both lists
@@ -51,13 +51,13 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 
 constexpr const char* BUFFER = "global_buffer";
 
-/// `_tiled_3d_signatures("gfx942", dtype, strided_kv=True)[0]`, by name and width.
+/// `tiled_3d_signatures("gfx942", dtype, strided_kv=True)[0]`, by name and width.
 std::vector<KernelArgument> pythonSegmentAbi()
 {
     return rockeKernelSignature("gfx942.unified_3d.segment");
 }
 
-/// `_tiled_3d_signatures("gfx942", dtype)[1]`: no LSE, num_query_heads read at runtime.
+/// `tiled_3d_signatures("gfx942", dtype)[1]`: no LSE, num_query_heads read at runtime.
 std::vector<KernelArgument> pythonReduceAbi()
 {
     return rockeKernelSignature("gfx942.unified_3d.reduce");

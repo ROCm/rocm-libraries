@@ -923,7 +923,7 @@ constexpr const char* BY_VALUE_KIND = "by_value";
 constexpr uint32_t PTR_BYTES = 8;
 
 /**
- * @brief The segment launch's argument list: `_tiled_3d_signatures("gfx942", dtype,
+ * @brief The segment launch's argument list: `tiled_3d_signatures("gfx942", dtype,
  *        strided_kv=True)` (`kernels/common/attention_unified.py`), 19 base arguments,
  *        3 i32 runtime fields (num_query_heads, num_kv_heads, sliding_window), then 8
  *        strided-K/V.

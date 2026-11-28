@@ -124,7 +124,7 @@ def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
     spec_id,
     head_size,
 ):
-    from kernels.common.attention_unified import _tiled_2d_signature
+    from kernels.common.attention_unified import tiled_2d_signature
     from kernels.gfx942.attention_tiled_2d import build_unified_attention_2d_tiled
 
     spec = _selected_spec(spec_id, head_size)
@@ -154,7 +154,7 @@ def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
         kernel
     )
     assert [p.name for p in kernel.params] == [
-        p["name"] for p in _tiled_2d_signature(ARCH, spec.dtype)
+        p["name"] for p in tiled_2d_signature(ARCH, spec.dtype)
     ]
 
     result = _run_cli(str(kdp), "--kpack-python-dir", rocm_kpack_dir, mode="full")

@@ -17,7 +17,7 @@ from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _explicit_path_supported,
     _strided_3d_specs_from_problem,
-    _tiled_3d_signatures,
+    tiled_3d_signatures,
     _validate_strided_3d_spec,
 )
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange, TorchBinding
@@ -253,7 +253,7 @@ def make_candidate() -> KernelCandidate:
         select_spec=select,
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
         build=lambda spec, arch: spec.build(arch),
-        signature=lambda spec: _tiled_3d_signatures(
+        signature=lambda spec: tiled_3d_signatures(
             spec.arch, spec.kernel_spec.dtype, strided_kv=True
         )[0],
         grid=lambda spec, req: spec.launch_grid(attention_problem(req)),
