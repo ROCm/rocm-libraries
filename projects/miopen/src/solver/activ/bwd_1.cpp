@@ -322,6 +322,10 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
         compiler_options.Define("MIOPEN_USE_FP32", 0);
         compiler_options.Define("MIOPEN_USE_FP16", 1);
     }
+    else if(xDesc.GetType() == miopenBFloat16 && problem.GetYDesc().GetType() == miopenBFloat16)
+    {
+        compiler_options.Define("MIOPEN_NEURON_BF16", 1);
+    }
     else
     {
         MIOPEN_LOG_E("Unsupported data types configuration: "
@@ -358,7 +362,8 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
             const auto kernel  = handle.Run(kernels.front());
             const auto& params = invoke_params.CastTo<miopen::activ::BwdInvokeParams>();
 
-            visit_float(xDesc.GetType(), [&](auto as_float) {
+            const auto type = xDesc.GetType();
+            visit_float(type == miopenBFloat16 ? miopenFloat : type, [&](auto as_float) {
                 auto f_activ_alpha = as_float(params.alpha);
                 auto f_activ_beta  = as_float(params.beta);
                 auto f_activ_gamma = as_float(params.gamma);

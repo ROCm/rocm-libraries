@@ -46,6 +46,13 @@
 #if MIOPEN_USE_FP32 == 1
 #define FP_TYPE float
 #endif
+#ifdef MIOPEN_DROPOUT_BF16
+#ifndef MIOPEN_USE_RNE_BFLOAT16
+#define MIOPEN_USE_RNE_BFLOAT16 1
+#endif
+#include "bfloat16_dev.hpp"
+#define FP_TYPE ushort
+#endif
 
 #ifndef RUN_INIT_PRNG
 #define RUN_INIT_PRNG 0
@@ -157,8 +164,12 @@ __forceinline__ __device__ void dropout_kernel(const rocrand_state_xorwow* state
 #pragma unroll
         for(auto i = 0; i < RD_BLCK; ++i)
         {
+#ifdef MIOPEN_DROPOUT_BF16
+            dat_blk[i] = is_kept[i] ? float_to_bfloat16(bfloat16_to_float(dat_blk[i]) * scale) : 0;
+#else
             dat_blk[i] = static_cast<bool>(is_kept[i]) ? dat_blk[i] * static_cast<F>(scale)
                                                        : static_cast<F>(0);
+#endif
         }
         // Write RD_BLCK number of FP_TYPE data to the output tensor
         *(reinterpret_cast<T*>(y + out_offset + y_idx)) = *(reinterpret_cast<T*>(dat_blk));

@@ -327,15 +327,11 @@ RNNDescriptor::RNNDescriptor(int hsz,
                      "type must be 0 for disabled bias or 1 for enabled "
                      "bias.");
     }
-    if(dType != miopenFloat && dType != miopenHalf)
-    {
-        MIOPEN_THROW(miopenStatusBadParm,
-                     "RNNDescriptor: Bad parameter(s). RNN datatype must be float or half.");
-    }
-    else
-    {
-        typeSize = dType == miopenHalf ? 2 : 4;
-    }
+    if(dType != miopenFloat && dType != miopenHalf && dType != miopenBFloat16)
+        MIOPEN_THROW(miopenStatusBadParm, "RNN datatype must be float, half, or bfloat16.");
+    if(dType == miopenBFloat16 && amode != miopenRNNdefault)
+        MIOPEN_THROW(miopenStatusNotImplemented, "BF16 RNN requires the default algorithm.");
+    typeSize = GetTypeSize(dType);
 
     hsize                       = hsz;
     nLayers                     = layers;
@@ -412,15 +408,11 @@ RNNDescriptor::RNNDescriptor(int hsz,
                      "type must be 0 for disabled bias or 1 for enabled "
                      "bias.");
     }
-    if(dType != miopenFloat && dType != miopenHalf)
-    {
-        MIOPEN_THROW(miopenStatusBadParm,
-                     "RNNDescriptor: Bad parameter(s). RNN datatype must be float or half.");
-    }
-    else
-    {
-        typeSize = dType == miopenHalf ? 2 : 4;
-    }
+    if(dType != miopenFloat && dType != miopenHalf && dType != miopenBFloat16)
+        MIOPEN_THROW(miopenStatusBadParm, "RNN datatype must be float, half, or bfloat16.");
+    if(dType == miopenBFloat16 && amode != miopenRNNdefault)
+        MIOPEN_THROW(miopenStatusNotImplemented, "BF16 RNN requires the default algorithm.");
+    typeSize = GetTypeSize(dType);
 
     switch(rmode)
     {
@@ -488,6 +480,7 @@ size_t RNNDescriptor::GetWorkspaceSize(const Handle& handle,
                                                      workspaceScale,
                                                      hsize,
                                                      dirMode == miopenRNNbidirection,
+                                                     biasMode != miopenRNNNoBias,
                                                      dataType);
         solution_ws =
             reduction_ws +
@@ -554,6 +547,7 @@ size_t RNNDescriptor::GetWorkspaceSize(const Handle& handle,
                                                      workspaceScale,
                                                      hsize,
                                                      dirMode == miopenRNNbidirection,
+                                                     biasMode != miopenRNNNoBias,
                                                      dataType);
 
         return padding_converter_tmp_space + reduction_ws +
@@ -1146,11 +1140,16 @@ RNNDescriptor::makeSeqTensorDescriptor(c_array_view<const miopenTensorDescriptor
 
     std::vector<size_t> batch_cache =
         [](c_array_view<const miopenTensorDescriptor_t> const& descs_array) {
+            const auto type = descs_array[0].GetType();
             auto size = descs_array.size();
             std::vector<size_t> vec;
             vec.reserve(size);
             for(size_t i = 0; i < size; ++i)
+            {
+                if(descs_array[i].GetType() != type)
+                    MIOPEN_THROW(miopenStatusBadParm, "Data type mismatch between RNN descriptors");
                 vec.push_back(descs_array[i].GetLengths()[0]);
+            }
             return vec;
         }(descs);
 

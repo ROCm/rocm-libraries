@@ -35,13 +35,12 @@ namespace rnn_base {
 void RNNForwardDataModularAlgo::PrepareWriteBuffers(const Handle& handle,
                                                     const runtimeArgsFwd& runtimeArgs) const
 {
-    float beta   = 0.;
     auto rs_size = reservLayout.getBufferSize();
 
     if(rs_size > 0)
     {
         miopen::TensorDescriptor ws_desk{rnnDesc.dataType, {1, rs_size}, {rs_size, 1}};
-        SetTensor(handle, ws_desk, runtimeArgs.reserveSpace, &beta);
+        FillTensor(handle, ws_desk, runtimeArgs.reserveSpace, 0);
     }
 
     if(runtimeArgs.hy != nullptr || (rnnDesc.rnnMode == miopenLSTM && runtimeArgs.cy != nullptr))
@@ -50,11 +49,11 @@ void RNNForwardDataModularAlgo::PrepareWriteBuffers(const Handle& handle,
 
         if(runtimeArgs.hy != nullptr)
         {
-            SetTensor(handle, cxhx_desc, runtimeArgs.hy, &beta);
+            FillTensor(handle, cxhx_desc, runtimeArgs.hy, 0);
         }
         if(rnnDesc.rnnMode == miopenLSTM && runtimeArgs.cy != nullptr)
         {
-            SetTensor(handle, cxhx_desc, runtimeArgs.cy, &beta);
+            FillTensor(handle, cxhx_desc, runtimeArgs.cy, 0);
         }
     }
 }
@@ -546,10 +545,9 @@ void RNNModuleAlgoDynamic::PrepareWriteBuffers(const Handle& handle,
     RNNForwardDataModularAlgo::PrepareWriteBuffers(handle, runtimeArgs);
 
     {
-        float beta       = 0;
         auto temp_x_size = buildDynamicVirtual(realXDesc).GetElementCount();
         miopen::TensorDescriptor temp_x_desk{rnnDesc.dataType, {1, temp_x_size}, {temp_x_size, 1}};
-        SetTensor(handle, temp_x_desk, runtimeArgsExt.tempX, &beta);
+        FillTensor(handle, temp_x_desk, runtimeArgsExt.tempX, 0);
     }
 
     realXProp(handle, runtimeArgsExt);

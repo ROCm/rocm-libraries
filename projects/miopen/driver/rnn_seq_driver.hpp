@@ -839,11 +839,8 @@ int RNNSeqDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     status |= miopenGetRNNTempSpaceSizes(
         GetHandle(), rnnDesc, inputSeqTensor, fwd_type, &workSpace_sz, &reserveSpace_sz);
 
-    workSpace_sz /= sizeof(Tgpu);
-    if(inflags.GetValueInt("use_dropout"))
-        reserveSpace_sz = (reserveSpace_sz + sizeof(Tgpu) - 1) / sizeof(Tgpu);
-    else
-        reserveSpace_sz /= sizeof(Tgpu);
+    workSpace_sz = (workSpace_sz + sizeof(Tgpu) - 1) / sizeof(Tgpu);
+    reserveSpace_sz = (reserveSpace_sz + sizeof(Tgpu) - 1) / sizeof(Tgpu);
 
     size_t wei_sz = 0;
     status |= miopenGetRNNParamsSize(GetHandle(), rnnDesc, inputTensor_dims, &wei_sz, data_type);
@@ -947,7 +944,7 @@ int RNNSeqDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     auto fill_array_via_gen = [](auto& dst, size_t dst_sz, double range_l, double range_r) {
         for(size_t it = 0; it < dst_sz; it++)
-            dst[it] = prng::gen_A_to_B(static_cast<Tgpu>(range_l), static_cast<Tgpu>(range_r));
+            dst[it] = static_cast<Tgpu>(prng::gen_A_to_B(range_l, range_r));
     };
 
     const double scale = 0.01;

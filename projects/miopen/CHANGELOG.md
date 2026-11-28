@@ -114,6 +114,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   C++ standard library.
 
 ### Added
+* [RNN] Added BF16 support for ReLU, tanh, LSTM, and GRU with `miopenRNNdefault` on the
+  rocBLAS backend. Both the legacy and sequence-descriptor APIs support inference, training
+  forward, backward data, and backward weights.
+  BF16 RNN bias gradients accumulate in FP32, including recurrent bias with a null initial hidden
+  state. Query workspace and reserve sizes before execution; RNN workspace byte counts remain
+  multiples of the tensor element size. Use `rnnbfp16` or `rnn_seqbfp16` for MIOpenDriver replay.
 * [Conv] Added a gfx1250 system find-db and perf-db (`gfx1250100`), generated from exhaustive
   tuning results and checked with DBSync on gfx1250 hardware. The databases are installed with the
   other system databases, and `StaticFDBSync` checks them on gfx1250. A device that reports a

@@ -125,6 +125,8 @@ extern "C" miopenStatus_t miopenActivationForward(miopenHandle_t handle,
     }
     miopen::debug::LogCmdActivation(xDesc, activDesc, true);
     return miopen::try_([&] {
+        if(miopen::deref(xDesc).GetType() == miopenBFloat16)
+            MIOPEN_THROW(miopenStatusNotImplemented, "BF16 standalone activation is unsupported");
         miopen::deref(activDesc).Forward(miopen::deref(handle),
                                          alpha,
                                          miopen::deref(xDesc),
@@ -161,6 +163,8 @@ extern "C" miopenStatus_t miopenActivationBackward(miopenHandle_t handle,
 
     miopen::debug::LogCmdActivation(xDesc, activDesc, false);
     return miopen::try_([&] {
+        if(miopen::deref(xDesc).GetType() == miopenBFloat16)
+            MIOPEN_THROW(miopenStatusNotImplemented, "BF16 standalone activation is unsupported");
         miopen::deref(activDesc).Backward(miopen::deref(handle),
                                           alpha,
                                           miopen::deref(yDesc),

@@ -4428,7 +4428,9 @@ MIOPEN_EXPORT miopenStatus_t miopenDestroyRNNDescriptor(miopenRNNDescriptor_t rn
  * @param rnnMode      RNN model type (input)
  * @param biasMode     RNN bias included (input)
  * @param algo         RNN algorithm selected (input)
- * @param dataType     MIOpen datatype (input)
+ * @param dataType     MIOpen datatype (input). BF16 requires the rocBLAS backend and
+ *                     `miopenRNNdefault` for every RNN mode. Both legacy and sequence APIs
+ *                     support BF16 inference, training forward, backward data, and backward weights.
  * @return             miopenStatus_t
  */
 MIOPEN_EXPORT miopenStatus_t miopenSetRNNDescriptor(miopenRNNDescriptor_t rnnDesc,
@@ -4456,7 +4458,8 @@ MIOPEN_EXPORT miopenStatus_t miopenSetRNNDescriptor(miopenRNNDescriptor_t rnnDes
  * @param rnnMode      RNN model type (input)
  * @param biasMode     RNN bias included (input)
  * @param algo         RNN algorithm selected (input)
- * @param dataType     MIOpen datatype (input)
+ * @param dataType     MIOpen datatype (input). BF16 has the same requirements and pass support
+ *                     as in miopenSetRNNDescriptor().
  * @return             miopenStatus_t
  */
 MIOPEN_EXPORT miopenStatus_t miopenSetRNNDescriptor_V2(miopenRNNDescriptor_t rnnDesc,

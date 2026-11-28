@@ -186,6 +186,8 @@ extern "C" miopenStatus_t miopenDropoutForward(miopenHandle_t handle,
         dropoutDesc, noise_shape, xDesc, x, yDesc, y, reserveSpace, reserveSpaceSizeInBytes);
     LogCmdDropout(dropoutDesc, xDesc, true);
     return miopen::try_([&] {
+        if(miopen::deref(xDesc).GetType() == miopenBFloat16)
+            MIOPEN_THROW(miopenStatusNotImplemented, "BF16 standalone dropout is unsupported");
         miopen::deref(dropoutDesc)
             .Dropout(miopen::deref(handle),
                      miopen::deref(noise_shape),
@@ -216,6 +218,8 @@ extern "C" miopenStatus_t miopenDropoutBackward(miopenHandle_t handle,
     MIOPEN_LOG_FUNCTION(dropoutDesc, dyDesc, dy, dxDesc, dx, reserveSpace, reserveSpaceSizeInBytes);
     LogCmdDropout(dropoutDesc, dxDesc, false);
     return miopen::try_([&] {
+        if(miopen::deref(dyDesc).GetType() == miopenBFloat16)
+            MIOPEN_THROW(miopenStatusNotImplemented, "BF16 standalone dropout is unsupported");
         miopen::deref(dropoutDesc)
             .Dropout(miopen::deref(handle),
                      miopen::deref(noise_shape),

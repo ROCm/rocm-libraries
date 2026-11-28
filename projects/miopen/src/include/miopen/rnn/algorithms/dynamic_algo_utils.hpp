@@ -26,6 +26,7 @@
 
 #pragma once
 #include <miopen/rnn.hpp>
+#include <miopen/rnn/base_ops.hpp>
 
 #include "miopen/rnn/algorithms/default_algo_utils.hpp"
 
@@ -477,6 +478,8 @@ public:
     {
         const Data_t temp_x         = runtimeArgs.freeWorkSpace;
         const auto temp_x_byte_size = tmpMapXDesc.GetTensorMaxByteSpace();
+        if(temp_x == nullptr || runtimeArgs.freeWorkSpaceSize < temp_x_byte_size)
+            MIOPEN_THROW(miopenStatusBadParm, "RNN backward weights staging workspace is too small");
 
         const Data_t free_ws = moveDataPtrByte(temp_x, temp_x_byte_size);
 
@@ -562,9 +565,7 @@ public:
         const auto normalized_desc = miopen::TensorDescriptor(
             rnnDesc.dataType, {1, normalized_tensor_size}, {normalized_tensor_size, 1});
 
-        const float beta = 0.;
-
-        SetTensor(handle, normalized_desc, runtimeArgsExt.tempX, &beta);
+        FillTensor(handle, normalized_desc, runtimeArgsExt.tempX, 0);
 
         RNNTensorBaseLayoutConverter::ConvertInputTensorGPUData(handle,
                                                                 realXDesc,

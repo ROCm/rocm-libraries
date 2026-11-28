@@ -91,10 +91,12 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
     const auto packed       = problem.GetXDesc().IsPacked() && problem.GetYDesc().IsPacked();
     const auto read_len     = (packed) ? x_elem_sz : x_width2D;
     const auto element_size = (problem.GetXDesc().GetType() == miopenHalf) ? 2 : 4;
-    const auto read_unit    = (read_len % 8 == 0 && element_size == 2) ? 8
-                              : (read_len % 4 == 0)                    ? 4
-                              : (read_len % 2 == 0)                    ? 2
-                                                                       : 1;
+    // RNN gate offsets need not be vector-aligned.
+    const auto read_unit = problem.GetXDesc().GetType() == miopenBFloat16 ? 1
+                           : (read_len % 8 == 0 && element_size == 2)    ? 8
+                           : (read_len % 4 == 0)                         ? 4
+                           : (read_len % 2 == 0)                         ? 2
+                                                                        : 1;
 
     const auto READ_TYPE = ((read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit));
 
@@ -124,6 +126,11 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
     {
         build_params.Define("MIOPEN_USE_FP16", 1);
         build_params.Define("MIOPEN_USE_FP32", 0);
+    }
+    else if(problem.GetXDesc().GetType() == miopenBFloat16 &&
+            problem.GetYDesc().GetType() == miopenBFloat16)
+    {
+        build_params.Define("MIOPEN_NEURON_BF16", 1);
     }
     else
     {
@@ -160,7 +167,8 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
             decltype(auto) kernel = handle.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::activ::InvokeParams>();
 
-            visit_float(params.x_desc.GetType(), [&](auto as_float) {
+            const auto type = params.x_desc.GetType();
+            visit_float(type == miopenBFloat16 ? miopenFloat : type, [&](auto as_float) {
                 const auto alpha = as_float(params.alpha);
                 const auto beta  = as_float(params.beta);
                 const auto gamma = as_float(params.gamma);

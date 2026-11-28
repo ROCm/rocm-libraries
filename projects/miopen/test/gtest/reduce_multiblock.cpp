@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdint>
+
+#include <miopen/bfloat16.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/reducetensor.hpp>
 #include <miopen/tensor.hpp>
@@ -14,7 +17,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <functional>
 #include <limits>
 #include <numeric>
@@ -84,6 +86,7 @@ struct MultiBlockCase
     // the blend with the prior output is made in the compute type: the reference rounds the prior
     // output and beta to it
     bool computeBlend = false;
+    std::size_t workspaceOffset = 0;
 
     friend std::ostream& operator<<(std::ostream& os, const MultiBlockCase& c)
     {
@@ -103,6 +106,11 @@ template <>
 struct ElemT<miopenFloat>
 {
     using type = float;
+};
+template <>
+struct ElemT<miopenBFloat16>
+{
+    using type = bfloat16;
 };
 template <>
 struct ElemT<miopenInt8>
@@ -301,6 +309,8 @@ double RoundToType(double v, miopenDataType_t t)
         const double scale = std::ldexp(1.0, 11 - e); // 11 significant bits
         return std::nearbyint(v * scale) / scale;
     }
+    if(t == miopenBFloat16)
+        return static_cast<float>(bfloat16{static_cast<float>(v)});
     if(t == miopenInt8)
         return std::nearbyint(v);
     return static_cast<double>(static_cast<float>(v));
@@ -384,24 +394,32 @@ void RunCase(const MultiBlockCase& c)
 
     // The workspace has exactly the size ReduceTensor() asks for; the bytes behind it must not
     // be touched (the host-side layout has to agree with the kernels).
-    Workspace wspace{wsBytes + canaryBytes};
-    wspace.Write(std::vector<std::uint8_t>(wsBytes + canaryBytes, canaryByte));
+    const auto wsOffset        = c.workspaceOffset;
+    const auto allocationBytes = wsOffset + wsBytes + canaryBytes;
+    Workspace wspace{allocationBytes};
+    wspace.Write(std::vector<std::uint8_t>(allocationBytes, canaryByte));
     Workspace idxSpace{idxBytes};
 
     auto input_dev  = handle.Write(deviceInput);
     auto output_dev = handle.Write(output);
 
-    reduceDesc.ReduceTensor(handle,
-                            idxBytes > 0 ? idxSpace.ptr() : nullptr,
-                            idxBytes,
-                            wspace.ptr(),
-                            wsBytes,
-                            &c.alpha,
-                            inDesc,
-                            input_dev.get(),
-                            &c.beta,
-                            outDesc,
-                            output_dev.get());
+    auto runReduction = [&](std::size_t bytes) {
+        reduceDesc.ReduceTensor(handle,
+                                idxBytes > 0 ? idxSpace.ptr() : nullptr,
+                                idxBytes,
+                                static_cast<char*>(wspace.ptr()) + wsOffset,
+                                bytes,
+                                &c.alpha,
+                                inDesc,
+                                input_dev.get(),
+                                &c.beta,
+                                outDesc,
+                                output_dev.get());
+    };
+
+    if(wsOffset == 1)
+        EXPECT_THROW(runReduction(wsBytes - 1), miopen::Exception);
+    runReduction(wsBytes);
 
     const auto gpu = handle.Read<T>(output_dev, outTotal);
 
@@ -422,10 +440,13 @@ void RunCase(const MultiBlockCase& c)
             EXPECT_EQ(gpuIdx[o], ref.indices[o]) << "index of output " << o;
     }
 
-    std::vector<std::uint8_t> wsAfter(wsBytes + canaryBytes);
+    std::vector<std::uint8_t> wsAfter(allocationBytes);
     wspace.ReadTo(wsAfter);
     EXPECT_TRUE(std::all_of(
-        wsAfter.begin() + wsBytes, wsAfter.end(), [](auto b) { return b == canaryByte; }))
+        wsAfter.begin(), wsAfter.begin() + wsOffset, [](auto b) { return b == canaryByte; }))
+        << "the reduction wrote before the start of the workspace slice";
+    EXPECT_TRUE(std::all_of(
+        wsAfter.begin() + wsOffset + wsBytes, wsAfter.end(), [](auto b) { return b == canaryByte; }))
         << "the reduction wrote behind the end of the workspace of " << wsBytes << " bytes";
 }
 
@@ -435,6 +456,8 @@ void RunCaseDispatch(const MultiBlockCase& c)
         RunCase<ElemT<miopenHalf>::type>(c);
     else if(c.inType == miopenFloat)
         RunCase<ElemT<miopenFloat>::type>(c);
+    else if(c.inType == miopenBFloat16)
+        RunCase<ElemT<miopenBFloat16>::type>(c);
     else if(c.inType == miopenInt8)
         RunCase<ElemT<miopenInt8>::type>(c);
     else
@@ -592,6 +615,40 @@ std::vector<MultiBlockCase> RnnBiasGradientStandard()
     std::vector<MultiBlockCase> cases{c, avg};
     for(auto& rnnCase : cases)
         rnnCase.propagateNan = true;
+    return cases;
+}
+
+std::vector<MultiBlockCase> Bf16BiasGradient()
+{
+    // Model the rank-2 modular and rank-3 legacy views of a padded gate-gradient matrix.
+    constexpr std::size_t biasCount = 9, rowStride = 15, multiBlockRows = 2200;
+    // The odd row counts also exercise tail padding and leave a nonzero signed sum.
+    const Shape shapes[] = {
+        {"Direct", {8, biasCount}, {0}, {rowStride, 1}},
+        {"WarpWise", {97, biasCount}, {0}, {rowStride, 1}},
+        {"BlockWise", {385, biasCount}, {0}, {rowStride, 1}},
+        {"MultiBlock",
+         {1, multiBlockRows, biasCount},
+         {0, 1},
+         {multiBlockRows * rowStride, rowStride, 1}},
+    };
+    std::vector<MultiBlockCase> cases;
+    for(const auto& shape : shapes)
+    {
+        auto c = MakeCase("AddAccumulate",
+                          miopenBFloat16,
+                          miopenFloat,
+                          MIOPEN_REDUCE_TENSOR_ADD,
+                          shape,
+                          Pattern::SignedHalves100);
+        c.beta         = 1.0f;
+        c.outputInit   = 5.0f;
+        c.propagateNan = true;
+        c.exactOutput  = true;
+        // The device allocation is aligned; this forces the maximum 63-byte adjustment.
+        c.workspaceOffset = 1;
+        cases.push_back(c);
+    }
     return cases;
 }
 
@@ -863,8 +920,8 @@ std::vector<WorkspaceSizeCase> GetWorkspaceSizeCases()
         // the compute type is narrower than the input type: the partials are smaller than before
         {"Fp32CompFp16_2x2048", miopenFloat, miopenHalf, {2, 2048}, {2, 1}, 4},
         {"Fp64CompFp32_2x2048", miopenDouble, miopenFloat, {2, 2048}, {2, 1}, 4},
-        // an odd number of partials of a narrower compute type: the size in bytes is not a multiple
-        // of the size of the input type (4106 and 4116 bytes), which callers must not assume
+        // An odd number of partials of a narrower compute type: callers must not assume the
+        // queried size is a multiple of either the input storage width or the alignment.
         {"Fp32CompFp16_1x1280", miopenFloat, miopenHalf, {1, 1280}, {1, 1}, 5},
         {"Fp64CompFp32_1x1280", miopenDouble, miopenFloat, {1, 1280}, {1, 1}, 5},
         // a compute type without a size matters only if there are partial results
@@ -887,6 +944,9 @@ class GPU_ReduceMultiBlock_FP32 : public ::testing::TestWithParam<MultiBlockCase
 class GPU_ReduceMultiBlock_I8 : public ::testing::TestWithParam<MultiBlockCase>
 {
 };
+class GPU_ReduceMultiBlock_BFP16 : public ::testing::TestWithParam<MultiBlockCase>
+{
+};
 class GPU_ReduceMultiBlockWorkspace_FP16 : public ::testing::TestWithParam<WorkspaceSizeCase>
 {
 };
@@ -894,6 +954,10 @@ class GPU_ReduceMultiBlockWorkspace_FP16 : public ::testing::TestWithParam<Works
 TEST_P(GPU_ReduceMultiBlock_FP16, PartialResultsKeepComputeType) { RunCaseDispatch(GetParam()); }
 TEST_P(GPU_ReduceMultiBlock_FP32, PartialResultsKeepComputeType) { RunCaseDispatch(GetParam()); }
 TEST_P(GPU_ReduceMultiBlock_I8, PartialResultsKeepComputeType) { RunCaseDispatch(GetParam()); }
+TEST_P(GPU_ReduceMultiBlock_BFP16, BiasGradientWithUnalignedWorkspace)
+{
+    RunCaseDispatch(GetParam());
+}
 
 TEST_P(GPU_ReduceMultiBlockWorkspace_FP16, PartialsAreStoredInComputeType)
 {
@@ -921,10 +985,10 @@ TEST_P(GPU_ReduceMultiBlockWorkspace_FP16, PartialsAreStoredInComputeType)
         return;
     }
 
-    // one page for the tensor descriptors of the kernels, then the partial results
-    constexpr std::size_t descriptorPage = 4096;
+    // The descriptor page and compute-typed partials need up to 63 bytes of leading padding.
+    constexpr std::size_t descriptorPage = 4096, alignmentPadding = 63;
     EXPECT_EQ(reduceDesc.GetWorkspaceSize(handle, inDesc, outDesc),
-              descriptorPage + c.partials * TypeSize(c.compType));
+              descriptorPage + c.partials * TypeSize(c.compType) + alignmentPadding);
 }
 
 #define MIOPEN_REDUCE_MULTIBLOCK_NAME [](const auto& info) { return info.param.name; }
@@ -932,6 +996,11 @@ TEST_P(GPU_ReduceMultiBlockWorkspace_FP16, PartialsAreStoredInComputeType)
 INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ReduceMultiBlock_FP16,
                          ::testing::ValuesIn(Fp16CompFp32Smoke()),
+                         MIOPEN_REDUCE_MULTIBLOCK_NAME);
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ReduceMultiBlock_BFP16,
+                         ::testing::ValuesIn(Bf16BiasGradient()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
 
 // The Standard tier is the one the per-PR CI (TheRock "standard" category) runs

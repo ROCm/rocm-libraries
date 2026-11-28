@@ -50,6 +50,10 @@ miopenStatus_t ActivationDescriptor::Forward(const Handle& handle,
         MIOPEN_THROW("Only alpha=1 and beta=0 is supported");
     }
 
+    if((xDesc.GetType() == miopenBFloat16 || yDesc.GetType() == miopenBFloat16) &&
+       xDesc.GetType() != yDesc.GetType())
+        MIOPEN_THROW(miopenStatusBadParm, "BF16 activation requires matching tensor types");
+
     const auto problem = activ::ProblemDescription{*this, xDesc, yDesc};
 
     const auto invoke_params = [&]() {
@@ -94,6 +98,14 @@ miopenStatus_t ActivationDescriptor::Backward(const Handle& handle,
        !float_equal(*(static_cast<const float*>(beta)), 0))
     {
         MIOPEN_THROW("Only alpha=1 and beta=0 is supported");
+    }
+
+    if(xDesc.GetType() == miopenBFloat16 || yDesc.GetType() == miopenBFloat16 ||
+       dxDesc.GetType() == miopenBFloat16 || dyDesc.GetType() == miopenBFloat16)
+    {
+        if(xDesc.GetType() != yDesc.GetType() || xDesc.GetType() != dxDesc.GetType() ||
+           xDesc.GetType() != dyDesc.GetType())
+            MIOPEN_THROW(miopenStatusBadParm, "BF16 activation requires matching tensor types");
     }
 
     const auto problem = activ::ProblemDescription{*this, xDesc, yDesc, dxDesc, dyDesc};

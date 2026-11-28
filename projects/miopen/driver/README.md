@@ -60,6 +60,8 @@ The supported base arguments:
   * Only convolutions support int8
   * Only reduce supports double-precision fp64
   * RNN's support fp16 but only on the HIP backend
+  * BF16 RNN uses `miopenRNNdefault` and requires rocBLAS. Use `rnnbfp16` for the
+    legacy API and `rnn_seqbfp16` for the sequence-descriptor API.
   * CTC loss function only supports fp32
 
 Summary of base_args meant for different datatypes and different operations:
@@ -74,7 +76,8 @@ Summary of base_args meant for different datatypes and different operations:
 | activ                | ✓ | ✓ | x |
 | softmax              | ✓ | ✓ | x |
 | bnorm                | ✓ | ✓ | ✓ |
-| rnn                  | ✓ | ✓ | x |
+| rnn                  | ✓ | ✓ | ✓ |
+| rnn_seq              | ✓ | ✓ | ✓ |
 | gemm                 | ✓ | ✓ | x |
 | ctc                  | ✓ | x | x |
 | dropout              | ✓ | ✓ | x |

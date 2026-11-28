@@ -37,14 +37,12 @@ void RNNBackwardDataModularAlgo::PrepareWriteBuffers(const Handle& handle,
                                                      Data_t dcx,
                                                      Data_t workSpace) const
 {
-    float beta = 0.;
-
     auto rnn_data_type = rnnDesc.dataType;
     auto ws_size       = workspaceInfo.getBufferSize();
     if(ws_size > 0)
     {
         miopen::TensorDescriptor ws_desk{rnn_data_type, {1, ws_size}, {ws_size, 1}};
-        SetTensor(handle, ws_desk, workSpace, &beta);
+        FillTensor(handle, ws_desk, workSpace, 0);
     }
 
     if(dhx != nullptr || (rnnDesc.rnnMode == miopenLSTM && dcx != nullptr))
@@ -53,11 +51,11 @@ void RNNBackwardDataModularAlgo::PrepareWriteBuffers(const Handle& handle,
 
         if(dhx != nullptr)
         {
-            SetTensor(handle, cxhx_desc, dhx, &beta);
+            FillTensor(handle, cxhx_desc, dhx, 0);
         }
         if(rnnDesc.rnnMode == miopenLSTM && dcx != nullptr)
         {
-            SetTensor(handle, cxhx_desc, dcx, &beta);
+            FillTensor(handle, cxhx_desc, dcx, 0);
         }
     }
 }
@@ -789,11 +787,10 @@ void RNNBackwardModuleAlgoDynamic::PrepareWriteBuffers(
         handle, runtimeArgsExt.dhx, runtimeArgsExt.dcx, runtimeArgsExt.workSpace);
 
     {
-        float beta        = 0;
         auto temp_dy_size = buildDynamicVirtual(realDyDesc).GetElementCount();
         miopen::TensorDescriptor temp_dy_desk{
             rnnDesc.dataType, {1, temp_dy_size}, {temp_dy_size, 1}};
-        SetTensor(handle, temp_dy_desk, runtimeArgsExt.tempDy, &beta);
+        FillTensor(handle, temp_dy_desk, runtimeArgsExt.tempDy, 0);
     }
 }
 

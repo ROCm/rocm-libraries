@@ -227,6 +227,11 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
         compiler_options.Define("MIOPEN_USE_FP32", 0);
         compiler_options.Define("MIOPEN_USE_FP16", 1);
     }
+    else if(problem.GetXDesc().GetType() == miopenBFloat16 &&
+            problem.GetYDesc().GetType() == miopenBFloat16)
+    {
+        compiler_options.Define("MIOPEN_NEURON_BF16", 1);
+    }
     else
     {
         MIOPEN_LOG_E("Unsupported data types configuration: "
@@ -259,7 +264,8 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
             const auto k       = handle.Run(kernels.front());
             const auto& params = invoke_params.CastTo<miopen::activ::InvokeParams>();
 
-            visit_float(xDesc.GetType(), [&](auto as_float) {
+            const auto type = xDesc.GetType();
+            visit_float(type == miopenBFloat16 ? miopenFloat : type, [&](auto as_float) {
                 k(params.x,
                   params.y,
                   static_cast<int>(map_size_aligned),

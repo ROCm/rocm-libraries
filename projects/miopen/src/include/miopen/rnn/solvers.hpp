@@ -344,6 +344,8 @@ public:
         const ConstData_t back_data_space = workSpace;
         const auto back_data_byte_size =
             rnnAlgoModules.workspaceInfo.getBufferSizeImpl() * GetTypeSize(rnnDesc.dataType);
+        if(workSpace == nullptr || workSpaceSize < back_data_byte_size)
+            MIOPEN_THROW(miopenStatusBadParm, "RNN backward weights workspace is too small");
 
         const Data_t free_ws    = moveDataPtrByte(workSpace, back_data_byte_size);
         const auto free_ws_size = workSpaceSize - back_data_byte_size;

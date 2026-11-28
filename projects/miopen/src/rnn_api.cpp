@@ -560,6 +560,8 @@ static void LogCmdRNN(const miopenTensorDescriptor_t* xDesc,
             ss << "rnn";
         else if(miopen::deref(xDesc[0]).GetType() == miopenHalf)
             ss << "rnnfp16";
+        else if(miopen::deref(xDesc[0]).GetType() == miopenBFloat16)
+            ss << "rnnbfp16";
         ss << " -n " << batch_sz // clang-format off
            << " -W " << miopen::deref(xDesc[0]).GetLengths()[1]
            << " -H " << miopen::deref(rnnDesc).hsize
@@ -630,6 +632,8 @@ static void LogCmdRNN(const miopenSeqTensorDescriptor_t xDesc,
             ss << "rnn_seq";
         else if(miopen::deref(xDesc).GetType() == miopenHalf)
             ss << "rnn_seqfp16";
+        else if(miopen::deref(xDesc).GetType() == miopenBFloat16)
+            ss << "rnn_seqbfp16";
 
         ss << " -n " << xdesc_lens[0] // clang-format off
            << " -W " << xdesc_lens[2]
@@ -659,6 +663,21 @@ static void LogCmdRNN(const miopenSeqTensorDescriptor_t xDesc,
         std::cout << ss.str() << std::endl;
         MIOPEN_LOG_DRIVER_CMD(ss.str());
     }
+}
+
+template <class... Descriptors>
+static void ValidateRNNTensorTypes(miopenDataType_t type, Descriptors... descs)
+{
+    if(((miopen::deref(descs).GetType() != type) || ...))
+        MIOPEN_THROW(miopenStatusBadParm, "Data type mismatch between RNN descriptors");
+}
+
+static void ValidateRNNTensorArray(miopenDataType_t type,
+                                   int sequenceLen,
+                                   const miopenTensorDescriptor_t* descs)
+{
+    for(int i = 0; i < sequenceLen; ++i)
+        ValidateRNNTensorTypes(type, descs[i]);
 }
 
 extern "C" miopenStatus_t miopenRNNForward(miopenHandle_t handle,
@@ -701,18 +720,16 @@ extern "C" miopenStatus_t miopenRNNForward(miopenHandle_t handle,
                         reserveSpace,
                         reserveSpaceNumBytes);
 
-    // bfloat16 not supported for rnn operation
-    if(miopen::deref(rnnDesc).dataType == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
-
     LogCmdRNN(xDesc,
               rnnDesc,
               fwdMode == miopenRNNFWDMode_t::miopenRNNInference ? ForwardInference
                                                                 : ForwardTraining);
 
     return miopen::try_([&] {
+        const auto type = miopen::deref(rnnDesc).dataType;
+        ValidateRNNTensorTypes(type, xDesc, yDesc, hDesc);
+        if(miopen::deref(rnnDesc).rnnMode == miopenLSTM)
+            ValidateRNNTensorTypes(type, cDesc);
         miopen::deref(rnnDesc).RNNForward(miopen::deref(handle),
                                           fwdMode,
                                           miopen::deref(xDesc),
@@ -777,14 +794,13 @@ extern "C" miopenStatus_t miopenRNNBackwardSeqData(miopenHandle_t handle,
                         reserveSpace,
                         reserveSpaceNumBytes);
 
-    // bfloat16 not supported for rnn operation
-    if(miopen::deref(rnnDesc).dataType == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
     LogCmdRNN(xDesc, rnnDesc, BackwardData);
 
     return miopen::try_([&] {
+        const auto type = miopen::deref(rnnDesc).dataType;
+        ValidateRNNTensorTypes(type, xDesc, yDesc, hDesc);
+        if(miopen::deref(rnnDesc).rnnMode == miopenLSTM)
+            ValidateRNNTensorTypes(type, cDesc);
         miopen::deref(rnnDesc).RNNBackwardData(miopen::deref(handle),
                                                miopen::deref(yDesc),
                                                DataCast(y),
@@ -838,14 +854,10 @@ extern "C" miopenStatus_t miopenRNNBackwardWeightsSeqTensor(miopenHandle_t handl
                         reserveSpace,
                         reserveSpaceNumBytes);
 
-    // bfloat16 not supported for rnn operation
-    if(miopen::deref(rnnDesc).dataType == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
     LogCmdRNN(xDesc, rnnDesc, BackwardWeights);
 
     return miopen::try_([&] {
+        ValidateRNNTensorTypes(miopen::deref(rnnDesc).dataType, xDesc, yDesc, hDesc);
         miopen::deref(rnnDesc).RNNBackwardWeights(miopen::deref(handle),
                                                   miopen::deref(xDesc),
                                                   DataCast(x),
@@ -907,15 +919,15 @@ extern "C" miopenStatus_t miopenRNNForwardTraining(miopenHandle_t handle,
                         reserveSpace,
                         reserveSpaceNumBytes);
 
-    // bfloat16 not supported for rnn operation
-    if(miopen::deref(wDesc).GetType() == miopenBFloat16 ||
-       miopen::deref(hyDesc).GetType() == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
     LogCmdRNN(xDesc, rnnDesc, sequenceLen, ForwardTraining);
 
     return miopen::try_([&] {
+        const auto type = miopen::deref(rnnDesc).dataType;
+        ValidateRNNTensorArray(type, sequenceLen, xDesc);
+        ValidateRNNTensorArray(type, sequenceLen, yDesc);
+        ValidateRNNTensorTypes(type, wDesc, hxDesc, hyDesc);
+        if(miopen::deref(rnnDesc).rnnMode == miopenLSTM)
+            ValidateRNNTensorTypes(type, cxDesc, cyDesc);
         miopen::c_array_view<const miopenTensorDescriptor_t> xDescArray{xDesc, size_t(sequenceLen)};
         miopen::c_array_view<const miopenTensorDescriptor_t> yDescArray{yDesc, size_t(sequenceLen)};
         miopen::deref(rnnDesc).RNNForwardTraining(miopen::deref(handle),
@@ -997,15 +1009,16 @@ extern "C" miopenStatus_t miopenRNNBackwardData(miopenHandle_t handle,
                         reserveSpace,
                         reserveSpaceNumBytes);
 
-    // bfloat16 not supported for rnn operation
-    if(miopen::deref(wDesc).GetType() == miopenBFloat16 ||
-       miopen::deref(cxDesc).GetType() == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
     LogCmdRNN(dxDesc, rnnDesc, sequenceLen, BackwardData);
 
     return miopen::try_([&] {
+        const auto type = miopen::deref(rnnDesc).dataType;
+        ValidateRNNTensorArray(type, sequenceLen, yDesc);
+        ValidateRNNTensorArray(type, sequenceLen, dyDesc);
+        ValidateRNNTensorArray(type, sequenceLen, dxDesc);
+        ValidateRNNTensorTypes(type, wDesc, hxDesc, dhyDesc, dhxDesc);
+        if(miopen::deref(rnnDesc).rnnMode == miopenLSTM)
+            ValidateRNNTensorTypes(type, cxDesc, dcyDesc, dcxDesc);
         miopen::c_array_view<const miopenTensorDescriptor_t> yDescArray{yDesc, size_t(sequenceLen)};
         miopen::c_array_view<const miopenTensorDescriptor_t> dyDescArray{dyDesc,
                                                                          size_t(sequenceLen)};
@@ -1072,15 +1085,13 @@ miopenStatus_t miopenRNNBackwardWeights(miopenHandle_t handle,
                         reserveSpace,
                         reserveSpaceNumBytes);
 
-    // bfloat16 not supported for rnn operation
-    if(miopen::deref(hxDesc).GetType() == miopenBFloat16 ||
-       miopen::deref(dwDesc).GetType() == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
     LogCmdRNN(xDesc, rnnDesc, sequenceLen, BackwardWeights);
 
     return miopen::try_([&] {
+        const auto type = miopen::deref(rnnDesc).dataType;
+        ValidateRNNTensorArray(type, sequenceLen, xDesc);
+        ValidateRNNTensorArray(type, sequenceLen, yDesc);
+        ValidateRNNTensorTypes(type, hxDesc, dwDesc);
         miopen::c_array_view<const miopenTensorDescriptor_t> xDescArray{xDesc, size_t(sequenceLen)};
         miopen::c_array_view<const miopenTensorDescriptor_t> yDescArray{yDesc, size_t(sequenceLen)};
         miopen::deref(rnnDesc).RNNBackwardWeights(miopen::deref(handle),
@@ -1142,6 +1153,12 @@ extern "C" miopenStatus_t miopenRNNForwardInference(miopenHandle_t handle,
                         workSpaceNumBytes);
     LogCmdRNN(xDesc, rnnDesc, sequenceLen, ForwardInference);
     return miopen::try_([&] {
+        const auto type = miopen::deref(rnnDesc).dataType;
+        ValidateRNNTensorArray(type, sequenceLen, xDesc);
+        ValidateRNNTensorArray(type, sequenceLen, yDesc);
+        ValidateRNNTensorTypes(type, wDesc, hxDesc, hyDesc);
+        if(miopen::deref(rnnDesc).rnnMode == miopenLSTM)
+            ValidateRNNTensorTypes(type, cxDesc, cyDesc);
         miopen::c_array_view<const miopenTensorDescriptor_t> xDescArray{xDesc, size_t(sequenceLen)};
         miopen::c_array_view<const miopenTensorDescriptor_t> yDescArray{yDesc, size_t(sequenceLen)};
         miopen::deref(rnnDesc).RNNForwardInference(miopen::deref(handle),
