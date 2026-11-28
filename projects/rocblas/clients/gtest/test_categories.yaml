@@ -48,8 +48,8 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Extended - same as Jenkins extended/nightly (timeout: 8 hours)"
-    # rtest-driver enabled so patterns and exclude are not used
+    description: "Extended - same as Jenkins extended/nightly, plus *HMM* with HSA_XNACK=1 (timeout: 8 hours)"
+    # rtest-driver enabled so patterns and exclude are not used; see ctest_comprehensive in rtest.xml
     test_patterns:
       # - "*nightly*"
       - "*known_bug*"
