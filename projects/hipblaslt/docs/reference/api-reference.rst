@@ -103,7 +103,17 @@ HIPBLAS_COMPUTE_32F_FAST_TF32 HIP_R_32F           HIP_R_32F       HIP_R_32F
 HIPBLAS_COMPUTE_32F           HIP_R_32F           HIP_R_16F       HIP_R_16F
 HIPBLAS_COMPUTE_32F           HIP_R_32F           HIP_R_16F       HIP_R_32F
 HIPBLAS_COMPUTE_32F           HIP_R_32F           HIP_R_16BF      HIP_R_16BF
+HIPBLAS_COMPUTE_32I           HIP_R_32I           HIP_R_8I        HIP_R_32I
+HIPBLAS_COMPUTE_32I           HIP_R_32I           HIP_R_8I        HIP_R_8I
 ============================= =================== =============== ===============
+
+``HIPBLAS_COMPUTE_32I`` takes alpha and beta as ``int32_t`` with scale type ``HIP_R_32I``;
+``hipblasLtMatmul`` refuses another scale type with ``HIPBLAS_STATUS_INVALID_VALUE``, and
+``hipblasLtMatmulAlgoGetHeuristic`` returns no algorithms for it. This differs from cuBLASLt,
+whose ``cublasLtMatmul`` takes scale type ``CUDA_R_32F`` (float alpha and beta) for ``CUDA_R_8I``
+output: code ported from cuBLASLt must pass ``int32_t`` alpha and beta with ``HIP_R_32I``. The
+extension API (``hipblaslt_ext::Gemm`` without a matmul descriptor) has no scale type and also
+reads alpha and beta as ``int32_t`` for this compute type.
 
 For ``FP8`` type Matmul, hipBLASLt supports the type combinations shown in the following table:
 

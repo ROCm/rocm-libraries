@@ -452,8 +452,9 @@ try
          "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.")
 
         ("scale_type",
-         value<std::string>(&scale_type), "Precision of scalar. "
-        "Options: f16_r,bf16_r,f32_c,f64_c")
+         value<std::string>(&scale_type), "Precision of alpha and beta: the real type of the "
+        "compute type (i32_r for c_i32_r), or a_type when it is complex, which is the type "
+        "hipblaslt-bench passes them in. Another value is refused. Default: that type")
 
         ("initialization",
          value<std::string>(&initialization)->default_value("hpl"),
@@ -1207,6 +1208,16 @@ try
         = compute_type == "" ? (HIPBLAS_COMPUTE_32F) : string_to_hipblas_computetype(compute_type);
     if(arg.compute_type == HIPBLASLT_COMPUTE_TYPE_INVALID)
         throw std::invalid_argument("Invalid value for --compute_type " + compute_type);
+
+    // testing_matmul passes alpha and beta in this type (Talpha), so the descriptor's
+    // scale type has to be it.
+    arg.scale_type = (arg.a_type == HIP_C_32F || arg.a_type == HIP_C_64F)
+                         ? arg.a_type
+                         : computeTypeToRealDataType(arg.compute_type);
+    if(scale_type != "" && string_to_hip_datatype(scale_type) != arg.scale_type)
+        throw std::invalid_argument("Invalid value for --scale_type " + scale_type
+                                    + ": hipblaslt-bench passes alpha and beta as "
+                                    + hip_datatype_to_string(arg.scale_type));
 
     // The value HIPBLASLT_DATATYPE_INVALID indicates that the compute_input_typeA has no effect.
     arg.compute_input_typeA = (compute_input_typeA != "")

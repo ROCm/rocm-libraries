@@ -25,6 +25,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 
+* `HIPBLAS_COMPUTE_32I` requires scale type `HIP_R_32I` with `int32_t` alpha and beta; unlike cuBLASLt, which takes `CUDA_R_32F` for `CUDA_R_8I` output, another scale type returns `HIPBLAS_STATUS_INVALID_VALUE`.
 * The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A` (`Disabled`, `GemmA2A` or `A2AGemm`), and the `tensilelite-client` option `--fused-gemm-a2a=1` is now `--fused-a2a=GemmA2A`. Device libraries and client configuration files from before this change must be regenerated.
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 * `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
@@ -50,6 +51,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Fixed the extension API examples that passed `stream` as the `useUserArgs` argument of `initialize`, and the device user arguments examples that ran with an undefined buffer.
 * Fixed `hipblaslt.h`, `hipblaslt-ext-op.h`, and `hipblaslt-local-kernel.h` failing to compile in a C translation unit. The C++ standard library includes, the default member initializers in `hipblasLtMatmulHeuristicResult_t`, the `static_cast` in the `*_INVALID` macros, and the C++-only `hipblaslt_e8.h` and `hipblaslt_e5m3.h` types now apply only to C++. In C, the `HIP_R_*_EXT` type ids are enumeration constants, so two C files that include the headers no longer fail to link with duplicate symbols. C++ consumers see no change.
 * gfx1200 and gfx1201 GEMM kernels, and the amax, layer norm and softmax extension-op kernels, now include the `s_wait_alu` instructions these GPUs require, as LLVM does for compiled code. Once a vector instruction has read a scalar register, a later write to that register needs a wait before the next read, or the read can return the old value. Small GEMMs can run 1-4% slower.
+* Fixed `HIPBLAS_COMPUTE_32I` with a scale type other than `HIP_R_32I` reading the bits of a float alpha and beta as `int32_t`, and `hipblaslt-bench` ignoring `--scale_type`.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 
