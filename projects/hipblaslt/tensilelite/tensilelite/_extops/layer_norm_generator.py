@@ -989,7 +989,7 @@ if __name__ == '__main__':
         assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
-    waveFrontSize = 32 if isa[0] in [11, 12] else 64
+    waveFrontSize = 32 if _global_ti.getIsaInfo(isa).archCaps["HasWave32"] else 64
     _global_ti.setKernel(isa, waveFrontSize)
     layernorm = LayerNormKernelGenerator(DataType('S'), w, c, 4, sweep_once, waveFrontSize, arch, isa)
     kernel_body = layernorm.layernorm_kernel_body()
