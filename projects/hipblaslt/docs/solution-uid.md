@@ -74,5 +74,19 @@ python3 -m tensilelite.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 `--inplace`, the command prints the new canonical `0u` UID without modifying
 the file.
 
-Repository-wide assignment, runtime selection, and mandatory uniqueness are
-introduced by later migration steps.
+One Tensile process gives every solution it writes a UID that is unique in that
+run. A solution keeps its UID when the UID is non-zero, well-formed, and not
+used yet in the run. A missing, zero, malformed, or colliding UID is replaced
+with a new one. A normal tuning config builds its solutions from parameters, so
+they carry no UID, and every winner in `3_LibraryLogic` gets a new one. Only
+`TensileRetuneLibrary`, which benchmarks the solutions of an existing logic file
+again, keeps their stored UIDs. So a UID copied out of `3_LibraryLogic` after a
+normal tuning run is not the UID the library ships for that kernel. When the
+tuned file is merged, `TensileMergeLibrary` matches solutions by
+`SolutionNameMin`, and a matching name keeps the solution, and its UID, that the
+library already has. Uniqueness across the shipped logic tree is checked by
+`test_solution_uid_uniqueness.py` in the logic-corpus lane
+(`tox -e logic-corpus`).
+
+Runtime metadata, runtime selection, and mandatory uniqueness are introduced
+by later migration steps.
