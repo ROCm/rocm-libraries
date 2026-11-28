@@ -36,10 +36,10 @@ _NUM_QUEUES = 8
 _ITEM = 40  # SGPR holding the popped work item
 _KERNEL = {"WorkGroupMappingXCC": -1, "WavefrontSize": 64}
 
-# Strategy -> (grid, split-tile count) SGPRs read by the gate.
+# Strategy -> grid SGPR read by the gate.
 _STRATEGIES = {
-    StreamKDynamic: ("skGrid", "skTiles"),
-    StreamKHybrid: ("SKGrid", "SKTiles"),
+    StreamKDynamic: "skGrid",
+    StreamKHybrid: "SKGrid",
 }
 
 
@@ -105,7 +105,6 @@ def test_emitted_sequence(strategy):
     _, items = _emit(strategy)
     assert [type(i) for i in items] == [
         SCmpGtU32, SCBranchSCC1,             # TotalItems > grid
-        SCmpEQU32, SCBranchSCC0,             # split tiles == 0
         SAndB32, SCmpEQU32, SCBranchSCC0,    # static uses the contiguous remap
         SAndB32, SLShiftRightB32,            # q, cnt
         SLShiftRightB32, SMulI32, SAddU32,   # + q * floor(T / numQueues)
@@ -118,37 +117,35 @@ def test_gate_branches_to_the_end(strategy):
     _, items = _emit(strategy)
     done = items[-1].getLabelName()
     branches = [i for i in items if isinstance(i, (SCBranchSCC0, SCBranchSCC1))]
-    assert len(branches) == 3
+    assert len(branches) == 2
     assert all(_params(b)[0] == done for b in branches)
 
 
 def test_gate_operands(strategy):
     _, items = _emit(strategy)
-    rounds, tiles, wgm, mode = items[0], items[2], items[4], items[5]
-    grid, splitTiles = _STRATEGIES[strategy]
+    rounds, wgm, mode = items[0], items[2], items[3]
+    grid = _STRATEGIES[strategy]
     assert _params(rounds) == ["s[sgprTotalItems]", "s[sgpr%s]" % grid]
     assert isinstance(items[1], SCBranchSCC1), "more items than workgroups: skip"
-    assert _params(tiles)[0] == "s[sgpr%s]" % splitTiles and _imm_in(tiles, 0)
-    assert isinstance(items[3], SCBranchSCC0), "split tiles: skip"
     # WGM bits: WGMXCC [13:10], chunk [21:14] with bit 14 masked out.
     assert "s[sgprWGM]" in _params(wgm) and _imm_in(wgm, 0x3FBC00)
     assert _params(mode)[0] == _params(wgm)[0] and _imm_in(mode, _NUM_QUEUES << 10)
-    assert isinstance(items[6], SCBranchSCC0), "other WGMXCC modes: skip"
+    assert isinstance(items[4], SCBranchSCC0), "other WGMXCC modes: skip"
 
 
 def test_queue_and_count_immediates(strategy):
     _, items = _emit(strategy)
-    q, cnt, floorT, modT = items[7], items[8], items[9], items[12]
+    q, cnt, floorT, modT = items[5], items[6], items[7], items[10]
     assert _params(q)[1] == "s%d" % _ITEM and _imm_in(q, _NUM_QUEUES - 1)
     assert _params(cnt)[:2] == ["s%d" % _ITEM, "s%d" % _ITEM] and _imm_in(cnt, 3)
     assert "s[sgprTotalItems]" in _params(floorT) and _imm_in(floorT, 3)
     assert "s[sgprTotalItems]" in _params(modT) and _imm_in(modT, _NUM_QUEUES - 1)
     item, sQ, sTmp = "s%d" % _ITEM, _params(q)[0], _params(floorT)[0]
     assert sQ not in (item, sTmp) and sTmp != item
-    assert _params(items[10]) == [sTmp, sQ, sTmp], "q * floor(T / numQueues)"
-    assert _params(items[11]) == [item, item, sTmp]
-    assert _params(items[13]) == [sTmp, sTmp, sQ], "min(q, T % numQueues)"
-    assert _params(items[14]) == [item, item, sTmp], "the renumbered item replaces the popped one"
+    assert _params(items[8]) == [sTmp, sQ, sTmp], "q * floor(T / numQueues)"
+    assert _params(items[9]) == [item, item, sTmp]
+    assert _params(items[11]) == [sTmp, sTmp, sQ], "min(q, T % numQueues)"
+    assert _params(items[12]) == [item, item, sTmp], "the renumbered item replaces the popped one"
 
 
 def test_temporaries_checked_back_in(strategy):

@@ -124,6 +124,10 @@ _SYNCSPERBENCHMARK_OPT_OUTS = {
         "validates output and synchronizer after back-to-back launches",
     ),
     SyncsPerBenchmarkOptOut(
+        "common/streamk/gfx950/sk_dynamic_contiguous_split.yaml",
+        "validates output and synchronizer after back-to-back launches",
+    ),
+    SyncsPerBenchmarkOptOut(
         "common/streamk/gfx950/sk_dynamic_split_overrides.yaml",
         "validates output and synchronizer after back-to-back launches",
     ),
