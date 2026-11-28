@@ -244,17 +244,16 @@ def find_slower_faster(outdirs, method, multitest, significance, ncompare,
 
         #print(pvals)
 
-        new_significance = None
+        # If we don't find a new cutoff, then we reject null for all tests (ie starting value for
+        # new significance is 0).
+        new_significance = 0.0
 
-        # Find the largest index
+        # Find the largest index where p_(k) < k * alpha / m; use that
+        # threshold for all comparisons (BH step-up procedure).
         for idx, pval in enumerate(pvals):
             j_alpha = (idx + 1) * significance / ncompare
             if pval < j_alpha:
                 new_significance = pval
-
-        # if new_significance == None:
-        #     print("Warning: didn't find cutoff alpha for bh multi-hypothesis testing")
-        #     new_significance = significance
 
     # Now that we have the new significance, decide on cases.
     for dat in token_p_measures:
