@@ -102,7 +102,7 @@ namespace local_kernel_test
 
     // Whether a shard serves the GPU with this PCI device id and compute unit
     // count. Shards built for one compute unit count carry "_CU<count>", and
-    // shards of an architecture split by chip (gfx950) "_ID<id>[-<id>...]";
+    // shards of an architecture split by chip (gfx942, gfx950) "_ID<id>[-<id>...]";
     // a shard without them serves every GPU of its architecture.
     inline bool shardServesDevice(std::string const& name, std::string const& pciId, int cuCount)
     {

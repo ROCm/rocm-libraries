@@ -112,6 +112,39 @@ def test_lt_different_chipid_sets(snapshot):
     assert {"one_lt_two": one < two, "two_lt_one": two < one} == snapshot
 
 
+_GFX942_ISA = (9, 4, 2)
+
+
+def test_from_hardware_gfx942_legacy_generic_is_silent_and_chip_agnostic(capsys):
+    # Legacy gfx942 DeviceNames name no chip: no warning, no PciChipId term.
+    p = HardwarePredicate.FromHardware(_GFX942_ISA, deviceNames=["Device 0049", "Device 0050"])
+    assert "WARNING" not in capsys.readouterr().out
+    assert p.state() == HardwarePredicate.FromHardware(_GFX942_ISA).state()
+    assert p.pciChipIds() == frozenset()
+
+
+def test_pci_chip_ids():
+    assert HardwarePredicate("TruePred").pciChipIds() == frozenset()
+    assert HardwarePredicate.FromHardware(_GFX942_ISA).pciChipIds() == frozenset()
+    assert HardwarePredicate.FromHardware(
+        _GFX942_ISA, deviceNames=["Device 74a5"]).pciChipIds() == frozenset([0x74a5])
+    assert HardwarePredicate.FromHardware(
+        _GFX942_ISA, cuCount=304, deviceNames=["Device 74a5"]).pciChipIds() == frozenset([0x74a5])
+    assert HardwarePredicate.FromHardware(
+        _GFX950_ISA, deviceNames=["Device 75a3", "Device 75a2"]).pciChipIds() == frozenset(
+            [0x75a3, 0x75a2])
+
+
+def test_lt_gfx942_mi325x_then_cu_then_generic():
+    # MI325X logic is tried first, then CU-specific logic, then the generic
+    # gfx942 logic every chip falls back to.
+    legacy = ["Device 0049", "Device 0050"]
+    mi325x = HardwarePredicate.FromHardware(_GFX942_ISA, deviceNames=["Device 74a5"])
+    cu20 = HardwarePredicate.FromHardware(_GFX942_ISA, cuCount=20, deviceNames=legacy)
+    generic = HardwarePredicate.FromHardware(_GFX942_ISA, deviceNames=legacy)
+    assert sorted([generic, cu20, mi325x]) == [mi325x, cu20, generic]
+
+
 def test_from_hardware_single_string_devicename(snapshot):
     # deviceNames as a bare string (not a list) -> the str-wrap branch.
     p = HardwarePredicate.FromHardware(_GFX950_ISA, deviceNames="Device 75a0")

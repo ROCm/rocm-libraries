@@ -41,6 +41,7 @@ from ..Common.Architectures import (
     SUPPORTED_CHIP_ID_FALLBACKS,
     _extractArchInfo,
     _verifyPredicate,
+    isLegacyGenericDeviceIds,
     supportsChipIdPredicate,
 )
 
@@ -160,6 +161,28 @@ def _validateChipIdPlacement(gfx: str, device_ids: Set[str], filepath: Path) -> 
     return None
 
 
+def _validateLegacyGenericPlacement(gfx: str, filepath: Path) -> Optional[str]:
+    """Checks where a legacy generic logic file may live.
+
+    Args:
+        gfx: GFX architecture the logic file declares.
+        filepath: Logic-root-relative path of the logic file.
+
+    Returns:
+        An error message if the file sits in a chip-ID directory, otherwise None.
+
+    Raises:
+        None.
+    """
+    chip_id_dir = _chipIdDirFromPath(gfx, filepath)
+    if chip_id_dir.hasChipIdDir:
+        return (
+            f"chip-ID directory '{chip_id_dir.dirName}' may not hold legacy generic "
+            f"{gfx} logic; declare the directory's chip ID in the YAML Device list"
+        )
+    return None
+
+
 def _validateChipId(
     filepath: Path,
     logic_relative_path: Optional[Path] = None,
@@ -187,12 +210,19 @@ def _validateChipId(
             )
             return False
 
+        device_ids = set(arch_info.DeviceIds)
+        if isLegacyGenericDeviceIds(arch_info.Gfx, device_ids):
+            placement_error = _validateLegacyGenericPlacement(arch_info.Gfx, placement_path)
+            if placement_error:
+                _reportChipIdFailure(report_path, placement_error)
+                return False
+            return True
+
         # _extractArchInfo lowercases device IDs at parse time, so no further
         # case normalization is needed here.
         for device_id in arch_info.DeviceIds:
             _verifyPredicate(device_id, arch_info.Gfx)
 
-        device_ids = set(arch_info.DeviceIds)
         # Walk the logic-root-relative path so that ancestor directories outside
         # the logic root (e.g. CI workspaces containing 'gfx950') cannot
         # masquerade as chip-ID directories.

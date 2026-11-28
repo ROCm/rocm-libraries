@@ -302,7 +302,7 @@ def check_corpus_invariants(
     callers that just want to check everything.
 
     The chip-ID-architecture-lock check (locking chip-ID-aware dispatch to
-    ``gfx950``) is intentionally *not* included here: it guards a future
+    ``gfx942`` and ``gfx950``) is intentionally *not* included here: it guards a future
     source-policy change, not the artifact a given build selects, so it's a
     hermetic pytest assertion over the architecture registry (see
     ``Tests/unit/test_PlaceholderMerge.py`` and
@@ -321,11 +321,11 @@ def check_corpus_invariants(
 
 def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
     """Lock chip-ID-aware architectures to the current, audited set
-    (``gfx950`` only). ``supportsChipIdPredicate`` gates both logic-file
+    (``gfx942`` and ``gfx950``). ``supportsChipIdPredicate`` gates both logic-file
     placement rules (``valid_chip_id.py``) and the ``SolutionLibrary`` placeholder
-    suffix; a new architecture silently becoming chip-ID-aware (or ``gfx950``
-    silently stopping being one) needs a deliberate re-audit of both, not a
-    registry edit that just happens to flip this predicate.
+    suffix; a new architecture silently becoming chip-ID-aware (or ``gfx942`` or
+    ``gfx950`` silently stopping being one) needs a deliberate re-audit of both,
+    not a registry edit that just happens to flip this predicate.
 
     This is a source-policy check over the architectures the given files
     declare, not a property of any one build's artifact, so it is exercised only
@@ -334,7 +334,7 @@ def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
     whole architecture registry on every invocation would add no additional
     safety over running it once in CI's unit-test job. The registry-wide form
     of the lock, which needs no corpus, is
-    ``test_PlaceholderMerge.py::test_supports_chip_id_predicate_only_gfx950``."""
+    ``test_PlaceholderMerge.py::test_supports_chip_id_predicate_only_gfx942_and_gfx950``."""
     from ..Common.Architectures import supportsChipIdPredicate
 
     violations: List[str] = []
@@ -344,7 +344,7 @@ def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
         if not isinstance(arch, str) or arch in seen_archs:
             continue
         seen_archs.add(arch)
-        expected = arch == "gfx950"
+        expected = arch in {"gfx942", "gfx950"}
         actual = supportsChipIdPredicate(arch)
         if actual is not expected:
             violations.append(

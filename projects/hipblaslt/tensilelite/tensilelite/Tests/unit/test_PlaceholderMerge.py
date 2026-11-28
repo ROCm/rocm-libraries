@@ -27,7 +27,8 @@ Two invariants must hold together; either alone is insufficient:
 
 1. Sibling logic YAMLs (same arch, same basename) declare identical DeviceNames.
 2. The ``_ID<chipid>`` placeholder-filename suffix is gated on
-   ``supportsChipIdPredicate``, mirroring ``HardwarePredicate.FromHardware``.
+   ``supportsChipIdPredicate`` and on the hardware predicate carrying a chip
+   ID, mirroring ``HardwarePredicate.FromHardware``.
 
 Sibling-DeviceNames consistency is a fact about the shipped corpus, so it is
 enforced by ``TensileLogic --check-all`` via
@@ -112,8 +113,14 @@ def test_id_suffix_appends_are_gated_on_supports_chip_id_predicate():
 
 
 _HARDWARE_CASES = [
-    ("gfx942", ["Device 74a1"], False),
+    ("gfx942", ["Device 74a5"], True),
+    ("gfx942", ["Device 74a1"], True),
+    # Legacy generic gfx942 logic names no chip, so its predicate has no
+    # PciChipId term and its placeholder must not carry an _ID suffix.
+    ("gfx942", ["Device 0049", "Device 0050"], False),
+    ("gfx942", ["Device 0049"], False),
     ("gfx950", ["Device 75a0"], True),
+    ("gfx90a", ["Device 0050"], False),
 ]
 
 
@@ -121,10 +128,10 @@ _HARDWARE_CASES = [
 def test_hardware_gates_placeholder_chip_id_suffix(
     devicePart, deviceNames, expect_id_suffix
 ):
-    """``MasterSolutionLibrary.hardware`` appends ``_ID<chipid>`` iff
-    ``supportsChipIdPredicate(devicePart)``."""
+    """``MasterSolutionLibrary.hardware`` appends ``_ID<chipid>`` iff the
+    hardware predicate it builds discriminates on a PCI chip ID."""
     d = {"ArchitectureName": devicePart, "CUCount": None, "DeviceNames": deviceNames}
-    _, placeholderName = SolutionLibrary.MasterSolutionLibrary.hardware(
+    lib, placeholderName = SolutionLibrary.MasterSolutionLibrary.hardware(
         d, library=None, placeholderName="TensileLibrary", lazyLibrary=True
     )
 
@@ -133,14 +140,31 @@ def test_hardware_gates_placeholder_chip_id_suffix(
         f"{devicePart}: _ID suffix presence={has_id}, expected={expect_id_suffix} "
         f"(name={placeholderName!r})"
     )
+    assert has_id == bool(lib.rows[0]["predicate"].pciChipIds())
     assert placeholderName.endswith("_" + devicePart), placeholderName
 
 
-def test_supports_chip_id_predicate_only_gfx950():
-    """Lock chip-id-aware archs to gfx950 across every architecture TensileLite
-    supports, whether or not logic ships for it yet; new entries require
-    re-audit of YAMLs and the SolutionLibrary suffix gate."""
-    assert [gfx for gfx in SUPPORTED_GFX if supportsChipIdPredicate(gfx)] == ["gfx950"]
+def test_legacy_generic_siblings_share_one_placeholder():
+    """gfx942 logic declaring ``[Device 0049]`` and ``[Device 0049, Device 0050]``
+    builds equal predicates, so it must also build one placeholder name."""
+    names = set()
+    for deviceNames in (["Device 0049"], ["Device 0049", "Device 0050"]):
+        d = {"ArchitectureName": "gfx942", "CUCount": None, "DeviceNames": deviceNames}
+        _, placeholderName = SolutionLibrary.MasterSolutionLibrary.hardware(
+            d, library=None, placeholderName="TensileLibrary", lazyLibrary=True
+        )
+        names.add(placeholderName)
+    assert names == {"TensileLibrary_gfx942"}
+
+
+def test_supports_chip_id_predicate_only_gfx942_and_gfx950():
+    """Lock chip-id-aware archs to gfx942 and gfx950 across every architecture
+    TensileLite supports, whether or not logic ships for it yet; new entries
+    require re-audit of YAMLs and the SolutionLibrary suffix gate."""
+    assert sorted(gfx for gfx in SUPPORTED_GFX if supportsChipIdPredicate(gfx)) == [
+        "gfx942",
+        "gfx950",
+    ]
 
 
 def test_supports_chip_id_predicate_includes_gfx950():

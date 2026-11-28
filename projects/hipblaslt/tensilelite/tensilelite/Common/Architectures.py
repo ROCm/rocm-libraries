@@ -267,6 +267,15 @@ SUPPORTED_CHIP_ID_FALLBACKS = {
     "id=75b3": ["id=75a0"],
     "id=75a8": ["id=75a0"],
     "id=75b8": ["id=75a0"],
+    "id=74a5": ["id=74a1"],
+}
+
+# Device names that legacy logic declares without naming a real chip. A logic
+# file whose DeviceNames are all listed here for its architecture is generic:
+# it carries no PciChipId predicate and serves every chip of that architecture,
+# after any chip-ID-specific logic.
+GFX_LEGACY_GENERIC_CHIP_IDS = {
+    "gfx942": ["0049", "0050"],
 }
 
 # `None` refers to an unspecified CU count.
@@ -286,7 +295,25 @@ def supportsChipIdPredicate(gfx: str) -> bool:
 
     Extend as needed to support other architectures.
     """
-    return gfx == "gfx950"
+    return gfx in {"gfx942", "gfx950"}
+
+
+def isLegacyGenericDeviceIds(gfx: str, deviceIds: Set[str]) -> bool:
+    """Returns whether a logic file's device IDs mark it as generic legacy logic.
+
+    Args:
+        gfx: GFX architecture the logic file declares.
+        deviceIds: Device ID predicate specs from the file header, e.g. ``{"id=0049"}``.
+
+    Returns:
+        True if ``deviceIds`` is non-empty and every entry is a legacy generic
+        device ID for ``gfx`` (see ``GFX_LEGACY_GENERIC_CHIP_IDS``).
+
+    Raises:
+        None.
+    """
+    legacyIds = {f"id={chipId.lower()}" for chipId in GFX_LEGACY_GENERIC_CHIP_IDS.get(gfx, [])}
+    return bool(deviceIds) and {d.lower() for d in deviceIds}.issubset(legacyIds)
 
 
 def isaToGfx(arch: IsaVersion) -> str:

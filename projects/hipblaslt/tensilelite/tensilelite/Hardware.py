@@ -27,7 +27,7 @@ from typing import List, Optional
 from . import Properties
 from .Common.Architectures import \
     SUPPORTED_CHIP_ID_FALLBACKS, SUPPORTED_BUILD_CHIP_IDS, GFX_CHIP_IDS, \
-    isaToGfx, supportsChipIdPredicate, print1
+    isaToGfx, isLegacyGenericDeviceIds, supportsChipIdPredicate, print1
 
 import copy
 import re
@@ -196,6 +196,8 @@ class HardwarePredicate(Properties.Predicate):
     ) -> List[str]:
         chipIdsRaw = [parseDeviceNameToHex(name) for name in deviceNames] if deviceNames else []
         chipIds = [chipId for chipId in chipIdsRaw if chipId is not None]
+        if isLegacyGenericDeviceIds(gfx, {f"id={chipId.lower()}" for chipId in chipIds}):
+            return []
         expectedIds = GFX_CHIP_IDS.get(gfx, [])
         supportedChipIds = [chipId for chipId in chipIds if f"id={chipId.lower()}" in SUPPORTED_BUILD_CHIP_IDS]
         unsupportedChipIds = [chipId for chipId in chipIds if f"id={chipId.lower()}" not in SUPPORTED_BUILD_CHIP_IDS]
@@ -221,6 +223,27 @@ class HardwarePredicate(Properties.Predicate):
             print1("")
 
         return supportedChipIds
+
+    def pciChipIds(self) -> frozenset:
+        """Returns the PCI chip IDs this hardware predicate discriminates on.
+
+        Args:
+            None.
+
+        Returns:
+            A frozenset of integer chip IDs; empty when the predicate carries no
+            PciChipId term (including TruePred and processor-only predicates).
+
+        Raises:
+            None.
+        """
+        if self.tag != "AMDGPU":
+            return frozenset()
+        if self.value.tag == "And":
+            chipIdPred = next(
+                iter(x for x in self.value.value if x.tag in ("PciChipId", "Or")), None)
+            return _extractPciChipIds(chipIdPred)
+        return _extractPciChipIds(self.value)
 
     def __lt__(self, other):
         # Use superclass logic for TruePreds

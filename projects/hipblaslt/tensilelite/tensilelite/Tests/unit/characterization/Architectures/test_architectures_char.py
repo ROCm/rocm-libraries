@@ -17,7 +17,16 @@ pytestmark = pytest.mark.unit
 
 def test_supports_chip_id_predicate():
     assert A.supportsChipIdPredicate("gfx950") is True
-    assert A.supportsChipIdPredicate("gfx942") is False
+    assert A.supportsChipIdPredicate("gfx942") is True
+    assert A.supportsChipIdPredicate("gfx90a") is False
+
+
+def test_is_legacy_generic_device_ids():
+    assert A.isLegacyGenericDeviceIds("gfx942", {"id=0049", "id=0050"}) is True
+    assert A.isLegacyGenericDeviceIds("gfx942", {"id=0049"}) is True
+    assert A.isLegacyGenericDeviceIds("gfx942", {"id=0049", "id=74a1"}) is False
+    assert A.isLegacyGenericDeviceIds("gfx942", set()) is False
+    assert A.isLegacyGenericDeviceIds("gfx950", {"id=0049"}) is False
 
 
 def test_isa_to_gfx_and_back(snapshot):

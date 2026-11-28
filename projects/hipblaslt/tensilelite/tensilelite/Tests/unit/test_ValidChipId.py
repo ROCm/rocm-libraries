@@ -275,9 +275,13 @@ def test_validateChipIdRejectsFallbackChipIdInMalformedVariantDirectory(
     assert "gfx950_75a3" in err
 
 
-def test_validateChipIdDoesNotRequireChipIdDirectoryForNonGatedArch(tmp_path, validate_chip_id):
+def _gfx942Path(tmp_path: Path, variant: str = "gfx942") -> Path:
+    return tmp_path / "aquavanjaram" / variant / "Equality" / "logic.yaml"
+
+
+def test_validateChipIdAcceptsGfx942DefaultChipIdInBaseDirectory(tmp_path, validate_chip_id):
     logic_file = _writeLogicFile(
-        tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "logic.yaml",
+        _gfx942Path(tmp_path),
         gfx="gfx942",
         name="aquavanjaram",
         devices="Device 74a0",
@@ -286,15 +290,97 @@ def test_validateChipIdDoesNotRequireChipIdDirectoryForNonGatedArch(tmp_path, va
     assert validate_chip_id(logic_file)
 
 
-def test_validateChipIdIgnoresUnsupportedChipIdForNonGatedArch(tmp_path, validate_chip_id):
+@pytest.mark.parametrize("variant", ["gfx942", "gfx942_20cu", "gfx942_304cu"])
+@pytest.mark.parametrize("devices", ["Device 0049, Device 0050", "Device 0049", "Device 0050"])
+def test_validateChipIdAcceptsLegacyGenericGfx942Logic(tmp_path, validate_chip_id, variant, devices):
     logic_file = _writeLogicFile(
-        tmp_path / "aquavanjaram" / "gfx942_20cu" / "GridBased" / "logic.yaml",
+        _gfx942Path(tmp_path, variant),
         gfx="gfx942",
         name="aquavanjaram",
-        devices="Device 0050",
+        devices=devices,
     )
 
     assert validate_chip_id(logic_file)
+
+
+def test_validateChipIdRejectsLegacyGenericGfx942LogicInChipIdDirectory(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
+    logic_file = _writeLogicFile(
+        _gfx942Path(tmp_path, "gfx942_id74a5"),
+        gfx="gfx942",
+        name="aquavanjaram",
+        devices="Device 0049, Device 0050",
+    )
+
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "may not hold legacy generic gfx942 logic" in err
+    assert "gfx942_id74a5" in err
+
+
+def test_validateChipIdRejectsLegacyGenericIdMixedWithChipId(tmp_path, capsys, validate_chip_id):
+    logic_file = _writeLogicFile(
+        _gfx942Path(tmp_path),
+        gfx="gfx942",
+        name="aquavanjaram",
+        devices="Device 0049, Device 74a1",
+    )
+
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "device ID not supported" in err
+
+
+def test_validateChipIdRejectsGfx942LegacyGenericIdOnGfx950(tmp_path, capsys, validate_chip_id):
+    logic_file = _writeLogicFile(_baseGfx950Path(tmp_path), devices="Device 0049")
+
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "device ID not supported" in err
+
+
+def test_validateChipIdAcceptsMi325xVariantDirectory(tmp_path, validate_chip_id):
+    logic_file = _writeLogicFile(
+        _gfx942Path(tmp_path, "gfx942_id74a5"),
+        gfx="gfx942",
+        name="aquavanjaram",
+        devices="Device 74a5",
+    )
+
+    assert validate_chip_id(logic_file)
+
+
+def test_validateChipIdRejectsMi300xFallbackChipIdInMi325xVariantDirectory(
+    tmp_path,
+    capsys,
+    validate_chip_id,
+):
+    logic_file = _writeLogicFile(
+        _gfx942Path(tmp_path, "gfx942_id74a5"),
+        gfx="gfx942",
+        name="aquavanjaram",
+        devices="Device 74a5, Device 74a1",
+    )
+
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "may not declare default fallback chip IDs" in err
+
+
+def test_validateChipIdRejectsMi300xVariantDirectory(tmp_path, capsys, validate_chip_id):
+    logic_file = _writeLogicFile(
+        _gfx942Path(tmp_path, "gfx942_id74a1"),
+        gfx="gfx942",
+        name="aquavanjaram",
+        devices="Device 74a1",
+    )
+
+    assert not validate_chip_id(logic_file)
+    err = capsys.readouterr().err
+    assert "non-source chip ID" in err
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +423,7 @@ def test_validateChipIdAcceptsUppercaseHexInYaml(tmp_path, validate_chip_id):
 # ---------------------------------------------------------------------------
 
 def _gated_archs(arch_mod):
-    """Archs currently gated by supportsChipIdPredicate (only gfx950 today)."""
+    """Archs currently gated by supportsChipIdPredicate (gfx942 and gfx950 today)."""
     return [
         gfx
         for gfx in arch_mod.GFX_CHIP_IDS
@@ -395,20 +481,19 @@ def test_validateChipIdAcceptsEverySourceChipIdInItsVariantDir(
 def test_validateChipIdSkipsAllNonGatedArchs(tmp_path, validate_chip_id, arch_mod):
     non_gated_archs = [
         gfx
-        for gfx in arch_mod.GFX_CHIP_IDS
+        for gfx in arch_mod.SUPPORTED_GFX
         if not arch_mod.supportsChipIdPredicate(gfx)
     ]
     assert non_gated_archs
 
     for gfx in non_gated_archs:
-        # Pick any chip ID for the arch — placement rules don't apply to
-        # non-gated archs, so the validator must short-circuit to True.
-        chip_id = arch_mod.GFX_CHIP_IDS[gfx][0]
+        # Any device ID will do: placement rules don't apply to non-gated
+        # archs, so the validator must short-circuit to True.
         logic_file = _writeLogicFile(
-            tmp_path / gfx / gfx / "Equality" / f"{chip_id}.yaml",
+            tmp_path / gfx / gfx / "Equality" / "logic.yaml",
             gfx=gfx,
             name=gfx,
-            devices=f"Device {chip_id}",
+            devices="Device 0050",
         )
 
         assert validate_chip_id(logic_file)

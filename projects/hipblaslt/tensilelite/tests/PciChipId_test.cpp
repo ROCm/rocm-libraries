@@ -35,7 +35,7 @@ TEST(PciChipIdTest, QueryDeviceChipId)
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess) << "Failed to get device properties";
     auto processor = AMDGPU::toProcessor(prop.gcnArchName);
     if(!ChipIdRegistry::supportsChipIdPredicate(processor))
-        GTEST_SKIP() << "PCI chip ID querying is gfx950-only at runtime";
+        GTEST_SKIP() << "PCI chip ID querying requires gfx942 or gfx950";
 
     // Query PCI Chip ID using hipDeviceGetAttribute directly
     int pciChipId = 0;
@@ -66,7 +66,7 @@ TEST(PciChipIdTest, HipHardwarePopulatesPciChipId)
     if(!ChipIdRegistry::supportsChipIdPredicate(amdgpu->processor))
     {
         EXPECT_FALSE(amdgpu->pciChipId().has_value())
-            << "pciChipId should be unset for non-gfx950 processors";
+            << "pciChipId should be unset for processors without chip-ID predicates";
         return;
     }
 
@@ -112,7 +112,7 @@ TEST(PciChipIdTest, PciChipIdEqualPredicate)
     ASSERT_NE(amdgpu, nullptr);
 
     if(!ChipIdRegistry::supportsChipIdPredicate(amdgpu->processor))
-        GTEST_SKIP() << "PciChipIdEqual runtime matching is gfx950-only";
+        GTEST_SKIP() << "PciChipIdEqual runtime matching requires gfx942 or gfx950";
 
     ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
     int actualPciChipId = amdgpu->pciChipId().value();
@@ -128,15 +128,69 @@ TEST(PciChipIdTest, PciChipIdEqualPredicate)
     EXPECT_FALSE((*nonMatchingPred)(*amdgpu)) << "Predicate should NOT match different chip ID";
 }
 
-TEST(PciChipIdTest, PciChipIdEqualIgnoredOnNonGfx950)
+TEST(PciChipIdTest, PciChipIdEqualIgnoredOnUnsupportedProcessor)
 {
-    AMDGPU gpuWithChipId(AMDGPU::Processor::gfx942, 120, "gfx942-mock", std::make_optional(0x75a0));
+    AMDGPU gpuWithChipId(AMDGPU::Processor::gfx90a, 120, "gfx90a-mock", std::make_optional(0x75a0));
     auto   pred = std::make_shared<Predicates::GPU::PciChipIdEqual>(0x75a0);
 
     EXPECT_FALSE((*pred)(gpuWithChipId))
-        << "PciChipIdEqual must ignore chip IDs for non-gfx950 processors";
+        << "PciChipIdEqual must ignore chip IDs for processors without chip-ID predicates";
     EXPECT_FALSE(pred->isFallbackMatch(gpuWithChipId))
-        << "Fallback matching must also be disabled for non-gfx950 processors";
+        << "Fallback matching must also be disabled for processors without chip-ID predicates";
+}
+
+TEST(PciChipIdTest, Gfx942ExactAndDirectedFallback)
+{
+    AMDGPU source(AMDGPU::Processor::gfx942, 304, "source", std::make_optional(0x74a5));
+    AMDGPU target(AMDGPU::Processor::gfx942, 304, "target", std::make_optional(0x74a1));
+    AMDGPU missing(AMDGPU::Processor::gfx942, 304, "missing");
+    Predicates::GPU::PciChipIdEqual sourcePred(0x74a5);
+    Predicates::GPU::PciChipIdEqual targetPred(0x74a1);
+    Predicates::GPU::PciChipIdEqual unrelatedPred(0x74a2);
+
+    EXPECT_TRUE(sourcePred(source));
+    EXPECT_FALSE(sourcePred.isFallbackMatch(source));
+    EXPECT_TRUE(targetPred(source));
+    EXPECT_TRUE(targetPred.isFallbackMatch(source));
+    EXPECT_FALSE(sourcePred(target));
+    EXPECT_FALSE(sourcePred.isFallbackMatch(target));
+    EXPECT_FALSE(unrelatedPred(source));
+    EXPECT_FALSE(unrelatedPred.isFallbackMatch(source));
+    EXPECT_FALSE(sourcePred(missing));
+    EXPECT_FALSE(sourcePred.isFallbackMatch(missing));
+}
+
+TEST(PciChipIdTest, Gfx942HardwareSelectionPreservesGenericFallback)
+{
+    constexpr auto processor = AMDGPU::Processor::gfx942;
+    AMDGPU         source(processor, 304, "source", std::make_optional(0x74a5));
+    AMDGPU         target(processor, 304, "target", std::make_optional(0x74a1));
+    AMDGPU         partition(processor, 38, "partition", std::make_optional(0x74a5));
+    AMDGPU         missing(processor, 304, "missing");
+
+    auto sourceEq = singleLib(makeSolution("source-equality", 1));
+    auto targetEq = singleLib(makeSolution("target-equality", 2));
+    auto generic  = singleLib(makeSolution("generic", 3));
+    auto cu38     = singleLib(makeSolution("cu38", 4));
+    auto lib      = buildHwLib({
+        {makeHwPred(processor, 0x74a5, 304), buildProblemLib(sourceEq, generic)},
+        {makeHwPred(processor, 0x74a1, 304), buildProblemLib(targetEq, generic)},
+        {makeHwPred(processor, std::nullopt, 38), buildProblemLib(cu38, generic)},
+        {makeHwPred(processor), buildProblemLib(generic)},
+    });
+
+    EXPECT_EQ(selectSolution(*lib, source), "source-equality");
+    EXPECT_EQ(selectSolution(*lib, target), "target-equality");
+    EXPECT_EQ(selectSolution(*lib, partition), "cu38");
+    EXPECT_EQ(selectSolution(*lib, missing), "generic");
+
+    auto targetOnly = buildHwLib({
+        {makeHwPred(processor, 0x74a1, 304), buildProblemLib(targetEq, generic)},
+        {makeHwPred(processor), buildProblemLib(generic)},
+    });
+    // Directed fallback must not expose another chip's Equality solution.
+    EXPECT_EQ(selectSolution(*targetOnly, source), "generic");
+    EXPECT_EQ(selectSolution(*targetOnly, target), "target-equality");
 }
 
 TEST(PciChipIdTest, OrPciChipIdPredicateExactForAllTargets)
@@ -188,7 +242,7 @@ TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
     ASSERT_NE(amdgpu, nullptr);
 
     if(!ChipIdRegistry::supportsChipIdPredicate(amdgpu->processor))
-        GTEST_SKIP() << "HardwareSelectionWithPciChipId is gfx950-specific";
+        GTEST_SKIP() << "HardwareSelectionWithPciChipId requires gfx942 or gfx950";
 
     ASSERT_TRUE(amdgpu->pciChipId().has_value()) << "pciChipId must be set for this test";
     int actualPciChipId = amdgpu->pciChipId().value();

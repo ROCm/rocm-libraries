@@ -512,17 +512,18 @@ def test_sibling_device_names_respects_a_caller_supplied_file_subset(tmp_path, v
 # ===========================================================================
 
 def test_chip_id_arch_lock_clean_for_real_predicate(tmp_path, vcc):
-    # gfx950 (chip-ID-aware) and gfx942 (not) both match the real,
+    # gfx950 and gfx942 (chip-ID-aware) and gfx90a (not) all match the real,
     # unpatched supportsChipIdPredicate -- no violations.
     f1 = _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml", gfx="gfx950")
     f2 = _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml", gfx="gfx942")
-    assert vcc.find_chip_id_arch_lock_violations([f1, f2]) == []
+    f3 = _write_header_yaml(tmp_path / "aldebaran" / "gfx90a" / "Equality" / "a.yaml", gfx="gfx90a")
+    assert vcc.find_chip_id_arch_lock_violations([f1, f2, f3]) == []
 
 
 def test_chip_id_arch_lock_flags_a_newly_gated_architecture(tmp_path, vcc, monkeypatch):
-    # Simulate a registry edit that makes a non-gfx950 architecture report
-    # chip-ID awareness without the corresponding re-audit -- the lock must
-    # catch it even though no real logic file changed.
+    # Simulate a registry edit that makes an architecture outside gfx942/gfx950
+    # report chip-ID awareness without the corresponding re-audit -- the lock
+    # must catch it even though no real logic file changed.
     f = _write_header_yaml(tmp_path / "codename" / "gfx1200" / "Equality" / "a.yaml", gfx="gfx1200")
     import tensilelite.Common.Architectures as arch_mod
 
@@ -533,16 +534,17 @@ def test_chip_id_arch_lock_flags_a_newly_gated_architecture(tmp_path, vcc, monke
     assert "expected=False" in violations[0]
 
 
-def test_chip_id_arch_lock_flags_gfx950_losing_its_gate(tmp_path, vcc, monkeypatch):
-    # The lock is symmetric: gfx950 silently losing chip-ID awareness is
+@pytest.mark.parametrize("gfx", ["gfx942", "gfx950"])
+def test_chip_id_arch_lock_flags_gated_arch_losing_its_gate(tmp_path, vcc, monkeypatch, gfx):
+    # The lock is symmetric: a gated arch silently losing chip-ID awareness is
     # just as much a violation as another arch silently gaining it.
-    f = _write_header_yaml(tmp_path / "aldebaran" / "gfx950" / "Equality" / "a.yaml", gfx="gfx950")
+    f = _write_header_yaml(tmp_path / "codename" / gfx / "Equality" / "a.yaml", gfx=gfx)
     import tensilelite.Common.Architectures as arch_mod
 
     monkeypatch.setattr(arch_mod, "supportsChipIdPredicate", lambda gfx: False)
     violations = vcc.find_chip_id_arch_lock_violations([f])
     assert len(violations) == 1
-    assert "gfx950" in violations[0]
+    assert gfx in violations[0]
     assert "expected=True" in violations[0]
 
 
