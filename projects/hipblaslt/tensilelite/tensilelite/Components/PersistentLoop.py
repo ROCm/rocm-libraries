@@ -409,7 +409,11 @@ class PersistentLoop(Component):
     def initialize(self, writer, kernel):
         processing = Component.TileProcessingStrategy.find(writer)
         writer.states.currentTileWork = processing.tileWork(kernel)
-        return Component.WorkAssignment.find(writer).initialize(writer, kernel, processing)
+        from .WorkGroupMappingAlgos import WGMMagicPersistentSetup, wgmRemapMagicPersistent
+        module = Component.WorkAssignment.find(writer).initialize(writer, kernel, processing)
+        if wgmRemapMagicPersistent(kernel):
+            module.add(WGMMagicPersistentSetup(writer, kernel))
+        return module
 
     def activateReservedOrAcquire(self, writer, kernel, tPA, tPB):
         processing = Component.TileProcessingStrategy.find(writer)
