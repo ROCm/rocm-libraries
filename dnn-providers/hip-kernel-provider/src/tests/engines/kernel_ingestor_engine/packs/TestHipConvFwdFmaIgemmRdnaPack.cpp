@@ -472,6 +472,22 @@ TEST(TestHipConvFwdFmaIgemmRdnaLaunchValues, RefusesMalformedValues)
     auto hugeGrid = savedValid();
     hugeGrid.values["n"] = int64_t{std::numeric_limits<int>::max()};
     refused(hugeGrid, "a grid beyond the launch limits");
+
+    // N x Do x Ho x Wo is 2^64, which wraps to 0 in int64.
+    auto wrappingGrid = savedValid();
+    for(const auto* name : {"n", "out_d", "out_h", "out_w"})
+    {
+        wrappingGrid.values[name] = int64_t{1} << 16;
+    }
+    refused(wrappingGrid, "a grid whose block count wraps");
+
+    // 2^33 taps: the kernel counts them in int.
+    auto hugeFilter = savedValid();
+    for(const auto* name : {"filter_d", "filter_h", "filter_w"})
+    {
+        hugeFilter.values[name] = int64_t{1} << 11;
+    }
+    refused(hugeFilter, "a K loop beyond int");
 }
 
 } // namespace

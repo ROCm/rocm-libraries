@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -98,6 +99,7 @@ constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
 
 // Must match kernels/ConvFwdFmaIgemm.cpp.
 constexpr int64_t FMA_TILE_M = 128;
+constexpr int64_t FMA_TILE_C = 16;
 constexpr unsigned int FMA_BLOCK_SIZE = 256;
 // Fewer output channels per group leave most of the (at least 32-wide) channel tile idle;
 // depthwise convolutions belong to a depthwise kernel family.
@@ -123,9 +125,39 @@ int64_t fmaTileN(const ConvProblem& problem)
     return kPerGroup <= 64 ? 64 : 128;
 }
 
+/// The product of @p factors (each at least 1), or @p cap + 1 once it would pass @p cap, so
+/// values near INT_MAX (reachable through a saved plan) cannot wrap it.
+int64_t cappedProduct(std::initializer_list<int64_t> factors, int64_t cap)
+{
+    int64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(factor > cap / product)
+        {
+            return cap + 1;
+        }
+        product *= factor;
+    }
+    return product;
+}
+
+/// The kernel counts the filter taps and its K iterations (taps x ceil(C per group / TILE_C))
+/// in int.
+bool fmaKLoopFits(const ConvProblem& problem)
+{
+    constexpr int64_t INT_LIMIT = std::numeric_limits<int>::max();
+    const int64_t channelTiles = (problem.channelsPerGroup() + FMA_TILE_C - 1) / FMA_TILE_C;
+    return cappedProduct({problem.filter[0], problem.filter[1], problem.filter[2], channelTiles},
+                         INT_LIMIT)
+           <= INT_LIMIT;
+}
+
+/// ceil(N x Do x Ho x Wo / TILE_M). Saturates past MAX_GRID_X_BLOCKS, so extents near INT_MAX
+/// (reachable through a saved plan) cannot wrap the product into the launch limits.
 int64_t fmaGridXBlocks(const ConvProblem& problem)
 {
-    const int64_t m = int64_t{problem.n} * problem.out[0] * problem.out[1] * problem.out[2];
+    const int64_t m = cappedProduct({problem.n, problem.out[0], problem.out[1], problem.out[2]},
+                                    MAX_GRID_X_BLOCKS * FMA_TILE_M);
     return (m + FMA_TILE_M - 1) / FMA_TILE_M;
 }
 
@@ -142,7 +174,8 @@ bool fmaServes(const ConvProblem& problem)
     {
         return false;
     }
-    return fmaGridXBlocks(problem) <= MAX_GRID_X_BLOCKS && fmaGridY(problem) <= MAX_GRID_Y;
+    return fmaGridXBlocks(problem) <= MAX_GRID_X_BLOCKS && fmaGridY(problem) <= MAX_GRID_Y
+           && fmaKLoopFits(problem);
 }
 
 /// The single conv-forward node and the problem it poses, or nullopt for any other graph.
@@ -405,13 +438,14 @@ LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
     problem.spatialRank = problem.in[0] == 1 && problem.filter[0] == 1 ? 2 : 3;
 
     if(problem.c % problem.groups != 0 || problem.k % problem.groups != 0
-       || fmaGridXBlocks(problem) > MAX_GRID_X_BLOCKS || fmaGridY(problem) > MAX_GRID_Y)
+       || fmaGridXBlocks(problem) > MAX_GRID_X_BLOCKS || fmaGridY(problem) > MAX_GRID_Y
+       || !fmaKLoopFits(problem))
     {
         serialization::refuseIngestorPlan(
             serialization::IngestorPlanRefusal::INCOMPATIBLE,
             "launch values of dispatch '" + inputs.dispatchSymbol
-                + "' give groups that do not divide 'c' and 'k', or a grid beyond the launch "
-                  "limits");
+                + "' give groups that do not divide 'c' and 'k', a grid beyond the launch limits, "
+                  "or a K loop beyond int");
     }
     return launch;
 }

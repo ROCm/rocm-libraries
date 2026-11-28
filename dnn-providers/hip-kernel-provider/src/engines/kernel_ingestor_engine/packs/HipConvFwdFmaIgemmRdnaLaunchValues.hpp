@@ -52,8 +52,9 @@ hipdnn_plugin_sdk::ingestor::MetadataValues
 
 /// Reads the values of the `hipkernel.hip_conv_fwd_fma_igemm_rdna.dispatch.v1` contract. Every extent,
 /// stride and dilation must be in [1, INT_MAX], every padding in [0, INT_MAX], C and K must
-/// split into the groups, and the grid must fit the launch limits. Dtype and layout are not
-/// saved: they are compiled into the saved kernel.
+/// split into the groups, the grid must fit the launch limits, and the kernel's tap and
+/// K-iteration counts must fit in int. Dtype and layout are not saved: they are compiled into
+/// the saved kernel.
 ///
 /// @throws HipdnnPluginException with a load refusal when the dispatch name is not that
 ///         contract, or when a value is missing, extra, of another type or out of range.
