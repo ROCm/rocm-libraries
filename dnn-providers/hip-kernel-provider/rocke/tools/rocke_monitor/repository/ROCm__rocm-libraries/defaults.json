@@ -1,0 +1,137 @@
+{
+  "folders": [
+    "dnn-providers/hip-kernel-provider/rocke"
+  ],
+  "values": {
+    "test_sparse": [
+      "shared/ctest"
+    ],
+    "gpu": {
+      "skip_pattern": "(?i)\\b(gpus?|devices?|gfx[0-9a-f]+x?|hip|hipcc|rocm|rocminfo|amdgpu|hsa|comgr)\\b",
+      "base_env": {
+        "ROCKE_BACKEND": "python"
+      }
+    },
+    "hot_spots": {
+      "RG": [
+        "<ROCKE_PATH>/platform/tests/golden/rocke_representative_ir_sha256.json",
+        "<ROCKE_PATH>/platform/tests/golden/rocke_representative_ir_sha256/"
+      ],
+      "DG": "<ROCKE_PATH>/platform/tests/instances/differential/golden/llvm_gfx_all.json",
+      "ABI": "<ROCKE_PATH>/platform/cpp/include/rocke/abi.h",
+      "CAT": "<ROCKE_PATH>/platform/cpp/core/arch/data.cpp",
+      "CMK": "<ROCKE_PATH>/platform/CMakeLists.txt"
+    },
+    "ci_test_tiers": [
+      {
+        "jobs": "TheRock Test hipkernelprovider shards",
+        "tree": "installed",
+        "tier": "standard",
+        "exclude": [
+          "ex_gpu"
+        ]
+      }
+    ],
+    "ci_absent_modules": [
+      "torch",
+      "matplotlib",
+      "rocke_engine",
+      "rocke_library_engine"
+    ],
+    "ci_infra_signatures": [
+      {
+        "pattern": "Executing the custom container implementation failed",
+        "note": "the external repository's checkout hung (often after its 10-minute checkout timeout)"
+      },
+      {
+        "pattern": "The action 'Test' has timed out after 30 minutes",
+        "jobs": "shard",
+        "unless": "\\*\\*\\*(?:Failed|Exception)|\\((?:Failed|Exception|SEGFAULT)\\)|\\bFAILED \\S+::\\S+",
+        "note": "a shard's Test step limit with no failed test: the pool's, unless the PR's entries add the time (rk shard-times N)"
+      },
+      {
+        "pattern": "The self-hosted runner lost communication with the server",
+        "note": "the runner was lost; its log reads 404"
+      },
+      {
+        "pattern": "The runner has received a shutdown signal",
+        "note": "the runner was shut down (exit 130)"
+      },
+      {
+        "pattern": "Network is unreachable|Temporary failure resolving",
+        "regex": true,
+        "jobs": "hipdnn",
+        "note": "no network while installing the build tools (apt exit 100): no build ran"
+      },
+      {
+        "pattern": "\\(exited (?:404|429)\\)",
+        "regex": true,
+        "jobs": "windows",
+        "note": "a Chocolatey download failed (404, or 429 rate limit) installing the requirements or build tools"
+      },
+      {
+        "pattern": "(?s)therock-dvc.{0,4000}?\\[Errno 13\\] Permission denied",
+        "regex": true,
+        "jobs": "windows",
+        "note": "the DVC fetch could not write its cache (Windows compiler runtime)"
+      },
+      {
+        "pattern": "(?s)fetch_sources\\.py.{0,4000}?Segmentation fault",
+        "regex": true,
+        "note": "the source fetch crashed (emulation)"
+      },
+      {
+        "pattern": "killed outside the job",
+        "note": "the runner's pod died during the build"
+      },
+      {
+        "pattern": "clean_configure_test_project.cmake:49",
+        "note": "the examples test's own project configure step"
+      },
+      {
+        "pattern": "getIDToken call failed",
+        "note": "the runner's OIDC token request failed"
+      },
+      {
+        "pattern": "No matching artifacts found",
+        "note": "an artifact download found nothing to fetch"
+      },
+      {
+        "pattern": "\\bHTTP 50[03]\\b",
+        "regex": true,
+        "jobs": "gate|bot",
+        "note": "GitHub answered 500 or 503 to a gate or bot workflow's gh call"
+      },
+      {
+        "pattern": "pwsh: command not found",
+        "jobs": "windows",
+        "note": "a Windows runner without PowerShell; a site sets ends_at to the develop commit that moves the step to bash"
+      }
+    ],
+    "drift_extract": [
+      "*",
+      "{provider}/*",
+      "{provider}/src",
+      "shared/ctest",
+      "projects/hipdnn/tools/IngestorGenerator/configs"
+    ],
+    "develop_watched_workflows": [
+      "TheRock Multi-Arch CI",
+      "Component CI",
+      "pre-commit",
+      "HipDNN Linux Superbuild",
+      "HipDNN Windows Superbuild"
+    ],
+    "develop_rocke_job_pattern": "hipkernelprovider|hip-kernel-provider|hipdnn|rocke",
+    "incident_issue": {
+      "time_limit_labels": [
+        "test-timeout"
+      ],
+      "title_pattern": "rocke|hip-kernel-provider|hipkernelprovider",
+      "test_name_pattern": "\\b(?:rocke_\\w{4,}|hkp-[\\w-]{4,})",
+      "umbrella_test_names": [
+        "rocke_pytest"
+      ]
+    }
+  }
+}

@@ -1,0 +1,2437 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rocKE monitor: deploy settings",
+  "description": "These settings decide what one monitor on this host does.",
+  "x-header": [
+    "These settings decide what one monitor on this host does. QUICK_DEPLOY_GUIDE.md walks you through them, and README.md explains each one.",
+    "This file is yours: keep it out of git and out of the package folder. Never put a password, token or key in it: rkmon login installs those.",
+    "Every feature starts in \"prototype\" mode: it does its work and shows you the result on the admin dashboard, but posts and sends nothing. Switch a feature to \"live\" when you are happy with it (QUICK_USER_GUIDE.md, \"Go live\").",
+    "Put text in double quotes. Replace every <...>, then run: rkmon check --settings FILE",
+    "To change a setting later, see QUICK_USER_GUIDE.md, \"Change a setting\"."
+  ],
+  "x-profiles": {
+    "full": {
+      "what": "reviews, the merge queue and the admin dashboard"
+    },
+    "review-only": {
+      "what": "reviews and the admin dashboard",
+      "header": [
+        "This monitor reviews the pull requests that have its scope labels, with your team's own review skills if skills_folder names them. It never merges a pull request, puts one on hold or turns on its auto-merge. Its reviews run on its own Claude login, so that login's account pays for them."
+      ],
+      "values": {
+        "features.merge_queue.enabled": false
+      }
+    },
+    "merge-queue": {
+      "what": "the merge queue and the admin dashboard, without Claude",
+      "header": [
+        "This monitor runs the merge queue and the develop guard by fixed rules. It writes no reviews, so its review gate counts only approvals by people. Decisions that need judgement, such as a hold to confirm or a develop break to file, wait for you on the admin dashboard."
+      ],
+      "values": {
+        "features.review_automation.enabled": false,
+        "features.merge_queue.drift_notices.enabled": false
+      }
+    }
+  },
+  "x-turn-on": "To turn it on, see QUICK_USER_GUIDE.md, \"Turn on a feature\".",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "image",
+    "repository",
+    "features",
+    "integrations"
+  ],
+  "properties": {
+    "kind": {
+      "description": "The type of settings file. Don't change it.",
+      "type": "string",
+      "const": "deploy_settings",
+      "x-class": "public",
+      "x-used-by": [],
+      "x-applies": "new_container"
+    },
+    "schema_version": {
+      "description": "The layout version of this file. Don't change it: rkmon migrate updates it when a new package changes the layout.",
+      "type": "integer",
+      "const": 2,
+      "x-changed-by": "rkmon migrate updates it when a new package changes the layout",
+      "x-class": "public",
+      "x-used-by": [],
+      "x-applies": "new_container"
+    },
+    "container": {
+      "title": "Container",
+      "description": "the Docker container this monitor runs in.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "The container's name. The monitor keeps its data under this name, so choose it once: rkmon confirm refuses a new name while this container exists. To run a second monitor on this host, see QUICK_DEPLOY_GUIDE.md, \"Several deployments\". While features.review_automation.automated_reviewer_name is blank, every review gives this name on its first line. Lowercase letters, digits, - and _. Default: \"rocke-monitor\".",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "default": "rocke-monitor",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "deployment.project"
+        }
+      }
+    },
+    "image": {
+      "title": "Image",
+      "description": "the container image to run, <registry>/<name>:<tag>, as your build settings name it.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "tag"
+      ],
+      "properties": {
+        "registry": {
+          "description": "The registry to pull the image from, such as \"registry.example.com/my-team\". Run docker login for it first. Leave blank if you load the image from a file instead (rkmon image load FILE).",
+          "type": "string",
+          "x-blank": "if you load the image from a file instead (rkmon image load FILE)",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "deployment.pull_registry"
+        },
+        "name": {
+          "description": "The image's name, as in your build settings, without its registry, which goes in image.registry. Default: \"rocke-monitor\".",
+          "type": "string",
+          "pattern": "^(?!localhost/)(?![^/]*\\.[^/]*/)[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",
+          "default": "rocke-monitor",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "deployment.image"
+        },
+        "tag": {
+          "description": "The image's tag, as in your build settings. To move to a newer image, change the tag (QUICK_USER_GUIDE.md, \"Change a setting\"). Required.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "deployment.image"
+        }
+      }
+    },
+    "updates": {
+      "title": "Updates",
+      "description": "where rkmon package update fetches newer code for this package. Leave this section out to update only from a folder or an archive (rkmon package update --from).",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "branch"
+      ],
+      "properties": {
+        "repository": {
+          "description": "The GitHub repository to fetch this package from, as <org>/<repo>. Example: \"ROCm/rocm-libraries\". Required.",
+          "type": "string",
+          "pattern": "^[\\w.-]+/[\\w.-]+$",
+          "x-template": "<org>/<repo>",
+          "x-source": "the GitHub repository to fetch this package from, as <org>/<repo> (the part of its GitHub address after github.com/)",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "update.repo"
+        },
+        "branch": {
+          "description": "The branch to fetch the newest code from. Example: \"develop\". Required.",
+          "type": "string",
+          "pattern": "^\\S+$",
+          "x-template": "<branch>",
+          "x-source": "the branch of that repository to fetch the newest code from",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "update.branch"
+        }
+      }
+    },
+    "repository": {
+      "title": "Repository",
+      "description": "the GitHub repository the monitor watches, and which of its pull requests the monitor works on.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "folder",
+        "scope_labels"
+      ],
+      "properties": {
+        "name": {
+          "description": "The repository, as <org>/<repo>. Example: \"my-org/my-repo\". Required.",
+          "type": "string",
+          "pattern": "^[\\w.-]+/[\\w.-]+$",
+          "x-template": "<org>/<repo>",
+          "x-source": "the repository the monitor watches, as <org>/<repo> (the part of its GitHub address after github.com/)",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "repo"
+        },
+        "folder": {
+          "description": "The folder your project lives in, from the repository's root, without a / at either end. The monitor uses it to tell your project's files from the rest of the repository. Example: \"projects/my-project\". Required.",
+          "type": "string",
+          "pattern": "^[^/](?:.*[^/])?$",
+          "x-template": "<folder>",
+          "x-source": "the folder your project lives in, from the repository's root, without a / at either end",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "rocke_path"
+        },
+        "scope_labels": {
+          "description": "The labels that put a pull request in scope: the monitor works on every open pull request that has at least one of them. To see the repository's labels, run: gh label list -R <org>/<repo>. Example: [\"my-project\"]. Required.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "minItems": 1,
+          "x-template": [
+            "<label>"
+          ],
+          "x-source": "the labels that put a pull request in scope; gh label list -R <org>/<repo> lists them",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "scope.labels"
+        },
+        "shared_label_folders": {
+          "description": "Labels that several teams share, each with a folder. A pull request with one of these labels is in scope only if it also changes files in that label's folder. Write each one as \"label\": \"folder\", the folder from the repository's root. Example: {\"needs-ci\": \"projects/my-project\"}: a \"needs-ci\" pull request is in scope only if it changes files in projects/my-project. Default: none.",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "\\S"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[^/](?:.*[^/])?$"
+          },
+          "default": {},
+          "x-class": "private",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "scope.path_labels"
+        }
+      }
+    },
+    "host": {
+      "title": "Host",
+      "description": "how much of this host the container may use, and which user it runs as.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "resources": {
+          "title": "Resources",
+          "description": "the container's share of this host. QUICK_DEPLOY_GUIDE.md, \"Machine sizing\", helps you choose.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "properties": {
+            "cpus": {
+              "description": "The number of CPUs the container may use. Default: 4.",
+              "type": "number",
+              "minimum": 1,
+              "default": 4,
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": "resources.cpus"
+            },
+            "memory_gib": {
+              "description": "The container's memory limit, in GiB. At least ramdisk_gib + {package:resources.work_memory_gib}. Default: 8.",
+              "type": "number",
+              "minimum": 1,
+              "default": 8,
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": "resources.memory_gb"
+            },
+            "ramdisk_gib": {
+              "description": "A RAM disk that makes reviews and builds faster, in GiB. It is part of memory_gib. Allow about {package:ramdisk.review_estimate_gib} GiB for each review and {package:ramdisk.build_estimate_gib} GiB for each build that run at the same time. 0: no RAM disk. Default: 0.",
+              "type": "number",
+              "minimum": 0,
+              "default": 0,
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": [
+                "ramdisk.enabled",
+                "ramdisk.size_gb"
+              ]
+            }
+          }
+        },
+        "users": {
+          "title": "Users",
+          "description": "the user and group the monitor runs as inside the container.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "properties": {
+            "monitor_uid": {
+              "description": "The user id, {minimum} or more, other than 65534, the system's \"nobody\" user, and none of the package's own users' (the GitHub writer's and the PR runners'). Default: null, which means your own user id on this host.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1000,
+              "maximum": 2147483647,
+              "default": null,
+              "x-default-means": "your own user id on this host",
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": "container.uid"
+            },
+            "monitor_gid": {
+              "description": "The group id, {minimum} or more: any group's, a system group's included, but none of the PR runners' groups'. Default: null, which means your own group id on this host.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 2147483647,
+              "default": null,
+              "x-default-means": "your own group id on this host",
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": "container.gid"
+            }
+          }
+        }
+      }
+    },
+    "monitor": {
+      "title": "Monitor",
+      "description": "the monitor works in ticks. Each tick, it reads GitHub and updates the reviews, the merge queue and the dashboards.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "tick_interval_minutes": {
+          "description": "Minutes between ticks. Default: 10.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "x-class": "public",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": [
+            "claude.tick_min",
+            "tick_interval_min"
+          ]
+        },
+        "full_tick_max_interval_minutes": {
+          "description": "Most ticks read only what changed on GitHub. At least this often, in minutes, a tick reads everything again. 0: every tick reads everything. Default: 60.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 60,
+          "x-class": "public",
+          "x-used-by": [],
+          "x-applies": "no_restart",
+          "x-internal": "idle_full_tick_min"
+        },
+        "parallel_builds": {
+          "description": "How many local builds, each with its tests, may run at the same time at first, from {minimum} to {maximum}. Reviews, the merge queue and the develop guard all use these builds. The monitor then adjusts the number, within {minimum} to {maximum}, to how busy this host is. Default: 1.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 1,
+          "x-class": "public",
+          "x-used-by": [],
+          "x-applies": "new_container",
+          "x-internal": "checks.limit"
+        }
+      }
+    },
+    "features": {
+      "title": "Features",
+      "description": "what the monitor does. Each feature that posts or sends runs in prototype mode or live mode:\n  \"prototype\": it does its work and shows you the result on the admin dashboard, but posts and sends nothing.\n  \"live\": it posts and sends.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "review_automation",
+        "merge_queue",
+        "dashboards",
+        "alerts",
+        "ticket_creation",
+        "weekly_report"
+      ],
+      "properties": {
+        "review_automation": {
+          "title": "Review automation",
+          "description": "Claude reviews every new or updated pull request in scope.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "true: review pull requests. false: no reviews and no Claude; decisions that need judgement wait for you on the admin dashboard. Required.",
+              "type": "boolean",
+              "x-template": true,
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": "features.review_automation.enabled"
+            },
+            "mode": {
+              "description": "\"prototype\": reviews are written and shown on the admin dashboard, but not posted. \"live\": reviews are posted on GitHub as integrations.github_cli.username, and so are notices about pull requests that change the same code. Required when review automation is on.",
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "x-required-when": "review automation is on",
+              "x-template": "prototype",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "features.review_automation.mode"
+            },
+            "automated_reviewer_name": {
+              "description": "The name at the top of every review this monitor posts: \"Automated review by <automated_reviewer_name>\". Letters, digits, spaces, - and _. Example: \"Platform team\". Leave blank to use the container's name.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9 _-]*$",
+              "x-blank": "to use the container's name",
+              "default": "",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "features.review_automation.automated_reviewer_name"
+            },
+            "skills_folder": {
+              "description": "A folder with your team's own review skills, as Markdown (.md) files only. Its layout must match the package's agentic/ folder, and it may contain only team_members/, agents/, review_book.md and skills/rocke-monitor/review_procedure.md. A file with the same name as a package file replaces it; a file with a new name is added. Leave blank to use the package's skills only.",
+              "type": "string",
+              "x-blank": "to use the package's skills only",
+              "default": "",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container"
+            },
+            "orchestrator": {
+              "title": "Orchestrator",
+              "description": "the main Claude session. It runs the reviews, checks and posts them, and makes the merge queue's judgement calls.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "model": {
+                  "description": "Its model: \"opus\", \"sonnet\", \"haiku\", or the name of a Claude model in model_bindings. Default: \"opus\".",
+                  "type": "string",
+                  "pattern": "^(?!(default|none)$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                  "default": "opus",
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "orchestrator.model"
+                },
+                "effort": {
+                  "description": "How hard it thinks: \"low\", \"medium\", \"high\", \"xhigh\" or \"max\". Higher costs more and takes longer. Default: \"high\".",
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh",
+                    "max"
+                  ],
+                  "default": "high",
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "effort.orchestrator"
+                }
+              }
+            },
+            "schedule": {
+              "title": "Schedule",
+              "description": "when reviews start.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "push_cooldown_minutes": {
+                  "description": "How long to wait after a pull request's latest push before reviewing it, in minutes, so that a burst of pushes gets one review. A burst waits {package:settle_burst_min} minutes after its last push, and your priorities and the pull requests that fix develop wait at most {package:settle_develop_fix_min} minutes after any push, a burst's too. Set above {package:settle_burst_min}, it applies to bursts too. 0: a single push doesn't wait. Default: 30.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 30,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "settle_min"
+                },
+                "follow_up_cooldown_minutes": {
+                  "description": "The shortest time between two follow-up reviews of the same pull request, in minutes. Your priorities, pull requests that fix develop, and pushes that only merge develop in don't wait. 0: don't wait. Default: 60.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 60,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "followup_min_gap_min"
+                }
+              }
+            },
+            "parallel_reviews": {
+              "description": "How many reviews may run at the same time at first, from {minimum} to {maximum}. The monitor then adjusts the number, within {minimum} to {maximum}, to how busy this host is. Default: 3.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "default": 3,
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "no_restart",
+              "x-internal": "review.pipes"
+            },
+            "large_prs": {
+              "title": "Large pull requests",
+              "description": "how very large pull requests are reviewed.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "in_depth_review_over_lines": {
+                  "description": "A pull request with more changed lines than this gets one in-depth review, split into parts, and after that only light follow-ups. The in-depth review starts only once you approve it: the admin dashboard's Needs you card gives its size and cost, with Approve and Decline, or run: rkmon rk review-approve N. Default: 30000.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 30000,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "autopilot_max_lines"
+                },
+                "split_part_lines": {
+                  "description": "The most changed lines in each part of an in-depth review, from {minimum} to {maximum}. Default: 8000.",
+                  "type": "integer",
+                  "minimum": 6000,
+                  "maximum": 10000,
+                  "default": 8000,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "split_part_lines"
+                }
+              }
+            },
+            "passes": {
+              "title": "Passes",
+              "description": "the steps of the review work, each with its model and effort.\n  Models: \"opus\", \"sonnet\", \"haiku\", or the name of an entry in model_bindings.\n  Efforts: \"low\", \"medium\", \"high\", \"xhigh\" or \"max\". Ollama and OpenAI-compatible models take only \"low\", \"medium\" or \"high\".\n  The verification and code quality passes always run, each on a Claude model. The four optional passes after them let another model do part of the work first; \"default\" means no other model, so the pass in charge does that work itself.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "verification_pass": {
+                  "title": "Verification pass",
+                  "description": "reviews each pull request on its own, checks every claim of the first review pass (if there is one) against the code, drops what it can't confirm, and writes the review that gets posted.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "Its model, which must be a Claude model. Default: \"opus\".",
+                      "type": "string",
+                      "pattern": "^(?!(default|none)$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                      "default": "opus",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "models.audit"
+                    },
+                    "effort": {
+                      "description": "Its effort. Default: \"high\".",
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "high",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "effort.verify"
+                    }
+                  }
+                },
+                "code_quality_pass": {
+                  "title": "Code quality pass",
+                  "description": "reviews each pull request's design (single responsibility, no duplication, layering, names, tests) and gives its findings to the verification pass.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "Its model, which must be a Claude model. Default: \"opus\".",
+                      "type": "string",
+                      "pattern": "^(?!(default|none)$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                      "default": "opus",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "models.deep"
+                    },
+                    "effort": {
+                      "description": "Its effort. Default: \"medium\".",
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "medium",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "effort.quality"
+                    }
+                  }
+                },
+                "first_review_pass": {
+                  "title": "First review pass (optional)",
+                  "description": "another model writes a first draft of each review, which the verification pass then checks claim by claim.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "The model that writes the draft. Default: \"default\", which means no draft: the verification pass reviews alone.",
+                      "type": "string",
+                      "pattern": "^(?!none$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                      "default": "default",
+                      "x-default-means": "no draft: the verification pass reviews alone",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "reviewer"
+                    },
+                    "effort": {
+                      "description": "Its effort. Default: \"default\", which means the verification pass's effort, or none for a model that isn't Claude.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default",
+                      "x-default-means": "the verification pass's effort, or none for a model that isn't Claude",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "effort.first_pass"
+                    }
+                  }
+                },
+                "ci_triage_pass": {
+                  "title": "CI triage pass (optional)",
+                  "description": "another model reads the pull request's failing CI jobs and tells the verification pass what caused each failure.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "The model. Default: \"default\", which means none: the verification pass reads the failing CI jobs itself.",
+                      "type": "string",
+                      "pattern": "^(?!none$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                      "default": "default",
+                      "x-default-means": "none: the verification pass reads the failing CI jobs itself",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "models.ci_triage"
+                    },
+                    "effort": {
+                      "description": "Its effort. Default: \"default\", which means the verification pass's effort, or none for a model that isn't Claude.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default",
+                      "x-default-means": "the verification pass's effort, or none for a model that isn't Claude",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "effort.ci_triage"
+                    }
+                  }
+                },
+                "first_code_quality_pass": {
+                  "title": "First code quality pass (optional)",
+                  "description": "another model checks the pull request's changes against the code quality rules first, and gives what it finds to the code quality pass to confirm.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "The model. Default: \"default\", which means none: the code quality pass does all of the work.",
+                      "type": "string",
+                      "pattern": "^(?!none$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                      "default": "default",
+                      "x-default-means": "none: the code quality pass does all of the work",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "models.quality_draft"
+                    },
+                    "effort": {
+                      "description": "Its effort. Default: \"default\", which means the code quality pass's effort, or none for a model that isn't Claude.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default",
+                      "x-default-means": "the code quality pass's effort, or none for a model that isn't Claude",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "effort.quality_draft"
+                    }
+                  }
+                },
+                "notice_draft_pass": {
+                  "title": "Notice draft pass (optional)",
+                  "description": "another model writes the first draft of the notices the monitor posts on pull requests: when two pull requests change the same code, and when a change on develop breaks a pull request's tests. The orchestrator checks and posts them.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": {
+                      "description": "The model. Default: \"default\", which means none: the orchestrator writes the notices itself.",
+                      "type": "string",
+                      "pattern": "^(?!none$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                      "default": "default",
+                      "x-default-means": "none: the orchestrator writes the notices itself",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "models.notice_draft"
+                    },
+                    "effort": {
+                      "description": "Its effort. Default: \"default\", which means the orchestrator's effort, or none for a model that isn't Claude.",
+                      "type": "string",
+                      "enum": [
+                        "default",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ],
+                      "default": "default",
+                      "x-default-means": "the orchestrator's effort, or none for a model that isn't Claude",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "effort.notice_draft"
+                    }
+                  }
+                }
+              }
+            },
+            "remote_gpu_tests": {
+              "title": "Remote GPU tests",
+              "description": "some tests need a GPU, and on a host without one they are skipped. With this on, the monitor runs them on a Slurm cluster instead: it logs in to the cluster's login node over SSH and submits each test run as a Slurm job, which runs on a GPU node. A review doesn't wait for the results: its GPU tests row says \"pending\" and is filled in when the job finishes.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: run GPU tests on the cluster. false: skip them, as on any host without a GPU. Required when review automation is on.",
+                  "type": "boolean",
+                  "x-required-when": "review automation is on",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "gpu.enabled"
+                },
+                "cluster": {
+                  "title": "Cluster",
+                  "description": "how the monitor reaches the cluster, and what each job asks for. Your cluster's documentation or its admins have these values.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "login_host": {
+                      "description": "The host name of the cluster's login node, where the monitor submits jobs: letters, digits, '.', '-' and '_', starting with a letter or a digit, with no user@ and no port. Example: \"login.cluster.example.com\". Required when remote GPU tests are on.",
+                      "type": "string",
+                      "pattern": "^(?:[A-Za-z0-9][\\w.-]*)?$",
+                      "x-required-when": "remote GPU tests are on",
+                      "x-template": "",
+                      "x-source": "the host name of the cluster's login node, such as \"login.cluster.example.com\"",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.login_host"
+                    },
+                    "ssh_port": {
+                      "description": "The login node's SSH port. Default: 22.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535,
+                      "default": 22,
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.ssh_port"
+                    },
+                    "ssh_user": {
+                      "description": "The user name the monitor logs in to the login node with: letters, digits, '.', '-' and '_', starting with a letter or '_'. Every pull request's tests run as this user on the GPU nodes, so use an account made for the monitor, not your own. Install this user's SSH key with: rkmon secret gpu_ssh_key FILE. Required when remote GPU tests are on.",
+                      "type": "string",
+                      "pattern": "^(?:[A-Za-z_][\\w.-]*)?$",
+                      "x-required-when": "remote GPU tests are on",
+                      "x-template": "",
+                      "x-source": "the user name of an account on the cluster made for the monitor, not your own",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.ssh_user"
+                    },
+                    "partition": {
+                      "description": "The Slurm partition to submit jobs to (sbatch --partition): letters, digits, '.', ',', '&', '|', '!', '-' and '_'. Required when remote GPU tests are on.",
+                      "type": "string",
+                      "pattern": "^[\\w.,&|!-]*$",
+                      "x-required-when": "remote GPU tests are on",
+                      "x-template": "",
+                      "x-source": "the Slurm partition to submit jobs to (sbatch --partition)",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.partition"
+                    },
+                    "accounts": {
+                      "description": "The Slurm accounts to charge jobs to (sbatch --account), in order: if the cluster refuses one, the monitor tries the next. Each is letters, digits, '.', '-' and '_'. Required when remote GPU tests are on.",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[\\w.-]+$"
+                      },
+                      "x-required-when": "remote GPU tests are on",
+                      "x-template": [],
+                      "x-source": "the Slurm accounts to charge jobs to (sbatch --account), in the order to try them",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.accounts"
+                    },
+                    "qos": {
+                      "description": "The Slurm quality of service for the jobs (sbatch --qos): letters, digits, '.', ',', '&', '|', '!', '-' and '_'. Leave blank for the account's default.",
+                      "type": "string",
+                      "pattern": "^[\\w.,&|!-]*$",
+                      "x-blank": "for the account's default",
+                      "default": "",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.qos"
+                    },
+                    "constraint": {
+                      "description": "A Slurm node constraint (sbatch --constraint), for example to use only nodes that can read your home folder: letters, digits, '.', ',', '&', '|', '!', '-' and '_'. Leave blank for none.",
+                      "type": "string",
+                      "pattern": "^[\\w.,&|!-]*$",
+                      "x-blank": "for none",
+                      "default": "",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.constraint"
+                    },
+                    "gpu_types": {
+                      "description": "For each GPU target the tests use (\"gfx\", then lowercase letters and digits), the cluster's name for that type of GPU, as in sbatch --gres=gpu:<type>:<count>: letters, digits, '.', ':', '-' and '_'. Example: {\"gfx942\": \"mi300x\"}. Required when remote GPU tests are on.",
+                      "type": "object",
+                      "propertyNames": {
+                        "pattern": "^gfx[0-9a-z]+$"
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "pattern": "^[\\w.:-]+$"
+                      },
+                      "x-required-when": "remote GPU tests are on",
+                      "x-template": {},
+                      "x-source": "each GPU target the tests use, with the cluster's name for that type of GPU, such as {\"gfx942\": \"mi300x\"}",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.gres"
+                    },
+                    "default_target": {
+                      "description": "The GPU target for tests that don't say which one they need: one of gpu_types' targets. Leave blank to use the first entry in gpu_types.",
+                      "type": "string",
+                      "pattern": "^(?:gfx[0-9a-z]+)?$",
+                      "x-blank": "to use the first entry in gpu_types",
+                      "default": "",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.default_arch"
+                    },
+                    "gpus_per_job": {
+                      "description": "GPUs per job. The tests use one. Default: 1.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 1,
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.gpus_per_job"
+                    },
+                    "time_limit": {
+                      "description": "Each job's time limit, as Slurm writes it (\"HH:MM:SS\", \"D-HH:MM:SS\" or minutes). Allow about 1.5 times a normal test run. Default: \"01:00:00\".",
+                      "type": "string",
+                      "pattern": "^(?:(?:\\d+-)?\\d{1,2}:\\d{2}:\\d{2}|\\d+)$",
+                      "default": "01:00:00",
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.time_limit"
+                    },
+                    "excluded_nodes": {
+                      "description": "GPU nodes to avoid, such as broken ones, each named as Slurm names nodes: letters, digits, '.', ',', '[', ']', '-' and '_', such as \"node[01-04]\". Each job first checks that its node's GPU works; when a node fails that check, the monitor tells you the node's name, so you can add it here. Default: none.",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[\\w.\\[\\],-]+$"
+                      },
+                      "default": [],
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.exclude"
+                    }
+                  }
+                },
+                "node": {
+                  "title": "Node",
+                  "description": "where jobs keep their files on the cluster, and how each GPU node is prepared.",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "work_folder": {
+                      "description": "The folder on the cluster for the monitor's copy of the repository and each job's files, on one line: relative to ssh_user's home folder, or absolute. The GPU nodes must be able to read it, for example on a shared home folder. Default: \"rkmon-gpu\".",
+                      "type": "string",
+                      "pattern": "^[^\\n\\r\\x00]*[^\\s\\x00][^\\n\\r\\x00]*$",
+                      "default": "rkmon-gpu",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.remote_dir"
+                    },
+                    "python": {
+                      "description": "The Python on the GPU nodes that has the tests' packages, pytest included, on one line; usually a virtual environment's bin/python. Example: \"~/venvs/tests/bin/python\". Required when remote GPU tests are on.",
+                      "type": "string",
+                      "pattern": "^[^\\n\\r\\x00]*$",
+                      "x-required-when": "remote GPU tests are on",
+                      "x-template": "",
+                      "x-source": "the Python on the GPU nodes that has the tests' packages, pytest included, such as \"~/venvs/tests/bin/python\"",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.remote_python"
+                    },
+                    "setup_command": {
+                      "description": "A shell command each job runs first, on one line, such as one that loads the cluster's modules. Example: \"module load rocm\". Leave blank for none.",
+                      "type": "string",
+                      "pattern": "^[^\\n\\r\\x00]*$",
+                      "x-blank": "for none",
+                      "default": "",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.setup"
+                    },
+                    "environment": {
+                      "description": "Environment variables each job sets, as NAME: \"value\": each NAME letters, digits and '_', starting with a letter or '_', and each value on one line. Example: {\"HIP_VISIBLE_DEVICES\": \"0\"}. Default: none.",
+                      "type": "object",
+                      "propertyNames": {
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "pattern": "^[^\\n\\r\\x00]*$"
+                      },
+                      "default": {},
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.env"
+                    },
+                    "clone_url": {
+                      "description": "Where the cluster clones the repository from, if not GitHub (for example, a mirror inside your network): an address with no spaces. Leave blank to clone from GitHub.",
+                      "type": "string",
+                      "pattern": "^[^\\s\\x00]*$",
+                      "x-blank": "to clone from GitHub",
+                      "default": "",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.review_automation.remote_gpu_tests"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "gpu.clone_url"
+                    }
+                  }
+                },
+                "jobs_per_review": {
+                  "description": "The most GPU targets one review runs tests on, one job each. The cluster's own limits decide how many jobs run at the same time. Default: 2.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 2,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation.remote_gpu_tests"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "gpu.max_jobs_per_pr"
+                },
+                "wait_report_after_minutes": {
+                  "description": "If a job is still waiting for a GPU node after this many minutes, the monitor tells you, once. The job keeps waiting. 0: never tell you. Default: 240.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 240,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation.remote_gpu_tests"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "gpu.pending_report_min"
+                },
+                "bad_node_resubmits": {
+                  "description": "How many times to resubmit a job on another node when its node fails the GPU check. Default: 1.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 1,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation.remote_gpu_tests"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "gpu.resubmits"
+                }
+              }
+            },
+            "spend": {
+              "title": "Spend",
+              "description": "what the reviews cost in US dollars, shown on the dashboards and in the weekly report.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: work out the cost from the prices in usd_per_million_tokens. false: don't show costs. Required when review automation is on.",
+                  "type": "boolean",
+                  "x-required-when": "review automation is on",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "prices"
+                },
+                "usd_per_million_tokens": {
+                  "description": "The price in US dollars per million tokens of each model the monitor uses, from Anthropic's price list or your gateway's. Name each model by its id: claude-opus-5-5 for \"opus\", claude-sonnet-5-5 for \"sonnet\", claude-haiku-5-5 for \"haiku\", and the model_id of a model_bindings entry. Add one entry per model, as shown below; a model with no entry has its cost shown as unknown. Default: none.",
+                  "type": "object",
+                  "propertyNames": {
+                    "pattern": "^\\S+$",
+                    "x-template": "claude-opus-5-5"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/model_prices"
+                  },
+                  "default": {},
+                  "x-class": "private",
+                  "x-used-by": [
+                    "features.review_automation.spend"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "prices"
+                }
+              }
+            }
+          }
+        },
+        "merge_queue": {
+          "title": "Merge queue",
+          "description": "puts the pull requests in scope in merge order, runs its gates (the checks a pull request must pass before it merges), and makes a merge plan (which pull requests can merge together without conflicts). Your priorities go first (rkmon rk prioritize N, or a priority request you approve on the admin dashboard).",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "true: run the merge queue (only one monitor per repository may). false: no merge queue; your priorities still decide which pull requests are reviewed first. Required.",
+              "type": "boolean",
+              "x-template": true,
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": "features.merge_queue.enabled"
+            },
+            "mode": {
+              "description": "\"prototype\": the queue, its gates and the merge plan are worked out and shown to you, but nothing happens on GitHub: no auto-merge is turned on, and nothing is held, commented on or filed. \"live\": the queue does these things on GitHub, as the settings below allow. Required when the merge queue is on.",
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "x-required-when": "the merge queue is on",
+              "x-template": "prototype",
+              "x-class": "public",
+              "x-used-by": [
+                "features.merge_queue"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "features.merge_queue.mode"
+            },
+            "auto_merge": {
+              "title": "Auto-merge",
+              "description": "when a pull request you cleared for merging (rkmon rk clear N) passes the gates, the monitor turns on GitHub's auto-merge for it. GitHub's branch protection still has the final say.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: turn on auto-merge (in prototype, the dashboard only shows where it would). false: only propose the merge order to you. Required when the merge queue is on.",
+                  "type": "boolean",
+                  "x-required-when": "the merge queue is on",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.merge_queue"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "features.merge_queue.auto_merge"
+                }
+              }
+            },
+            "auto_merge_guard": {
+              "title": "Auto-merge guard",
+              "description": "when someone turns on auto-merge for a pull request that fails a gate, the monitor comments on the pull request and turns its auto-merge off (in prototype, it only tells you). It never turns off an auto-merge you turned on yourself. It runs whenever the merge queue runs.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "on_your_pull_requests": {
+                  "description": "What to do when someone else turns on auto-merge for a pull request you wrote: \"alert_only\" (only tell you) or \"same_as_others\" (comment and turn it off, as for anyone else's pull request). Default: \"alert_only\".",
+                  "type": "string",
+                  "enum": [
+                    "alert_only",
+                    "same_as_others"
+                  ],
+                  "default": "alert_only",
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.merge_queue"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "automerge_guard_own"
+                }
+              }
+            },
+            "auto_hold": {
+              "title": "Auto-hold",
+              "description": "when a pull request fails a gate because of its own changes, the monitor posts a \"Request changes\" review on it from your account. That blocks the merge until the author fixes it and you approve it again.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: hold such pull requests (in prototype, only show them). false: only report the failure to you. Required when the merge queue is on.",
+                  "type": "boolean",
+                  "x-required-when": "the merge queue is on",
+                  "x-template": true,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.merge_queue"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "features.merge_queue.auto_hold"
+                }
+              }
+            },
+            "queue_notices": {
+              "title": "Queue notices",
+              "description": "each pull request near the front of the queue gets one comment about its place in the queue, updated as things change.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: post them (in live). false: none. Required when the merge queue is on.",
+                  "type": "boolean",
+                  "x-required-when": "the merge queue is on",
+                  "x-template": true,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.merge_queue"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "features.merge_queue.queue_notices"
+                }
+              }
+            },
+            "drift_notices": {
+              "title": "Drift notices",
+              "description": "when a change on develop breaks a pull request's own tests, the monitor tells its author which develop commit changed the behaviour. Claude writes these, so they need review automation.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: post them (in live). false: none. Required when the merge queue is on.",
+                  "type": "boolean",
+                  "x-required-when": "the merge queue is on",
+                  "x-template": true,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.merge_queue"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "features.merge_queue.drift_notices"
+                }
+              }
+            },
+            "develop_guard": {
+              "title": "Develop guard",
+              "description": "after every merge, the monitor checks develop and traces any break to the pull request that caused it. In live, each break becomes a GitHub issue, and an open pull request that fixes it is linked to the issue. Without review automation, breaks wait for you on the admin dashboard instead.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "true: check develop. false: don't. Required when the merge queue is on.",
+                  "type": "boolean",
+                  "x-required-when": "the merge queue is on",
+                  "x-template": true,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.merge_queue"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "features.merge_queue.develop_guard"
+                },
+                "issue_repository": {
+                  "description": "The repository to file develop issues in, as <org>/<repo>. Leave blank to use repository.name.",
+                  "type": "string",
+                  "pattern": "^$|^[\\w.-]+/[\\w.-]+$",
+                  "x-blank": "to use repository.name",
+                  "default": "",
+                  "x-class": "private",
+                  "x-used-by": [
+                    "features.merge_queue.develop_guard"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "incident_issue.repo"
+                },
+                "ci_red_label": {
+                  "description": "The label for an issue about a break that turns develop's CI red. The label must already exist in issue_repository (rkmon rk label-create NAME --description TEXT --color HEX creates one). Example: \"ci-red\". Required when the develop guard is on and the merge queue is live.",
+                  "type": "string",
+                  "x-required-when": "the develop guard is on and the merge queue is live",
+                  "default": "",
+                  "x-source": "the name of a label in issue_repository for an issue about a break that turns develop's CI red, such as \"ci-red\"",
+                  "x-class": "private",
+                  "x-used-by": [
+                    "features.merge_queue.develop_guard"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "incident_issue.labels"
+                },
+                "ci_red_extra_labels": {
+                  "description": "More labels for those issues. Each must already exist. Default: none.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": [],
+                  "x-class": "private",
+                  "x-used-by": [
+                    "features.merge_queue.develop_guard"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "incident_issue.labels"
+                },
+                "stability_label": {
+                  "description": "The label for an issue about a break that CI doesn't catch; the issue is assigned to the author of the pull request that caused it. The label must already exist in issue_repository. Example: \"stability\". Required when the develop guard is on and the merge queue is live.",
+                  "type": "string",
+                  "x-required-when": "the develop guard is on and the merge queue is live",
+                  "default": "",
+                  "x-source": "the name of a label in issue_repository for an issue about a break that CI doesn't catch, such as \"stability\"",
+                  "x-class": "private",
+                  "x-used-by": [
+                    "features.merge_queue.develop_guard"
+                  ],
+                  "x-applies": "no_restart",
+                  "x-internal": "incident_issue.stability_label"
+                }
+              }
+            }
+          }
+        },
+        "dashboards": {
+          "title": "Dashboards",
+          "description": "the admin dashboard (yours) and the team dashboard (for other teams).",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "admin",
+            "team"
+          ],
+          "properties": {
+            "admin": {
+              "title": "Admin dashboard",
+              "description": "everything the monitor shows, with Approve and Decline buttons for priority requests, proposed tickets and the in-depth reviews of large pull requests. Only this host can open it, at http://127.0.0.1:<port>/. It asks for a user name and a password: type any user name, and the access token as the password (rkmon secret admin_access_token --generate makes one). To open it from another machine, use an SSH tunnel (README.md, \"The admin dashboard\").",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "true: serve the admin dashboard. false: none (the team dashboard and found-issue tickets need it). Required.",
+                  "type": "boolean",
+                  "x-template": true,
+                  "x-class": "public",
+                  "x-used-by": [],
+                  "x-applies": "new_container",
+                  "x-internal": "features.dashboards.admin.enabled"
+                },
+                "port": {
+                  "description": "The port to serve it on. Default: 18614.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535,
+                  "default": 18614,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.dashboards.admin"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "admin_dashboard.public_port"
+                }
+              }
+            },
+            "team": {
+              "title": "Team dashboard",
+              "description": "a copy of the dashboard for other teams to read, without the admin buttons.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "true: deliver the team dashboard (it needs the admin dashboard). false: none. Required.",
+                  "type": "boolean",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [],
+                  "x-applies": "new_container",
+                  "x-internal": "features.dashboards.team.enabled"
+                },
+                "mode": {
+                  "description": "\"prototype\": the page is made every tick and shown on the admin dashboard, but not published. \"live\": the page is delivered as delivery says. Required when the team dashboard is on.",
+                  "type": "string",
+                  "enum": [
+                    "prototype",
+                    "live"
+                  ],
+                  "x-required-when": "the team dashboard is on",
+                  "x-template": "prototype",
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.dashboards.team"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "features.dashboards.team.mode"
+                },
+                "public_url": {
+                  "description": "The web address other teams open the page at; the Needs you alerts (below) link to it. Example: \"https://dashboards.example.com/my-team/\". With priority requests on and delivery \"publish\", the monitor's request service serves the page over plain http, at the root of its own port: give http, a port of 1024 or more and no path, with a host that is an IP address or a name of letters, digits, \".\" and \"-\". Example: \"http://dashboards.example.com:8080/\". Required when delivery is \"publish\", or when serve's address is \"0.0.0.0\" or \"::\". Otherwise, leave blank to use serve's address and port.",
+                  "type": "string",
+                  "pattern": "^$|^https?://\\S+$",
+                  "x-required-when": "delivery is \"publish\", or when serve's address is \"0.0.0.0\" or \"::\"",
+                  "x-blank": "to use serve's address and port",
+                  "default": "",
+                  "x-source": "the web address other teams open the page at, such as \"https://dashboards.example.com/my-team/\" (with priority requests on and delivery \"publish\": http, a port of 1024 or more and no path, with an IP address or a name of letters, digits, \".\" and \"-\" as its host, such as \"http://dashboards.example.com:8080/\")",
+                  "x-class": "private",
+                  "x-used-by": [
+                    "features.dashboards.team"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": [
+                    "publish.html.url",
+                    "team_dashboard.url"
+                  ]
+                },
+                "priority_requests": {
+                  "title": "Priority requests",
+                  "description": "a box on the page where other teams can ask for a pull request to be prioritized. Each request waits for your Approve or Decline on the admin dashboard. With delivery \"publish\", the web host needs the monitor's request service (README.md, \"The team dashboard\", says how to install it).",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "description": "true: show the box. false: no box. Required when the team dashboard is on.",
+                      "type": "boolean",
+                      "x-required-when": "the team dashboard is on",
+                      "x-template": false,
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.dashboards.team"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "publish.html.requests"
+                    }
+                  }
+                },
+                "delivery": {
+                  "description": "How the page reaches other teams: \"publish\" (copied to a web host over SSH every tick) or \"serve\" (served by this monitor from this host: anyone who can reach that address and port can open it). Fill in the matching block below and delete the other. Required when the team dashboard is on.",
+                  "type": "string",
+                  "enum": [
+                    "publish",
+                    "serve"
+                  ],
+                  "x-chooses": true,
+                  "x-required-when": "the team dashboard is on",
+                  "x-template": "publish",
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.dashboards.team"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "team_dashboard.mode"
+                },
+                "publish": {
+                  "title": "Publish",
+                  "description": "the web host to copy the page to. Install the SSH key for it with: rkmon secret web_host_ssh_key FILE",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "web_host": {
+                      "description": "The web host's name: letters, digits, '.', '-' and '_', starting with a letter, a digit or '_'. Example: \"web.example.com\". Required when delivery is \"publish\".",
+                      "type": "string",
+                      "pattern": "^(?:[A-Za-z0-9_][A-Za-z0-9._-]*)?$",
+                      "x-required-when": "delivery is \"publish\"",
+                      "default": "",
+                      "x-source": "the web host's name, such as \"web.example.com\"",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.dashboards.team"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "publish.html.host"
+                    },
+                    "username": {
+                      "description": "The user name to log in to the web host with: letters, digits, '.', '-' and '_', starting with a letter, a digit or '_'. Required when delivery is \"publish\".",
+                      "type": "string",
+                      "pattern": "^(?:[A-Za-z0-9_][A-Za-z0-9._-]*)?$",
+                      "x-required-when": "delivery is \"publish\"",
+                      "default": "",
+                      "x-source": "the user name to log in to the web host with",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.dashboards.team"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "publish.html.user"
+                    },
+                    "site_folder": {
+                      "description": "The folder the web host serves the page from, relative to that user's home folder: folder names of letters, digits, '.', '-' and '_', each starting with a letter, a digit or '_', joined by '/'. Example: \"public_html/my-team\". Required when delivery is \"publish\".",
+                      "type": "string",
+                      "pattern": "^(?:[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*/?)?$",
+                      "x-required-when": "delivery is \"publish\"",
+                      "default": "",
+                      "x-source": "the folder the web host serves the page from, relative to that user's home folder, such as \"public_html/my-team\"",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.dashboards.team"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "publish.html.site"
+                    }
+                  }
+                },
+                "serve": {
+                  "title": "Serve",
+                  "description": "use this block instead of publish when delivery is \"serve\".",
+                  "type": "object",
+                  "x-class": "public",
+                  "additionalProperties": false,
+                  "properties": {
+                    "address": {
+                      "description": "The address of this host to serve the page on: \"127.0.0.1\" (this host only), one of this host's addresses, or \"0.0.0.0\" or \"::\" (all of them; then set public_url). In prototype the page is served on \"127.0.0.1\" only, whatever this says. Default: \"127.0.0.1\".",
+                      "type": "string",
+                      "pattern": "^(?:[0-9]{1,3}(?:\\.[0-9]{1,3}){3}|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*)$",
+                      "default": "127.0.0.1",
+                      "x-class": "private",
+                      "x-used-by": [
+                        "features.dashboards.team"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "team_dashboard.publish_host"
+                    },
+                    "port": {
+                      "description": "The port to serve it on. Default: 18615.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535,
+                      "default": 18615,
+                      "x-class": "public",
+                      "x-used-by": [
+                        "features.dashboards.team"
+                      ],
+                      "x-applies": "new_container",
+                      "x-internal": "team_dashboard.public_port"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "alerts": {
+          "title": "Alerts",
+          "description": "short messages to a Microsoft Teams channel, through a Teams Workflows webhook. Install the webhook's address with: rkmon secret teams_webhook FILE. Each alert has its own on/off switch.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "develop_breaks",
+            "needs_you"
+          ],
+          "properties": {
+            "mode": {
+              "description": "\"prototype\": messages are written and listed on the admin dashboard, but not sent. \"live\": messages are sent. Required when an alert is on.",
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "x-required-when": "an alert is on",
+              "x-template": "prototype",
+              "x-class": "public",
+              "x-used-by": [
+                "features.alerts.develop_breaks",
+                "features.alerts.needs_you"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "features.alerts.mode"
+            },
+            "message_label": {
+              "description": "Text to start every message with, such as your team's name. Leave blank for none.",
+              "type": "string",
+              "x-blank": "for none",
+              "default": "",
+              "x-class": "private",
+              "x-used-by": [
+                "features.alerts.develop_breaks",
+                "features.alerts.needs_you"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "teams.channel"
+            },
+            "message_cooldown_minutes": {
+              "description": "The shortest time between two messages of the same alert, in minutes; anything new in between goes into the next one. 0: don't wait. Default: 30.",
+              "type": "integer",
+              "minimum": 0,
+              "default": 30,
+              "x-class": "public",
+              "x-used-by": [
+                "features.alerts.develop_breaks",
+                "features.alerts.needs_you"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "teams.message_cooldown_min"
+            },
+            "develop_breaks": {
+              "title": "Develop breaks",
+              "description": "a message when develop's CI is red and no fix is planned. It needs the develop guard.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "true: send this alert. false: breaks only show on the dashboards. Required.",
+                  "type": "boolean",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [],
+                  "x-applies": "new_container",
+                  "x-internal": [
+                    "features.alerts.enabled",
+                    "features.alerts.develop_breaks"
+                  ]
+                }
+              }
+            },
+            "needs_you": {
+              "title": "Needs you",
+              "description": "a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to approve, reviews that have waited on verification for hours). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its public_url is set.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "true: send this alert. false: decisions only show on the dashboards. Required.",
+                  "type": "boolean",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [],
+                  "x-applies": "new_container",
+                  "x-internal": [
+                    "features.alerts.enabled",
+                    "features.alerts.needs_you"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "ticket_creation": {
+          "title": "Ticket creation",
+          "description": "JIRA tickets, filed with the atlassian tool on the site in integrations.atlassian_cli.jira_url. Install its login with: rkmon login atlassian (the login needs permission to create tickets). Each type of ticket has its own on/off switch.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "follow_up_tickets",
+            "found_issue_tickets"
+          ],
+          "properties": {
+            "mode": {
+              "description": "\"prototype\": tickets are written and listed on the admin dashboard, but not filed. \"live\": tickets are filed. Required when a type of ticket is on.",
+              "type": "string",
+              "enum": [
+                "prototype",
+                "live"
+              ],
+              "x-required-when": "a type of ticket is on",
+              "x-template": "prototype",
+              "x-class": "public",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "features.ticket_creation.mode"
+            },
+            "project_key": {
+              "description": "The key of the JIRA project to file tickets in. Example: \"PROJ\". Required when a type of ticket is on.",
+              "type": "string",
+              "pattern": "^$|^[A-Z][A-Z0-9_]+$",
+              "x-required-when": "a type of ticket is on",
+              "x-template": "",
+              "x-source": "the key of the JIRA project to file tickets in, such as \"PROJ\"",
+              "x-class": "private",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "jira.project"
+            },
+            "issue_type": {
+              "description": "The issue type of new tickets, as your JIRA project writes it, case and all, and never a sub-task type: a sub-task needs a parent, which the monitor never gives. Example: \"Story\". Leave blank for \"Task\".",
+              "type": "string",
+              "x-blank": "for \"Task\"",
+              "default": "",
+              "x-class": "private",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "jira.issue_type"
+            },
+            "epic_key": {
+              "description": "The epic to link new tickets to, by its key. Example: \"<PROJECT>-123\". With an epic, a new ticket gets its description only after it is linked, so a project that requires a description when a ticket is created refuses the ticket. Leave blank for no epic.",
+              "type": "string",
+              "pattern": "^$|^[A-Z][A-Z0-9_]+-[0-9]+$",
+              "x-blank": "for no epic",
+              "default": "",
+              "x-class": "private",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "jira.default_epic"
+            },
+            "components": {
+              "description": "Components to set on every new ticket, each one your JIRA project allows. A project that requires components on a new ticket needs at least one here. Default: none.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "x-class": "private",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "jira.component"
+            },
+            "labels": {
+              "description": "Labels to set on every new ticket. A project that requires labels on a new ticket needs at least one here. Default: none.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "x-class": "private",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "jira.labels"
+            },
+            "required_fields": {
+              "description": "Other fields your JIRA project requires on a new ticket: a line for each, its field id and its value, such as customfield_10010: \"High\". Set only the fields JIRA requires and gives no value of its own, never one the monitor or JIRA fills: the monitor fills the project, the summary, the issue type, the priority, the labels and components their keys list, and the description while epic_key is blank; JIRA fills the reporter. rkmon check asks JIRA which fields these are. On a terminal it then asks you for each one's value, from those JIRA allows, and on your yes adds their lines here, keeping the file as it was as FILE.bak: in place of {}, after the last entry, or with required_fields itself at the end of features.ticket_creation. It adds none to a required_fields written as {...} with entries: add those lines by hand. Default: none.",
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^\\S+$"
+              },
+              "additionalProperties": {},
+              "default": {},
+              "x-class": "private",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "jira.extra_fields"
+            },
+            "follow_up_tickets": {
+              "title": "Follow-up tickets",
+              "description": "when a pull request merges with review items still open, each one becomes a ticket for the pull request's author. Open items are the monitor's own blocking and should-fix findings, review comments answered with a promise to fix them later (\"next PR\", \"TODO\"), and reviewers' requests nobody answered. Never nits. Tickets are filed without asking you, so agree on this with your team first. To assign a ticket, the monitor needs the author's JIRA account (rkmon rk jira-account add LOGIN ACCOUNT); without it, the ticket is filed unassigned.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "true: file them (in live). It needs review automation. false: only list the items for you. Required.",
+                  "type": "boolean",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [],
+                  "x-applies": "new_container",
+                  "x-internal": [
+                    "features.ticket_creation.enabled",
+                    "features.ticket_creation.triggers.review_follow_up"
+                  ]
+                }
+              }
+            },
+            "found_issue_tickets": {
+              "title": "Found-issue tickets",
+              "description": "when the monitor finds a problem that belongs to no pull request and isn't a develop break, such as a flaky test, it proposes a ticket on the admin dashboard. Approve files it; Decline drops it.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "true: propose tickets. It needs the admin dashboard. false: only report such problems to you. Required.",
+                  "type": "boolean",
+                  "x-template": false,
+                  "x-class": "public",
+                  "x-used-by": [],
+                  "x-applies": "new_container",
+                  "x-internal": [
+                    "features.ticket_creation.enabled",
+                    "features.ticket_creation.triggers.out_of_scope_issue"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "weekly_report": {
+          "title": "Weekly report",
+          "description": "every week, a statistics report and notes for a lessons-learned review, saved in the monitor's rocke_weekly/ folder (README.md, \"Where things live\").",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "true: write them every week. false: don't; rkmon rk stats and rkmon rk lessons write them when you ask. Required.",
+              "type": "boolean",
+              "x-template": false,
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "no_restart",
+              "x-internal": "weekly_report.enabled"
+            }
+          }
+        }
+      }
+    },
+    "integrations": {
+      "title": "Integrations",
+      "description": "the tools the monitor uses. rkmon login lists the logins they need and installs each one.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "github_cli"
+      ],
+      "properties": {
+        "github_cli": {
+          "title": "GitHub CLI",
+          "description": "how the monitor reads and writes GitHub. It needs two logins: rkmon login github_read for reading, and rkmon login github_write for posting. README.md, \"Logins and secrets\", lists the permissions each one needs.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "username"
+          ],
+          "properties": {
+            "username": {
+              "description": "Your GitHub username. The monitor posts as this user, and treats this user's actions as yours: your comments, your approvals (an approval lifts a hold), and auto-merges you turned on (which the guard leaves alone). Needs you alerts are addressed to this user. Required.",
+              "type": "string",
+              "pattern": "^\\S+$",
+              "x-template": "<user_login>",
+              "x-source": "your GitHub username",
+              "x-class": "private",
+              "x-used-by": [],
+              "x-applies": "new_container",
+              "x-internal": "operator.github_login"
+            },
+            "max_requests_per_hour": {
+              "description": "The most GitHub API requests this monitor may make in an hour. GitHub's hourly limit is per account: if several monitors share one account, give each a cap so that together they stay under the limit. A gh command that reads several pages of results counts once toward this cap, though GitHub counts each page: leave headroom. 0: no cap. Default: 0.",
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "x-class": "public",
+              "x-used-by": [],
+              "x-applies": "no_restart",
+              "x-internal": "gh.max_requests_per_hour"
+            }
+          }
+        },
+        "atlassian_cli": {
+          "title": "Atlassian CLI",
+          "description": "how the monitor files JIRA tickets. Install its login with: rkmon login atlassian",
+          "type": "object",
+          "x-class": "public",
+          "x-used-by": [
+            "features.ticket_creation.follow_up_tickets",
+            "features.ticket_creation.found_issue_tickets"
+          ],
+          "x-off-reason": "no type of ticket is on",
+          "additionalProperties": false,
+          "properties": {
+            "jira_url": {
+              "description": "Your JIRA site's address. Example: \"https://<site>.atlassian.net\". Required when a type of ticket is on.",
+              "type": "string",
+              "pattern": "^$|^https?://\\S+$",
+              "x-required-when": "a type of ticket is on",
+              "x-template": "",
+              "x-source": "your JIRA site's address",
+              "x-class": "private",
+              "x-used-by": [
+                "features.ticket_creation.follow_up_tickets",
+                "features.ticket_creation.found_issue_tickets"
+              ],
+              "x-applies": "new_container",
+              "x-internal": [
+                "atlassian.site",
+                "jira.url"
+              ]
+            }
+          }
+        },
+        "claude_code": {
+          "title": "Claude Code",
+          "description": "how the monitor reaches Claude. Install the key with: rkmon login claude (an Anthropic API key, or your LLM gateway's token).",
+          "type": "object",
+          "x-class": "public",
+          "x-used-by": [
+            "features.review_automation"
+          ],
+          "x-off-reason": "review automation is off",
+          "additionalProperties": false,
+          "properties": {
+            "base_url": {
+              "description": "The address to reach Claude at, if you use an LLM gateway (Claude Code's ANTHROPIC_BASE_URL). Example: \"https://llm-gateway.example.com\". Leave blank to use Anthropic's own API.",
+              "type": "string",
+              "pattern": "^$|^https?://\\S+$",
+              "x-blank": "to use Anthropic's own API",
+              "default": "",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "claude.gateway"
+            },
+            "api_key_sent_as": {
+              "description": "How the key is sent: \"header\" (in the header that api_key_header names), \"bearer\" (as \"Authorization: Bearer <key>\") or \"header_and_bearer\" (both). Your gateway's documentation says which. Default: \"header\".",
+              "type": "string",
+              "enum": [
+                "header",
+                "bearer",
+                "header_and_bearer"
+              ],
+              "default": "header",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "claude.api_key_sent_as"
+            },
+            "api_key_header": {
+              "description": "The header the key goes in, for \"header\" and \"header_and_bearer\". Leave blank for Anthropic's own header, \"x-api-key\".",
+              "type": "string",
+              "pattern": "^$|^[A-Za-z0-9-]+$",
+              "x-blank": "for Anthropic's own header, \"x-api-key\"",
+              "default": "",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "claude.api_key_header"
+            },
+            "api_key_scheme": {
+              "description": "Text to put before the key in that header, such as \"Bearer\". Leave blank to send the key alone.",
+              "type": "string",
+              "pattern": "^\\S*$",
+              "x-blank": "to send the key alone",
+              "default": "",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "claude.api_key_scheme"
+            }
+          }
+        }
+      }
+    },
+    "model_bindings": {
+      "title": "Model bindings",
+      "description": "other models the passes can use, each under a name you choose. \"opus\", \"sonnet\" and \"haiku\" are built in, reached through integrations.claude_code, and need no entry. To add a model, replace {} with entries in one of the three forms that rkmon template section model_bindings prints. Default: none.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(?!(default|none)$)[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        "x-template": "<name>"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/binding"
+      },
+      "default": {},
+      "x-class": "public",
+      "x-used-by": [
+        "features.review_automation"
+      ],
+      "x-off-reason": "review automation is off",
+      "x-applies": "new_container",
+      "x-internal": "model_bindings"
+    }
+  },
+  "$defs": {
+    "model_prices": {
+      "description": "one model's prices, in US dollars per million tokens.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "output",
+        "cache_read",
+        "cache_write_5_minutes",
+        "cache_write_1_hour"
+      ],
+      "properties": {
+        "input": {
+          "description": "Input tokens. Required.",
+          "type": "number",
+          "minimum": 0,
+          "x-template": "<price>",
+          "x-source": "the model's price per million input tokens, in US dollars, from Anthropic's price list or your gateway's",
+          "x-class": "public",
+          "x-used-by": [
+            "features.review_automation.spend"
+          ],
+          "x-applies": "new_container",
+          "x-internal": "prices.*.in"
+        },
+        "output": {
+          "description": "Output tokens. Required.",
+          "type": "number",
+          "minimum": 0,
+          "x-template": "<price>",
+          "x-source": "the model's price per million output tokens, in US dollars, from Anthropic's price list or your gateway's",
+          "x-class": "public",
+          "x-used-by": [
+            "features.review_automation.spend"
+          ],
+          "x-applies": "new_container",
+          "x-internal": "prices.*.out"
+        },
+        "cache_read": {
+          "description": "Tokens read from the prompt cache. Required.",
+          "type": "number",
+          "minimum": 0,
+          "x-template": "<price>",
+          "x-source": "the model's price per million tokens read from the prompt cache, in US dollars, from Anthropic's price list or your gateway's",
+          "x-class": "public",
+          "x-used-by": [
+            "features.review_automation.spend"
+          ],
+          "x-applies": "new_container",
+          "x-internal": "prices.*.cache_read"
+        },
+        "cache_write_5_minutes": {
+          "description": "Tokens written to the prompt cache for 5 minutes. Required.",
+          "type": "number",
+          "minimum": 0,
+          "x-template": "<price>",
+          "x-source": "the model's price per million tokens written to the prompt cache for 5 minutes, in US dollars, from Anthropic's price list or your gateway's",
+          "x-class": "public",
+          "x-used-by": [
+            "features.review_automation.spend"
+          ],
+          "x-applies": "new_container",
+          "x-internal": "prices.*.cache_write_5m"
+        },
+        "cache_write_1_hour": {
+          "description": "Tokens written to the prompt cache for 1 hour. Required.",
+          "type": "number",
+          "minimum": 0,
+          "x-template": "<price>",
+          "x-source": "the model's price per million tokens written to the prompt cache for 1 hour, in US dollars, from Anthropic's price list or your gateway's",
+          "x-class": "public",
+          "x-used-by": [
+            "features.review_automation.spend"
+          ],
+          "x-applies": "new_container",
+          "x-internal": "prices.*.cache_write_1h"
+        }
+      }
+    },
+    "binding": {
+      "oneOf": [
+        {
+          "description": "A Claude model, reached through integrations.claude_code.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model_id"
+          ],
+          "properties": {
+            "provider": {
+              "description": "\"claude\". Required.",
+              "type": "string",
+              "const": "claude",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.provider"
+            },
+            "model_id": {
+              "description": "The model's id. Example: \"claude-sonnet-5-5\". Required.",
+              "type": "string",
+              "pattern": "^\\S+$",
+              "x-template": "<model>",
+              "x-source": "the model's id, such as \"claude-sonnet-5-5\"",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.model"
+            }
+          }
+        },
+        {
+          "description": "A model behind an OpenAI-compatible API (an LLM gateway, vLLM, LiteLLM).",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model_id",
+            "base_url"
+          ],
+          "properties": {
+            "provider": {
+              "description": "\"openai_compatible\". Required.",
+              "type": "string",
+              "const": "openai_compatible",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.provider"
+            },
+            "model_id": {
+              "description": "The model's id, as the API lists it. Required.",
+              "type": "string",
+              "pattern": "^\\S+$",
+              "x-template": "<model>",
+              "x-source": "the model's id, as the API lists it",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.model"
+            },
+            "base_url": {
+              "description": "The API's base address. Example: \"https://llm-gateway.example.com/v1\". Required.",
+              "type": "string",
+              "pattern": "^https?://\\S+$",
+              "x-template": "<url>",
+              "x-source": "the API's base address, usually ending in /v1",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.url"
+            },
+            "api_key_secret_name": {
+              "description": "The name of the secret that contains the API key (not the key itself): lowercase letters, digits and _, ending in _api_key. Install the key with: rkmon secret <name>_api_key FILE. Leave blank if the API needs no key.",
+              "type": "string",
+              "pattern": "^$|^[a-z0-9][a-z0-9_]*_api_key$",
+              "x-blank": "if the API needs no key",
+              "default": "",
+              "x-template": "<name>_api_key",
+              "x-source": "the name of the secret that contains the API key, in lowercase letters, digits and _, ending in _api_key (rkmon secret NAME FILE installs the key under that name)",
+              "x-secret-ref": true,
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.api_key_secret"
+            },
+            "api_key_sent_as": {
+              "description": "How the key is sent: \"bearer\" (as \"Authorization: Bearer <key>\", with api_key_header and api_key_scheme not used), \"header\" (in the header that api_key_header names, after api_key_scheme) or \"header_and_bearer\" (both). Default: \"bearer\".",
+              "type": "string",
+              "enum": [
+                "bearer",
+                "header",
+                "header_and_bearer"
+              ],
+              "default": "bearer",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.auth_mode"
+            },
+            "api_key_header": {
+              "description": "The header the key goes in; with api_key_sent_as \"bearer\" it is not used. Required when api_key_sent_as is \"header\" or \"header_and_bearer\".",
+              "type": "string",
+              "pattern": "^$|^[A-Za-z0-9-]+$",
+              "x-required-when": "api_key_sent_as is \"header\" or \"header_and_bearer\"",
+              "default": "",
+              "x-source": "the name of the header the API takes the key in, from its documentation",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.auth_header"
+            },
+            "api_key_scheme": {
+              "description": "Text to put before the key in api_key_header's header, such as \"Bearer\"; with api_key_sent_as \"bearer\" it is not used. Leave blank to send the key alone.",
+              "type": "string",
+              "pattern": "^\\S*$",
+              "x-blank": "to send the key alone",
+              "default": "",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.auth_scheme"
+            },
+            "limits": {
+              "title": "Limits",
+              "description": "what the API allows.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "requests_per_minute": {
+                  "description": "Requests per minute. 0: unknown (the monitor still slows down when the API says it is busy). Default: 0.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "model_bindings.*.rpm"
+                },
+                "tokens_per_minute": {
+                  "description": "Tokens per minute. 0: unknown. Default: 0.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "model_bindings.*.tpm"
+                },
+                "max_parallel_requests": {
+                  "description": "Requests at the same time, across all passes. 0: no limit. Default: 0.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "model_bindings.*.concurrency"
+                }
+              }
+            },
+            "stall_timeout_seconds": {
+              "description": "If a request gets no new output for this many seconds, it is stopped and sent again. Default: 300.",
+              "type": "integer",
+              "minimum": 1,
+              "default": 300,
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.stall_s"
+            }
+          }
+        },
+        {
+          "description": "A model on an Ollama server.",
+          "type": "object",
+          "x-class": "public",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model_id",
+            "server_url"
+          ],
+          "properties": {
+            "provider": {
+              "description": "\"ollama\". Required.",
+              "type": "string",
+              "const": "ollama",
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.provider"
+            },
+            "model_id": {
+              "description": "The model, as ollama list shows it. Example: \"llama3.1:8b\". Required.",
+              "type": "string",
+              "pattern": "^\\S+$",
+              "x-template": "<model>:<tag>",
+              "x-source": "the model, as ollama list shows it, such as \"llama3.1:8b\"",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.model"
+            },
+            "server_url": {
+              "description": "The Ollama server's address. Inside the container, localhost is the container itself, so use the host's address. Example: \"http://<host address>:11434\". Required.",
+              "type": "string",
+              "pattern": "^https?://\\S+$",
+              "x-template": "<url>",
+              "x-source": "the Ollama server's address, as the container reaches it (inside the container, localhost is the container itself)",
+              "x-class": "private",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.url"
+            },
+            "limits": {
+              "title": "Limits",
+              "description": "what the server allows.",
+              "type": "object",
+              "x-class": "public",
+              "additionalProperties": false,
+              "properties": {
+                "max_parallel_requests": {
+                  "description": "Requests at the same time. One model in memory serves one request well. 0: no limit. Default: 1.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 1,
+                  "x-class": "public",
+                  "x-used-by": [
+                    "features.review_automation"
+                  ],
+                  "x-applies": "new_container",
+                  "x-internal": "model_bindings.*.concurrency"
+                }
+              }
+            },
+            "stall_timeout_seconds": {
+              "description": "If a request gets no new output for this many seconds, it is stopped and sent again. Default: 300.",
+              "type": "integer",
+              "minimum": 1,
+              "default": 300,
+              "x-class": "public",
+              "x-used-by": [
+                "features.review_automation"
+              ],
+              "x-applies": "new_container",
+              "x-internal": "model_bindings.*.stall_s"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

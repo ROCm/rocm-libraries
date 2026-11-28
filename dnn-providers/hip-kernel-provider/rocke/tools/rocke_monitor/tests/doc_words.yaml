@@ -1,0 +1,230 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The words and phrases that may not appear in the user docs, the schema descriptions, the printed messages and the
+# skill files. A list's words match as whole words, in any case unless the list says
+# match_case: true. A list's patterns are regular expressions, for a form no word spells, and match as whole words
+# too. Text in backticks, quoted as code, is not looked into. tests/test_settings_schemas.py reads the lists for the
+# schemas' names, values and texts.
+
+# Each list says what to write instead (say), which tools/doc_lints.py's words lint prints with each word it finds.
+# code: true reads text in backticks and fenced blocks for the list too; every_file: true reads every file of the
+# package for it, the maintainer docs and the code included (an earlier name, which no file keeps); allowed: the places
+# that keep the list's words, each a mapping of files (a pattern the file's path matches whole), kind (a list of user,
+# maintainer, skill and message), section (a heading the text is under), keep (a pattern of the words kept, in the
+# list's case, its ^ and $ at each line's ends; the whole text when there is none) and why.
+
+# The rejected words, in each of their forms.
+rejected:
+  say: write it in other words
+  words:
+    - me
+    - pipe
+    - pipes
+    - piped
+    - piping
+    - heavy check
+    - heavy checks
+    - kinds
+    - holds
+    - authority
+    - authorities
+    - observe
+    - observes
+    - observed
+    - observing
+    - act
+    - acts
+    - acted
+    - acting
+  allowed:
+    - files: 'rkmon\.py'
+      keep: '^  holds\b'
+      why: the command rk holds, by its name, in rk's help
+    - files: 'rkmon_lib/dispatch\.py'
+      keep: '\{me\}'
+      why: the key of a facts section's title, which rkmon_lib/facts.py fills in with the operator's login
+    - files: 'rkmon_lib/lessons\.py'
+      keep: '^Holds, releases and disarms$'
+      why: the noun, the merge queue's holds, which a section of the lessons names (the verb is rejected)
+    - files: 'rkmon_lib/publish\.py|tests/test_(?:publish|tick_filter)\.py'
+      keep: '\bBroken pipe\b'
+      why: rsync's own error, and the operating system's, which the code reads and the tests give it
+    - files: 'rkmon_lib/secrets_registry\.py'
+      keep: '^auto-merge-guard=act$'
+      why: a login's condition, the auto-merge guard set to act, which the code reads; condition_words says it in words
+    - files: 'rkmon_lib/report\.py'
+      keep: '^(?:HOLDS: |Holds|holds )$'
+      why: "the noun: the tick summary's line, the board's row and its key, of the merge queue's holds"
+    - files: 'rkmon_lib/(?:tickfilter|triage)\.py'
+      keep: '^(?:HOLDS:|the holds)$'
+      why: the noun, the tick summary's line of the merge queue's holds (HOLDS), which the filter and the triage read
+    - files: 'schema/layout1/deploy_settings\.schema\.json'
+      keep: '\bholds\b'
+      why: layout 1's deploy settings schema, its descriptions as layout 1's package wrote them
+    - files: 'tests/test_tick_filter\.py'
+      keep: '(?-i:^HOLDS(?=: #\d))'
+      why: the noun, the tick summary's line of the merge queue's holds (HOLDS), as the filter's test gives it
+    - files: 'tests/test_tickets\.py'
+      keep: '\b(?:tk-|data-|dataset\.)act\b'
+      why: "the dashboard's HTML and script: a ticket button's class and data attribute, by their names"
+    - files: 'rkmon_lib/daylog\.py'
+      keep: '^holds (?=\{…\}$)'
+      why: the noun, the day log line's count of the merge queue's holds
+    - files: 'rkmon_lib/facts\.py'
+      keep: '\{me\}'
+      why: the key of a facts section's title, which the module fills in with the operator's login
+    - files: 'rkmon_lib/webdash\.py'
+      keep: '(?-i:\b(?:prio-|tk-|data-|dataset\.)act\b|\bconst me=|\bdata-me\b|\.me\b|\+me\+)'
+      why: "the dashboard's HTML and script: the buttons' classes and data, and the operator's login (me, data-me)"
+
+# Phrases of history, the phrases found unclear, and names the docs do not use.
+unwanted:
+  say: write what is true today, in plain words
+  words:
+    - no longer
+    - from now on
+    - used to be
+    - formerly
+    - renamed from
+    - before the package
+    - new in version
+    - new in layout
+    - would-send
+    - would send
+    - counts as its own
+    - for want of
+    - scaler
+    - advanced
+  patterns:
+    - "new in v?[0-9]"
+  allowed:
+    - keep: Advanced Micro Devices
+      why: a proper name
+    - kind: [skill]
+      keep: '\bscaler\b'
+      why: the module's name, which the skill files use
+    - files: 'rkmon_lib/from_layout1\.py'
+      keep: '\badvanced(?=\.|: | is )'
+      why: layout 1's key advanced and the keys under it, which the move from layout 1 reads and names in its notes
+    - files: 'rkmon_lib/tickfilter\.py'
+      keep: '^SCALER $'
+      why: the tick summary's line that `rkmon_lib/scaler.py` prints, which the filter reads
+    - files: 'rkmon_lib/insights\.py'
+      keep: '\bno longer merges\b'
+      why: the words a review uses of a PR that develop moved under, which a pattern of the insights matches
+    - files: 'rkmon_lib/scaler\.py'
+      keep: '(?-i:^SCALER (?=\{…\}))'
+      why: the tick summary's line the module prints (SCALER), which rkmon_lib/tickfilter.py reads
+
+# The closing words that a key's closing sentence replaces, in their case.
+closing_words:
+  say: end the text with the key's closing sentence, as tools/closing_sentences.py writes it
+  match_case: true
+  words:
+    - "Blank:"
+    - "Empty:"
+    - "null:"
+    - Required while
+    - Private.
+
+# The earlier names of the parallel reviews, read in every file of the package.
+parallel_reviews:
+  say: write the parallel reviews
+  match_case: true
+  code: true
+  every_file: true
+  words:
+    - pipe(s)
+    - <REVIEW_PIPES>
+  patterns:
+    - '[Pp]ipes?'
+  allowed:
+    - files: 'rkmon_lib/publish\.py|tests/test_(?:publish|tick_filter)\.py'
+      keep: Broken pipe
+      why: rsync's own error, and the operating system's, which the code reads and the tests give it
+
+# The earlier names of the parallel builds and of a build, read in every file of the package.
+parallel_builds:
+  say: write the parallel builds, or a build
+  match_case: true
+  code: true
+  every_file: true
+  patterns:
+    - '[Hh]eavy[ -](?:slots?|jobs?|checks?)'
+    - '[Hh]eavy local'
+
+# The earlier name of the dashboards' Merge queue tile, read in every file of the package.
+merge_queue_tile:
+  say: write Merge queue
+  match_case: true
+  code: true
+  every_file: true
+  words:
+    - Merge pipeline
+
+# The earlier names of the two dashboards.
+dashboards:
+  say: write the admin dashboard, or the team dashboard
+  words:
+    - admin page
+    - local dashboard
+    - local page
+    - published copy
+    - published dashboard
+    - published page
+    - team page
+
+# The container's users by their user names, which only the maintainer docs give.
+container_users:
+  say: write the monitor, the writer or the PR runners; their user names are for the maintainer docs
+  code: true
+  words:
+    - rkwrite
+    - rkpr
+  patterns:
+    - 'rkmon (?:user|account)'
+    - 'user rkmon'
+  allowed:
+    - files: 'docker/(?:Dockerfile|entrypoint\.sh)'
+      keep: '\brk(?:pr|write)\b'
+      why: the image's build makes the container's users and its entry point checks which one it runs as, by their names
+
+# "mode", which means a feature's prototype or live and nothing else.
+mode:
+  say: mode means only prototype or live; name the thing in other words
+  words:
+    - mode
+    - modes
+  allowed:
+    - keep: '"?\b(?:prototype|live)\b"? modes?\b'
+      why: a feature's mode, beside its value (prototype mode, live mode)
+    - keep: '\bmode: "?(?:prototype|live)\b|[\w.]*\.mode\b'
+      why: a feature's mode key, with its value or by its whole name
+    - keep: '\bmodes?[ =][0-7]{3,4}\b'
+      why: a file's permissions, by their octal number (mode 600, mode 0700, modes 700 and 600, mode=1777)
+    - keep: '--import-mode\b'
+      why: pytest's option, which the code passes
+    - keep: '\b(?:new|deleted) file mode\b'
+      why: git's own words in a diff, which the code reads
+    - files: 'docker/rk_(?:prcode|root|write)\.py|worker/perms\.py'
+      keep: '\bmode(?= \{…\})'
+      why: a file's permissions, by the octal number the code fills in (mode 0664)
+    - files: 'rkmon_lib/gpu\.py'
+      keep: '(?-i:\$J/mode\b|\$MODE\b|\bMODE=)'
+      why: the GPU job's file and shell variable of what it tests (merge, head or develop), which its results read back
+    - files: 'rkmon_lib/(?:guard|review)\.py'
+      keep: '(?<![\w-])--mode\b'
+      why: run_diff.py's option, which the differential golden's check passes and looks for in its help (DG_FLAGS)
+    - files: 'rkmon_lib/webdash\.py'
+      keep: '\bwriting-mode\b'
+      why: CSS's property, which the dashboard's style sets for the grid's turned headers
+    - files: 'tests/test_tickets\.py'
+      keep: '\bSec-Fetch-Mode\b'
+      why: a browser's request header, which the test sends the dashboard
+    - files: 'tools/translate_production\.py'
+      keep: '(?-i:(?<=, )mode(?= \{…\}))'
+      why: a feature's mode beside its value (prototype or live), which the translation's report fills in
+    - files: 'agentic/skills/rocke-monitor/SKILL\.md'
+      keep: '\*\*Features and modes\.\*\*'
+      why: the title of the skill's paragraph on the features and their two modes, prototype and live

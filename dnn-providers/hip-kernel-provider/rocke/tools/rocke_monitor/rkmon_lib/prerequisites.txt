@@ -1,0 +1,21 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The prerequisites rk doctor checks, one per line: rkmon_lib/doctor.py reads this table, and installs nothing.
+#
+# Fields, split by "|":  key|level|name|look for|what it blocks while it is missing
+#   level: core (the first tick needs it), review (needed while review automation is on; a WARN while off), optional
+#   look for: commands (any one on PATH), or :llvm (ROCm's LLVM clang under /opt/rocm*)
+python|core|Python 3.10+ with venv|python3|everything: rk runs on Python
+git|core|git 2.38+|git|everything: the monitor's clone and every PR's worktrees
+gh|core|gh (GitHub CLI)|gh|everything that reads or writes GitHub
+claude|core|Claude Code|claude|Claude's part of each tick (verification, gate decisions, posting) and headless-claude
+ollama|review|Ollama (the local model runtime)|ollama|review-drafts on a local Ollama model (a remote endpoint needs none here)
+gpu|optional|GPU runtime (rocminfo)|rocminfo /opt/rocm/bin/rocminfo|the GPU test lanes, and a local model on this machine's GPU (the CPU lanes run without it)
+llvm|review|ROCm LLVM tools (clang)|:llvm|develop-checks and the review checks' compile lanes
+cmake|review|cmake|cmake|develop-checks and the review checks' native builds (the checks venv brings it)
+ninja|review|ninja|ninja|develop-checks and the review checks' native builds (the checks venv brings it)
+cxx|review|C/C++ compiler|c++ g++ clang++|develop-checks and the review checks' native builds
+rsync|optional|rsync|rsync|team-dashboard
+ssh|optional|ssh|ssh|team-dashboard
+curl|optional|curl|curl|nothing (handy for checks by hand)

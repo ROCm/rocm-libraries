@@ -1,0 +1,293 @@
+{
+  "test_sparse": [],
+  "worker": {
+    "context": 262144,
+    "temperature": 0.3,
+    "max_output_tokens": 16000,
+    "num_batch": 256,
+    "keep_alive": "120s",
+    "max_steps": 20,
+    "hang_s": 120,
+    "max_hangs": 6,
+    "max_resends": 3
+  },
+  "draft_parallel_max": 6,
+  "drafter": {
+    "review_token_budget": 1000000,
+    "review_wall_min": 45,
+    "prior_wall_min": 15,
+    "hunt_wall_min": 35,
+    "prior_token_budget": 400000,
+    "hunt_token_budget": 500000,
+    "prior_task_steps": 3,
+    "prior_parallel": 4,
+    "prior_effort": "medium",
+    "mechanical_effort": "low",
+    "card_tokens": 3000,
+    "keep_results": 4,
+    "hunt_steps": 30,
+    "prior_max_tokens": 8000,
+    "hunt_max_tokens": 16000,
+    "probe_timeout_s": 600,
+    "reserve_pct": 20,
+    "limiter_dir": "",
+    "restage_min": 60,
+    "check_rerun_max_s": 120,
+    "check_total_s": 600,
+    "quality_wall_min": 20,
+    "quality_token_budget": 400000,
+    "quality_steps": 24,
+    "quality_max_tokens": 16000,
+    "first_pass_wall_min": 5,
+    "first_pass_token_budget": 200000,
+    "first_pass_max_tokens": 6000
+  },
+  "mirror": {
+    "enabled": false,
+    "feed": "",
+    "out": "",
+    "pairs": 15,
+    "max_age_min": 360,
+    "checks": "",
+    "checks_wait_min": 240,
+    "arm_a": 0
+  },
+  "checks": {
+    "min_free_memory_gb": 16
+  },
+  "offload": {
+    "mode": "off",
+    "spot_check": 0.25,
+    "spot_check_min": 2,
+    "deep_lines": 2000,
+    "deep_files": 40,
+    "deep_hot_spots": [
+      "ABI",
+      "CMK",
+      "CAT"
+    ],
+    "deep_paths": [
+      "(^|/)CMakeLists\\.txt$",
+      "\\.cmake$"
+    ],
+    "budget_shares": {
+      "draft": 0.5,
+      "quality": 0.25,
+      "regrade": 0.25
+    },
+    "max_steps": 40,
+    "probe_timeout_s": 600,
+    "check_rerun_max_s": 120,
+    "check_total_s": 900,
+    "trial_prs": 10
+  },
+  "gpu": {
+    "skip_pattern": "(?i)\\b(gpus?|devices?)\\b",
+    "base_env": {},
+    "max_cases": 300
+  },
+  "review_checklist": "",
+  "clashes": {
+    "budget_s": 240,
+    "max_fetch": 4,
+    "merge_timeout_s": 60
+  },
+  "max_posts_per_hour": 6,
+  "huge_pr_lines": 8000,
+  "hot_spots": {},
+  "rebase_noise_paths": [],
+  "libparity_check": true,
+  "models": {
+    "tick": "",
+    "verify": "claude",
+    "quality": "claude",
+    "post": "claude",
+    "analytics": "",
+    "planner": "",
+    "analyst": ""
+  },
+  "effort": {
+    "audit": "",
+    "deep": "medium",
+    "tick": ""
+  },
+  "roles": {},
+  "claude": {
+    "effort": "high",
+    "auto_compact_window": 300000,
+    "prompt_cache_ttl": "1h",
+    "subagent_prompt_cache_ttl": "5m"
+  },
+  "weekly_report": {
+    "weekday": 0,
+    "hour_utc": 14,
+    "friction_window_h": 6
+  },
+  "followup_gap_exempt": [
+    "develop_fix",
+    "priority"
+  ],
+  "settle_burst_min": 45,
+  "settle_develop_fix_min": 10,
+  "loop_heartbeat_min": 180,
+  "tick_timeout_min": 20,
+  "loop_log_max_mb": 20,
+  "analysis_max_wait_min": 90,
+  "revert_offer_after_min": 120,
+  "hold_stale_h": 24,
+  "ci_test_tiers": [],
+  "ci_absent_modules": [],
+  "ci_infra_signatures": [],
+  "drift_extract": [],
+  "drift_batch": 6,
+  "develop_watched_workflows": [],
+  "develop_rocke_job_pattern": "",
+  "hold_label_patterns": [
+    "do[ _-]*not[ _-]*merge",
+    "don'?t[ _-]*merge",
+    "\\bdnm\\b",
+    "on[ _-]*hold",
+    "\\bwip\\b",
+    "not[ _-]*ready"
+  ],
+  "merge_plan": {
+    "max_merges": 200,
+    "budget_s": 30,
+    "timeout_s": 120
+  },
+  "conflicts": {
+    "max_checks": 25,
+    "max_fetches": 5,
+    "budget_s": 60,
+    "timeout_s": 120,
+    "refresh_h": 6,
+    "scan_days": 8
+  },
+  "ci_times": {
+    "every_min": 60,
+    "max_calls": 30,
+    "budget_s": 90,
+    "days": 8,
+    "jobs_runs": 2,
+    "job_min_s": 600,
+    "weekly_calls": 150
+  },
+  "overlaps": {
+    "max_heads": 12,
+    "max_fetches": 3,
+    "budget_s": 30
+  },
+  "admin_dashboard": {
+    "url": ""
+  },
+  "scoreboard": {
+    "lookback_days": 8,
+    "conflict_window_h": 3,
+    "ahead_h": 12,
+    "git_budget_s": 0.4
+  },
+  "tracker_allow": [
+    "SEM",
+    "IEEE",
+    "GQA",
+    "SWA",
+    "MFMA",
+    "SHA",
+    "UTF",
+    "ISO",
+    "RFC",
+    "CVE",
+    "X86",
+    "FP",
+    "INT",
+    "UINT",
+    "BF",
+    "TF",
+    "GFX",
+    "LLVM",
+    "MI",
+    "HIP",
+    "CDNA",
+    "RDNA",
+    "CUDA",
+    "SM",
+    "PEP",
+    "POSIX",
+    "ANSI",
+    "ECMA",
+    "AVX",
+    "SSE",
+    "DDR",
+    "HBM",
+    "PCIE",
+    "WG",
+    "LDS",
+    "GEMM",
+    "MLA",
+    "DSA",
+    "GDN",
+    "KDA",
+    "TOP",
+    "RC"
+  ],
+  "incident_issue": {
+    "time_limit_labels": [],
+    "title_pattern": "",
+    "test_name_pattern": "",
+    "umbrella_test_names": []
+  },
+  "tracker_keys": [],
+  "jira": {
+    "priority_map": {}
+  },
+  "atlassian": {
+    "proxy_url": ""
+  },
+  "followup_scan": {
+    "defer_patterns": [
+      "\\bfollow[ -]?ups?\\b",
+      "\\blater\\b",
+      "\\b(separate|next|future|another|subsequent) (PR|pull request)",
+      "\\bTODO\\b",
+      "\\bout of scope\\b",
+      "\\bwill address\\b",
+      "\\btickets?\\b"
+    ],
+    "request_patterns": [
+      "\\?",
+      "\\bplease\\b",
+      "\\bshould",
+      "\\b(can|could|would) (you|we)\\b",
+      "\\bneeds? to\\b",
+      "\\bmust\\b",
+      "\\bconsider\\b",
+      "\\bsuggest",
+      "\\binstead\\b",
+      "\\bmissing\\b",
+      "\\bnit\\b",
+      "\\bblock(ing|er)\\b",
+      "^\\s*(add|remove|rename|move|drop|avoid|use|fix|update|document|split|keep)\\b(?!:)"
+    ],
+    "ticket_pattern": "\\b[A-Z][A-Z0-9]{1,9}-\\d{2,}\\b"
+  },
+  "max_host_usage_pct": 75,
+  "resources": {
+    "work_memory_gib": 8
+  },
+  "ramdisk": {
+    "review_estimate_gib": 1.5,
+    "build_estimate_gib": 2
+  },
+  "gh": {
+    "probe_issue": 1
+  },
+  "retention": {
+    "log_max_mb": 20,
+    "job_days": 7,
+    "kept_reviews_h": 24
+  },
+  "update": {
+    "drain_timeout_min": 60,
+    "poll_s": 20
+  }
+}

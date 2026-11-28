@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""A stand-in for ssh in the remote GPU tests (tests/test_gpu.py): it runs the remote command here, as the cluster's
+login host would, and refuses every host but $FAKE_SSH_HOST (an example host: never a real one). Like the real client
+under BatchMode it needs the key file, and refuses one that others may read. With strict host key checking it trusts
+the known_hosts files the options name alone (UserKnownHostsFile, with GlobalKnownHostsFile=/dev/null), and refuses a
+host none of them lists (as `host`, or `[host]:port` off port 22): the monitor names its own file, never ssh's own or
+the system's. The login's home is $FAKE_REMOTE_HOME; the
+cluster's commands (sbatch, squeue, sacct, scancel, sinfo, sacctmgr, srun) are the fakes in bin/, with their state in
+$FAKE_SLURM_DIR. Each call is logged to $FAKE_SSH_LOG: host, login, key, port and the command's first line.
+$FAKE_SSH_DOWN makes every connection time out."""
+
+import os
+import pathlib
+import shlex
+import subprocess
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+WITH_VALUE = ("-o", "-i", "-l", "-p", "-F", "-J", "-E", "-b", "-c", "-m")
+
+
+def unknown_host(opts: list[str], host: str, port: str) -> str:
+    """Why the host's key is not trusted, as ssh says it; "" when it is: strict checking, against the known_hosts files
+    the options name alone."""
+    if "StrictHostKeyChecking=yes" not in opts:
+        return "fake ssh: the monitor must never take a host key it is shown (StrictHostKeyChecking=yes)"
+    if "GlobalKnownHostsFile=/dev/null" not in opts:
+        return "fake ssh: the monitor must never read the system's known hosts (GlobalKnownHostsFile=/dev/null)"
+    named = [o.split("=", 1)[1] for o in opts if o.startswith("UserKnownHostsFile=")]
+    if not named:
+        return "fake ssh: the monitor must name its own known hosts (UserKnownHostsFile), never ssh's own"
+    name = host if port == "22" else f"[{host}]:{port}"
+    for f in shlex.split(named[0]):  # ssh takes an option's first value
+        try:
+            lines = pathlib.Path(f).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        if any(len(x.split()) >= 3 and name in x.split()[0].split(",") for x in lines):
+            return ""
+    return (
+        f"No host key is known for {name} and you have requested strict checking.\n"
+        "Host key verification failed."
+    )
+
+
+def main(argv: list[str]) -> int:
+    opts, user, key, port, i = [], os.environ.get("USER", "op"), "", "22", 0
+    while i < len(argv) and argv[i].startswith("-"):
+        flag = argv[i]
+        if flag in WITH_VALUE and i + 1 < len(argv):
+            value = argv[i + 1]
+            opts += [value] if flag == "-o" else []
+            key = value if flag == "-i" else key
+            user = value if flag == "-l" else user
+            port = value if flag == "-p" else port
+            i += 2
+        else:
+            i += 1
+    if i >= len(argv):
+        print("usage: ssh [options] host [command]", file=sys.stderr)
+        return 255
+    host, cmd = argv[i], " ".join(argv[i + 1 :])
+    if "@" in host:
+        user, host = host.split("@", 1)
+    log = os.environ.get("FAKE_SSH_LOG")
+    if log:
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"{host}\t{user}\t{key}\t{port}\t{(cmd.splitlines() or [''])[0]}\n")
+    want = os.environ.get("FAKE_SSH_HOST", "")
+    if not want or host != want:
+        print(
+            f"ssh: connect to host {host} port {port}: refused by the test's fake (it answers only "
+            f"{want or 'no host'})",
+            file=sys.stderr,
+        )
+        return 255
+    if "BatchMode=yes" not in opts:
+        print(
+            "fake ssh: the monitor must never ask for a password (BatchMode=yes)",
+            file=sys.stderr,
+        )
+        return 255
+    if not key or not os.path.isfile(key):
+        print(
+            f"Warning: Identity file {key} not accessible: No such file or directory.",
+            file=sys.stderr,
+        )
+        print(f"{user}@{host}: Permission denied (publickey).", file=sys.stderr)
+        return 255
+    if os.stat(key).st_mode & 0o077:
+        print(f"Permissions for '{key}' are too open.", file=sys.stderr)
+        return 255
+    if os.environ.get("FAKE_SSH_DOWN"):
+        print(
+            f"ssh: connect to host {host} port {port}: Connection timed out",
+            file=sys.stderr,
+        )
+        return 255
+    why = unknown_host(opts, host, port)
+    if why:
+        print(why, file=sys.stderr)
+        return 255
+    home = os.environ["FAKE_REMOTE_HOME"]
+    env = dict(
+        os.environ,
+        HOME=home,
+        USER=user,
+        LOGNAME=user,
+        PATH=f"{HERE / 'bin'}:{os.environ.get('PATH', '')}",
+    )
+    return subprocess.run(["bash", "-c", cmd or "true"], env=env, cwd=home).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

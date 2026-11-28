@@ -1,0 +1,657 @@
+{
+  "about": "Each configuration key whose value in today's config.json differs between a deploy settings file in layout 1 and the same file once rkmon migrate has written it in layout 2 (tests/data/deploy_tree_carry.json), in the comparisons a row names: defaults, a file that leaves every key to its default, or a sample. For each comparison a row records OLD, the values the layout 1 carry gave, and NEW, the values the layout 2 carry gives, by configuration key: a key left out has no value there, and {version} stands for this package's version. WHY says what changes for you, FILES lists the files of the package that make the difference. tests/test_deploy_tree.py fails on a difference no row records with these values, and on a value a row records that is no difference.",
+  "differences": [
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "admin_dashboard.publish_host": "127.0.0.1"
+          },
+          "new": {}
+        },
+        "full": {
+          "old": {
+            "admin_dashboard.publish_host": "127.0.0.1"
+          },
+          "new": {}
+        },
+        "minimal": {
+          "old": {
+            "admin_dashboard.publish_host": "127.0.0.1"
+          },
+          "new": {}
+        },
+        "prototype": {
+          "old": {
+            "admin_dashboard.publish_host": "127.0.0.1"
+          },
+          "new": {}
+        }
+      },
+      "why": "The file has no key for the admin dashboard's address, so the configuration names none: the dashboard is published on 127.0.0.1, the compose file's default, the address layout 1 gave each of these files. migrate refuses a file that names another.",
+      "files": "rkmon_lib/removed_keys.py (PACKAGE_SET), rkmon_lib/from_layout1.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "confluence.site": ""
+          },
+          "new": {}
+        },
+        "minimal": {
+          "old": {
+            "confluence.site": ""
+          },
+          "new": {}
+        },
+        "prototype": {
+          "old": {
+            "confluence.site": ""
+          },
+          "new": {}
+        },
+        "full": {
+          "old": {
+            "confluence.site": "https://wiki.example.com"
+          },
+          "new": {}
+        }
+      },
+      "why": "No feature reads Confluence's address, so the file has no key for it, and migrate drops it with a note: nothing that runs changes.",
+      "files": "rkmon_lib/removed_keys.py (WHY_DROPPED), rkmon_lib/from_layout1.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "container.mounts": []
+          },
+          "new": {}
+        },
+        "minimal": {
+          "old": {
+            "container.mounts": []
+          },
+          "new": {}
+        },
+        "prototype": {
+          "old": {
+            "container.mounts": []
+          },
+          "new": {}
+        },
+        "full": {
+          "old": {
+            "container.mounts": [
+              "/srv/sample-data:/data:ro"
+            ]
+          },
+          "new": {}
+        }
+      },
+      "why": "The file has no host mounts: the remote GPU tests' SSH key, the one file they were for, is the gpu_ssh_key secret. migrate drops a file's mounts with a note, and the container no longer mounts them.",
+      "files": "rkmon_lib/removed_keys.py (WHY_DROPPED), rkmon_lib/from_layout1.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "container.write_uid": 1999,
+            "container.pr_uid": 1998
+          },
+          "new": {}
+        },
+        "minimal": {
+          "old": {
+            "container.write_uid": 1999,
+            "container.pr_uid": 1998
+          },
+          "new": {}
+        },
+        "prototype": {
+          "old": {
+            "container.write_uid": 1999,
+            "container.pr_uid": 1998
+          },
+          "new": {}
+        },
+        "full": {
+          "old": {
+            "container.write_uid": 2999,
+            "container.pr_uid": 2998
+          },
+          "new": {}
+        }
+      },
+      "why": "The GitHub writer's and the PR runner's ids are the package's own (rkmon_lib/container_layout.py), the ids layout 1 used by default, not settings. A file that set others, as the full sample does, now runs both users with the package's ids, and migrate's note says so.",
+      "files": "rkmon_lib/container_layout.py, rkmon_lib/removed_keys.py (PACKAGE_SET), rkmon_lib/from_layout1.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "container.uid": "",
+            "container.gid": ""
+          },
+          "new": {}
+        },
+        "minimal": {
+          "old": {
+            "container.uid": "",
+            "container.gid": ""
+          },
+          "new": {}
+        },
+        "prototype": {
+          "old": {
+            "container.uid": "",
+            "container.gid": ""
+          },
+          "new": {}
+        }
+      },
+      "why": "The monitor's user and group ids default to null, the ids of whoever runs rkmon: the configuration leaves them out, which today's code reads as it read a blank, so nothing changes.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/deploy_tree.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "deployment.image": ""
+          },
+          "new": {
+            "deployment.image": "rocke-monitor:{version}"
+          }
+        }
+      },
+      "why": "A file at the defaults names this package's own image, rocke-monitor at this package's version, where layout 1's default named no image: image.tag is required, and the templates write this package's version into it.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/settings_file.py, rkmon_lib/deploy_tree.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "deployment.project": "rkmon"
+          },
+          "new": {
+            "deployment.project": "rocke-monitor"
+          }
+        }
+      },
+      "why": "A new file's container is named rocke-monitor by default, where layout 1's blank name meant rkmon. migrate writes rkmon for a file that left the name blank, as the samples did, so an existing deployment keeps its name, its volumes and its state.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/from_layout1.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "features.ticket_creation.triggers.review_follow_up": true,
+            "features.ticket_creation.triggers.out_of_scope_issue": true
+          },
+          "new": {
+            "features.ticket_creation.triggers.review_follow_up": false,
+            "features.ticket_creation.triggers.out_of_scope_issue": false
+          }
+        },
+        "minimal": {
+          "old": {
+            "features.ticket_creation.triggers.review_follow_up": true,
+            "features.ticket_creation.triggers.out_of_scope_issue": true
+          },
+          "new": {
+            "features.ticket_creation.triggers.review_follow_up": false,
+            "features.ticket_creation.triggers.out_of_scope_issue": false
+          }
+        }
+      },
+      "why": "Each type of ticket has a switch of its own, off until you set it, and ticket creation is on while one of them is. With ticket creation off, as here, the triggers read false where layout 1 left them true, and nothing is filed either way.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/deploy_tree.py"
+    },
+    {
+      "comparisons": {
+        "minimal": {
+          "old": {},
+          "new": {
+            "atlassian.enabled": false
+          }
+        }
+      },
+      "why": "The file answers whether JIRA and Confluence are used: yes while a type of ticket is on. Layout 1's carry said yes while JIRA's address was set, and else left the question to layout 1's interview, which for a file like this one, with no address and no feature that needs JIRA, answered no unless you said yes; the file now answers no itself. What changes is the other two cases: a file with JIRA's address and both types of ticket off now answers no, so the address is blanked and the verifier no longer reads the tickets a pull request names; a file with a type of ticket on and no address answers yes, as layout 1's interview did, and its check asks for the address.",
+      "files": "rkmon_lib/deploy_tree.py, rkmon_lib/features.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "incident_issue.labels": [
+              "post-merge"
+            ],
+            "incident_issue.stability_label": "rocke-stability"
+          },
+          "new": {
+            "incident_issue.labels": [],
+            "incident_issue.stability_label": ""
+          }
+        }
+      },
+      "why": "A new file's develop guard has no labels until you set them, and its check asks for them once the guard is on and the merge queue live: the package carries no site's labels. migrate writes the labels layout 1's guard used, as the samples show.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/coherence.py (DEPLOY_REQUIRED), rkmon_lib/from_layout1.py"
+    },
+    {
+      "comparisons": {
+        "minimal": {
+          "old": {
+            "incident_issue.labels": [
+              "post-merge"
+            ]
+          },
+          "new": {
+            "incident_issue.labels": [
+              "post-merge",
+              "ci-red"
+            ]
+          }
+        },
+        "prototype": {
+          "old": {
+            "incident_issue.labels": [
+              "post-merge"
+            ]
+          },
+          "new": {
+            "incident_issue.labels": [
+              "post-merge",
+              "ci-red"
+            ]
+          }
+        }
+      },
+      "why": "migrate writes into the file the labels layout 1's guard put on a develop issue while CI was red: the first, then ci-red, the companion label the guard added beside it. The configuration lists both; today's code reads the first and adds ci-red itself, so each issue gets the labels it got before.",
+      "files": "rkmon_lib/from_layout1.py, rkmon_lib/breakage.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "automerge_guard_own": false
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "automerge_guard_own": false
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "automerge_guard_own": false
+          }
+        }
+      },
+      "why": "How the auto-merge guard treats your own pull requests is a key of the file, alert_only by default, which gives false: what today's code reads when the key is absent, so nothing changes.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/deploy_tree.py, rkmon_lib/merge.py"
+    },
+    {
+      "comparisons": {
+        "full": {
+          "old": {},
+          "new": {
+            "model_bindings.drafter.auth_mode": "bearer",
+            "model_bindings.drafter.auth_scheme": ""
+          }
+        }
+      },
+      "why": "A binding's api_key_sent_as and api_key_scheme take their defaults, bearer and blank: the same header goes out, Authorization: Bearer and the key.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/deploy_tree.py"
+    },
+    {
+      "comparisons": {
+        "full": {
+          "old": {
+            "publish.html.dest": "public_html/sample/index.html",
+            "publish.html.requests": "sample-requests.jsonl"
+          },
+          "new": {
+            "publish.html.dest": "",
+            "publish.html.requests": "public_html+sample-requests.jsonl"
+          }
+        }
+      },
+      "why": "The team dashboard's page and its requests file are worked out from the site folder. The page, index.html in it, is worked out at each load, so the configuration the file makes holds none: the full sample's page stays where its layout 1 file put it. The requests file lies at the top of the login's home, named after the site folder, public_html+sample-requests.jsonl, where the full sample's layout 1 file names sample-requests.jsonl, a file the writer does not read: the web host's request service, installed with that place, must be installed again to write to the new one.",
+      "files": "rkmon_lib/derived.py, rkmon_lib/deploy_tree.py"
+    },
+    {
+      "comparisons": {
+        "full": {
+          "old": {
+            "jira.url": "",
+            "team_dashboard.url": "",
+            "tick_interval_min": 10
+          },
+          "new": {
+            "jira.url": "https://jira.example.com",
+            "team_dashboard.url": "http://web.example.com:8080/",
+            "tick_interval_min": 7
+          }
+        },
+        "prototype": {
+          "old": {
+            "jira.url": ""
+          },
+          "new": {
+            "jira.url": "https://jira.example.com"
+          }
+        }
+      },
+      "why": "Layout 2 merges each into a key of the file that feeds another configuration key too: jira.url into integrations.atlassian_cli.jira_url (atlassian.site), team_dashboard.url into features.dashboards.team.public_url (publish.html.url), tick_interval_min into monitor.tick_interval_minutes (claude.tick_min). Layout 1's file fed only the other configuration key and left these at their defaults; each now takes its key's value, so the code that still reads one, the tick loop's interval among them, takes the file's value.",
+      "files": "rkmon_lib/deploy_tree.py, schema/deploy_settings.schema.json (x-internal)"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "features.alerts.mode": "prototype",
+            "features.dashboards.team.mode": "prototype",
+            "features.ticket_creation.mode": "prototype"
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "features.alerts.mode": "live",
+            "features.dashboards.team.mode": "live",
+            "features.ticket_creation.mode": "live"
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "features.alerts.mode": "prototype",
+            "features.dashboards.team.mode": "prototype",
+            "features.ticket_creation.mode": "prototype"
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "features.alerts.mode": "prototype",
+            "features.dashboards.team.mode": "prototype",
+            "features.ticket_creation.mode": "prototype"
+          }
+        }
+      },
+      "why": "Layout 1 had no mode for alerts, the team dashboard or ticket creation: each sent whenever it was on, so migrate writes each live. Each mode feeds its feature's mode, as review automation's and the merge queue's do: in prototype the feature does its work, and what it would send is kept as an unsent item at the one outward gate.",
+      "files": "rkmon_lib/from_layout1.py, rkmon_lib/deploy_tree.py, rkmon_lib/post.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "features.merge_queue.queue_notices": true
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "features.merge_queue.queue_notices": true
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "features.merge_queue.queue_notices": true
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "features.merge_queue.queue_notices": true
+          }
+        }
+      },
+      "why": "The queue notices' switch reaches the configuration, true in each file: migrate writes it on while the merge queue is on, and a file that leaves it out means true. Queue notices go out while the merge queue is live, as before; set to false, the switch stops every one of them.",
+      "files": "rkmon_lib/from_layout1.py, rkmon_lib/deploy_tree.py, rkmon_lib/features.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "gpu.gpus_per_job": 1,
+            "gpu.qos": ""
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "gpu.gpus_per_job": 1,
+            "gpu.qos": ""
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "gpu.gpus_per_job": 1,
+            "gpu.qos": ""
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "gpu.gpus_per_job": 1,
+            "gpu.qos": ""
+          }
+        }
+      },
+      "why": "The remote GPU tests' quality of service and GPU count reach the configuration, blank and 1 in each file: each job asks for the account's default quality of service and one GPU, as layout 1's jobs did. Set qos to send sbatch --qos, and gpus_per_job to ask for more GPUs.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/gpu.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {
+            "scope.path_labels": []
+          },
+          "new": {
+            "scope.path_labels": {}
+          }
+        },
+        "full": {
+          "old": {
+            "scope.path_labels": [
+              "shared: ci"
+            ]
+          },
+          "new": {
+            "scope.path_labels.shared: ci": "projects/sample"
+          }
+        },
+        "minimal": {
+          "old": {
+            "scope.path_labels": []
+          },
+          "new": {
+            "scope.path_labels": {}
+          }
+        },
+        "prototype": {
+          "old": {
+            "scope.path_labels": []
+          },
+          "new": {
+            "scope.path_labels": {}
+          }
+        }
+      },
+      "why": "Each shared label reaches the configuration with its folder, so a pull request with one is in scope only when it changes files in that label's folder; no shared label is an empty map. A list of labels in config.json still gives each label the repository's folder, the one folder each counted for.",
+      "files": "rkmon_lib/deploy_tree.py, rkmon_lib/config.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "features.merge_queue.drift_notices": true
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "features.merge_queue.drift_notices": true
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "features.merge_queue.drift_notices": true
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "features.merge_queue.drift_notices": true
+          }
+        }
+      },
+      "why": "The drift notices' switch reaches the configuration, true in each file: migrate writes it on while the merge queue and review automation are on, and a file that leaves it out means true. Drift notices go out while the merge queue is live, as before, and the switch is true; set to false, it stops every one of them.",
+      "files": "rkmon_lib/from_layout1.py, rkmon_lib/deploy_tree.py, rkmon_lib/features.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "features.alerts.develop_breaks": false,
+            "features.alerts.needs_you": false
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "features.alerts.develop_breaks": true,
+            "features.alerts.needs_you": true
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "features.alerts.develop_breaks": false,
+            "features.alerts.needs_you": false
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "features.alerts.develop_breaks": true,
+            "features.alerts.needs_you": true
+          }
+        }
+      },
+      "why": "Each kind of alert's own switch reaches the configuration as the file has it: migrate writes both as layout 1's one switch for both was. The alerts' switch is on while either kind is on and the mode is live, as before; each kind now goes out only while its own switch is on too, so a file can turn on one kind and not the other.",
+      "files": "rkmon_lib/from_layout1.py, rkmon_lib/deploy_tree.py, rkmon_lib/features.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "claude.api_key_header": "",
+            "claude.api_key_scheme": "",
+            "claude.api_key_sent_as": "header"
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "claude.api_key_header": "",
+            "claude.api_key_scheme": "",
+            "claude.api_key_sent_as": "header"
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "claude.api_key_header": "",
+            "claude.api_key_scheme": "",
+            "claude.api_key_sent_as": "header"
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "claude.api_key_header": "",
+            "claude.api_key_scheme": "",
+            "claude.api_key_sent_as": "header"
+          }
+        }
+      },
+      "why": "How the Claude session sends its key reaches the configuration at the file's values, here the defaults: the key in Anthropic's own header, as the session sends it.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/deploy_tree.py, rkmon_lib/orchestrator.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "gh.max_requests_per_hour": 0
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "gh.max_requests_per_hour": 0
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "gh.max_requests_per_hour": 0
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "gh.max_requests_per_hour": 0
+          }
+        }
+      },
+      "why": "The cap on GitHub requests an hour reaches the configuration at the file's value, 0 in each file: no cap, as layout 1 had none. Each tick gives the cap to the container's GitHub request counter, which counts every gh call there and makes one over the cap wait until the last hour has room.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/gh_cap.py"
+    },
+    {
+      "comparisons": {
+        "defaults": {
+          "old": {},
+          "new": {
+            "features.review_automation.automated_reviewer_name": ""
+          }
+        },
+        "full": {
+          "old": {},
+          "new": {
+            "features.review_automation.automated_reviewer_name": ""
+          }
+        },
+        "minimal": {
+          "old": {},
+          "new": {
+            "features.review_automation.automated_reviewer_name": ""
+          }
+        },
+        "prototype": {
+          "old": {},
+          "new": {
+            "features.review_automation.automated_reviewer_name": ""
+          }
+        }
+      },
+      "why": "The automated reviewer name reaches the configuration at the file's value, blank in each file: line 1 of each review gives the container's name, \"Automated review by <name>: Model - <model>, effort: <effort>\". Set it to give another name, such as your team's.",
+      "files": "schema/deploy_settings.schema.json, rkmon_lib/reviewer_name.py"
+    }
+  ]
+}

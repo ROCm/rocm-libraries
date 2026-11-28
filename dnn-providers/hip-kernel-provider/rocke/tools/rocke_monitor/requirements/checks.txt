@@ -1,0 +1,17 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# The checks venv (paths.venv, default <WORKING_DIR>/venv): the review checks, gates and develop sanity run rocKE's
+# own tests and builds in it, and the worker's run_pytest tool uses its python. The image creates it (in
+# /opt/rkmon/venv) from checks.lock.txt (the exact versions the live checks run with):
+#   python3 -m venv /opt/rkmon/venv && /opt/rkmon/venv/bin/pip install -r requirements/checks.lock.txt
+# This file sets the lower bounds the code needs, and PyYAML within its major version 6 (rocKE's tests that read
+# YAML: with paths.pyyaml blank, the test runs take it from this venv). Never torch: CI's lanes run without it.
+pytest>=8.0
+pytest-timeout>=2.3
+cmake>=3.28
+ninja>=1.11
+pybind11>=2.12
+numpy>=1.26
+ml_dtypes>=0.4
+matplotlib>=3.8
+PyYAML>=6.0,<7

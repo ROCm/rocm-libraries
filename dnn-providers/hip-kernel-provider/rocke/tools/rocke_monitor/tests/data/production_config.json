@@ -1,0 +1,542 @@
+{
+  "deployment": {
+    "project": "rkmon",
+    "image": "",
+    "pull_registry": "",
+    "profile": "",
+    "phase": "queue"
+  },
+  "features": {
+    "review-posting": true,
+    "auto-merge": true,
+    "auto-merge-guard": "act",
+    "holds": true,
+    "overlap-management": true,
+    "stability-issues": true,
+    "incident-issues": true,
+    "chat-alerts": true,
+    "needs-you-alerts": false,
+    "follow-up-tickets": true,
+    "found-issue-tickets": true,
+    "team-dashboard": true,
+    "queue-notices": false,
+    "drift-notices": true,
+    "fix-links": true,
+    "weekly-report": true,
+    "services": false,
+    "headless-claude": true,
+    "jira-mcp": false,
+    "remote-gpu-tests": false
+  },
+  "repo": "example-org/example-repo",
+  "rocke_path": "projects/sample-tool",
+  "scope": {
+    "labels": [
+      "area: tools"
+    ],
+    "path_labels": [
+      "area: shared"
+    ]
+  },
+  "codeowner_org": "",
+  "codeowner_teams": {
+    "platform": [
+      "example-org/platform-owners"
+    ],
+    "style": [],
+    "library": [],
+    "root": [
+      "example-org/root-owners"
+    ]
+  },
+  "clone_since": "2026-01-05",
+  "clone_url": "",
+  "base_branch": "",
+  "test_sparse": [],
+  "operator": {
+    "github_login": "op-login"
+  },
+  "reviewer": "default",
+  "worker": {
+    "backend": "openai",
+    "url": "https://llm-gateway.example.com/drafter/v1",
+    "model": "drafter-model-a",
+    "model_name": "",
+    "api_key_file": "",
+    "api_key_env": "",
+    "auth_header": "X-Api-Key",
+    "auth_scheme": "",
+    "auth_mode": "both",
+    "headers_file": "",
+    "header_env": {},
+    "chat_path": "",
+    "models_url": "",
+    "source": "",
+    "omp_provider": "",
+    "context": 262144,
+    "temperature": 0.3,
+    "max_output_tokens": 16000,
+    "num_batch": 256,
+    "keep_alive": "120s",
+    "think": "max",
+    "max_steps": 20,
+    "stall_s": 900,
+    "hang_s": 120,
+    "max_hangs": 6,
+    "max_resends": 3,
+    "max_parallel": 4,
+    "rpm": 60,
+    "tpm": 400000,
+    "probe": {},
+    "tag": ""
+  },
+  "draft_stage": "auto",
+  "draft_parallel_max": 6,
+  "drafter": {},
+  "mirror": {
+    "enabled": false,
+    "feed": "",
+    "out": "",
+    "pairs": 15,
+    "max_age_min": 360,
+    "checks": "",
+    "checks_wait_min": 240,
+    "arm_a": 0
+  },
+  "profile_dir": "",
+  "review": {
+    "pipes": 3
+  },
+  "checks": {
+    "limit": 2,
+    "min_free_memory_gb": 16
+  },
+  "offload": {
+    "mode": "off",
+    "spot_check": 0.25,
+    "spot_check_min": 2,
+    "deep_lines": 2000,
+    "deep_files": 40,
+    "deep_hot_spots": [
+      "ABI",
+      "CMK",
+      "CAT"
+    ],
+    "deep_paths": [
+      "(^|/)CMakeLists\\.txt$",
+      "\\.cmake$"
+    ],
+    "budget_shares": {
+      "draft": 0.5,
+      "quality": 0.25,
+      "regrade": 0.25
+    },
+    "max_steps": 40,
+    "probe_timeout_s": 600,
+    "check_rerun_max_s": 120,
+    "check_total_s": 900,
+    "trial_prs": 10
+  },
+  "gpu": {
+    "login_host": "",
+    "ssh_user": "",
+    "ssh_key": "",
+    "known_hosts": "",
+    "ssh_port": 22,
+    "partition": "",
+    "accounts": [],
+    "constraint": "",
+    "gres": {},
+    "default_arch": "",
+    "exclude": [],
+    "time_limit": "01:00:00",
+    "remote_dir": "rkmon-gpu",
+    "remote_python": "",
+    "clone_url": "",
+    "setup": "",
+    "env": {
+      "ROCKE_BACKEND": "python"
+    },
+    "skip_pattern": "(?i)\\b(gpus?|devices?|gfx[0-9a-f]+x?|hip|hipcc|rocm|rocminfo|amdgpu|hsa|comgr)\\b",
+    "max_cases": 300,
+    "max_jobs_per_pr": 2,
+    "pending_report_min": 240,
+    "resubmits": 1
+  },
+  "review_first_line": "",
+  "verifier_name": "",
+  "review_first_line_no_draft": "",
+  "review_checklist": "",
+  "clashes": {},
+  "max_posts_per_hour": 6,
+  "autopilot_max_lines": 30000,
+  "huge_pr_lines": 8000,
+  "hot_spots": {
+    "RG": [
+      "<ROCKE_PATH>/platform/tests/golden/rocke_representative_ir_sha256.json",
+      "<ROCKE_PATH>/platform/tests/golden/rocke_representative_ir_sha256/"
+    ],
+    "DG": "<ROCKE_PATH>/platform/tests/instances/differential/golden/llvm_gfx_all.json",
+    "ABI": "<ROCKE_PATH>/platform/cpp/include/rocke/abi.h",
+    "CAT": "<ROCKE_PATH>/platform/cpp/core/arch/data.cpp",
+    "CMK": "<ROCKE_PATH>/platform/CMakeLists.txt"
+  },
+  "rebase_noise_paths": [],
+  "libparity_check": true,
+  "models": {
+    "draft": "worker",
+    "quality_draft": "default",
+    "notice_draft": "default",
+    "ci_triage": "default",
+    "tick": "",
+    "verify": "claude",
+    "quality": "claude",
+    "post": "claude",
+    "analytics": "",
+    "planner": "",
+    "analyst": "",
+    "audit": "opus",
+    "deep": "opus"
+  },
+  "effort": {
+    "orchestrator": "",
+    "verify": "",
+    "quality": "medium",
+    "audit": "",
+    "deep": "medium",
+    "tick": "",
+    "ci_triage": "default",
+    "notice_draft": "default",
+    "quality_draft": "default"
+  },
+  "model_bindings": {},
+  "roles": {},
+  "orchestrator": {
+    "model": "opus"
+  },
+  "prices": {
+    "claude-opus-5-5": {
+      "in": 5,
+      "out": 25,
+      "cache_read": 0.5,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10
+    },
+    "claude-sonnet-5-5": {
+      "in": 3,
+      "out": 15,
+      "cache_read": 0.3,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6
+    },
+    "claude-haiku-5-5": {
+      "in": 1,
+      "out": 5,
+      "cache_read": 0.1,
+      "cache_write_5m": 1.25,
+      "cache_write_1h": 2
+    }
+  },
+  "claude": {
+    "tick_min": 10,
+    "effort": "high",
+    "auto_compact_window": 300000,
+    "prompt_cache_ttl": "1h",
+    "subagent_prompt_cache_ttl": "5m",
+    "gateway": ""
+  },
+  "weekly_report": {
+    "weekday": 0,
+    "hour_utc": 14,
+    "dir": "",
+    "friction_window_h": 6
+  },
+  "settle_min": 30,
+  "followup_min_gap_min": 60,
+  "followup_gap_exempt": [
+    "develop_fix",
+    "priority"
+  ],
+  "idle_full_tick_min": 60,
+  "tick_interval_min": 10,
+  "loop_heartbeat_min": 180,
+  "tick_timeout_min": 20,
+  "loop_log_max_mb": 20,
+  "analysis_max_wait_min": 90,
+  "revert_offer_after_min": 120,
+  "hold_stale_h": 24,
+  "merge_authority": "none",
+  "ci_test_tiers": [],
+  "ci_absent_modules": [],
+  "ci_infra_signatures": [
+    {
+      "pattern": "Executing the custom container implementation failed",
+      "note": "the external repository's checkout hung (often after its 10-minute checkout timeout)"
+    },
+    {
+      "pattern": "The action 'Test' has timed out after 30 minutes",
+      "jobs": "shard",
+      "unless": "\\*\\*\\*(?:Failed|Exception)|\\((?:Failed|Exception|SEGFAULT)\\)|\\bFAILED \\S+::\\S+",
+      "note": "a shard's Test step limit with no failed test: the pool's, unless the PR's entries add the time (rk shard-times N)"
+    },
+    {
+      "pattern": "The self-hosted runner lost communication with the server",
+      "note": "the runner was lost; its log reads 404"
+    },
+    {
+      "pattern": "The runner has received a shutdown signal",
+      "note": "the runner was shut down (exit 130)"
+    },
+    {
+      "pattern": "Network is unreachable|Temporary failure resolving",
+      "regex": true,
+      "jobs": "hipdnn",
+      "note": "no network while installing the build tools (apt exit 100): no build ran"
+    },
+    {
+      "pattern": "\\(exited (?:404|429)\\)",
+      "regex": true,
+      "jobs": "windows",
+      "note": "a Chocolatey download failed (404, or 429 rate limit) installing the requirements or build tools"
+    },
+    {
+      "pattern": "(?s)therock-dvc.{0,4000}?\\[Errno 13\\] Permission denied",
+      "regex": true,
+      "jobs": "windows",
+      "note": "the DVC fetch could not write its cache (Windows compiler runtime)"
+    },
+    {
+      "pattern": "(?s)fetch_sources\\.py.{0,4000}?Segmentation fault",
+      "regex": true,
+      "note": "the source fetch crashed (emulation)"
+    },
+    {
+      "pattern": "killed outside the job",
+      "note": "the runner's pod died during the build"
+    },
+    {
+      "pattern": "clean_configure_test_project.cmake:49",
+      "note": "the examples test's own project configure step"
+    },
+    {
+      "pattern": "getIDToken call failed",
+      "note": "the runner's OIDC token request failed"
+    },
+    {
+      "pattern": "No matching artifacts found",
+      "note": "an artifact download found nothing to fetch"
+    },
+    {
+      "pattern": "\\bHTTP 50[03]\\b",
+      "regex": true,
+      "jobs": "gate|bot",
+      "note": "GitHub answered 500 or 503 to a gate or bot workflow's gh call"
+    },
+    {
+      "pattern": "pwsh: command not found",
+      "jobs": "windows",
+      "note": "a Windows runner without PowerShell; a site sets ends_at to the develop commit that moves the step to bash"
+    }
+  ],
+  "ci_infra_site_signatures": [],
+  "drift_extract": [],
+  "drift_batch": 6,
+  "develop_watched_workflows": [
+    "TheRock Multi-Arch CI",
+    "Component CI",
+    "pre-commit",
+    "HipDNN Linux Superbuild",
+    "HipDNN Windows Superbuild"
+  ],
+  "develop_rocke_job_pattern": "hipkernelprovider|hip-kernel-provider|hipdnn|rocke",
+  "hold_label_patterns": [
+    "do[ _-]*not[ _-]*merge",
+    "don'?t[ _-]*merge",
+    "\\bdnm\\b",
+    "on[ _-]*hold",
+    "\\bwip\\b",
+    "not[ _-]*ready"
+  ],
+  "merge_plan": {
+    "max_merges": 200,
+    "budget_s": 30,
+    "timeout_s": 120
+  },
+  "conflicts": {
+    "max_checks": 25,
+    "max_fetches": 5,
+    "budget_s": 60,
+    "timeout_s": 120,
+    "refresh_h": 6,
+    "scan_days": 8
+  },
+  "ci_times": {
+    "every_min": 60,
+    "max_calls": 30,
+    "budget_s": 90,
+    "days": 8,
+    "jobs_runs": 2,
+    "job_min_s": 600,
+    "weekly_calls": 150
+  },
+  "overlaps": {
+    "max_heads": 12,
+    "max_fetches": 3,
+    "budget_s": 30
+  },
+  "publish": {
+    "html": {
+      "host": "web.example.com",
+      "user": "publisher",
+      "key": "",
+      "known_hosts": "",
+      "host_keys": [],
+      "dest": "public_html/dash/index.html",
+      "url": "http://web.example.com:8080/",
+      "site": "public_html/dash",
+      "requests": "public_html+dash-requests.jsonl"
+    }
+  },
+  "admin_dashboard": {
+    "port": 18613,
+    "token_file": "",
+    "bind": "127.0.0.1",
+    "public_port": 18614,
+    "publish_host": "127.0.0.1",
+    "url": "",
+    "access_token_file": ""
+  },
+  "team_dashboard": {
+    "mode": "publish",
+    "bind": "127.0.0.1",
+    "port": 18615,
+    "publish_host": "127.0.0.1",
+    "public_port": 0,
+    "url": ""
+  },
+  "scoreboard": {
+    "lookback_days": 8,
+    "conflict_window_h": 3,
+    "ahead_h": 12,
+    "git_budget_s": 0.4
+  },
+  "tracker_allow": [],
+  "incident_issue": {
+    "repo": "",
+    "labels": [
+      "post-merge"
+    ],
+    "stability_label": "rocke-stability",
+    "time_limit_labels": [
+      "test-timeout"
+    ]
+  },
+  "tracker_keys": [],
+  "jira": {
+    "url": "https://jira.example.com",
+    "project": "SAMPLE",
+    "component": "Component A, Component B",
+    "labels": [
+      "label-a",
+      "label-b"
+    ],
+    "mcp_server": "",
+    "mcp_url": "",
+    "issue_type": "",
+    "priority_map": {},
+    "extra_fields": {},
+    "accounts": {}
+  },
+  "atlassian": {
+    "enabled": true,
+    "site": "https://jira.example.com",
+    "proxy_url": ""
+  },
+  "confluence": {
+    "site": "",
+    "space": ""
+  },
+  "followup_scan": {
+    "defer_patterns": [],
+    "request_patterns": [],
+    "ticket_pattern": "",
+    "dir": ""
+  },
+  "teams": {
+    "channel": "Monitor alerts",
+    "webhook_file": "",
+    "needs_you_every_min": 30
+  },
+  "max_host_usage_pct": 75,
+  "ramdisk": {
+    "enabled": true,
+    "path": "/ramdisk",
+    "size_gb": 12
+  },
+  "resources": {
+    "cpus": 8,
+    "memory_gb": 32
+  },
+  "container": {
+    "uid": "",
+    "gid": "",
+    "write_uid": 1999,
+    "pr_uid": 1998,
+    "mounts": []
+  },
+  "gh": {
+    "read_config_dir": "",
+    "write_config_dir": "",
+    "probe_issue": 1
+  },
+  "wsl_distro": "",
+  "claude_workspace": "/work/claude-workspace",
+  "paths": {
+    "working_dir": "/work",
+    "outputs_dir": "",
+    "toolkit": "",
+    "repo": "",
+    "workers": "",
+    "tmp": "",
+    "probes": "",
+    "lessons": "",
+    "cache": "",
+    "scratch": "",
+    "worker_tools": "",
+    "venv": "/opt/rkmon/venv",
+    "build": "",
+    "agentic": "",
+    "secrets_dir": "/secrets",
+    "run": "",
+    "review_book": "",
+    "rocm_llvm_bin": "",
+    "rocm_reference_clang": "AMD clang version 24.0.0git (https://github.com/ROCm/llvm-project.git d6f6cb691863e9258034ab48c1dfce21689d5606)",
+    "dashboard": "",
+    "html": "",
+    "daily_dir": "",
+    "insights_dir": "",
+    "posted_dir": "",
+    "posts": "",
+    "verifier_team_file": "",
+    "claude_projects": "",
+    "cmake": "",
+    "pyyaml": "",
+    "torch_python": "",
+    "spend_dir": "",
+    "gh": ""
+  },
+  "retention": {
+    "log_max_mb": 20,
+    "job_days": 7,
+    "kept_reviews_h": 24
+  },
+  "update": {
+    "repo": "",
+    "branch": "",
+    "path": "",
+    "drain_timeout_min": 60,
+    "test_timeout_min": 45,
+    "poll_s": 20
+  },
+  "automerge_guard_own": false
+}

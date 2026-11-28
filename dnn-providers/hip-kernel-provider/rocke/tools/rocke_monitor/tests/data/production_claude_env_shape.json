@@ -1,0 +1,23 @@
+{
+  "variables": [
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_CUSTOM_HEADERS",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+  ],
+  "headers": [
+    {
+      "name": "X-Gateway-Key",
+      "value_is_key": true,
+      "word": ""
+    }
+  ],
+  "keys_differ": false,
+  "base_url": "https://llm-gateway.example.com/anthropic",
+  "base_url_credential": "",
+  "nonessential_traffic": "1"
+}

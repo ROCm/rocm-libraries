@@ -1,0 +1,812 @@
+{
+  "about": "Three deploy settings files in layout 1 (samples; the header's two keys left out), with the values a sample sets on its file once rkmon migrate has written it in layout 2, which migrate cannot write (set_after_migrate: layout 1 had no mode for alerts, the team dashboard or ticket creation, which sent whenever they were on); and the configuration (config.json) the layout 1 carry made: its defaults, and each sample's keys laid over them (layout_1_config). tests/test_deploy_tree.py migrates each file as rkmon migrate does (rkmon_lib/migrate.py, whose step from layout 1 is rkmon_lib/from_layout1.py), sets set_after_migrate on the file it writes, and checks that rkmon_lib/deploy_tree.py makes the same configuration from it, but for the differences tests/data/deploy_tree_differences.json lists.",
+  "samples": {
+    "full": {
+      "layout_1": {
+        "container": {
+          "name": "acme-monitor",
+          "image": {
+            "name": "acme-rkmon",
+            "tag": "2.0.1",
+            "pull_registry": "registry.example.com/team"
+          }
+        },
+        "repository": {
+          "name": "example-org/example-repo",
+          "path": "projects/sample",
+          "scope_labels": [
+            "team: sample",
+            "area: tools"
+          ],
+          "path_labels": [
+            "shared: ci"
+          ]
+        },
+        "host": {
+          "resources": {
+            "cpus": 8,
+            "memory_gb": 20,
+            "ramdisk_gb": 12
+          },
+          "users": {
+            "monitor_uid": 1234,
+            "monitor_gid": 1235,
+            "github_writer_uid": 2999,
+            "pr_runner_uid": 2998
+          },
+          "mounts": [
+            "/srv/sample-data:/data:ro"
+          ]
+        },
+        "monitor": {
+          "tick_min": 7,
+          "full_tick_min": 45,
+          "orchestrator": {
+            "model": "sonnet",
+            "effort": "xhigh"
+          }
+        },
+        "features": {
+          "review_automation": {
+            "enabled": true,
+            "mode": "live",
+            "schedule": {
+              "push_cooldown_min": 20,
+              "follow_up_cooldown_min": 90
+            },
+            "capacity": {
+              "parallel_reviews": 5,
+              "parallel_heavy_checks": 2
+            },
+            "large_prs": {
+              "manual_review_over_lines": 20000,
+              "split_part_lines": 6000
+            },
+            "passes": {
+              "verify": {
+                "model": "sonnet",
+                "effort": "max"
+              },
+              "quality": {
+                "model": "custom-claude",
+                "effort": "low"
+              },
+              "first_pass": {
+                "model": "worker",
+                "effort": "default"
+              },
+              "ci_triage": {
+                "model": "drafter",
+                "effort": "default"
+              },
+              "quality_draft": {
+                "model": "haiku",
+                "effort": "low"
+              },
+              "notice_draft": {
+                "model": "default",
+                "effort": "default"
+              }
+            }
+          },
+          "merge_queue": {
+            "enabled": true,
+            "mode": "live",
+            "auto_merge": "enabled",
+            "auto_hold": false,
+            "develop_guard": true
+          },
+          "dashboards": {
+            "admin": {
+              "enabled": true,
+              "port": 18700,
+              "bind": "127.0.0.1"
+            },
+            "team": {
+              "enabled": true,
+              "delivery": "publish"
+            }
+          },
+          "alerts": {
+            "enabled": true,
+            "teams_channel": "team-alerts",
+            "message_cooldown_min": 15
+          },
+          "ticket_creation": {
+            "enabled": true,
+            "jira_project": "SAMPLE",
+            "default_epic": "",
+            "triggers": {
+              "review_follow_up": true,
+              "out_of_scope_issue": false
+            }
+          }
+        },
+        "integrations": {
+          "github_cli": {
+            "account": "sample-bot"
+          },
+          "atlassian_cli": {
+            "jira_site": "https://jira.example.com",
+            "confluence_site": "https://wiki.example.com"
+          },
+          "claude_code": {
+            "gateway": "https://llm-gateway.example.com"
+          }
+        },
+        "model_bindings": {
+          "worker": {
+            "provider": "ollama",
+            "model_id": "sample-model:7b",
+            "endpoint": "http://ollama.example.com:11434",
+            "limits": {
+              "max_parallel": 2
+            }
+          },
+          "drafter": {
+            "provider": "openai-compatible",
+            "model_id": "drafter-7b",
+            "endpoint": "https://llm.example.com/v1",
+            "api_key_secret": "drafter_api_key",
+            "limits": {
+              "requests_per_min": 60,
+              "tokens_per_min": 100000,
+              "max_parallel": 4,
+              "timeout_min": 5
+            }
+          },
+          "custom-claude": {
+            "provider": "claude",
+            "model_id": "claude-opus-custom"
+          }
+        },
+        "advanced": {
+          "update": {
+            "repo": "https://github.com/ROCm/example-monitor",
+            "branch": "main"
+          },
+          "automerge_guard_own": true,
+          "weekly_report": {
+            "enabled": true
+          },
+          "incident_issue": {
+            "repo": "example-org/example-issues",
+            "labels": [
+              "ci-red",
+              "develop-break"
+            ],
+            "stability_label": "stability"
+          },
+          "publish": {
+            "html": {
+              "host": "web.example.com",
+              "user": "sample-web",
+              "url": "http://web.example.com:8080/",
+              "site": "public_html/sample",
+              "dest": "public_html/sample/index.html",
+              "requests": "sample-requests.jsonl"
+            }
+          },
+          "jira": {
+            "issue_type": "Story",
+            "component": "Tools, CI",
+            "labels": [
+              "rkmon"
+            ],
+            "extra_fields": {
+              "customfield_100": "sample"
+            }
+          },
+          "prices": {
+            "claude-sonnet-5-5": {
+              "in": 3,
+              "out": 15,
+              "cache_read": 0.3,
+              "cache_write_5m": 3.75,
+              "cache_write_1h": 6
+            }
+          },
+          "gpu": {
+            "enabled": true,
+            "login_host": "gpu-login.example.com",
+            "ssh_port": 2222,
+            "ssh_user": "svc-sample",
+            "partition": "gpu",
+            "accounts": [
+              "acct-a"
+            ],
+            "constraint": "fast",
+            "gres": {
+              "gfx90a": "type-a"
+            },
+            "default_arch": "gfx90a",
+            "exclude": [
+              "node-9"
+            ],
+            "time_limit": "02:00:00",
+            "remote_dir": "rk-sample",
+            "remote_python": "/usr/bin/python3",
+            "setup": "module load sample",
+            "env": {
+              "SAMPLE_FLAG": "1"
+            },
+            "clone_url": "https://git.example.com/example-org/example-repo.git",
+            "max_jobs_per_pr": 3,
+            "pending_report_min": 120,
+            "resubmits": 2
+          }
+        }
+      }
+    },
+    "minimal": {
+      "layout_1": {
+        "container": {
+          "image": {
+            "tag": "2.0.1"
+          }
+        },
+        "repository": {
+          "name": "example-org/example-repo",
+          "path": "projects/sample",
+          "scope_labels": [
+            "team: sample"
+          ]
+        },
+        "features": {
+          "review_automation": {
+            "enabled": true,
+            "mode": "prototype"
+          },
+          "merge_queue": {
+            "enabled": true,
+            "mode": "prototype",
+            "auto_merge": "hints_only",
+            "auto_hold": true,
+            "develop_guard": true
+          },
+          "dashboards": {
+            "admin": {
+              "enabled": true
+            },
+            "team": {
+              "enabled": false
+            }
+          },
+          "alerts": {
+            "enabled": false
+          },
+          "ticket_creation": {
+            "enabled": false
+          }
+        },
+        "integrations": {
+          "github_cli": {
+            "account": "sample-bot"
+          }
+        }
+      }
+    },
+    "prototype": {
+      "layout_1": {
+        "container": {
+          "image": {
+            "tag": "2.0.1"
+          }
+        },
+        "repository": {
+          "name": "example-org/example-repo",
+          "path": "projects/sample",
+          "scope_labels": [
+            "team: sample"
+          ]
+        },
+        "features": {
+          "review_automation": {
+            "enabled": true,
+            "mode": "prototype"
+          },
+          "merge_queue": {
+            "enabled": true,
+            "mode": "prototype",
+            "auto_merge": "hints_only",
+            "auto_hold": true,
+            "develop_guard": true
+          },
+          "dashboards": {
+            "admin": {
+              "enabled": true
+            },
+            "team": {
+              "enabled": true,
+              "delivery": "serve",
+              "port": 18616
+            }
+          },
+          "alerts": {
+            "enabled": true,
+            "teams_channel": "team-alerts"
+          },
+          "ticket_creation": {
+            "enabled": true,
+            "jira_project": "SAMPLE",
+            "triggers": {
+              "review_follow_up": true,
+              "out_of_scope_issue": true
+            }
+          }
+        },
+        "integrations": {
+          "github_cli": {
+            "account": "sample-bot"
+          },
+          "atlassian_cli": {
+            "jira_site": "https://jira.example.com"
+          }
+        }
+      },
+      "set_after_migrate": {
+        "features": {
+          "dashboards": {
+            "team": {
+              "mode": "prototype"
+            }
+          },
+          "alerts": {
+            "mode": "prototype"
+          },
+          "ticket_creation": {
+            "mode": "prototype"
+          }
+        }
+      }
+    }
+  },
+  "layout_1_config": {
+    "defaults": {
+      "deployment": {
+        "project": "rkmon",
+        "pull_registry": "",
+        "image": ""
+      },
+      "repo": "",
+      "rocke_path": "",
+      "scope": {
+        "labels": [],
+        "path_labels": []
+      },
+      "resources": {
+        "cpus": 4,
+        "memory_gb": 8
+      },
+      "container": {
+        "uid": "",
+        "gid": "",
+        "write_uid": 1999,
+        "pr_uid": 1998,
+        "mounts": []
+      },
+      "claude": {
+        "tick_min": 10,
+        "gateway": ""
+      },
+      "idle_full_tick_min": 60,
+      "effort": {
+        "orchestrator": "high",
+        "verify": "high",
+        "quality": "medium",
+        "first_pass": "",
+        "ci_triage": "",
+        "quality_draft": "",
+        "notice_draft": ""
+      },
+      "features": {
+        "review_automation": {
+          "enabled": true,
+          "mode": "prototype"
+        },
+        "merge_queue": {
+          "enabled": true,
+          "mode": "prototype",
+          "auto_merge": "hints_only",
+          "auto_hold": true,
+          "develop_guard": true
+        },
+        "dashboards": {
+          "admin": {
+            "enabled": true
+          },
+          "team": {
+            "enabled": false
+          }
+        },
+        "alerts": {
+          "enabled": false
+        },
+        "ticket_creation": {
+          "enabled": false,
+          "triggers": {
+            "review_follow_up": true,
+            "out_of_scope_issue": true
+          }
+        }
+      },
+      "settle_min": 30,
+      "followup_min_gap_min": 60,
+      "review": {
+        "pipes": 3
+      },
+      "checks": {
+        "limit": 1
+      },
+      "autopilot_max_lines": 30000,
+      "split_part_lines": 8000,
+      "admin_dashboard": {
+        "public_port": 18614,
+        "publish_host": "127.0.0.1"
+      },
+      "team_dashboard": {
+        "mode": "publish",
+        "public_port": 18615,
+        "publish_host": "127.0.0.1"
+      },
+      "teams": {
+        "channel": "",
+        "message_cooldown_min": 30
+      },
+      "jira": {
+        "project": "",
+        "default_epic": ""
+      },
+      "operator": {
+        "github_login": ""
+      },
+      "atlassian": {
+        "site": ""
+      },
+      "confluence": {
+        "site": ""
+      },
+      "ramdisk": {
+        "enabled": false,
+        "size_gb": 0
+      },
+      "orchestrator": {
+        "model": "opus"
+      },
+      "models": {
+        "audit": "opus",
+        "deep": "opus",
+        "ci_triage": "default",
+        "quality_draft": "default",
+        "notice_draft": "default"
+      },
+      "reviewer": "default"
+    },
+    "full": {
+      "deployment": {
+        "project": "acme-monitor",
+        "pull_registry": "registry.example.com/team",
+        "image": "acme-rkmon:2.0.1"
+      },
+      "repo": "example-org/example-repo",
+      "rocke_path": "projects/sample",
+      "scope": {
+        "labels": [
+          "team: sample",
+          "area: tools"
+        ],
+        "path_labels": [
+          "shared: ci"
+        ]
+      },
+      "resources": {
+        "cpus": 8,
+        "memory_gb": 20
+      },
+      "container": {
+        "uid": 1234,
+        "gid": 1235,
+        "write_uid": 2999,
+        "pr_uid": 2998,
+        "mounts": [
+          "/srv/sample-data:/data:ro"
+        ]
+      },
+      "claude": {
+        "tick_min": 7,
+        "gateway": "https://llm-gateway.example.com"
+      },
+      "idle_full_tick_min": 45,
+      "effort": {
+        "orchestrator": "xhigh",
+        "verify": "max",
+        "quality": "low",
+        "first_pass": "",
+        "ci_triage": "",
+        "quality_draft": "low",
+        "notice_draft": ""
+      },
+      "features": {
+        "review_automation": {
+          "enabled": true,
+          "mode": "live"
+        },
+        "merge_queue": {
+          "enabled": true,
+          "mode": "live",
+          "auto_merge": "enabled",
+          "auto_hold": false,
+          "develop_guard": true
+        },
+        "dashboards": {
+          "admin": {
+            "enabled": true
+          },
+          "team": {
+            "enabled": true
+          }
+        },
+        "alerts": {
+          "enabled": true
+        },
+        "ticket_creation": {
+          "enabled": true,
+          "triggers": {
+            "review_follow_up": true,
+            "out_of_scope_issue": false
+          }
+        }
+      },
+      "settle_min": 20,
+      "followup_min_gap_min": 90,
+      "review": {
+        "pipes": 5
+      },
+      "checks": {
+        "limit": 2
+      },
+      "autopilot_max_lines": 20000,
+      "split_part_lines": 6000,
+      "admin_dashboard": {
+        "public_port": 18700,
+        "publish_host": "127.0.0.1"
+      },
+      "team_dashboard": {
+        "mode": "publish"
+      },
+      "teams": {
+        "channel": "team-alerts",
+        "message_cooldown_min": 15
+      },
+      "jira": {
+        "project": "SAMPLE",
+        "default_epic": "",
+        "issue_type": "Story",
+        "component": "Tools, CI",
+        "labels": [
+          "rkmon"
+        ],
+        "extra_fields": {
+          "customfield_100": "sample"
+        }
+      },
+      "operator": {
+        "github_login": "sample-bot"
+      },
+      "atlassian": {
+        "site": "https://jira.example.com",
+        "enabled": true
+      },
+      "confluence": {
+        "site": "https://wiki.example.com"
+      },
+      "ramdisk": {
+        "enabled": true,
+        "size_gb": 12
+      },
+      "worker": {
+        "backend": "ollama",
+        "model": "sample-model:7b",
+        "url": "http://ollama.example.com:11434",
+        "max_parallel": 2
+      },
+      "model_bindings": {
+        "drafter": {
+          "provider": "openai-compatible",
+          "model": "drafter-7b",
+          "url": "https://llm.example.com/v1",
+          "api_key_secret": "drafter_api_key",
+          "rpm": 60,
+          "tpm": 100000,
+          "concurrency": 4,
+          "stall_s": 300
+        },
+        "custom-claude": {
+          "provider": "claude",
+          "model": "claude-opus-custom"
+        },
+        "haiku": {
+          "provider": "claude",
+          "model": "haiku"
+        }
+      },
+      "orchestrator": {
+        "model": "sonnet"
+      },
+      "models": {
+        "audit": "sonnet",
+        "deep": "claude-opus-custom",
+        "ci_triage": "drafter",
+        "quality_draft": "haiku",
+        "notice_draft": "default"
+      },
+      "reviewer": "worker",
+      "update": {
+        "repo": "https://github.com/ROCm/example-monitor",
+        "branch": "main"
+      },
+      "automerge_guard_own": true,
+      "weekly_report": {
+        "enabled": true
+      },
+      "incident_issue": {
+        "repo": "example-org/example-issues",
+        "labels": [
+          "ci-red",
+          "develop-break"
+        ],
+        "stability_label": "stability"
+      },
+      "publish": {
+        "html": {
+          "host": "web.example.com",
+          "user": "sample-web",
+          "url": "http://web.example.com:8080/",
+          "site": "public_html/sample",
+          "dest": "public_html/sample/index.html",
+          "requests": "sample-requests.jsonl"
+        }
+      },
+      "prices": {
+        "claude-sonnet-5-5": {
+          "in": 3,
+          "out": 15,
+          "cache_read": 0.3,
+          "cache_write_5m": 3.75,
+          "cache_write_1h": 6
+        }
+      },
+      "gpu": {
+        "enabled": true,
+        "login_host": "gpu-login.example.com",
+        "ssh_port": 2222,
+        "ssh_user": "svc-sample",
+        "partition": "gpu",
+        "accounts": [
+          "acct-a"
+        ],
+        "constraint": "fast",
+        "gres": {
+          "gfx90a": "type-a"
+        },
+        "default_arch": "gfx90a",
+        "exclude": [
+          "node-9"
+        ],
+        "time_limit": "02:00:00",
+        "remote_dir": "rk-sample",
+        "remote_python": "/usr/bin/python3",
+        "setup": "module load sample",
+        "env": {
+          "SAMPLE_FLAG": "1"
+        },
+        "clone_url": "https://git.example.com/example-org/example-repo.git",
+        "max_jobs_per_pr": 3,
+        "pending_report_min": 120,
+        "resubmits": 2
+      }
+    },
+    "minimal": {
+      "repo": "example-org/example-repo",
+      "rocke_path": "projects/sample",
+      "scope": {
+        "labels": [
+          "team: sample"
+        ]
+      },
+      "features": {
+        "review_automation": {
+          "enabled": true,
+          "mode": "prototype"
+        },
+        "merge_queue": {
+          "enabled": true,
+          "mode": "prototype",
+          "auto_merge": "hints_only",
+          "auto_hold": true,
+          "develop_guard": true
+        },
+        "dashboards": {
+          "admin": {
+            "enabled": true
+          },
+          "team": {
+            "enabled": false
+          }
+        },
+        "alerts": {
+          "enabled": false
+        },
+        "ticket_creation": {
+          "enabled": false
+        }
+      },
+      "operator": {
+        "github_login": "sample-bot"
+      },
+      "deployment": {
+        "image": "rocke-pr-monitor:2.0.1"
+      }
+    },
+    "prototype": {
+      "repo": "example-org/example-repo",
+      "rocke_path": "projects/sample",
+      "scope": {
+        "labels": [
+          "team: sample"
+        ]
+      },
+      "features": {
+        "review_automation": {
+          "enabled": true,
+          "mode": "prototype"
+        },
+        "merge_queue": {
+          "enabled": true,
+          "mode": "prototype",
+          "auto_merge": "hints_only",
+          "auto_hold": true,
+          "develop_guard": true
+        },
+        "dashboards": {
+          "admin": {
+            "enabled": true
+          },
+          "team": {
+            "enabled": true
+          }
+        },
+        "alerts": {
+          "enabled": true
+        },
+        "ticket_creation": {
+          "enabled": true,
+          "triggers": {
+            "review_follow_up": true,
+            "out_of_scope_issue": true
+          }
+        }
+      },
+      "team_dashboard": {
+        "mode": "serve",
+        "public_port": 18616
+      },
+      "teams": {
+        "channel": "team-alerts"
+      },
+      "jira": {
+        "project": "SAMPLE"
+      },
+      "operator": {
+        "github_login": "sample-bot"
+      },
+      "atlassian": {
+        "site": "https://jira.example.com",
+        "enabled": true
+      },
+      "deployment": {
+        "image": "rocke-pr-monitor:2.0.1"
+      }
+    }
+  }
+}

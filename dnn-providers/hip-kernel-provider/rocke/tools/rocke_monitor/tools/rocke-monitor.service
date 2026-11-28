@@ -1,0 +1,19 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# rocke-monitor.service: the rocKE monitor's team dashboard and its priority requests, a systemd user
+# unit on the web host, with the @...@ values taken from your confirmed deploy settings (the site folder, the requests
+# file, the team dashboard's public address: its port and origin) when `rkmon web-host install` installs it
+# (rkmon_lib/web_host_install.py). It replaces `python3 -m http.server`: the same directory and port, plus POST
+# .../priority-request (tools/webhost_server.py: other teams may request priority, and their clicks wait for the
+# operator's OK). The requests file lies at the top of the home folder, outside the served directory.
+[Unit]
+Description=rocKE monitor dashboard (static site and priority requests)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/env python3 %h/@BASE@/webhost_server.py --directory %h/@SITE@ --requests %h/@REQUESTS@ --port @PORT@ --bind @BIND@ --origin @ORIGIN@
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,54 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The deploy settings of the container stages' deployment (tests/container/stages.py, set_up): a deploy settings
+# file's keys without its header (kind, schema_version), which the stages add, since the privacy check refuses a
+# settings file anywhere in the package. The stages add the image's tag too, this package's version, and the container
+# users' ids. Every value is fake or neutral: the fake GitHub and model servers listen on 127.0.0.1 inside the container
+# (tests/fakes/fake_servers.py; a stage moves their ports with --port), the repository and rocKE's folder are
+# tests/fakerepo.py's, and the login and the channel are invented. No secret is in this file: the stages set the planted
+# secrets as `rkmon secret NAME` sets them.
+repository:
+  name: acme/widgets
+  folder: a/b/rocke
+  scope_labels: [rocke]
+monitor:
+  tick_interval_minutes: 1
+features:
+  review_automation:
+    enabled: true
+    mode: prototype
+    passes:
+      first_review_pass:
+        model: worker
+  merge_queue:
+    enabled: true
+    mode: prototype
+  dashboards:
+    admin:
+      enabled: true
+    team:
+      enabled: false
+  alerts:
+    mode: live
+    message_label: Example Channel
+    develop_breaks:
+      enabled: true
+    needs_you:
+      enabled: true
+  ticket_creation:
+    follow_up_tickets:
+      enabled: false
+    found_issue_tickets:
+      enabled: false
+  weekly_report:
+    enabled: false
+integrations:
+  github_cli:
+    username: op-login
+model_bindings:
+  worker:
+    provider: openai_compatible
+    model_id: fake-model:1
+    base_url: http://127.0.0.1:18703/v1
+    api_key_secret_name: first_review_pass_api_key

@@ -1,0 +1,96 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# python3 -B tools/make_package.py --refresh-generated writes this file from rkmon_lib/paths.py
+# (COPY_OWN_FOLDERS, COPY_OWN_LEFTOVERS), tools/generated.py (LET_IN_GIT, a line for each skill DOCS lists) and
+# rkmon_lib/secrets_registry.py (ignore_patterns): change them, not this file.
+#
+# The package is read-only at run time: everything the monitor writes lives in <WORKING_DIR>, outside the repository.
+# The first lines leave out what a developer's copy makes. The lines about .claude/ let each of the package's skills in
+# again, since the repository the package lives in may leave out every .claude/ folder, and keep out the rest of
+# .claude/: a skill of your own, and Claude Code's local files, such as settings.local.json, which may have private
+# values in them. The others leave out, wherever they are, the files and folders that may have a secret or a private
+# value in them. None of them leaves out a file of the package.
+/state/
+/dist/
+/sandbox/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.bak-*
+!/.claude/
+/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/rkmon-setup/
+hosts.yml
+hosts.yml.*
+gh_read_token
+gh_read_token.*
+gh-read-token
+gh-read-token.*
+credentials
+credentials.*
+claude_key
+claude_key.*
+claude_env
+claude_env.*
+admin_access_token
+admin_access_token.*
+admin_token
+admin_token.*
+teams_webhook
+teams_webhook.*
+web_host_ssh_key
+web_host_ssh_key.*
+webhost_ed25519
+webhost_ed25519.*
+gpu_ssh_key
+gpu_ssh_key.*
+worker_api_key
+worker_api_key.*
+worker_headers
+worker_headers.*
+jira_mcp_headers
+jira_mcp_headers.*
+.env
+.env.*
+..env.*.new
+compose.override.yaml
+compose.override.yaml.*
+.compose.override.yaml.*.new
+.env.prev
+.env.prev.*
+..env.prev.*.new
+compose.override.yaml.prev
+compose.override.yaml.prev.*
+.compose.override.yaml.prev.*.new
+records.json
+records.json.*
+.records.json.*.new
+rkmon-*.yaml
+rkmon-*.yaml.*
+rkmon-*.yml
+rkmon-*.yml.*
+rkmon-settings*
+*settings*.yaml
+*settings*.yaml.*
+*settings*.yml
+*settings*.yml.*
+privacy_deny.txt
+privacy_deny.txt.*
+gh-read/
+gh/
+atlassian/
+gh-write/
+.config/
+secrets/
+secrets-write/
+.rkmon/
+*_api_key
+*_api_key.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*.crt

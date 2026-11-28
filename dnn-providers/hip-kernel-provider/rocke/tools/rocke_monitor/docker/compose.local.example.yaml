@@ -1,0 +1,15 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The shape of the RAM disk's mount in the compose.override.yaml beside docker/compose.yaml, here with
+# host.resources.ramdisk_gib at 24. Do not write that file yourself: rkmon writes it from the settings you confirmed,
+# with the team dashboard's port too while the container serves it (README.md, "Ports, volumes and docker/.env").
+services:
+  rkmon:
+    # The RAM disk: a tmpfs for the reviews' worktrees, builds and temporary files. It counts against the container's
+    # memory limit, so host.resources.memory_gib must leave room for it and for the work (rkmon check and rkmon
+    # confirm refuse less). rk doctor checks the mount, its size, that it runs programs, and the memory limit. `exec`
+    # is needed: Docker mounts a tmpfs noexec by default, and the pull requests' tests run helpers they write into
+    # the RAM disk's temporary folder.
+    tmpfs:
+      - /ramdisk:size=24g,mode=1777,exec

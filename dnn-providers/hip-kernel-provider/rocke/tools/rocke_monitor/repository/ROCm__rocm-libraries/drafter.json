@@ -1,0 +1,15 @@
+{
+ "_doc": "The repository profile of the tool-loop drafter (worker/drafter.py): what is specific to the repository it reviews. project: how the system message names the code under review. rules_card: the file (in this folder) with the rules every request starts from. bot_logins: a regular expression of the logins whose conversation comments hold no review point. group_logins: login patterns shown under one name. skip_rx: the texts that hold no review point of their own, by why (a regular expression each, matched against an item's first comment): such items get no prior row. data_paths and data_suffixes: changed files listed as data in the PR map (a data suffix counts once its change reaches data_min_lines). checks_note: the Our checks point that names what the checks job covers. tracker_keys: the tracker's keys a header tag may carry (KEY-NNNN), found in the PR's own title, body or commits; the configuration's tracker_keys and jira.project are added to them.",
+ "project": "rocKE (dnn-providers/hip-kernel-provider/rocke in the public ROCm/rocm-libraries repository)",
+ "rules_card": "drafter_rules.md",
+ "bot_logins": "(\\[bot\\]$|^therock-pr-bot$|^github-actions|^dependabot|^codecov|^copilot-swe-agent)",
+ "group_logins": {"^copilot": "Copilot"},
+ "skip_rx": {"an overview of its own inline comments": "<!-- ccr-overview",
+             "a nudge about open threads (the Threads row)": "^I reviewed this PR again\\. The following review threads",
+             "a pointer to its inline comments": "^Please see the inline comments?\\.?\\s*$"},
+ "data_paths": ["/golden/[^ ]*\\.json$"],
+ "data_suffixes": "\\.(json|ya?ml|csv|txt|kdp)$",
+ "data_min_lines": 300,
+ "checks_note": "build, tests and goldens: the checks job's",
+ "tracker_keys": []
+}

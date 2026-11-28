@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""crontab on a stand-in web host (bin/systemctl): its login has none."""
+
+import os
+import sys
+
+sys.stderr.write(f"no crontab for {os.environ.get('USER') or 'this login'}\n")
+sys.exit(1)

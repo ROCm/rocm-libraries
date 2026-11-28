@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""A fake GitHub CLI for the package's offline tests and the container smoke test: it answers `--version` and
+`auth status`, and sends `api` calls, `pr view N --json FIELDS` and `pr diff N` (the worker's reads) to the fake
+GitHub server (fake_servers.py) at $FAKE_GITHUB_URL; like gh, a --jq result that is a string prints raw. It refuses
+every write (every other pr command, issue, label, release, and api with a method or a body other than a GraphQL
+query), and logs every call to $FAKE_GH_LOG (one JSON line each) when that is set, so a test can prove nothing was
+written.
+
+Environment: FAKE_GITHUB_URL (the fake server), FAKE_GH_LOGIN (the login it reports; default op-login), FAKE_GH_LOG.
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+VERSION = "2.46.0"
+
+
+def log(args, outcome):
+    path = os.environ.get("FAKE_GH_LOG")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"args": args, "outcome": outcome}) + "\n")
+
+
+def api(args):
+    path, jq, fields, method, paginate = None, None, {}, "GET", False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--paginate":
+            paginate = True
+        elif a == "--jq":
+            i += 1
+            jq = args[i]
+        elif a in ("-f", "-F", "--field", "--raw-field"):
+            i += 1
+            k, _, v = args[i].partition("=")
+            fields[k] = int(v) if a in ("-F", "--field") and v.lstrip("-").isdigit() else v
+        elif a in ("-X", "--method"):
+            i += 1
+            method = args[i].upper()
+        elif a in ("-H", "--header"):
+            i += 1
+        elif a == "--input":
+            return refuse(args, "a request body")
+        elif path is None:
+            path = a
+        i += 1
+    if path is None:
+        print("fake gh: api needs a path", file=sys.stderr)
+        return 2
+    base = os.environ.get("FAKE_GITHUB_URL", "").rstrip("/")
+    if not base:
+        print("fake gh: FAKE_GITHUB_URL is not set", file=sys.stderr)
+        return 1
+    if path == "graphql":
+        query = str(fields.pop("query", ""))
+        if "mutation" in query:
+            return refuse(args, "a GraphQL mutation")
+        data = json.dumps({"query": query, "variables": fields}).encode()
+        req = urllib.request.Request(f"{base}/graphql", data=data, method="POST")
+    else:
+        if method != "GET" or fields:
+            return refuse(args, f"{method} with fields" if fields else method)
+        req = urllib.request.Request(f"{base}/{path.lstrip('/')}", method="GET")
+    if jq:
+        req.add_header("X-Jq", jq)
+    if paginate:
+        req.add_header("X-Paginate", "1")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = r.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        msg = exc.read().decode("utf-8", "replace")
+        try:
+            msg = json.loads(msg).get("message", msg)
+        except ValueError:
+            pass
+        print(f"gh: {msg} (HTTP {exc.code})", file=sys.stderr)
+        log(args, f"HTTP {exc.code}")
+        return 1
+    except OSError as exc:
+        print(f"error connecting to the fake GitHub: {exc}", file=sys.stderr)
+        log(args, "no connection")
+        return 1
+    if jq:
+        try:
+            value = json.loads(body) if body.strip() else None
+        except ValueError:
+            value = None
+        if isinstance(value, str):  # gh prints a string result of --jq raw
+            body = value
+    sys.stdout.write(body if body.endswith("\n") or not body else body + "\n")
+    log(args, "ok")
+    return 0
+
+
+def pr(args):
+    """The worker's reads: `pr view N --json FIELDS` and `pr diff N`; every other pr command is a write."""
+    if len(args) < 2 or args[0] not in ("view", "diff") or not args[1].isdigit():
+        return refuse(["pr", *args], "pr " + " ".join(args[:1]))
+    base = os.environ.get("FAKE_GITHUB_URL", "").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base}/_fake/pr/{args[1]}/{args[0]}", timeout=30) as r:
+            body = r.read().decode("utf-8")
+    except (OSError, ValueError) as exc:
+        print(f"gh: could not read pull request {args[1]}: {exc}", file=sys.stderr)
+        log(["pr", *args], "failed")
+        return 1
+    if args[0] == "view":
+        data = json.loads(body)
+        if "--json" in args:
+            fields = args[args.index("--json") + 1].split(",")
+            data = {k: data.get(k) for k in fields}
+        body = json.dumps(data) + "\n"
+    sys.stdout.write(body)
+    log(["pr", *args], "ok")
+    return 0
+
+
+def refuse(args, what):
+    print(f"fake gh: refusing a write ({what}): the tests never write to GitHub", file=sys.stderr)
+    log(args, "write refused")
+    return 1
+
+
+def main(args):
+    if args[:1] == ["--version"]:
+        print(f"gh version {VERSION} (2026-01-01)\nhttps://github.com/cli/cli/releases/tag/v{VERSION}")
+        return 0
+    if args[:2] == ["auth", "status"]:
+        if not os.environ.get("FAKE_GITHUB_URL"):
+            print("You are not logged into any GitHub hosts. To log in, run: gh auth login", file=sys.stderr)
+            return 1
+        login = os.environ.get("FAKE_GH_LOGIN", "op-login")
+        print(f"github.com\n  ✓ Logged in to github.com account {login} (keyring)\n  - Active account: true\n"
+              f"  - Git operations protocol: https\n  - Token: gho_************************************\n"
+              f"  - Token scopes: 'gist', 'read:org', 'repo'")
+        return 0
+    if args[:1] == ["api"]:
+        return api(args[1:])
+    if args[:1] == ["pr"]:
+        return pr(args[1:])
+    if args[:1] and args[0] in ("issue", "label", "release", "repo", "workflow", "run", "secret", "auth"):
+        return refuse(args, " ".join(args[:2]))
+    print(f"fake gh: unknown command {' '.join(args[:2])}", file=sys.stderr)
+    log(args, "unknown")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

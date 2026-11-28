@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rocKE monitor: build settings",
+  "description": "These settings decide how the monitor's container image is built.",
+  "x-header": [
+    "These settings decide how the monitor's container image is built. QUICK_BUILD_GUIDE.md walks you through them, and README.md explains each one.",
+    "This file is yours: keep it out of git and out of the package folder. Never put a password, token or key in it.",
+    "Download addresses in this file are used only while building: the image never stores them.",
+    "Put text in double quotes. Replace every <...>, then run: rkmon check --settings FILE"
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "rocm",
+    "atlassian_cli"
+  ],
+  "properties": {
+    "kind": {
+      "description": "The type of settings file. Don't change it.",
+      "type": "string",
+      "const": "build_settings",
+      "x-class": "public",
+      "x-used-by": []
+    },
+    "schema_version": {
+      "description": "The layout version of this file. Don't change it: rkmon migrate updates it when a new package changes the layout.",
+      "type": "integer",
+      "const": 2,
+      "x-changed-by": "rkmon migrate updates it when a new package changes the layout",
+      "x-class": "public",
+      "x-used-by": []
+    },
+    "image": {
+      "title": "Image",
+      "description": "the name the built image gets, <registry>/<name>:<tag>. Your deploy settings name the same image.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "registry": {
+          "description": "The registry to push the image to, such as \"registry.example.com/my-team\". Run docker login for it first. Leave blank to move the image as a file instead (rkmon image save here, rkmon image load on the deploy host).",
+          "type": "string",
+          "x-blank": "to move the image as a file instead (rkmon image save here, rkmon image load on the deploy host)",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "image.push_registry"
+        },
+        "name": {
+          "description": "The image's name, without its registry, which goes in image.registry. Default: \"rocke-monitor\".",
+          "type": "string",
+          "pattern": "^(?!localhost/)(?![^/]*\\.[^/]*/)[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",
+          "default": "rocke-monitor",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "image.name"
+        },
+        "tag": {
+          "description": "The image's tag. Give every build a new tag, such as \"2026.11.15-2\", so a deployment can move to it and back. Leave blank to use this package's version, such as \"2026.11.15\".",
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$",
+          "x-blank": "to use this package's version, such as \"2026.11.15\"",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "image.tag"
+        }
+      }
+    },
+    "operating_system": {
+      "title": "Operating system",
+      "description": "the Linux image the build starts from.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "base_image": {
+          "description": "The base image: \"ubuntu:26.04\", \"ubuntu:24.04\", \"rockylinux:9\" or \"almalinux:9\". Default: \"ubuntu:26.04\".",
+          "type": "string",
+          "enum": [
+            "ubuntu:26.04",
+            "ubuntu:24.04",
+            "rockylinux:9",
+            "almalinux:9"
+          ],
+          "default": "ubuntu:26.04",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "image.base"
+        },
+        "package_mirror": {
+          "description": "A mirror of Ubuntu's package archive, if your network can't reach Ubuntu's own. Ubuntu base images only. Example: \"http://mirror.example.com/ubuntu\". Leave blank to use Ubuntu's own archive.",
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$",
+          "x-blank": "to use Ubuntu's own archive",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "os_packages.package_mirror"
+        },
+        "ca_certificates": {
+          "description": "Extra root certificates (PEM files on this machine), for a network that inspects TLS traffic. If downloads fail with certificate errors, ask your IT team for these. Example: [\"~/certs/my-company-root.pem\"]. Default: none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "image.ca_certificates"
+        }
+      }
+    },
+    "rocm": {
+      "title": "ROCm",
+      "description": "the ROCm release installed in the image.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "description": "The ROCm version. Keep {x-template} unless your team needs another: the review checks are set up for its compiler. Required.",
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)+(-[0-9]+)?$",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "rocm.version"
+        },
+        "package_url": {
+          "description": "Where to download the ROCm installer (the .run file) from, if not AMD's public site. Leave blank to use AMD's public installer for this version, which is checked only when you set package_sha256.",
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$",
+          "x-blank": "to use AMD's public installer for this version, which is checked only when you set package_sha256",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "rocm.package_url"
+        },
+        "package_sha256": {
+          "description": "The installer's SHA-256 checksum: 64 hex digits, in quotes (run: sha256sum FILE). Required when you set package_url; set it anyway to check AMD's public installer.",
+          "type": "string",
+          "pattern": "^$|^[0-9a-fA-F]{64}$",
+          "x-required-when": "you set package_url; set it anyway to check AMD's public installer",
+          "default": "",
+          "x-source": "the installer's SHA-256 (download it once, then run sha256sum FILE)",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "rocm.package_sha256"
+        }
+      }
+    },
+    "github_cli": {
+      "title": "GitHub CLI",
+      "description": "the gh tool, which the monitor uses to read and write GitHub.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "description": "The gh version to install, such as \"2.80.0\". Leave blank for the newest release (rkmon check warns that two builds may then differ).",
+          "type": "string",
+          "pattern": "^$|^v?[0-9][0-9A-Za-z.+-]*$",
+          "x-blank": "for the newest release (rkmon check warns that two builds may then differ)",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "github_cli.version"
+        },
+        "package_url": {
+          "description": "Where to download the gh release archive (gh_<version>_linux_<arch>.tar.gz) from, if not GitHub. Leave blank to download it from GitHub, checked against GitHub's published checksums.",
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$",
+          "x-blank": "to download it from GitHub, checked against GitHub's published checksums",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "github_cli.package_url"
+        },
+        "package_sha256": {
+          "description": "The archive's SHA-256 checksum. Required when you set package_url.",
+          "type": "string",
+          "pattern": "^$|^[0-9a-fA-F]{64}$",
+          "x-required-when": "you set package_url",
+          "default": "",
+          "x-source": "the archive's SHA-256 (download it once, then run sha256sum FILE)",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "github_cli.package_sha256"
+        }
+      }
+    },
+    "atlassian_cli": {
+      "title": "Atlassian CLI",
+      "description": "the atlassian tool, whose commands are auth, confluence, jira, rest, site, update and version. The monitor uses it to file JIRA tickets. Every image includes it, so that one image works for every deployment.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "required": [
+        "package_url",
+        "package_sha256"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version to require, such as \"1.2.3\" (atlassian version prints it). Leave blank to accept any version.",
+          "type": "string",
+          "pattern": "^$|^v?[0-9][0-9A-Za-z.+-]*$",
+          "x-blank": "to accept any version",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "atlassian_cli.version"
+        },
+        "package_url": {
+          "description": "Where to download the atlassian tool's Linux binary from (the program file itself, not an archive). Ask your team where your organization keeps it. Required.",
+          "type": "string",
+          "pattern": "^https?://\\S+$",
+          "x-template": "<URL>",
+          "x-source": "the address of the atlassian tool's Linux binary for x86-64, from wherever your organization keeps it",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": "atlassian_cli.package_url"
+        },
+        "package_sha256": {
+          "description": "The binary's SHA-256 checksum. Download the file once and run: sha256sum FILE. Required.",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$",
+          "x-template": "<sha256>",
+          "x-source": "the atlassian binary's SHA-256 (download it once, then run sha256sum FILE)",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "atlassian_cli.package_sha256"
+        }
+      }
+    },
+    "claude_agent_sdk": {
+      "title": "Claude Agent SDK",
+      "description": "the Python package that includes Claude Code, which runs the reviews.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "description": "The SDK version, such as \"1.2.3\". Leave blank for the newest release (rkmon check warns that two builds may then differ).",
+          "type": "string",
+          "pattern": "^$|^v?[0-9][0-9A-Za-z.+-]*$",
+          "x-blank": "for the newest release (rkmon check warns that two builds may then differ)",
+          "default": "",
+          "x-class": "public",
+          "x-used-by": [],
+          "x-internal": "claude_code.version"
+        },
+        "package_url": {
+          "description": "Where to download the SDK's wheel (the .whl file) from, if not the package index below. Leave blank to install it from the package index, which is not checked against a checksum.",
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$",
+          "x-blank": "to install it from the package index, which is not checked against a checksum",
+          "default": "",
+          "x-source": "the address of the SDK's wheel (the .whl file)",
+          "x-class": "private",
+          "x-used-by": []
+        },
+        "package_sha256": {
+          "description": "The wheel's SHA-256 checksum. Required when you set package_url.",
+          "type": "string",
+          "pattern": "^$|^[0-9a-fA-F]{64}$",
+          "x-required-when": "you set package_url",
+          "default": "",
+          "x-source": "the wheel's SHA-256 (download it once, then run sha256sum FILE)",
+          "x-class": "public",
+          "x-used-by": []
+        }
+      }
+    },
+    "python_packages": {
+      "title": "Python packages",
+      "description": "where the build downloads Python packages from.",
+      "type": "object",
+      "x-class": "public",
+      "additionalProperties": false,
+      "properties": {
+        "package_index": {
+          "description": "A Python package index to use instead of pypi.org, such as \"https://pypi.example.com/simple/\". Leave blank to use pypi.org.",
+          "type": "string",
+          "pattern": "^$|^https?://\\S+$",
+          "x-blank": "to use pypi.org",
+          "default": "",
+          "x-class": "private",
+          "x-used-by": [],
+          "x-internal": [
+            "python_packages.package_index",
+            "claude_code.package_index"
+          ]
+        }
+      }
+    }
+  }
+}

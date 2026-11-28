@@ -1,0 +1,18 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The places where tools/doc_lints.py's placeholders lint keeps a name in angle brackets that neither the glossary nor
+# the agentic files' table names. allowed: each place a mapping as tests/doc_words.yaml says
+# (files, kind, section, keep and why), files, keep and why required; there, the names in angle brackets that keep
+# matches are no placeholders.
+
+allowed:
+  - files: 'agentic/.+\.md|worker/offload_agent\.py'
+    keep: '<(?:STATUS|STATE|NAME|TAB|UTC|ID|SAVE|NN|MM-DD|Rk|light|title|reviewer|what|whom|path|line|text|tool)>'
+    why: example words of the agentic files and the offload prompt, the slots of a form, filled as it is written
+  - files: 'agentic/skills/rocke-monitor/lessons\.md'
+    keep: '<(?:n|n-1|m|f|d|files|digits|token|base|commit|mb|log|id|pid|png|html|fam|form)>'
+    why: a lesson's example words, the slots of a command or a printed line it quotes, filled as the lesson is followed
+  - files: 'rkmon_lib/spend_scan\.py'
+    keep: '<(?:task-notification|synthetic)>'
+    why: Claude Code's own markers in a session's transcript, which the scan matches as they are written
