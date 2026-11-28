@@ -346,6 +346,20 @@ struct sort_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                constexpr auto size = LogicalWarpSize * ItemsPerThread;
+                std::vector<T> expected(input.begin(), input.begin() + size);
+                std::sort(expected.begin(), expected.end(), CompareOp{});
+                if constexpr(BenchmarkKind == benchmark_kinds::sort_pairs)
+                {
+                    for(auto& key : expected)
+                        key = benchmark_utils::add(key, benchmark_utils::add(key, T(1)));
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
+
         state.run(
             [&]
             {
@@ -431,6 +445,24 @@ struct segmented_sort_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                for(unsigned int segment = 0; segment < segments_per_block; ++segment)
+                {
+                    const auto     start = segment * max_segment_size;
+                    const auto     size  = segment_sizes[segment];
+                    std::vector<T> expected(input.begin() + start, input.begin() + start + size);
+                    std::sort(expected.begin(), expected.end(), CompareOp{});
+                    if constexpr(BenchmarkKind == benchmark_kinds::sort_pairs)
+                    {
+                        for(auto& key : expected)
+                            key = benchmark_utils::add(key, benchmark_utils::add(key, T(1)));
+                    }
+                    benchmark_utils::check_output(d_output + start, expected);
+                }
+            });
 
         state.run(
             [&]

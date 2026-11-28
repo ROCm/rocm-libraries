@@ -28,8 +28,8 @@
 template<class Key>
 struct CompareFunction
 {
-    HIPCUB_DEVICE
-    inline constexpr bool operator()(const Key& a, const Key& b)
+    HIPCUB_HOST_DEVICE
+    inline constexpr bool operator()(const Key& a, const Key& b) const
     {
         return a < b;
     }
@@ -87,6 +87,16 @@ class sort_keys_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<Key>(items);
+
+        state.test(
+            [&]
+            {
+                benchmark_utils::check_sorted_keys(d_keys_output,
+                                                   keys_input,
+                                                   0,
+                                                   items,
+                                                   compare_function);
+            });
 
         state.run(launch);
 
@@ -166,6 +176,18 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Key>(items);
         state.add_writes<Value>(items);
+
+        state.test(
+            [&]
+            {
+                benchmark_utils::check_unstable_sorted_pairs(d_keys_output,
+                                                             d_values_output,
+                                                             keys_input,
+                                                             values_input,
+                                                             0,
+                                                             items,
+                                                             compare_function);
+            });
 
         state.run(launch);
 

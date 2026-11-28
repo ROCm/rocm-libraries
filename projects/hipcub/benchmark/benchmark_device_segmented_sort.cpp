@@ -68,7 +68,8 @@ class sort_keys_benchmark : public primbench::benchmark_interface
 
         std::vector<offset_type> offsets;
 
-        const double avg_segment_length = static_cast<double>(items) / DesiredSegments;
+        const double avg_segment_length
+            = std::max(1.0, static_cast<double>(items) / DesiredSegments);
 
         std::random_device         rd;
         std::default_random_engine gen(rd());
@@ -129,6 +130,27 @@ class sort_keys_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Key>(items);
 
+        state.test(
+            [&]
+            {
+                const std::conditional_t<Descending, std::greater<Key>, std::less<Key>> compare{};
+
+                size_t checked = 0;
+                for(size_t segment = 0; segment < segments_count && checked < 3; ++segment)
+                {
+                    const auto begin = offsets[segment];
+                    const auto end   = offsets[segment + 1];
+                    if(begin == end)
+                        continue;
+                    benchmark_utils::check_sorted_keys(d_keys_output,
+                                                       keys_input,
+                                                       begin,
+                                                       end,
+                                                       compare);
+                    ++checked;
+                }
+            });
+
         state.run(launch);
 
         HIP_CHECK(hipFree(d_temp_storage));
@@ -186,7 +208,8 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
 
         std::vector<offset_type> offsets;
 
-        const double avg_segment_length = static_cast<double>(items) / DesiredSegments;
+        const double avg_segment_length
+            = std::max(1.0, static_cast<double>(items) / DesiredSegments);
 
         std::random_device         rd;
         std::default_random_engine gen(rd());
@@ -261,6 +284,42 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Key>(items);
         state.add_writes<Value>(items);
+
+        state.test(
+            [&]
+            {
+                const std::conditional_t<Descending, std::greater<Key>, std::less<Key>> compare{};
+
+                size_t checked = 0;
+                for(size_t segment = 0; segment < segments_count && checked < 3; ++segment)
+                {
+                    const auto begin = offsets[segment];
+                    const auto end   = offsets[segment + 1];
+                    if(begin == end)
+                        continue;
+                    if constexpr(Stable)
+                    {
+                        benchmark_utils::check_sorted_pairs(d_keys_output,
+                                                            d_values_output,
+                                                            keys_input,
+                                                            values_input,
+                                                            begin,
+                                                            end,
+                                                            compare);
+                    }
+                    else
+                    {
+                        benchmark_utils::check_unstable_sorted_pairs(d_keys_output,
+                                                                     d_values_output,
+                                                                     keys_input,
+                                                                     values_input,
+                                                                     begin,
+                                                                     end,
+                                                                     compare);
+                    }
+                    ++checked;
+                }
+            });
 
         state.run(launch);
 

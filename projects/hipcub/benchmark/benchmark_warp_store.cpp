@@ -121,6 +121,20 @@ class warp_store_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                constexpr auto tile_size = LogicalWarpSize * ItemsPerThread;
+                std::vector<T> expected(tile_size);
+                for(unsigned int i = 0; i < tile_size; ++i)
+                {
+                    expected[i] = static_cast<T>(Algorithm == hipcub::WARP_STORE_STRIPED
+                                                     ? i / LogicalWarpSize
+                                                     : i % ItemsPerThread);
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
+
         state.run(
             [&]
             {

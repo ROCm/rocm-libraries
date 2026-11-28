@@ -49,11 +49,14 @@ void block_run_length_decode_kernel(const ItemT*   d_run_items,
     hipcub::LoadDirectBlocked(global_thread_idx, d_run_items, run_items);
     hipcub::LoadDirectBlocked(global_thread_idx, d_run_offsets, run_offsets);
 
-    BlockRunLengthDecodeT block_run_length_decode(run_items, run_offsets);
-
+    const OffsetT block_offset = d_run_offsets[hipBlockIdx_x * BlockSize * RunsPerThread];
     const OffsetT total_decoded_size
-        = d_run_offsets[(hipBlockIdx_x + 1) * BlockSize * RunsPerThread]
-          - d_run_offsets[hipBlockIdx_x * BlockSize * RunsPerThread];
+        = d_run_offsets[(hipBlockIdx_x + 1) * BlockSize * RunsPerThread] - block_offset;
+    for(unsigned int i = 0; i < RunsPerThread; ++i)
+    {
+        run_offsets[i] -= block_offset;
+    }
+    BlockRunLengthDecodeT block_run_length_decode(run_items, run_offsets);
 
 #pragma nounroll
     for(unsigned i = 0; i < Trials; ++i)
@@ -66,9 +69,13 @@ void block_run_length_decode_kernel(const ItemT*   d_run_items,
 
             if(enable_store)
             {
-                hipcub::StoreDirectBlocked(global_thread_idx,
-                                           d_decoded_items + decoded_window_offset,
-                                           decoded_items);
+                const auto valid_items
+                    = hipcub::Min{}(total_decoded_size - decoded_window_offset,
+                                    static_cast<OffsetT>(BlockSize * DecodedItemsPerThread));
+                hipcub::StoreDirectBlocked(hipThreadIdx_x,
+                                           d_decoded_items + block_offset + decoded_window_offset,
+                                           decoded_items,
+                                           static_cast<int>(valid_items));
             }
 
             decoded_window_offset += BlockSize * DecodedItemsPerThread;
@@ -105,7 +112,8 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
         const auto&  stream      = state.stream;
 
         constexpr auto runs_per_block  = BlockSize * RunsPerThread;
-        const auto     target_num_runs = 2 * input_items / (MinRunLength + MaxRunLength);
+        const auto     target_num_runs
+            = std::max(size_t{1}, 2 * input_items / (MinRunLength + MaxRunLength));
         const auto     num_runs
             = runs_per_block * ((target_num_runs + runs_per_block - 1) / runs_per_block);
 
@@ -149,6 +157,32 @@ class block_run_length_decode_benchmark : public primbench::benchmark_interface
 
         state.set_items(Trials * output_length);
         state.add_writes<ItemT>(Trials * output_length);
+
+        state.test(
+            [&]
+            {
+                const auto size  = static_cast<size_t>(output_length);
+                const auto count = benchmark_utils::validation_size(size);
+                const auto check = [&](size_t start, size_t length)
+                {
+                    auto run = std::upper_bound(run_offsets.begin(), run_offsets.end(), start)
+                               - run_offsets.begin() - 1;
+                    std::vector<ItemT> expected(length);
+                    for(size_t i = 0; i < length; ++i)
+                    {
+                        if(start + i == static_cast<size_t>(run_offsets[run + 1]))
+                            ++run;
+                        expected[i] = run_items[run];
+                    }
+                    benchmark_utils::check_output(d_output + start, expected);
+                };
+                check(0, count);
+                if(size > count)
+                {
+                    const auto tail_count = std::min(count, size - count);
+                    check(size - tail_count, tail_count);
+                }
+            });
 
         state.run(
             [&]

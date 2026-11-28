@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "../test/hipcub/test_utils_sort_comparator.hpp"
 #include "benchmark_utils.hpp"
 
 #include <hipcub/block/block_load.hpp>
@@ -89,6 +90,7 @@ void rank_kernel(const T* keys_input, int* ranks_output)
             DigitExtractor digit_extractor(begin_bit, pass_bits);
 
             rank.RankKeys(unsigned_keys, ranks, digit_extractor);
+            __syncthreads();
             begin_bit += RadixBits;
         }
     }
@@ -148,6 +150,34 @@ class block_radix_rank_benchmark : public primbench::benchmark_interface
 
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
+
+        state.test(
+            [&]
+            {
+                constexpr unsigned int end_bit   = sizeof(T) * 8;
+                constexpr unsigned int start_bit = end_bit - 4;
+                const auto compare = test_utils::key_comparator<T, false, start_bit, end_bit>{};
+                std::vector<size_t> indices(items_per_block);
+                std::iota(indices.begin(), indices.end(), size_t{0});
+                if constexpr(BenchmarkKind == RadixRankAlgorithm::RADIX_RANK_MATCH)
+                {
+                    const auto lanes = HIPCUB_HOST_WARP_THREADS;
+                    const auto tile  = lanes * ItemsPerThread;
+                    for(size_t i = 0; i < items_per_block; ++i)
+                    {
+                        const auto offset = i % tile;
+                        indices[i]
+                            = i - offset + (offset % lanes) * ItemsPerThread + offset / lanes;
+                    }
+                }
+                std::stable_sort(indices.begin(),
+                                 indices.end(),
+                                 [&](size_t a, size_t b) { return compare(input[a], input[b]); });
+                std::vector<int> expected(items_per_block);
+                for(size_t i = 0; i < items_per_block; ++i)
+                    expected[indices[i]] = static_cast<int>(i);
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(
             [&]

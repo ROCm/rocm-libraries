@@ -129,6 +129,27 @@ struct warp_load_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                std::vector<T> expected(items_per_block);
+                constexpr auto tile_size = LogicalWarpSize * ItemsPerThread;
+                for(unsigned int lane = 0; lane < BlockSize; ++lane)
+                {
+                    const auto warp      = lane / LogicalWarpSize;
+                    const auto warp_lane = lane % LogicalWarpSize;
+                    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                    {
+                        const auto blocked_index = warp_lane * ItemsPerThread + i;
+                        const auto striped_index = i * LogicalWarpSize + warp_lane;
+                        const auto index = Algorithm == hipcub::WARP_LOAD_STRIPED ? striped_index
+                                                                                  : blocked_index;
+                        expected[i * BlockSize + lane] = input[warp * tile_size + index];
+                    }
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
+
         state.run(
             [&]
             {

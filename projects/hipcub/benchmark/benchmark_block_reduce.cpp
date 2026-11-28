@@ -27,11 +27,15 @@
 
 constexpr unsigned int Trials = 100;
 
-template<class Runner, class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+template<class Runner,
+         class T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int TrialCount = Trials>
 __global__ __launch_bounds__(BlockSize)
 void kernel(const T* input, T* output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread>(input, output);
+    Runner::template run<T, BlockSize, ItemsPerThread, TrialCount>(input, output);
 }
 
 template<hipcub::BlockReduceAlgorithm algorithm>
@@ -51,7 +55,7 @@ struct reduce
         return "unknown algorithm";
     }
 
-    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
+    template<class T, unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int TrialCount>
     __device__
     static void run(const T* input, T* output)
     {
@@ -68,7 +72,7 @@ struct reduce
         __shared__ typename breduce_t::TempStorage storage;
 
 #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int trial = 0; trial < TrialCount; trial++)
         {
             reduced_value = breduce_t(storage).Reduce(values, hipcub::Sum());
             values[0]     = reduced_value;
@@ -116,6 +120,22 @@ class block_reduce_benchmark : public primbench::benchmark_interface
 
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
+
+        state.test(
+            [&]
+            {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, 1>),
+                    dim3(1),
+                    dim3(BlockSize),
+                    0,
+                    stream,
+                    d_input,
+                    d_output);
+                HIP_CHECK(hipStreamSynchronize(stream));
+                const auto output = benchmark_utils::read_output(d_output);
+                benchmark_utils::check_value(output, T(items_per_block));
+            });
 
         state.run(
             [&]

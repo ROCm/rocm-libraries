@@ -107,13 +107,15 @@ auto warp_exchange_scatter_to_striped_benchmark(T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     const unsigned warp_id = threadIdx.x / LogicalWarpSize;
+    const unsigned lane    = threadIdx.x % LogicalWarpSize;
     T              thread_data[ItemsPerThread];
     OffsetT        thread_ranks[ItemsPerThread];
 #pragma unroll
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         thread_data[i]  = static_cast<T>(i);
-        thread_ranks[i] = static_cast<OffsetT>(LogicalWarpSize - warp_id * ItemsPerThread - i - 1);
+        thread_ranks[i] = static_cast<OffsetT>(LogicalWarpSize * ItemsPerThread
+                                               - (lane * ItemsPerThread + i) - 1);
     }
 
     using WarpExchangeT = ::hipcub::WarpExchange<T, ItemsPerThread, LogicalWarpSize>;
@@ -154,6 +156,30 @@ void warp_exchange_scatter_to_striped_kernel(T* d_output)
         d_output);
 }
 
+struct StripedToBlockedOp
+{
+    static constexpr const char* name = "striped_to_blocked_op";
+
+    template<class WarpExchangeT, class T, unsigned ItemsPerThread>
+    __device__
+    void operator()(WarpExchangeT& warp_exchange, T (&thread_data)[ItemsPerThread]) const
+    {
+        warp_exchange.StripedToBlocked(thread_data, thread_data);
+    }
+};
+
+struct BlockedToStripedOp
+{
+    static constexpr const char* name = "blocked_to_striped_op";
+
+    template<class WarpExchangeT, class T, unsigned ItemsPerThread>
+    __device__
+    void operator()(WarpExchangeT& warp_exchange, T (&thread_data)[ItemsPerThread]) const
+    {
+        warp_exchange.BlockedToStriped(thread_data, thread_data);
+    }
+};
+
 template<class T,
          unsigned                        BlockSize,
          unsigned                        ItemsPerThread,
@@ -189,6 +215,26 @@ class exchange_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<T>(items);
+
+        state.test(
+            [&]
+            {
+                constexpr auto tile_size = LogicalWarpSize * ItemsPerThread;
+                std::vector<T> expected(tile_size);
+                for(unsigned int lane = 0; lane < LogicalWarpSize; ++lane)
+                {
+                    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                    {
+                        const auto blocked_index = lane * ItemsPerThread + i;
+                        const auto striped_index = i * LogicalWarpSize + lane;
+                        const auto source        = std::is_same_v<Op, StripedToBlockedOp>
+                                                       ? blocked_index / LogicalWarpSize
+                                                       : striped_index % ItemsPerThread;
+                        expected[blocked_index]  = static_cast<T>(source);
+                    }
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
 
         state.run(
             [&]
@@ -236,6 +282,23 @@ class scatter_to_striped_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<T>(items);
 
+        state.test(
+            [&]
+            {
+                constexpr auto tile_size = LogicalWarpSize * ItemsPerThread;
+                std::vector<T> expected(items_per_block);
+                for(unsigned int lane = 0; lane < BlockSize; ++lane)
+                {
+                    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                    {
+                        const auto rank = i * LogicalWarpSize + lane % LogicalWarpSize;
+                        expected[i * BlockSize + lane]
+                            = static_cast<T>((tile_size - rank - 1) % ItemsPerThread);
+                    }
+                }
+                benchmark_utils::check_output(d_output, expected);
+            });
+
         state.run(
             [&]
             {
@@ -247,30 +310,6 @@ class scatter_to_striped_benchmark : public primbench::benchmark_interface
             });
 
         HIP_CHECK(hipFree(d_output));
-    }
-};
-
-struct StripedToBlockedOp
-{
-    static constexpr const char* name = "striped_to_blocked_op";
-
-    template<class WarpExchangeT, class T, unsigned ItemsPerThread>
-    __device__
-    void operator()(WarpExchangeT& warp_exchange, T (&thread_data)[ItemsPerThread]) const
-    {
-        warp_exchange.StripedToBlocked(thread_data, thread_data);
-    }
-};
-
-struct BlockedToStripedOp
-{
-    static constexpr const char* name = "blocked_to_striped_op";
-
-    template<class WarpExchangeT, class T, unsigned ItemsPerThread>
-    __device__
-    void operator()(WarpExchangeT& warp_exchange, T (&thread_data)[ItemsPerThread]) const
-    {
-        warp_exchange.BlockedToStriped(thread_data, thread_data);
     }
 };
 

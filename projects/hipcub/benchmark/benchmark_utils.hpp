@@ -24,11 +24,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <iterator>
+#include <limits>
 #include <numeric>
 #include <random>
+#include <set>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -52,6 +56,16 @@
 #else
     #define HIPCUB_WARP_THREADS_MACRO CUB_PTX_WARP_THREADS
 #endif
+
+#define HIP_CHECK(condition)                                                           \
+    {                                                                                  \
+        hipError_t error = condition;                                                  \
+        if(error != hipSuccess)                                                        \
+        {                                                                              \
+            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+            exit(error);                                                               \
+        }                                                                              \
+    }
 
 namespace benchmark_utils
 {
@@ -292,6 +306,253 @@ struct custom_type
     }
 };
 
+inline size_t validation_size(size_t items)
+{
+    return std::min(items, size_t{1024});
+}
+
+template<class T>
+T read_output(const T* d_output)
+{
+    T output{};
+    HIP_CHECK(hipMemcpy(&output, d_output, sizeof(T), hipMemcpyDeviceToHost));
+    return output;
+}
+
+template<class T>
+std::vector<T> read_output(const T* d_output, size_t count)
+{
+    std::vector<T> output(count);
+    if(count != 0)
+    {
+        HIP_CHECK(hipMemcpy(output.data(), d_output, count * sizeof(T), hipMemcpyDeviceToHost));
+    }
+    return output;
+}
+
+template<class T, class Predicate>
+size_t get_selected_prefix(const std::vector<T>& input, std::vector<T>& expected, Predicate select)
+{
+    const auto count    = validation_size(input.size());
+    size_t     selected = 0;
+    for(size_t i = 0; i < input.size(); ++i)
+    {
+        if(select(i))
+        {
+            if(expected.size() < count)
+                expected.push_back(input[i]);
+            ++selected;
+        }
+    }
+    return selected;
+}
+
+template<class T>
+void check_value(const T& output, const T& expected)
+{
+    if constexpr(std::is_integral_v<T>)
+    {
+        PRIMBENCH_ASSERT(output, expected);
+    }
+    else
+    {
+        PRIMBENCH_ASSERT(output == expected, true);
+    }
+}
+
+template<class T>
+void check_output(const std::vector<T>& output, const std::vector<T>& expected)
+{
+    if constexpr(std::is_integral_v<T>)
+    {
+        PRIMBENCH_ASSERT(output, expected);
+    }
+    else
+    {
+        if(output.size() != expected.size())
+            PRIMBENCH_ASSERT(output.size(), expected.size());
+        const auto mismatch
+            = std::mismatch(output.begin(), output.end(), expected.begin(), expected.end());
+        PRIMBENCH_ASSERT(static_cast<size_t>(mismatch.first - output.begin()), expected.size());
+    }
+}
+
+template<class T>
+void check_output(const T* d_output, const std::vector<T>& expected)
+{
+    check_output(read_output(d_output, expected.size()), expected);
+}
+
+template<class T>
+T add(T a, T b)
+{
+    if constexpr(std::is_integral_v<T>)
+    {
+        using unsigned_type = std::make_unsigned_t<T>;
+        return static_cast<T>(static_cast<unsigned_type>(a) + static_cast<unsigned_type>(b));
+    }
+    else
+    {
+        return a + b;
+    }
+}
+
+template<class T>
+void check_near(const T& output, const T& expected)
+{
+    if constexpr(std::is_floating_point_v<T>)
+    {
+        const auto tolerance = std::abs(static_cast<double>(expected)) * 1e-4;
+        if(!(std::abs(static_cast<double>(output) - expected) <= tolerance))
+        {
+            PRIMBENCH_ASSERT(std::isfinite(output), true);
+            PRIMBENCH_ASSERT(output, expected, tolerance);
+        }
+    }
+    else if constexpr(std::is_integral_v<T>)
+    {
+        check_value(output, expected);
+    }
+    else
+    {
+        check_near(output.x, expected.x);
+        check_near(output.y, expected.y);
+    }
+}
+
+template<class T>
+void check_near_output(const T* d_output, const std::vector<T>& expected)
+{
+    const auto output = read_output(d_output, expected.size());
+    if constexpr(std::is_integral_v<T>)
+    {
+        PRIMBENCH_ASSERT(output, expected);
+    }
+    else
+    {
+        for(size_t i = 0; i < expected.size(); ++i)
+        {
+            check_near(output[i], expected[i]);
+        }
+    }
+}
+
+template<class Iterator>
+auto reference_sum(Iterator first, Iterator last)
+{
+    using T = typename std::iterator_traits<Iterator>::value_type;
+    if constexpr(std::is_floating_point_v<T>)
+    {
+        return static_cast<T>(std::accumulate(first, last, 0.0));
+    }
+    else
+    {
+        return std::accumulate(first, last, T{}, add<T>);
+    }
+}
+
+template<class Key, class Compare>
+std::vector<Key>
+    get_sorted_prefix(const std::vector<Key>& input, size_t begin, size_t end, Compare compare)
+{
+    std::vector<Key> expected(validation_size(end - begin));
+    std::partial_sort_copy(input.begin() + begin,
+                           input.begin() + end,
+                           expected.begin(),
+                           expected.end(),
+                           compare);
+    return expected;
+}
+
+template<class Key, class Compare>
+void check_sorted_keys(
+    const Key* d_output, const std::vector<Key>& input, size_t begin, size_t end, Compare compare)
+{
+    check_output(d_output + begin, get_sorted_prefix(input, begin, end, compare));
+}
+
+template<class Key, class Value, class Compare>
+void check_sorted_pairs(const Key*                d_keys,
+                        const Value*              d_values,
+                        const std::vector<Key>&   keys,
+                        const std::vector<Value>& values,
+                        size_t                    begin,
+                        size_t                    end,
+                        Compare                   compare)
+{
+    const auto          count = validation_size(end - begin);
+    std::vector<size_t> indices(count);
+    std::iota(indices.begin(), indices.end(), begin);
+    const auto index_compare = [&](size_t a, size_t b)
+    {
+        if(compare(keys[a], keys[b]))
+            return true;
+        if(compare(keys[b], keys[a]))
+            return false;
+        return a < b;
+    };
+
+    std::make_heap(indices.begin(), indices.end(), index_compare);
+    for(size_t i = begin + count; i < end; ++i)
+    {
+        if(index_compare(i, indices.front()))
+        {
+            std::pop_heap(indices.begin(), indices.end(), index_compare);
+            indices.back() = i;
+            std::push_heap(indices.begin(), indices.end(), index_compare);
+        }
+    }
+    std::sort_heap(indices.begin(), indices.end(), index_compare);
+
+    std::vector<Key>   expected_keys;
+    std::vector<Value> expected_values;
+    expected_keys.reserve(count);
+    expected_values.reserve(count);
+    for(const auto i : indices)
+    {
+        expected_keys.push_back(keys[i]);
+        expected_values.push_back(values[i]);
+    }
+    check_output(d_keys + begin, expected_keys);
+    check_output(d_values + begin, expected_values);
+}
+
+template<class Key, class Value, class Compare>
+void check_unstable_sorted_pairs(const Key*                d_keys,
+                                 const Value*              d_values,
+                                 const std::vector<Key>&   keys,
+                                 const std::vector<Value>& values,
+                                 size_t                    begin,
+                                 size_t                    end,
+                                 Compare                   compare)
+{
+    const auto expected_keys = get_sorted_prefix(keys, begin, end, compare);
+    const auto count         = expected_keys.size();
+    const auto output_keys   = read_output(d_keys + begin, count);
+    const auto output_values = read_output(d_values + begin, count);
+    check_output(output_keys, expected_keys);
+
+    const auto valid_values
+        = std::all_of(output_values.begin(),
+                      output_values.end(),
+                      [](const Value& value) { return std::equal_to<Value>{}(value, value); });
+    PRIMBENCH_ASSERT(valid_values, true);
+
+    std::multiset<std::pair<Key, Value>> remaining;
+    for(size_t i = 0; i < count; ++i)
+        remaining.emplace(output_keys[i], output_values[i]);
+
+    for(size_t i = begin; i < end && !remaining.empty(); ++i)
+    {
+        if(compare(output_keys.back(), keys[i]))
+            continue;
+        const auto match = remaining.find({keys[i], values[i]});
+        if(match != remaining.end())
+            remaining.erase(match);
+    }
+    PRIMBENCH_ASSERT(remaining.empty(), true);
+}
+
 template<typename>
 struct is_custom_type : std::false_type
 {};
@@ -502,60 +763,28 @@ inline constexpr auto ceiling_div(const T a, const U b)
 // Need for hipcub::DeviceReduce::Min/Max etc.
 namespace std
 {
-template<>
-class numeric_limits<benchmark_utils::custom_type<int>>
+template<class T>
+class numeric_limits<benchmark_utils::custom_type<T>>
 {
-    using T = typename benchmark_utils::custom_type<int>;
+    using value_type = benchmark_utils::custom_type<T>;
 
 public:
-    static constexpr inline T min()
+    static constexpr value_type min()
     {
-        return std::numeric_limits<typename T::first_type>::min();
+        return std::numeric_limits<T>::min();
     }
 
-    static constexpr inline T max()
+    static constexpr value_type max()
     {
-        return std::numeric_limits<typename T::first_type>::max();
+        return std::numeric_limits<T>::max();
     }
 
-    static constexpr inline T lowest()
+    static constexpr value_type lowest()
     {
-        return std::numeric_limits<typename T::first_type>::lowest();
-    }
-};
-
-template<>
-class numeric_limits<benchmark_utils::custom_type<float>>
-{
-    using T = typename benchmark_utils::custom_type<float>;
-
-public:
-    static constexpr inline T min()
-    {
-        return std::numeric_limits<typename T::first_type>::min();
-    }
-
-    static constexpr inline T max()
-    {
-        return std::numeric_limits<typename T::first_type>::max();
-    }
-
-    static constexpr inline T lowest()
-    {
-        return std::numeric_limits<typename T::first_type>::lowest();
+        return std::numeric_limits<T>::lowest();
     }
 };
 } // namespace std
-
-#define HIP_CHECK(condition)                                                           \
-    {                                                                                  \
-        hipError_t error = condition;                                                  \
-        if(error != hipSuccess)                                                        \
-        {                                                                              \
-            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-            exit(error);                                                               \
-        }                                                                              \
-    }
 
 PRIMBENCH_REGISTER_TYPE(int8_t, "i8")
 PRIMBENCH_REGISTER_TYPE(int16_t, "i16")

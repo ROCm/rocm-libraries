@@ -28,7 +28,7 @@ template<class Key>
 struct CompareFunction
 {
     HIPCUB_HOST_DEVICE
-    inline constexpr bool operator()(const Key& a, const Key& b)
+    inline constexpr bool operator()(const Key& a, const Key& b) const
     {
         return a < b;
     }
@@ -70,11 +70,14 @@ class merge_keys_benchmark : public primbench::benchmark_interface
         std::sort(keys_input2.begin(), keys_input2.end(), compare_function);
 
         Key* d_keys_input1;
-        HIP_CHECK(hipMalloc(&d_keys_input1, items1 * sizeof(Key)));
-        HIP_CHECK(hipMemcpy(d_keys_input1,
-                            keys_input1.data(),
-                            items1 * sizeof(Key),
-                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMalloc(&d_keys_input1, std::max(items1, size_t{1}) * sizeof(Key)));
+        if(items1 != 0)
+        {
+            HIP_CHECK(hipMemcpy(d_keys_input1,
+                                keys_input1.data(),
+                                items1 * sizeof(Key),
+                                hipMemcpyHostToDevice));
+        }
 
         Key* d_keys_input2;
         HIP_CHECK(hipMalloc(&d_keys_input2, items2 * sizeof(Key)));
@@ -109,6 +112,31 @@ class merge_keys_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_writes<Key>(items);
+
+        state.test(
+            [&]
+            {
+                const auto       count  = benchmark_utils::validation_size(items);
+                size_t           index1 = 0;
+                size_t           index2 = 0;
+                std::vector<Key> expected_keys;
+                for(size_t i = 0; i < count; ++i)
+                {
+                    if(index2 == items2
+                       || (index1 < items1
+                           && !compare_function(keys_input2[index2], keys_input1[index1])))
+                    {
+                        expected_keys.push_back(keys_input1[index1]);
+                        ++index1;
+                    }
+                    else
+                    {
+                        expected_keys.push_back(keys_input2[index2]);
+                        ++index2;
+                    }
+                }
+                benchmark_utils::check_output(d_keys_output, expected_keys);
+            });
 
         state.run(launch);
 
@@ -155,11 +183,14 @@ class merge_pairs_benchmark : public primbench::benchmark_interface
         std::sort(keys_input2.begin(), keys_input2.end(), compare_function);
 
         Key* d_keys_input1;
-        HIP_CHECK(hipMalloc(&d_keys_input1, items1 * sizeof(Key)));
-        HIP_CHECK(hipMemcpy(d_keys_input1,
-                            keys_input1.data(),
-                            items1 * sizeof(Key),
-                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMalloc(&d_keys_input1, std::max(items1, size_t{1}) * sizeof(Key)));
+        if(items1 != 0)
+        {
+            HIP_CHECK(hipMemcpy(d_keys_input1,
+                                keys_input1.data(),
+                                items1 * sizeof(Key),
+                                hipMemcpyHostToDevice));
+        }
 
         Key* d_keys_input2;
         HIP_CHECK(hipMalloc(&d_keys_input2, items2 * sizeof(Key)));
@@ -174,11 +205,14 @@ class merge_pairs_benchmark : public primbench::benchmark_interface
         std::vector<Value> values_input1(items1);
         std::iota(values_input1.begin(), values_input1.end(), 0);
         Value* d_values_input1;
-        HIP_CHECK(hipMalloc(&d_values_input1, items1 * sizeof(Value)));
-        HIP_CHECK(hipMemcpy(d_values_input1,
-                            values_input1.data(),
-                            items1 * sizeof(Value),
-                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMalloc(&d_values_input1, std::max(items1, size_t{1}) * sizeof(Value)));
+        if(items1 != 0)
+        {
+            HIP_CHECK(hipMemcpy(d_values_input1,
+                                values_input1.data(),
+                                items1 * sizeof(Value),
+                                hipMemcpyHostToDevice));
+        }
 
         std::vector<Value> values_input2(items2);
         std::iota(values_input2.begin(), values_input2.end(), items1);
@@ -219,6 +253,35 @@ class merge_pairs_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_writes<Key>(items);
         state.add_writes<Value>(items);
+
+        state.test(
+            [&]
+            {
+                const auto         count  = benchmark_utils::validation_size(items);
+                size_t             index1 = 0;
+                size_t             index2 = 0;
+                std::vector<Key>   expected_keys;
+                std::vector<Value> expected_values;
+                for(size_t i = 0; i < count; ++i)
+                {
+                    if(index2 == items2
+                       || (index1 < items1
+                           && !compare_function(keys_input2[index2], keys_input1[index1])))
+                    {
+                        expected_keys.push_back(keys_input1[index1]);
+                        expected_values.push_back(values_input1[index1]);
+                        ++index1;
+                    }
+                    else
+                    {
+                        expected_keys.push_back(keys_input2[index2]);
+                        expected_values.push_back(values_input2[index2]);
+                        ++index2;
+                    }
+                }
+                benchmark_utils::check_output(d_keys_output, expected_keys);
+                benchmark_utils::check_output(d_values_output, expected_values);
+            });
 
         state.run(launch);
 

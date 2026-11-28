@@ -26,7 +26,7 @@
 
 constexpr unsigned int Trials = 100;
 
-template<unsigned int WarpSize, class T>
+template<unsigned int WarpSize, unsigned int TrialCount, class T>
 __device__
 auto warp_reduce_benchmark_fn(const T* d_input, T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -39,7 +39,7 @@ auto warp_reduce_benchmark_fn(const T* d_input, T* d_output)
     __shared__ typename wreduce_t::TempStorage storage;
     auto                                       reduce_op = hipcub::Sum();
 #pragma nounroll
-    for(unsigned int trial = 0; trial < Trials; trial++)
+    for(unsigned int trial = 0; trial < TrialCount; trial++)
     {
         value = wreduce_t(storage).Reduce(value, reduce_op);
     }
@@ -47,20 +47,20 @@ auto warp_reduce_benchmark_fn(const T* d_input, T* d_output)
     d_output[i] = value;
 }
 
-template<unsigned int WarpSize, class T>
+template<unsigned int WarpSize, unsigned int TrialCount, class T>
 __device__
 auto warp_reduce_benchmark_fn(const T* /*d_input*/, T* /*d_output*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {}
 
-template<unsigned int WarpSize, class T>
+template<unsigned int WarpSize, unsigned int TrialCount, class T>
 __global__ __launch_bounds__(64)
 void warp_reduce_kernel(const T* d_input, T* d_output)
 {
-    warp_reduce_benchmark_fn<WarpSize>(d_input, d_output);
+    warp_reduce_benchmark_fn<WarpSize, TrialCount>(d_input, d_output);
 }
 
-template<unsigned int WarpSize, class T, class Flag>
+template<unsigned int WarpSize, unsigned int TrialCount, class T, class Flag>
 __device__
 auto segmented_warp_reduce_benchmark_fn(const T* d_input, Flag* d_flags, T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -73,7 +73,7 @@ auto segmented_warp_reduce_benchmark_fn(const T* d_input, Flag* d_flags, T* d_ou
     using wreduce_t = hipcub::WarpReduce<T, WarpSize>;
     __shared__ typename wreduce_t::TempStorage storage;
 #pragma nounroll
-    for(unsigned int trial = 0; trial < Trials; trial++)
+    for(unsigned int trial = 0; trial < TrialCount; trial++)
     {
         value = wreduce_t(storage).HeadSegmentedSum(value, flag);
     }
@@ -81,25 +81,30 @@ auto segmented_warp_reduce_benchmark_fn(const T* d_input, Flag* d_flags, T* d_ou
     d_output[i] = value;
 }
 
-template<unsigned int WarpSize, class T, class Flag>
+template<unsigned int WarpSize, unsigned int TrialCount, class T, class Flag>
 __device__
 auto segmented_warp_reduce_benchmark_fn(const T* /*d_input*/, Flag* /*d_flags*/, T* /*d_output*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {}
 
-template<unsigned int WarpSize, class T, class Flag>
+template<unsigned int WarpSize, unsigned int TrialCount, class T, class Flag>
 __global__ __launch_bounds__(64)
 void segmented_warp_reduce_kernel_fn(const T* d_input, Flag* d_flags, T* d_output)
 {
-    segmented_warp_reduce_benchmark_fn<WarpSize>(d_input, d_flags, d_output);
+    segmented_warp_reduce_benchmark_fn<WarpSize, TrialCount>(d_input, d_flags, d_output);
 }
 
-template<bool Segmented, unsigned int WarpSize, unsigned int BlockSize, class T, class Flag>
+template<bool         Segmented,
+         unsigned int WarpSize,
+         unsigned int BlockSize,
+         unsigned int TrialCount = Trials,
+         class T,
+         class Flag>
 inline auto execute_warp_reduce_kernel(
     T* input, T* output, Flag* /* flags */, size_t items, hipStream_t stream) ->
     typename std::enable_if<!Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<WarpSize, T>),
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<WarpSize, TrialCount, T>),
                        dim3(items / BlockSize),
                        dim3(BlockSize),
                        0,
@@ -109,19 +114,25 @@ inline auto execute_warp_reduce_kernel(
     HIP_CHECK(hipPeekAtLastError());
 }
 
-template<bool Segmented, unsigned int WarpSize, unsigned int BlockSize, class T, class Flag>
-inline auto execute_warp_reduce_kernel(
-    T* input, T* output, Flag* flags, size_t items, hipStream_t stream) ->
-    typename std::enable_if<Segmented>::type
+template<bool         Segmented,
+         unsigned int WarpSize,
+         unsigned int BlockSize,
+         unsigned int TrialCount = Trials,
+         class T,
+         class Flag>
+inline auto
+    execute_warp_reduce_kernel(T* input, T* output, Flag* flags, size_t items, hipStream_t stream)
+        -> typename std::enable_if<Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_warp_reduce_kernel_fn<WarpSize, T, Flag>),
-                       dim3(items / BlockSize),
-                       dim3(BlockSize),
-                       0,
-                       stream,
-                       input,
-                       flags,
-                       output);
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(segmented_warp_reduce_kernel_fn<WarpSize, TrialCount, T, Flag>),
+        dim3(items / BlockSize),
+        dim3(BlockSize),
+        0,
+        stream,
+        input,
+        flags,
+        output);
     HIP_CHECK(hipPeekAtLastError());
 }
 
@@ -164,6 +175,46 @@ class warp_reduce_benchmark : public primbench::benchmark_interface
 
         state.set_items(Trials * items);
         state.add_writes<T>(Trials * items);
+
+        state.test(
+            [&]
+            {
+                if(!benchmark_utils::is_warp_size_supported(WarpSize))
+                    return;
+
+                const flag_type head_flag{1};
+                if constexpr(Segmented)
+                {
+                    HIP_CHECK(
+                        hipMemcpy(d_flags, &head_flag, sizeof(head_flag), hipMemcpyHostToDevice));
+                }
+                execute_warp_reduce_kernel<Segmented, WarpSize, WarpSize, 1>(d_input,
+                                                                             d_output,
+                                                                             d_flags,
+                                                                             WarpSize,
+                                                                             stream);
+                HIP_CHECK(hipStreamSynchronize(stream));
+                const auto output = benchmark_utils::read_output(d_output, WarpSize);
+                for(size_t begin = 0; begin < WarpSize;)
+                {
+                    size_t end = WarpSize;
+                    if constexpr(Segmented)
+                    {
+                        end = begin + 1;
+                        while(end < WarpSize && !flags[end])
+                            ++end;
+                    }
+                    benchmark_utils::check_near(
+                        output[begin],
+                        benchmark_utils::reference_sum(input.begin() + begin, input.begin() + end));
+                    begin = end;
+                }
+                if constexpr(Segmented)
+                {
+                    HIP_CHECK(
+                        hipMemcpy(d_flags, flags.data(), sizeof(head_flag), hipMemcpyHostToDevice));
+                }
+            });
 
         state.run(
             [&]
