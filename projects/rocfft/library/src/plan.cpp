@@ -5049,6 +5049,9 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
         // that we will request users to allocate.
         plan->DetermineTempBufferUserAllocs();
 
+        if(LOG_PLAN_ENABLED() && rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1")
+            plan->LogCompileOnlyPlan();
+
         return rocfft_status_success;
     }
     catch(std::exception& e)
@@ -5781,7 +5784,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
         child->DetermineBufferMemory(tmpBufSize, cmplxForRealSize, blueSize, chirpSize);
 }
 
-void TreeNode::Print(rocfft_ostream& os, const int indent) const
+void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
 {
 
     std::string indentStr;
@@ -5797,10 +5800,10 @@ void TreeNode::Print(rocfft_ostream& os, const int indent) const
     {
         os << " " << val;
     }
-    if(!outputLength.empty() && outputLength != length)
+    if(detailed || (!outputLength.empty() && outputLength != length))
     {
         os << "\n" << indentStr << "outputLength:";
-        for(const auto val : outputLength)
+        for(const auto val : (outputLength.empty() ? length : outputLength))
         {
             os << " " << val;
         }
@@ -5940,7 +5943,7 @@ void TreeNode::Print(rocfft_ostream& os, const int indent) const
     {
         for(auto& children_p : childNodes)
         {
-            children_p->Print(os, indent + 1);
+            children_p->Print(os, indent + 1, detailed);
         }
     }
 
@@ -6083,6 +6086,10 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
 {
     std::string kernel_name;
     bool        is_tuning = TuningBenchmarker::GetSingleton().IsProcessingTuning();
+    const bool  log_kernel_names
+        = LOG_PLAN_ENABLED() && rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1";
+    if(log_kernel_names)
+        execPlan.kernelNames.reserve(execPlan.execSeq.size());
 
     TreeNode* load_node             = nullptr;
     TreeNode* store_node            = nullptr;
@@ -6107,6 +6114,8 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
         else if(node == store_node && have_store_spirv_cb && store_cbtype != CallbackType::NONE)
             cbtype_real = store_cbtype;
 
+        if(log_kernel_names)
+            kernel_name.clear();
         node->compiledKernel = RTCKernel::runtime_compile(
             node->getLeafNode(), execPlan.deviceProp.gcnArchName, kernel_name, cbtype_real);
 
@@ -6117,6 +6126,14 @@ void RuntimeCompilePlan(ExecPlan& execPlan)
             if(LOG_TUNING_ENABLED())
                 (*LogSingleton::GetInstance().GetTuningOS())
                     << "kernel: " << kernel_name << std::endl;
+        }
+
+        // AOT kernels report their name even when the future holds no RTCKernel.
+        if(log_kernel_names)
+        {
+            if(kernel_name.empty())
+                kernel_name = PrintScheme(node->scheme);
+            execPlan.kernelNames.push_back(std::move(kernel_name));
         }
     }
 
@@ -6510,7 +6527,7 @@ void ProcessNode(ExecPlan& execPlan)
     execPlan.chirpWorkBufSize = chirpSize;
 }
 
-void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent)
+void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent, bool detailed)
 {
     std::string indentStr;
     int         i = indent;
@@ -6530,7 +6547,14 @@ void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent)
     os << indentStr << "Assignment strategy: " << PrintOptimizeStrategy(execPlan.assignOptStrategy)
        << std::endl;
 
-    execPlan.rootPlan->Print(os, indent);
+    execPlan.rootPlan->Print(os, indent, detailed);
+
+    if(detailed)
+    {
+        os << indentStr << "Kernel names:\n";
+        for(const auto& name : execPlan.kernelNames)
+            os << indentStr << "  " << name << '\n';
+    }
 
     os << indentStr << "GridParams\n";
     for(const auto& gp : execPlan.gridParam)

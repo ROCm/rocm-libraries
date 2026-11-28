@@ -938,12 +938,11 @@ void get_rank_load_callbacks_funcptr(const fft_params&                          
 std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params& params,
                                                                const char*       symbol,
                                                                bool              round_trip_inverse,
-                                                               jit_callback_op   type)
+                                                               jit_callback_op   type,
+                                                               bool              plan_only)
 {
     auto state    = std::make_shared<fft_params::jit_cb_state_t>();
     state->symbol = symbol;
-
-    int mpi_rank = params.get_process_rank();
 
     switch(type)
     {
@@ -954,6 +953,11 @@ std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params&
         state->func = get_store_callback_jit(params.otype, params.precision, round_trip_inverse);
         break;
     }
+
+    if(plan_only)
+        return state;
+
+    int mpi_rank = params.get_process_rank();
 
     // Allocate a cbdata for the current device and append to state->data
     auto add_cb_data = [&]() {

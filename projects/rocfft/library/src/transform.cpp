@@ -22,10 +22,13 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <vector>
 
 #include "../../shared/array_predicate.h"
+#include "../../shared/environment.h"
 #include "../../shared/precision_type.h"
 #include "logging.h"
 #include "plan.h"
@@ -302,22 +305,48 @@ void rocfft_plan_t::LogFields(const char* description, const std::vector<rocfft_
     }
 }
 
-void rocfft_plan_t::LogSortedPlan(const std::vector<size_t>& sortedIdx) const
+void rocfft_plan_t::LogCompileOnlyPlan()
 {
-    // If we have a single-node plan, just log that without any extra indenting
-    if(multiPlan.size() == 1)
+    tempBuffers.assign_log_ids();
+
+    // Buffer one complete plan so concurrent compile-only callers using the
+    // ordinary log destination cannot interleave their trees.
+    rocfft_ostream log;
+    LogSortedPlan({}, &log);
+
+    // The dump client selects a separate file for each plan without rerunning setup.
+    const auto path = rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY_LOG_PLAN_PATH");
+    if(path.empty())
     {
-        if(LOG_PLAN_ENABLED())
-        {
-            auto& os = *LogSingleton::GetInstance().GetPlanOS();
-            multiPlan.front()->Print(os, 0);
-        }
+        *LogSingleton::GetInstance().GetPlanOS() << log.str() << std::flush;
         return;
     }
 
-    if(LOG_PLAN_ENABLED())
+    std::ofstream file(path, std::ios::binary);
+    file << log.str();
+    file.close();
+    if(!file)
+        throw std::runtime_error("Failed to write compile-only plan log: " + path);
+}
+
+void rocfft_plan_t::LogSortedPlan(const std::vector<size_t>& sortedIdx,
+                                  rocfft_ostream*            planOS) const
+{
+    const bool planOnly = planOS != nullptr;
+    if(!planOS && LOG_PLAN_ENABLED())
+        planOS = LogSingleton::GetInstance().GetPlanOS();
+
+    // If we have a single-node plan, just log that without any extra indenting
+    if(multiPlan.size() == 1)
     {
-        auto& os = *LogSingleton::GetInstance().GetPlanOS();
+        if(planOS)
+            multiPlan.front()->Print(*planOS, 0);
+        return;
+    }
+
+    if(planOS)
+    {
+        auto& os = *planOS;
         os << "multiPlans: " << multiPlan.size() << "\n";
         for(size_t midx = 0; midx < multiPlan.size(); ++midx)
         {
@@ -336,7 +365,7 @@ void rocfft_plan_t::LogSortedPlan(const std::vector<size_t>& sortedIdx) const
         }
     }
 
-    if(LOG_GRAPH_ENABLED())
+    if(!planOnly && LOG_GRAPH_ENABLED())
     {
         // multi-device plan, log that with dependency graph
         auto& os = *LogSingleton::GetInstance().GetGraphOS();

@@ -549,9 +549,12 @@ struct rocfft_plan_t
     void InitRCCLCommunicator() noexcept;
 #endif
 
-    // check log level, log the topologically sorted plan if plan
-    // logging is enabled
-    void LogSortedPlan(const std::vector<size_t>& sortedIdx) const;
+    // Log the compile-only plan without executing it or logging user pointers.
+    void LogCompileOnlyPlan();
+
+    // Log the plan to the configured layers or only to the supplied plan stream.
+    void LogSortedPlan(const std::vector<size_t>& sortedIdx,
+                       rocfft_ostream*            planOS = nullptr) const;
 
     // log field layout at plan level
     static void LogFields(const char* description, const std::vector<rocfft_field_t>& fields);

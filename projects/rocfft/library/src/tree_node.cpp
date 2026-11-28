@@ -265,9 +265,9 @@ void LeafNode::SanityCheck(SchemeTree* solution_scheme, std::vector<FMKey>& kern
     TreeNode::SanityCheck(solution_scheme, kernels_keys);
 }
 
-void LeafNode::Print(rocfft_ostream& os, int indent) const
+void LeafNode::Print(rocfft_ostream& os, int indent, bool detailed) const
 {
-    TreeNode::Print(os, indent);
+    TreeNode::Print(os, indent, detailed);
 
     std::string indentStr;
     while(indent--)
@@ -1407,5 +1407,5 @@ void ExecPlan::Print(rocfft_ostream& os, const int indent) const
     if(workPtr)
         os << indentStr << "  workPtr: " << workPtr.str() << std::endl;
 
-    PrintNode(os, *this, indent);
+    PrintNode(os, *this, indent, !kernelNames.empty());
 }
