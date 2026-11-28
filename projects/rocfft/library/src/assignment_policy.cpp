@@ -296,7 +296,7 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
 // Output lengths, and the matching strides, that a node actually writes.
 static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(const TreeNode& node)
 {
-    auto len    = node.LengthForOutStride();
+    auto len    = node.outputLength;
     auto stride = node.outStride;
     // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
     if(node.GetBluesteinFuseType() == BFT_INV_CHIRP_MUL
@@ -304,9 +304,10 @@ static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(const
     {
         len.erase(len.begin(), len.begin() + 2);
         len.insert(len.begin(), node.blue->get_transform_length());
-        stride.erase(stride.begin() + 1);
+        // The flattened transform uses the stride of the old fastest output axis.
+        stride.erase(stride.begin());
     }
-    return {len, stride};
+    return {std::move(len), std::move(stride)};
 }
 
 bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
@@ -326,8 +327,21 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // would normally call OB_USER_OUT).
     auto dataFits = [&execPlan](TreeNode& node, OperatingBuffer buffer) {
         auto [nodeLen, nodeStride] = OutputFootprint(node);
-        auto bufLen                = buffer == OB_USER_OUT ? execPlan.rootPlan->GetOutputLength()
-                                                           : execPlan.rootPlan->length;
+        auto bufLen
+            = buffer == OB_USER_OUT ? execPlan.rootPlan->outputLength : execPlan.rootPlan->length;
+
+        // The shape check below consumes the legacy output order. Keep that
+        // view for SBRC, including which axis is doubled for a real buffer.
+        // Fused inverse Bluestein has already flattened the two SBRC axes.
+        const bool legacySBRCOrder
+            = node.LegacySBRCOutputAxis(0) != 0 && node.GetBluesteinFuseType() != BFT_INV_CHIRP_MUL;
+        if(legacySBRCOrder)
+        {
+            for(size_t i = 0; i < nodeLen.size(); ++i)
+                nodeLen[i] = node.outputLength[node.LegacySBRCOutputAxis(i)];
+            for(size_t i = 0; i < nodeStride.size(); ++i)
+                nodeStride[i] = node.outStride[node.LegacySBRCOutputAxis(i)];
+        }
 
         // if node's output is complex and buffer's format is real,
         // adjust output length to be 2x to make the units of
@@ -358,18 +372,15 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
                                                       : execPlan.rootPlan->inStride))
             return true;
 
-        // nodeLen was paired with nodeStride for MatchingLengthStride, but the
-        // decomposition below always needs the output lengths, which may differ
-        // (fused Bluestein nodes writing to user buffers are excluded as they have
-        // a behavior of their own that OutputFootprint handles).
-        // TODO: maintain consistency of axis ordering between input and output
-        // for all nodes (e.g. implicit-stride transpose AxB -> BxA can be made
-        // self-explanatory with explicit strides [1, A] -> [B, 1] without
-        // changing the ordering of axes). That would remove the ambiguity of
-        // "which length to use in this context?"
-        if(node.GetBluesteinFuseType() == BFT_NONE)
+        // Enumerate tests candidate buffers before assigning their strides.
+        // Preserve the packed order for decomposition; SBRC and fused Bluestein
+        // already use the desired view above.
+        if(node.legacyOutputOrder != TreeNode::OutputAxisOrder::IDENTITY
+           && node.GetBluesteinFuseType() == BFT_NONE && !legacySBRCOrder)
         {
-            nodeLen = node.GetOutputLength();
+            if(doubleFront)
+                nodeLen.front() /= 2;
+            TreeNode::PermuteOutputAxes(node.legacyOutputOrder, nodeLen);
             if(doubleFront)
                 nodeLen.front() *= 2;
         }
@@ -1271,9 +1282,8 @@ void CollectTempBufOps(TreeNode&               node,
         for(auto child = backwardChildren.rbegin(); child != backwardChildren.rend(); ++child)
             CollectTempBufOps(**child, buf, users);
 
-        // Store this write
-        insertOp(
-            {node.LengthForOutStride(), node.outStride, node.oDist, TempBufOp::BufWrite, node});
+        // Store this write with the lengths paired to the assigned strides.
+        insertOp({node.outputLength, node.outStride, node.oDist, TempBufOp::BufWrite, node});
 
         // If we have a parent node, tail-recurse into our following sibling node.
         //
@@ -1401,10 +1411,17 @@ void AssignmentPolicy::PadPlan(ExecPlan& execPlan)
             // 2D strides are slower with padding
             if(is_device_gcn_arch(execPlan.deviceProp, "gfx906"))
             {
-                const auto& stride = users.front().stride;
-                if(stride.size() == 3 && IsPo2(stride[0]) && stride[0] > 2048 && IsPo2(stride[1])
-                   && stride[1] > 2048)
-                    return;
+                const auto& op = users.front();
+                if(op.stride.size() == 3)
+                {
+                    const auto stride = [&](size_t i) {
+                        return op
+                            .stride[op.op == TempBufOp::BufWrite ? op.node.LegacySBRCOutputAxis(i)
+                                                                 : i];
+                    };
+                    if(IsPo2(stride(0)) && stride(0) > 2048 && IsPo2(stride(1)) && stride(1) > 2048)
+                        return;
+                }
             }
 
             // standalone real-complex kernels can't handle arbitrary

@@ -24,6 +24,8 @@ Documentation for rocFFT is available at
   on a single device.
 * Planar array types are now rejected by `rocfft_plan_create` if a field is set for either input or
   output (previously, only the side with a field set was checked).
+* The planner tracks each node's input and output axes in the same order. Transposes are
+  represented by output strides, and existing solution-map keys remain compatible.
 
 ### Resolved issues
 

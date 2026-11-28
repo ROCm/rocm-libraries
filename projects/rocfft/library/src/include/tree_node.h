@@ -579,17 +579,22 @@ public:
     // provided
     size_t dimension = 1;
 
-    // Length of the FFT in each dimension, internal value
-    std::vector<size_t> length;
+    // Input and output have the same rank and axis order: length[i] and inStride[i]
+    // describe the same axis as outputLength[i] and outStride[i]. Both spans are
+    // always set once the node is built, but can differ in value (e.g. N vs N/2+1).
+    // Transpose changes only strides: an A x B transpose has [A, B] on both sides,
+    // with input strides [1, A] and output strides [B, 1].
+    std::vector<size_t> length, outputLength;
 
-    // Row-major output lengths, from fastest to slowest.  If empty,
-    // output length is assumed to be the same as input length.
-    //
-    // This is set for nodes that might do non-obvious things with
-    // strides (e.g. having fastest dimension not be first), so that
-    // buffer assignment can know whether a node's output will fit in
-    // a given buffer.
-    std::vector<size_t> outputLength;
+    // Preserve the packed output order used by legacy buffer-fit and collapse decisions.
+    enum class OutputAxisOrder : uint8_t
+    {
+        IDENTITY,
+        SWAP_01,
+        ROTATE_LEFT_3,
+    };
+    OutputAxisOrder legacyOutputOrder = OutputAxisOrder::IDENTITY;
+    static void     PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axes);
 
     // Stride of the FFT in each dimension
     std::vector<size_t> inStride, outStride;
@@ -977,28 +982,25 @@ public:
     // nullptr if there is no such ancestor
     TreeNode* GetPartialPassAncestor() const;
 
-    // Set length of transpose kernel node, since those are easily
-    // knowable just by looking at the scheme and they're used in
-    // many plans.  Throws an exception if this is not a transpose
-    // node.
-    void SetTransposeOutputLength();
-
-    // Get row-major output length of this node.
-    std::vector<size_t> GetOutputLength() const
+    // Map a legacy SBRC output axis to its input-axis index.
+    size_t LegacySBRCOutputAxis(size_t axis) const
     {
-        return outputLength.empty() ? length : outputLength;
-    }
-    // True if outStride is indexed in outputLength order rather than length
-    // order (e.g. fused SBRC transposes, embedded r2c/c2r).  Anything pairing
-    // a length vector with outStride should go through LengthForOutStride().
-    virtual bool OutputLengthMatchesOutStride() const
-    {
-        return false;
-    }
-    // The length vector that pairs with outStride.
-    std::vector<size_t> LengthForOutStride() const
-    {
-        return OutputLengthMatchesOutStride() ? GetOutputLength() : length;
+        switch(scheme)
+        {
+        case CS_KERNEL_STOCKHAM_BLOCK_RC:
+            return axis < 2 ? 1 - axis : axis;
+        case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
+            return axis < 3 ? (axis + 2) % 3 : axis;
+        case CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY:
+            // ERC can use a 3D kernel on a 2D layout.
+            if(length.size() == 2)
+                return axis < 2 ? 1 - axis : axis;
+            [[fallthrough]];
+        case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
+            return axis < 3 ? (axis + 1) % 3 : axis;
+        default:
+            return axis;
+        }
     }
 
     virtual bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) = 0;
@@ -1240,8 +1242,7 @@ public:
         // launch (see powX.cpp) and don't affect kernel index arithmetic.
         const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
         const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
-        // inStride always pairs with length, outStride does not on every node.
-        const auto io_length = io == io_data_label::INPUT ? length : LengthForOutStride();
+        const auto& io_length = io == io_data_label::INPUT ? length : outputLength;
 
         // compute_ptrdiff returns the buffer size (one-past-the-end).
         auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
@@ -1325,10 +1326,14 @@ protected:
     TransposeNode(TreeNode* p, ComputeScheme s)
         : LeafNode(p, s)
     {
-        allowInplace = false;
+        allowInplace      = false;
+        legacyOutputOrder = PackedOutputOrder(s);
     }
 
     void SetupGridParam_internal(GridParam& gp) override;
+
+    // Packed order is independent of the strides assigned to a user buffer.
+    static OutputAxisOrder PackedOutputOrder(ComputeScheme scheme);
 
 public:
     // Transpose tiles read more row-ish and write more column-ish.  So

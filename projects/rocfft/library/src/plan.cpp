@@ -876,6 +876,8 @@ static std::unique_ptr<ExecPlan> transpose_brick(int                        loca
         throw std::runtime_error("unsupported transpose_brick dimension");
     }
 
+    execPlan.rootPlan->outputLength = execPlan.rootPlan->length;
+
     execPlan.rootPlan->loadOps  = std::move(loadOps);
     execPlan.rootPlan->storeOps = std::move(storeOps);
 
@@ -1622,8 +1624,7 @@ std::unique_ptr<ExecPlan>
         }
 
         execPlan.iLength = rootPlanData.length;
-        execPlan.oLength
-            = rootPlanData.outputLength.empty() ? rootPlanData.length : rootPlanData.outputLength;
+        execPlan.oLength = rootPlanData.outputLength;
 
         // setup isUnitStride values
         execPlan.rootPlan->inStrideUnit  = BufferIsUnitStride(execPlan, OB_USER_IN);
@@ -2371,14 +2372,15 @@ size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx
     transformLengths.pop_back();
     transformStride.pop_back();
 
-    rootPlanData.dimension = 1;
-    rootPlanData.length    = transformLengths;
-    rootPlanData.inStride  = transformStride;
-    rootPlanData.outStride = transformStride;
-    rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
+    rootPlanData.dimension    = 1;
+    rootPlanData.length       = transformLengths;
+    rootPlanData.outputLength = transformLengths;
+    rootPlanData.inStride     = transformStride;
+    rootPlanData.outStride    = transformStride;
+    rootPlanData.direction    = transformType == rocfft_transform_type_complex_forward
                                      || transformType == rocfft_transform_type_real_forward
-                                 ? -1
-                                 : 1;
+                                    ? -1
+                                    : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
     rootPlanData.precision         = precision;
@@ -5376,11 +5378,10 @@ bool BufferIsUnitStride(ExecPlan& execPlan, OperatingBuffer buf)
 
 void TreeNode::CopyNodeData(const TreeNode& srcNode)
 {
-    dimension = srcNode.dimension;
-    batch     = srcNode.batch;
-    length    = srcNode.length;
-    if(!srcNode.outputLength.empty())
-        outputLength = srcNode.outputLength;
+    dimension       = srcNode.dimension;
+    batch           = srcNode.batch;
+    length          = srcNode.length;
+    outputLength    = srcNode.outputLength;
     inStride        = srcNode.inStride;
     outStride       = srcNode.outStride;
     iDist           = srcNode.iDist;
@@ -5416,11 +5417,10 @@ void TreeNode::CopyNodeData(const TreeNode& srcNode)
 
 void TreeNode::CopyNodeData(const NodeMetaData& data)
 {
-    dimension = data.dimension;
-    batch     = data.batch;
-    length    = data.length;
-    if(!data.outputLength.empty())
-        outputLength = data.outputLength;
+    dimension    = data.dimension;
+    batch        = data.batch;
+    length       = data.length;
+    outputLength = data.outputLength;
     inStride     = data.inStride;
     outStride    = data.outStride;
     iDist        = data.iDist;
@@ -5765,7 +5765,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
             = blue && blue->get_conv_buf_layout(io_data_label::OUTPUT)
                   ? blue->get_conv_buf_layout(io_data_label::OUTPUT)->buffer_element_count()
                         + (obOut == OB_TEMP_BLUESTEIN ? blue->get_padded_length() : 0)
-                  : compute_ptrdiff(LengthForOutStride(), outStride, batch, oDist);
+                  : compute_ptrdiff(outputLength, outStride, batch, oDist);
 
         if(scheme == CS_KERNEL_CHIRP && blue)
             chirpSize = std::max(blue->get_padded_length(), chirpSize);
@@ -5800,10 +5800,10 @@ void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
     {
         os << " " << val;
     }
-    if(detailed || (!outputLength.empty() && outputLength != length))
+    if(detailed || outputLength != length)
     {
         os << "\n" << indentStr << "outputLength:";
-        for(const auto val : (outputLength.empty() ? length : outputLength))
+        for(const auto val : outputLength)
         {
             os << " " << val;
         }
@@ -6200,14 +6200,15 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
                             ? ("")
                             : (PrintKernelSchemeAbbr(probNode.scheme) + "_");
 
-    // Solutions are keyed on complex length.  So for C2R transforms,
-    // use the output length to search for solutions.
-    auto& probLength = (array_type_is_complex(probNode.inArrayType)
-                        && probNode.outArrayType == rocfft_array_type_real)
-                           ? probNode.outputLength
-                           : probNode.length;
+    // C2R uses the output length as the solution key.
+    const bool useOutputLength = array_type_is_complex(probNode.inArrayType)
+                                 && probNode.outArrayType == rocfft_array_type_real;
+    const auto& probLength = useOutputLength ? probNode.outputLength : probNode.length;
     for(size_t i = 0; i < probNode.dimension; ++i)
-        token += std::to_string(probLength[i]) + "_";
+    {
+        const size_t axis = useOutputLength ? probNode.LegacySBRCOutputAxis(i) : i;
+        token += std::to_string(probLength[axis]) + "_";
+    }
 
     std::string precision_str;
     if(probNode.precision == rocfft_precision_single)
@@ -6245,9 +6246,10 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
     for(size_t i = 0; i < probNode.inStride.size(); ++i)
         token += "_" + std::to_string(probNode.inStride[i]);
 
+    // Keep the serialized output axis order used by existing solution maps.
     token += "_ostride";
     for(size_t i = 0; i < probNode.outStride.size(); ++i)
-        token += "_" + std::to_string(probNode.outStride[i]);
+        token += "_" + std::to_string(probNode.outStride[probNode.LegacySBRCOutputAxis(i)]);
 
     token += "_idist_" + std::to_string(probNode.iDist);
     token += "_odist_" + std::to_string(probNode.oDist);

@@ -65,7 +65,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans1Plan->length.push_back(length[index]);
     }
-    trans1Plan->SetTransposeOutputLength();
+    trans1Plan->outputLength = trans1Plan->length;
 
     // first row fft
     NodeMetaData row1PlanData(this);
@@ -76,6 +76,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row1PlanData.length.push_back(length[index]);
     }
+    row1PlanData.outputLength = row1PlanData.length;
 
     auto row1Plan = NodeFactory::CreateExplicitNode(row1PlanData, this, determined_scheme_node1);
     row1Plan->large1D = 0;
@@ -91,7 +92,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans2Plan->length.push_back(length[index]);
     }
-    trans2Plan->SetTransposeOutputLength();
+    trans2Plan->outputLength = trans2Plan->length;
 
     // second row fft
     auto row2Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
@@ -102,6 +103,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row2Plan->length.push_back(length[index]);
     }
+    row2Plan->outputLength = row2Plan->length;
 
     // third transpose
     auto trans3Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
@@ -112,7 +114,7 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         trans3Plan->length.push_back(length[index]);
     }
-    trans3Plan->SetTransposeOutputLength();
+    trans3Plan->outputLength = trans3Plan->length;
 
     // --------------------------------
     // Fuse Shims
@@ -353,8 +355,8 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         col2colPlan->length.push_back(length[index]);
     }
-    col2colPlan->outputLength = col2colPlan->length;
-    std::swap(col2colPlan->outputLength[0], col2colPlan->outputLength[1]);
+    col2colPlan->outputLength      = col2colPlan->length;
+    col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // second plan, row-to-column
     auto row2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_RC, this);
@@ -370,7 +372,6 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         row2colPlan->length.push_back(length[index]);
     }
     row2colPlan->outputLength = row2colPlan->length;
-    std::swap(row2colPlan->outputLength[0], row2colPlan->outputLength[1]);
 
     // CC , RC
     childNodes.emplace_back(std::move(col2colPlan));
@@ -423,8 +424,8 @@ void CC1DNode::AssignParams_internal()
         row2colPlan->inStride.push_back(row2colPlan->length[0]);
         row2colPlan->iDist = length[0];
 
-        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
+        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->oDist = oDist;
 
         for(size_t index = 1; index < length.size(); index++)
@@ -439,8 +440,11 @@ void CC1DNode::AssignParams_internal()
         {
             for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
             {
-                const auto& lens
-                    = io == io_data_label::INPUT ? row2colPlan->length : row2colPlan->outputLength;
+                // The convolution workspace is described in packed order. Only
+                // its higher-axis strides and distance are passed to the kernel.
+                auto lens = row2colPlan->length;
+                if(io == io_data_label::OUTPUT)
+                    std::swap(lens[0], lens[1]);
                 std::vector<size_t> row2col_strides(lens.size(), 1);
                 row2col_strides[1] = lens[0];
                 auto tmp           = lens[0] * lens[1];
@@ -535,8 +539,8 @@ void CC1DNode::AssignParams_internal()
             }
         }
 
-        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
+        row2colPlan->outStride.push_back(outStride[0]);
         row2colPlan->oDist = oDist;
 
         for(size_t index = 1; index < length.size(); index++)
@@ -562,7 +566,7 @@ void CC1DNode::AssignParams_internal()
         // hack the plan to put batch as second dimension since it moves
         // faster than the actual second dimension
         std::swap(col2colPlan->length.back(), col2colPlan->batch);
-        col2colPlan->outputLength = {col2colPlan->length.back(), col2colPlan->length.front()};
+        col2colPlan->outputLength = col2colPlan->length;
         col2colPlan->iDist        = col2colPlan->inStride.back();
         col2colPlan->inStride     = {col2colPlan->inStride.back() * col2colPlan->batch, 1};
         // make output the same shape as input (even though it's going to
@@ -573,11 +577,11 @@ void CC1DNode::AssignParams_internal()
 
         // again, make batch the second dimension
         std::swap(row2colPlan->length.back(), row2colPlan->batch);
-        row2colPlan->outputLength = {row2colPlan->length.back(), row2colPlan->length.front()};
+        row2colPlan->outputLength = row2colPlan->length;
         row2colPlan->inStride     = {inStride.front(), 1};
         row2colPlan->iDist        = row2colPlan->length.front() * inStride.front();
         row2colPlan->oDist        = outStride.front();
-        row2colPlan->outStride    = {1, row2colPlan->batch * outStride.front()};
+        row2colPlan->outStride    = {row2colPlan->batch * outStride.front(), 1};
     }
 }
 
@@ -617,8 +621,8 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         col2colPlan->length.push_back(length[index]);
     }
-    col2colPlan->outputLength = col2colPlan->length;
-    std::swap(col2colPlan->outputLength[0], col2colPlan->outputLength[1]);
+    col2colPlan->outputLength      = col2colPlan->length;
+    col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // second plan, row-to-row
     auto row2rowPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
@@ -629,6 +633,7 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         row2rowPlan->length.push_back(length[index]);
     }
+    row2rowPlan->outputLength = row2rowPlan->length;
     // memo: A worth-noting try
     // row2rowPlan->allowOutofplace = false;
 
@@ -641,7 +646,7 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         transPlan->length.push_back(length[index]);
     }
-    transPlan->SetTransposeOutputLength();
+    transPlan->outputLength = transPlan->length;
 
     // --------------------------------
     // Fuse Shims

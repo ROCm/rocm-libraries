@@ -38,12 +38,6 @@ protected:
     }
     void AssignParams_internal() override;
     void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
-
-public:
-    bool OutputLengthMatchesOutStride() const override
-    {
-        return true;
-    }
 };
 
 /*****************************************************
@@ -65,11 +59,6 @@ protected:
 public:
     // 3D Even can possibly set this
     bool try_fuse_pre_post_processing = false;
-
-    bool OutputLengthMatchesOutStride() const override
-    {
-        return true;
-    }
 };
 
 /*****************************************************
@@ -85,11 +74,6 @@ class Real2DEvenNode : public InternalNode
         TR_PAIR, // RTRT Real2C, or TRTR for C2Real
         REAL_2D_SINGLE, // 2D_SINGLE with pre/post processing
     };
-
-    bool OutputLengthMatchesOutStride() const override
-    {
-        return true;
-    }
 
 protected:
     explicit Real2DEvenNode(TreeNode* p)
@@ -125,11 +109,6 @@ class Real3DEvenNode : public InternalNode
         SBRC, // SBRC + SBRC + SBRC with post-processing for Real2C only // NOT IMPLEMENTED
         TR_PAIRS // RTRTRT Real2C, or TRTRTR for C2Real
     };
-
-    bool OutputLengthMatchesOutStride() const override
-    {
-        return true;
-    }
 
     static bool use_real_2D_single_SBCC(const NodeMetaData&  nodeData,
                                         const function_pool& pool,
@@ -221,12 +200,6 @@ protected:
     }
 
     void SetupGridParam_internal(GridParam& gp) override{};
-
-public:
-    bool OutputLengthMatchesOutStride() const override
-    {
-        return true;
-    }
 };
 
 /*****************************************************
@@ -277,10 +250,6 @@ protected:
 
 public:
     std::vector<size_t> CollapsibleDims() override;
-    bool                OutputLengthMatchesOutStride() const override
-    {
-        return true;
-    }
 };
 
 #endif // TREE_NODE_REAL_H

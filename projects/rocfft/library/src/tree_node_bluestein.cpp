@@ -119,10 +119,14 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         chirpPlan->direction = direction;
         chirpPlan->batch     = 1;
         chirpPlan->large1D   = 2 * length[0];
+        // Keep the transform-length shape; the chirp kernel writes two padded spans.
+        chirpPlan->outputLength = chirpPlan->length;
 
         NodeMetaData chirpFFTPlanData(this);
         chirpFFTPlanData.dimension = 1;
         chirpFFTPlanData.length.push_back(blue->get_padded_length());
+        chirpFFTPlanData.outputLength = chirpFFTPlanData.length;
+
         chirpFFTPlanData.batch   = 1;
         chirpFFTPlanData.iOffset = blue->get_padded_length();
         chirpFFTPlanData.oOffset = blue->get_padded_length();
@@ -133,6 +137,7 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         singlePlan->dimension = 1;
         singlePlan->length    = length;
         singlePlan->blue      = blue;
+        singlePlan->outputLength = singlePlan->length;
 
         childNodes.emplace_back(std::move(chirpPlan));
         childNodes.emplace_back(std::move(chirpFFTPlan));
@@ -146,6 +151,8 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         NodeMetaData fftFwdChirpPadPlanData(this);
         fftFwdChirpPadPlanData.dimension = 1;
         fftFwdChirpPadPlanData.length.push_back(blue->get_padded_length());
+        fftFwdChirpPadPlanData.outputLength = fftFwdChirpPadPlanData.length;
+
         fftFwdChirpPadPlanData.batch = 1;
         auto fftFwdChirpPadPlan = NodeFactory::CreateExplicitNode(fftFwdChirpPadPlanData, this);
         fftFwdChirpPadPlan->direction = direction;
@@ -164,6 +171,7 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             fftFwdChirpMulPadPlanData.length.push_back(length[index]);
         }
+        fftFwdChirpMulPadPlanData.outputLength = fftFwdChirpMulPadPlanData.length;
         auto fftFwdChirpMulPadPlan
             = NodeFactory::CreateExplicitNode(fftFwdChirpMulPadPlanData, this);
         fftFwdChirpMulPadPlan->direction = direction;
@@ -184,6 +192,8 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             fftInvMulChirpMulPlanData.length.push_back(length[index]);
         }
+        // Keep the padded FFT shape; the final fused kernel stores only the transform length.
+        fftInvMulChirpMulPlanData.outputLength = fftInvMulChirpMulPlanData.length;
         auto fftInvMulChirpMulPlan
             = NodeFactory::CreateExplicitNode(fftInvMulChirpMulPlanData, this);
         fftInvMulChirpMulPlan->blue = blue;
@@ -208,15 +218,21 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         chirpPlan->direction = direction;
         chirpPlan->batch     = 1;
         chirpPlan->large1D   = 2 * length[0];
+        // As in the single-kernel path, the padded chirp storage is not the node shape.
+        chirpPlan->outputLength = chirpPlan->length;
 
         auto padmulPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_PAD_MUL, this);
         padmulPlan->dimension = 1;
         padmulPlan->length    = length;
         padmulPlan->blue      = blue;
+        // Keep the unpadded shape even though PadMul writes padded output.
+        padmulPlan->outputLength = padmulPlan->length;
 
         NodeMetaData ffticPlanData(this);
         ffticPlanData.dimension = 1;
         ffticPlanData.length.push_back(blue->get_padded_length());
+        ffticPlanData.outputLength = ffticPlanData.length;
+
         ffticPlanData.batch *= product(length.begin() + 1, length.end());
         ffticPlanData.batch++;
         ffticPlanData.iOffset = blue->get_padded_length();
@@ -236,7 +252,8 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             fftmulPlan->length.push_back(length[index]);
         }
-        fftmulPlan->blue = blue;
+        fftmulPlan->blue         = blue;
+        fftmulPlan->outputLength = fftmulPlan->length;
 
         NodeMetaData fftrPlanData(this);
         fftrPlanData.dimension = 1;
@@ -245,6 +262,8 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             fftrPlanData.length.push_back(length[index]);
         }
+        fftrPlanData.outputLength = fftrPlanData.length;
+
         fftrPlanData.direction    = -direction;
         fftrPlanData.iOffset      = 2 * blue->get_padded_length();
         fftrPlanData.oOffset      = 2 * blue->get_padded_length();
@@ -252,10 +271,11 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         fftrPlan->allowOutofplace = false;
         fftrPlan->RecursiveBuildTree();
 
-        auto resmulPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_RES_MUL, this);
-        resmulPlan->dimension = 1;
-        resmulPlan->length    = length;
-        resmulPlan->blue      = blue;
+        auto resmulPlan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_RES_MUL, this);
+        resmulPlan->dimension    = 1;
+        resmulPlan->length       = length;
+        resmulPlan->blue         = blue;
+        resmulPlan->outputLength = resmulPlan->length;
 
         childNodes.emplace_back(std::move(chirpPlan));
         childNodes.emplace_back(std::move(padmulPlan));

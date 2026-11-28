@@ -407,39 +407,39 @@ void LeafNode::SetupGridParam(GridParam& gp)
 // grid params are set up by RTC
 void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
-void TreeNode::SetTransposeOutputLength()
+TreeNode::OutputAxisOrder TransposeNode::PackedOutputOrder(ComputeScheme scheme)
 {
     switch(scheme)
     {
     case CS_KERNEL_TRANSPOSE:
-    {
-        outputLength = length;
-        std::swap(outputLength[0], outputLength[1]);
-        break;
-    }
     case CS_KERNEL_TRANSPOSE_XY_Z:
-    case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
-    {
-        outputLength = length;
-        std::swap(outputLength[1], outputLength[2]);
-        std::swap(outputLength[0], outputLength[1]);
-        break;
-    }
+        // XY_Z builders already exchange Y and Z in the node's input axes.
+        return OutputAxisOrder::SWAP_01;
     case CS_KERNEL_TRANSPOSE_Z_XY:
-    case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
-    {
-        outputLength = length;
-        std::swap(outputLength[0], outputLength[1]);
-        std::swap(outputLength[1], outputLength[2]);
-        break;
-    }
+        return OutputAxisOrder::ROTATE_LEFT_3;
     default:
-        throw std::runtime_error("can't set transpose output length on non-transpose node");
+        return OutputAxisOrder::IDENTITY;
+    }
+}
+
+void TreeNode::PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axes)
+{
+    switch(order)
+    {
+    case OutputAxisOrder::IDENTITY:
+        break;
+    case OutputAxisOrder::SWAP_01:
+        std::swap(axes[0], axes[1]);
+        break;
+    case OutputAxisOrder::ROTATE_LEFT_3:
+        std::rotate(axes.begin(), axes.begin() + 1, axes.begin() + 3);
+        break;
     }
 }
 
 void TreeNode::CollapseContiguousDims()
 {
+    assert(outputLength.size() == length.size());
     // collapse children
     for(auto& child : childNodes)
         child->CollapseContiguousDims();
@@ -461,8 +461,11 @@ void TreeNode::CollapseContiguousDims()
     // into axis of larger index (so that batch dimension is never removed), iff collapsing
     // is valid for both the input and output node's data layouts for the considered couple
     // of axes
-    auto outputLengthTemp = GetOutputLength();
-    auto first_axis_it    = collapsible_axes.begin();
+    // Develop tested collapse eligibility against the packed output spans for
+    // these nodes. Keep that choice; additional collapses can change kernels.
+    auto collapseOutputLength = std::move(outputLength);
+    PermuteOutputAxes(legacyOutputOrder, collapseOutputLength);
+    auto first_axis_it = collapsible_axes.begin();
     while(first_axis_it != collapsible_axes.end())
     {
         auto second_axis_it = collapsible_axes.begin();
@@ -482,13 +485,13 @@ void TreeNode::CollapseContiguousDims()
             const auto del_idx  = std::min(*first_axis_it, *second_axis_it);
             // note: del_idx < length.size() by construction
 
-            auto& keep_ilength      = keep_idx < length.size() ? length[keep_idx] : batch;
-            auto& keep_istride      = keep_idx < length.size() ? inStride[keep_idx] : iDist;
-            auto& keep_olength      = keep_idx < length.size() ? outputLengthTemp[keep_idx] : batch;
-            auto& keep_ostride      = keep_idx < length.size() ? outStride[keep_idx] : oDist;
+            auto& keep_ilength = keep_idx < length.size() ? length[keep_idx] : batch;
+            auto& keep_istride = keep_idx < length.size() ? inStride[keep_idx] : iDist;
+            auto& keep_ostride = keep_idx < length.size() ? outStride[keep_idx] : oDist;
+            auto& keep_olength = keep_idx < length.size() ? collapseOutputLength[keep_idx] : batch;
             const auto& del_ilength = del_idx < length.size() ? length[del_idx] : batch;
             const auto& del_istride = del_idx < length.size() ? inStride[del_idx] : iDist;
-            const auto& del_olength = del_idx < length.size() ? outputLengthTemp[del_idx] : batch;
+            const auto& del_olength = collapseOutputLength[del_idx];
             const auto& del_ostride = del_idx < length.size() ? outStride[del_idx] : oDist;
             const bool  keep_is_multiple_of_del
                 = (keep_ilength == 1 || keep_istride == del_istride * del_ilength)
@@ -525,7 +528,7 @@ void TreeNode::CollapseContiguousDims()
             // effectively erase the axis of index del_idx
             length.erase(length.begin() + del_idx);
             inStride.erase(inStride.begin() + del_idx);
-            outputLengthTemp.erase(outputLengthTemp.begin() + del_idx);
+            collapseOutputLength.erase(collapseOutputLength.begin() + del_idx);
             outStride.erase(outStride.begin() + del_idx);
             if(del_idx == *first_axis_it)
                 collapsible_axes.erase(first_axis_it);
@@ -553,8 +556,11 @@ void TreeNode::CollapseContiguousDims()
             first_axis_it++;
     }
 
-    if(!outputLength.empty())
-        outputLength = outputLengthTemp;
+    // The packed-order nodes do not change shape. Restore their output spans
+    // in input-axis order, including any axes collapsed above.
+    if(legacyOutputOrder != OutputAxisOrder::IDENTITY)
+        std::copy(length.begin(), length.end(), collapseOutputLength.begin());
+    outputLength = std::move(collapseOutputLength);
 }
 
 bool TreeNode::IsBluesteinChirpSetup()

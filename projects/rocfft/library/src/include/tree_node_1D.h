@@ -94,12 +94,6 @@ protected:
 public:
     bool                CreateDeviceResources() override;
     std::vector<size_t> CollapsibleDims() override;
-    bool                OutputLengthMatchesOutStride() const override
-    {
-        // with embedded r2c, stockham nodes will change length, so the
-        // output length is different from the input length.
-        return ebtype != EmbeddedType::NONE;
-    }
 };
 
 /*****************************************************
@@ -216,10 +210,6 @@ public:
 
     // writes are along columns so they may benefit from padding
     bool PaddingBenefitsOutput() override
-    {
-        return true;
-    }
-    bool OutputLengthMatchesOutStride() const override
     {
         return true;
     }

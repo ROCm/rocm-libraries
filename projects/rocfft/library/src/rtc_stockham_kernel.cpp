@@ -172,7 +172,9 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     if(specs2d)
         specs2d->wgs_is_derived = true;
 
-    bool unit_stride = node.inStride.front() == 1 && node.outStride.front() == 1;
+    // SBRC specializes on the tiled output axis.
+    bool unit_stride
+        = node.inStride.front() == 1 && node.outStride[node.LegacySBRCOutputAxis(0)] == 1;
 
     specs->transform_type = node.GetRootPlanTransformType();
 

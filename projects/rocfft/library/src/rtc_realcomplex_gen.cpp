@@ -667,27 +667,6 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable gridY{"gridY", "const " + std::string(rtc_kint_type(KIntType::U32))};
     Variable gridZ{"gridZ", "const " + std::string(rtc_kint_type(KIntType::U32))};
 
-    // r2c uses a device function helper to work out which dimension
-    // we're transposing to
-    if(isR2C)
-    {
-        // this helper doesn't need to have its AST transformed or
-        // anything, so just add it to source as a string
-        src += R"(
-	    __device__ integer_type output_row_base(integer_type            dim,
-	                                      integer_type            output_batch_start,
-	                                      const integer_type* outStride,
-	                                      const integer_type      col)
-	    {
-	        if(dim == 2)
-	            return output_batch_start + outStride[1] * col;
-	        else if(dim == 3)
-	            return output_batch_start + outStride[2] * col;
-	        return 0;
-            }
-        )";
-    }
-
     Function func{kernel_name};
     func.launch_bounds = tileX * tileY;
     func.qualifier     = "extern \"C\" __global__";
@@ -889,11 +868,13 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable input_row_idx{"input_row_idx", "const integer_type"};
     Variable input_row_base{"input_row_base", "integer_type"};
 
+    // output offsets for both directions
+    Variable output_row_base{"output_row_base", "integer_type"};
+    Variable output_row_stride{"output_row_stride", "const integer_type"};
+
     // c2r-specific variables
     Variable input_col_base{"input_col_base", "const integer_type"};
     Variable input_col_stride{"input_col_stride", "const integer_type"};
-    Variable output_row_base{"output_row_base", "const integer_type"};
-    Variable output_row_stride{"output_row_stride", "const integer_type"};
 
     func.body += Declaration{lds_row, "threadIdx.y"};
     func.body += Declaration{lds_col, "threadIdx.x"};
@@ -904,6 +885,10 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         func.body += Declaration{input_row_base, input_row_idx % lengths[1] * inStride[1]};
         func.body
             += If{dim > 2, {AddAssign(input_row_base, input_row_idx / lengths[1] * inStride[2])}};
+        func.body += Declaration{output_row_base, input_row_idx % lengths[1] * outStride[1]};
+        func.body
+            += If{dim > 2, {AddAssign(output_row_base, input_row_idx / lengths[1] * outStride[2])}};
+        func.body += Declaration{output_row_stride, outStride[0]};
 
         read_condition = row_start + lds_row < row_end && lds_col < cols_to_read;
         read_left_idx  = input_batch_start + input_row_base + left_col_start + lds_col;
@@ -937,18 +922,15 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
 
         compute_first_val += Assign{val.x(), first_elem.x() - first_elem.y()};
         compute_first_val += Assign{val.y(), Literal{"0.0"}};
-        write_first_idx = CallExpr{"output_row_base", {dim, output_batch_start, outStride, len_row}}
-                          + row_start + lds_row;
+        write_first_idx = output_batch_start + output_row_base + len_row * output_row_stride;
 
         compute_middle_val += Assign{val.x(), middle_elem.x()};
         compute_middle_val += Assign{val.y(), -middle_elem.y()};
-        write_middle_idx = CallExpr{"output_row_base", {dim, output_batch_start, outStride, middle}}
-                           + row_start + lds_row;
+        write_middle_idx = output_batch_start + output_row_base + middle * output_row_stride;
 
         compute_last_val += Assign{val.x(), first_elem.x() + first_elem.y()};
         compute_last_val += Assign{val.y(), Literal{"0.0"}};
-        write_last_idx = CallExpr{"output_row_base", {dim, output_batch_start, outStride, 0}}
-                         + row_start + lds_row;
+        write_last_idx = output_batch_start + output_row_base;
     }
     else
     {
@@ -958,9 +940,9 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         func.body += Declaration{input_col_stride, Ternary{dim == 2, inStride[1], inStride[2]}};
 
         func.body += Declaration{output_row_base,
-                                 (row_start + lds_col) % lengths[0] * outStride[1]
-                                     + (row_start + lds_col) / lengths[0] * outStride[2]};
-        func.body += Declaration{output_row_stride, outStride[0]};
+                                 (row_start + lds_col) % lengths[0] * outStride[0]
+                                     + (row_start + lds_col) / lengths[0] * outStride[1]};
+        func.body += Declaration{output_row_stride, Ternary{dim == 2, outStride[1], outStride[2]}};
 
         read_condition = row_start + lds_col < row_end && lds_row < cols_to_read;
         read_left_idx
@@ -1088,20 +1070,16 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
         butterfly.body += CommentLines{"write left side"};
         butterfly.body += Assign{val.x(), u.x() + v.x() * twd_p.y() + u.y() * twd_p.x()};
         butterfly.body += Assign{val.y(), v.y() + u.y() * twd_p.y() - v.x() * twd_p.x()};
-        butterfly.body
-            += StoreGlobal{output,
-                           CallExpr{"output_row_base", {dim, output_batch_start, outStride, col}}
-                               + row_start + lds_row,
-                           val};
+        butterfly.body += StoreGlobal{
+            output, output_batch_start + output_row_base + col * output_row_stride, val};
 
         butterfly.body += CommentLines{"write right side"};
         butterfly.body += Assign{val.x(), u.x() - v.x() * twd_p.y() - u.y() * twd_p.x()};
         butterfly.body += Assign{val.y(), -v.y() + u.y() * twd_p.y() - v.x() * twd_p.x()};
-        butterfly.body += StoreGlobal{
-            output,
-            CallExpr{"output_row_base", {dim, output_batch_start, outStride, len_row - col}}
-                + row_start + lds_row,
-            val};
+        butterfly.body += StoreGlobal{output,
+                                      output_batch_start + output_row_base
+                                          + (len_row - col) * output_row_stride,
+                                      val};
 
         func.body += butterfly;
     }

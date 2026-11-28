@@ -50,17 +50,18 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     // 2d fft
     NodeMetaData xyPlanData(this);
-    xyPlanData.length    = length;
-    xyPlanData.dimension = 2;
+    xyPlanData.length       = length;
+    xyPlanData.dimension    = 2;
+    xyPlanData.outputLength = xyPlanData.length;
     auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
     xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
     // first transpose
     auto trans1Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
     trans1Plan->length = length;
-    trans1Plan->SetTransposeOutputLength();
     std::swap(trans1Plan->length[1], trans1Plan->length[2]);
-    trans1Plan->dimension = 2;
+    trans1Plan->outputLength = trans1Plan->length;
+    trans1Plan->dimension    = 2;
 
     // z fft
     NodeMetaData zPlanData(this);
@@ -68,14 +69,15 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     zPlanData.length.push_back(length[2]);
     zPlanData.length.push_back(length[0]);
     zPlanData.length.push_back(length[1]);
+    zPlanData.outputLength = zPlanData.length;
     auto zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node2);
     zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
     // second transpose
-    auto trans2Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-    trans2Plan->length = zPlan->length;
-    trans2Plan->SetTransposeOutputLength();
-    trans2Plan->dimension = 2;
+    auto trans2Plan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
+    trans2Plan->length       = zPlan->length;
+    trans2Plan->outputLength = trans2Plan->length;
+    trans2Plan->dimension    = 2;
 
     // --------------------------------
     // Fuse Shims
@@ -184,16 +186,17 @@ void TRTRTR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         // transpose Z_XY
         auto trans_plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
         trans_plan->length = cur_length;
-        trans_plan->SetTransposeOutputLength();
-        trans_plan->dimension = 2;
+        trans_plan->outputLength = trans_plan->length;
+        trans_plan->dimension    = 2;
 
         std::swap(cur_length[0], cur_length[1]);
         std::swap(cur_length[1], cur_length[2]);
 
         // row ffts
         NodeMetaData row_plan_data(this);
-        row_plan_data.length    = cur_length;
-        row_plan_data.dimension = 1;
+        row_plan_data.length       = cur_length;
+        row_plan_data.dimension    = 1;
+        row_plan_data.outputLength = row_plan_data.length;
         // skip the decide scheme part in node factory
         ComputeScheme determined_scheme
             = (noSolution) ? CS_NONE : child_scheme_trees[i + 1]->curScheme;
@@ -386,17 +389,18 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             if(!noSolution && (child_scheme_trees[childNodes.size()]->curScheme != sbrcScheme))
                 throw std::runtime_error(
                     "BLOCKRC3DNode: Unexpected child scheme from solution map");
-            auto sbrc_node    = NodeFactory::CreateNodeFromScheme(sbrcScheme, this);
-            sbrc_node->length = cur_length;
-            sbrc_node->SetTransposeOutputLength();
+            auto sbrc_node          = NodeFactory::CreateNodeFromScheme(sbrcScheme, this);
+            sbrc_node->length       = cur_length;
+            sbrc_node->outputLength = sbrc_node->length;
             childNodes.emplace_back(std::move(sbrc_node));
         }
         else
         {
             // row ffts
             NodeMetaData row_plan_data(this);
-            row_plan_data.length    = cur_length;
-            row_plan_data.dimension = 1;
+            row_plan_data.length       = cur_length;
+            row_plan_data.dimension    = 1;
+            row_plan_data.outputLength = row_plan_data.length;
             ComputeScheme determined_scheme
                 = (noSolution) ? CS_NONE : child_scheme_trees[childNodes.size()]->curScheme;
             auto row_plan = NodeFactory::CreateExplicitNode(row_plan_data, this, determined_scheme);
@@ -410,16 +414,17 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
                     "BLOCKRC3DNode: Unexpected child scheme from solution map");
             auto trans_plan    = NodeFactory::CreateNodeFromScheme(transScheme, this);
             trans_plan->length = cur_length;
-            trans_plan->SetTransposeOutputLength();
             if(!use_ZXY_sbrc)
                 std::swap(trans_plan->length[1], trans_plan->length[2]);
-            trans_plan->dimension = 2;
+            trans_plan->outputLength = trans_plan->length;
+            trans_plan->dimension    = 2;
 
             // RT
             childNodes.emplace_back(std::move(row_plan));
             childNodes.emplace_back(std::move(trans_plan));
         }
 
+        // Rebase the next partition's input lengths so its transform axis is first.
         if(use_ZXY_sbrc)
         {
             std::swap(cur_length[1], cur_length[0]);
@@ -461,18 +466,14 @@ void BLOCKRC3DNode::AssignParams_internal()
         {
         case CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z:
         {
-            node->outStride.push_back(1);
-            node->outStride.push_back(node->length[2]);
-            node->outStride.push_back(node->outStride[1] * node->length[0]);
-            node->oDist = node->outStride[2] * node->length[1];
+            node->outStride = {node->length[2], node->length[2] * node->length[0], 1};
+            node->oDist     = node->outStride[1] * node->length[1];
             break;
         }
         case CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY:
         {
-            node->outStride.push_back(1);
-            node->outStride.push_back(node->length[1]);
-            node->outStride.push_back(node->outStride[1] * node->length[2]);
-            node->oDist = node->outStride[2] * node->length[0];
+            node->outStride = {node->length[1] * node->length[2], 1, node->length[1]};
+            node->oDist     = node->outStride[0] * node->length[0];
             break;
         }
         case CS_KERNEL_TRANSPOSE_XY_Z:
@@ -500,11 +501,18 @@ void BLOCKRC3DNode::AssignParams_internal()
             break;
         }
         }
+        // Rebase the strides for the next partition without changing the producer's outStride.
         prev_outStride = node->outStride;
         prev_oDist     = node->oDist;
         if(node->scheme == CS_KERNEL_TRANSPOSE_XY_Z)
             std::swap(prev_outStride[0], prev_outStride[1]);
-        else if(node->scheme == CS_KERNEL_TRANSPOSE_Z_XY)
+        else if(node->scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z)
+        {
+            std::swap(prev_outStride[2], prev_outStride[1]);
+            std::swap(prev_outStride[1], prev_outStride[0]);
+        }
+        else if(node->scheme == CS_KERNEL_TRANSPOSE_Z_XY
+                || node->scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY)
         {
             std::swap(prev_outStride[0], prev_outStride[1]);
             std::swap(prev_outStride[1], prev_outStride[2]);
@@ -540,6 +548,7 @@ void BLOCKCR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         auto node = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
         node->length.push_back(cur_length[2]);
         node->length.push_back(cur_length[0] * cur_length[1]);
+        node->outputLength = node->length;
         childNodes.emplace_back(std::move(node));
         std::swap(cur_length[1], cur_length[2]);
         std::swap(cur_length[1], cur_length[0]);
@@ -606,6 +615,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         xyPlanData.length.push_back(length[index]);
     }
+    xyPlanData.outputLength = xyPlanData.length;
     auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
     xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
@@ -619,7 +629,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         zPlanData.length.push_back(length[index]);
     }
-    zPlanData.outputLength = length;
+    zPlanData.outputLength = zPlanData.length;
 
     // use explicit SBCC kernel if available
     std::unique_ptr<TreeNode> zPlan;
@@ -627,19 +637,22 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     if(determined_scheme_node1 != CS_NONE)
     {
         zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node1);
+        zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
         zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
     }
     else
     {
         if(pool.has_SBCC_kernel(length[2], precision))
         {
-            zPlan            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
-            zPlan->length    = zPlanData.length;
-            zPlan->dimension = 1;
+            zPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
+            zPlan->length = zPlanData.length;
+            zPlan->outputLength = zPlan->length;
+            zPlan->dimension    = 1;
         }
         else
         {
-            zPlan = NodeFactory::CreateExplicitNode(zPlanData, this);
+            zPlan                    = NodeFactory::CreateExplicitNode(zPlanData, this);
+            zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
             zPlan->RecursiveBuildTree(nullptr);
         }
     }
@@ -731,6 +744,7 @@ void PP3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
         xPartialPassPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP, this);
         xPartialPassPlan->length = xPartialPassPlanData.length;
+        xPartialPassPlan->outputLength = xPartialPassPlan->length;
         xPartialPassPlan->dimension    = 1;
         xPartialPassPlan->ppOffDim     = ppOffDim;
         xPartialPassPlan->allowInplace = true;
@@ -747,13 +761,13 @@ void PP3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             zPartialPassPlanData.length.push_back(length[index]);
         }
-        zPartialPassPlanData.outputLength = length;
 
         // use explicit SBCC partial-pass kernel
         std::unique_ptr<TreeNode> zPartialPassPlan;
 
         zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP_BLOCK_CC, this);
         zPartialPassPlan->length       = zPartialPassPlanData.length;
+        zPartialPassPlan->outputLength = zPartialPassPlan->length;
         zPartialPassPlan->dimension    = 1;
         zPartialPassPlan->ppOffDim     = ppOffDim;
         zPartialPassPlan->allowInplace = false;
@@ -978,8 +992,10 @@ bool RealCmplxTransZ_XYNode::CreateDevKernelArgs()
     if(length.size() == 2)
     {
         length.push_back(1);
+        outputLength.push_back(1);
         inStride.push_back(inStride.back());
-        outStride.push_back(outStride.back());
+        // In input-axis order, axis 0 supplies the legacy dummy output stride.
+        outStride.push_back(outStride.front());
     }
     return SBRCTranspose3DNode::CreateDevKernelArgs();
 }

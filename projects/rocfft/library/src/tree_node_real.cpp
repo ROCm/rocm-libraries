@@ -28,25 +28,11 @@
 #include <algorithm>
 #include <cstdint>
 
-// work out the real and complex lengths on a real-complex plan, and
-// return pointers to those lengths
-static void set_complex_length(TreeNode&                   node,
-                               const std::vector<size_t>*& realLength,
-                               const std::vector<size_t>*& complexLength)
+// View the same axis spans in real/complex order regardless of transform direction.
+static void get_real_complex_lengths(const TreeNode&             node,
+                                     const std::vector<size_t>*& realLength,
+                                     const std::vector<size_t>*& complexLength)
 {
-    // if output is not set yet, then node.length counts in real
-    // units.  compute number of complex units and make both input
-    // and output lengths correct
-    if(node.outputLength.empty())
-    {
-        node.outputLength = node.length;
-        node.outputLength.front() /= 2;
-        node.outputLength.front() += 1;
-
-        if(node.direction == 1)
-            std::swap(node.length, node.outputLength);
-    }
-
     if(node.direction == -1)
     {
         // forward transform
@@ -149,7 +135,7 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // check schemes from solution map
     ComputeScheme determined_scheme = CS_NONE;
@@ -166,16 +152,16 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     auto copyHeadPlan = NodeFactory::CreateNodeFromScheme(copyHeadScheme, this);
     // head copy plan
-    copyHeadPlan->dimension = dimension;
-    copyHeadPlan->length    = length;
-    if(!r2c)
-        copyHeadPlan->outputLength = *realLength;
+    copyHeadPlan->dimension    = dimension;
+    copyHeadPlan->length       = length;
+    copyHeadPlan->outputLength = *realLength;
     childNodes.emplace_back(std::move(copyHeadPlan));
 
     // complex fft
     NodeMetaData fftPlanData(this);
-    fftPlanData.dimension = dimension;
-    fftPlanData.length    = *realLength;
+    fftPlanData.dimension    = dimension;
+    fftPlanData.length       = *realLength;
+    fftPlanData.outputLength = fftPlanData.length;
 
     auto fftPlan = NodeFactory::CreateExplicitNode(fftPlanData, this, determined_scheme);
     fftPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
@@ -188,11 +174,10 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     fftPlan->GetLastLeaf()->allowedOutArrayTypes = {rocfft_array_type_complex_interleaved};
     childNodes.emplace_back(std::move(fftPlan));
 
-    auto copyTailPlan       = NodeFactory::CreateNodeFromScheme(copyTailScheme, this);
-    copyTailPlan->dimension = dimension;
-    copyTailPlan->length    = *realLength;
-    if(r2c)
-        copyTailPlan->outputLength = *complexLength;
+    auto copyTailPlan          = NodeFactory::CreateNodeFromScheme(copyTailScheme, this);
+    copyTailPlan->dimension    = dimension;
+    copyTailPlan->length       = *realLength;
+    copyTailPlan->outputLength = r2c ? *complexLength : *realLength;
 
     childNodes.emplace_back(std::move(copyTailPlan));
 }
@@ -208,8 +193,7 @@ void RealTransCmplxNode::AssignParams_internal()
     copyHeadPlan->iDist    = iDist;
 
     copyHeadPlan->outStride.push_back(1);
-    copyHeadPlan->oDist = copyHeadPlan->outputLength.empty() ? copyHeadPlan->length[0]
-                                                             : copyHeadPlan->outputLength[0];
+    copyHeadPlan->oDist = copyHeadPlan->outputLength[0];
     for(size_t index = 1; index < length.size(); index++)
     {
         copyHeadPlan->outStride.push_back(copyHeadPlan->oDist);
@@ -239,7 +223,7 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // Fastest moving dimension must be even:
     if(realLength->at(0) % 2 != 0)
@@ -278,10 +262,11 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // complex
 
     NodeMetaData cfftPlanData(this);
-    cfftPlanData.dimension = dimension;
-    cfftPlanData.length    = *realLength;
-    cfftPlanData.length[0] = cfftPlanData.length[0] / 2;
-    auto cfftPlan          = NodeFactory::CreateExplicitNode(cfftPlanData, this, determined_scheme);
+    cfftPlanData.dimension    = dimension;
+    cfftPlanData.length       = *realLength;
+    cfftPlanData.length[0]    = cfftPlanData.length[0] / 2;
+    cfftPlanData.outputLength = cfftPlanData.length;
+    auto cfftPlan = NodeFactory::CreateExplicitNode(cfftPlanData, this, determined_scheme);
     // NB: the buffer is real, but we treat it as complex
     cfftPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[fft_node_id].get());
 
@@ -293,8 +278,7 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
         // fuse 1D pre/post when the fused Stockham kernel fits in LDS.
         // Use cfftPlan->length[0] (always = realLength/2) rather than length[0]/2:
-        // for C2R, set_complex_length swaps node.length to the Hermitian side,
-        // making length[0]/2 wrong.
+        // For C2R, length[0] counts the Hermitian bins, not the real samples.
         if((cfftPlan->scheme == CS_KERNEL_STOCKHAM) && // simple decomposition
            (length.size() == 1) && // 1D
            fused_real_stockham_fits_lds(pool, cfftPlan->length[0], precision, deviceProp)
@@ -351,7 +335,7 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             prePlan->dimension = 1;
             prePlan->length    = *complexLength;
             // output of the prePlan is in complex units
-            prePlan->outputLength = outputLength;
+            prePlan->outputLength = *realLength;
             prePlan->outputLength.front() /= 2;
             childNodes.emplace_back(std::move(prePlan));
         }
@@ -482,7 +466,7 @@ void Real2DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 {
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // Fastest moving dimension must be even:
     if(realLength->at(0) % 2 != 0)
@@ -547,8 +531,9 @@ void Real2DEvenNode::BuildTree_internal_2D_SINGLE()
     else
     {
         NodeMetaData cfftPlanData(this);
-        cfftPlanData.dimension = dimension;
-        cfftPlanData.length    = {outputLength[0] / 2, outputLength[1]};
+        cfftPlanData.dimension    = dimension;
+        cfftPlanData.length       = {outputLength[0] / 2, outputLength[1]};
+        cfftPlanData.outputLength = cfftPlanData.length;
 
         auto cfftPlan = NodeFactory::CreateExplicitNode(cfftPlanData, this);
         cfftPlan->RecursiveBuildTree();
@@ -586,15 +571,17 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         static_cast<RealTransEvenNode*>(rcplan.get())->try_fuse_pre_post_processing
             = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
-        rcplan->length    = length;
-        rcplan->dimension = 1;
+        rcplan->length       = length;
+        rcplan->outputLength = outputLength;
+        rcplan->dimension    = 1;
         rcplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
         childNodes.emplace_back(std::move(rcplan));
 
-        auto sbccY          = NodeFactory::CreateNodeFromScheme(determined_scheme_1, this);
-        sbccY->length       = childNodes.back()->outputLength;
-        sbccY->outputLength = sbccY->length;
+        auto sbccY    = NodeFactory::CreateNodeFromScheme(determined_scheme_1, this);
+        sbccY->length = childNodes.back()->outputLength;
         std::swap(sbccY->length[0], sbccY->length[1]);
+        sbccY->outputLength      = sbccY->length;
+        sbccY->legacyOutputOrder = OutputAxisOrder::SWAP_01;
         childNodes.emplace_back(std::move(sbccY));
     }
     else
@@ -612,10 +599,11 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
             determined_scheme_0 = child_scheme_trees[0]->curScheme;
         }
 
-        auto sbccY          = NodeFactory::CreateNodeFromScheme(determined_scheme_0, this);
-        sbccY->outputLength = length;
-        sbccY->length       = length;
+        auto sbccY    = NodeFactory::CreateNodeFromScheme(determined_scheme_0, this);
+        sbccY->length = length;
         std::swap(sbccY->length[0], sbccY->length[1]);
+        sbccY->outputLength      = sbccY->length;
+        sbccY->legacyOutputOrder = OutputAxisOrder::SWAP_01;
         childNodes.emplace_back(std::move(sbccY));
 
         // c2r
@@ -624,8 +612,9 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
             = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
-        crplan->length    = outputLength;
-        crplan->dimension = 1;
+        crplan->length       = length;
+        crplan->outputLength = outputLength;
+        crplan->dimension    = 1;
         crplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
         childNodes.emplace_back(std::move(crplan));
     }
@@ -653,29 +642,32 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
         }
         // RTRT
         // first row fft
-        auto row1Plan       = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        row1Plan->length    = length;
-        row1Plan->dimension = 1;
+        auto row1Plan          = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
+        row1Plan->length       = length;
+        row1Plan->outputLength = outputLength;
+        row1Plan->dimension    = 1;
         row1Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
         // first transpose
-        auto trans1Plan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans1Plan->length    = row1Plan->outputLength;
-        trans1Plan->dimension = 2;
-        trans1Plan->SetTransposeOutputLength();
+        auto trans1Plan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        trans1Plan->length       = row1Plan->outputLength;
+        trans1Plan->dimension    = 2;
+        trans1Plan->outputLength = trans1Plan->length;
 
         // second row fft
         NodeMetaData row2PlanData(this);
-        row2PlanData.length    = trans1Plan->outputLength;
-        row2PlanData.dimension = 1;
+        row2PlanData.length = trans1Plan->outputLength;
+        std::swap(row2PlanData.length[0], row2PlanData.length[1]);
+        row2PlanData.dimension    = 1;
+        row2PlanData.outputLength = row2PlanData.length;
         auto row2Plan = NodeFactory::CreateExplicitNode(row2PlanData, this, determined_scheme_2);
         row2Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
         // second transpose
-        auto trans2Plan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans2Plan->length    = trans1Plan->outputLength;
-        trans2Plan->dimension = 2;
-        trans2Plan->SetTransposeOutputLength();
+        auto trans2Plan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        trans2Plan->length       = row2PlanData.outputLength;
+        trans2Plan->dimension    = 2;
+        trans2Plan->outputLength = trans2Plan->length;
 
         // --------------------------------
         // Fuse Shims:
@@ -731,30 +723,33 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
 
         // TRTR
         // first transpose
-        auto trans1Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans1Plan->length = length;
-        trans1Plan->SetTransposeOutputLength();
-        trans1Plan->dimension = 2;
+        auto trans1Plan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        trans1Plan->length       = length;
+        trans1Plan->outputLength = trans1Plan->length;
+        trans1Plan->dimension    = 2;
 
         // c2c row transform
         NodeMetaData c2cPlanData(this);
         c2cPlanData.dimension = 1;
         c2cPlanData.length    = trans1Plan->outputLength;
+        std::swap(c2cPlanData.length[0], c2cPlanData.length[1]);
+        c2cPlanData.outputLength = c2cPlanData.length;
         auto c2cPlan = NodeFactory::CreateExplicitNode(c2cPlanData, this, determined_scheme_1);
         c2cPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
 
         // second transpose
-        auto trans2plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-        trans2plan->length = trans1Plan->outputLength;
-        trans2plan->SetTransposeOutputLength();
-        trans2plan->dimension = 2;
+        auto trans2plan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        trans2plan->length       = c2cPlanData.outputLength;
+        trans2plan->outputLength = trans2plan->length;
+        trans2plan->dimension    = 2;
         // NOTE
 
         // c2r row transform
         if(!noSolution && (child_scheme_trees[3]->curScheme != CS_REAL_TRANSFORM_EVEN))
             throw std::runtime_error("Real2DEvenNode: Unexpected child scheme from solution map");
-        auto c2rPlan    = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        c2rPlan->length = outputLength;
+        auto c2rPlan          = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
+        c2rPlan->length       = length;
+        c2rPlan->outputLength = outputLength;
         c2rPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[3].get());
 
         // --------------------------------
@@ -1061,7 +1056,7 @@ void Real3DEvenNode::Build_solution()
 {
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // Fastest moving dimension must be even:
     if(realLength->at(0) % 2 != 0)
@@ -1154,27 +1149,30 @@ void Real3DEvenNode::BuildTree_internal_2D_SINGLE_CC()
         xyPlan->outputLength = xyPlan->length;
         xyPlan->outputLength.front() += 1;
 
-        bool haveSBCC_Z     = pool.has_SBCC_kernel(length[2], precision);
-        auto scheme         = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
-        auto sbccZ          = NodeFactory::CreateNodeFromScheme(scheme, this);
-        sbccZ->length       = {length[2], (length[0] / 2 + 1), length[1]};
-        sbccZ->outputLength = outputLength;
-        sbccZ->dimension    = 1;
+        bool haveSBCC_Z          = pool.has_SBCC_kernel(length[2], precision);
+        auto scheme              = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
+        auto sbccZ               = NodeFactory::CreateNodeFromScheme(scheme, this);
+        sbccZ->length            = {length[2], (length[0] / 2 + 1), length[1]};
+        sbccZ->outputLength      = sbccZ->length;
+        sbccZ->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
+        sbccZ->dimension         = 1;
 
         childNodes.emplace_back(std::move(xyPlan));
         childNodes.emplace_back(std::move(sbccZ));
     }
     else
     {
-        bool haveSBCC_Z  = pool.has_SBCC_kernel(outputLength[2], precision);
-        auto scheme      = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
-        auto sbccZ       = NodeFactory::CreateNodeFromScheme(scheme, this);
-        sbccZ->length    = {outputLength[2], (outputLength[0] / 2 + 1) * outputLength[1]};
-        sbccZ->dimension = 1;
+        bool haveSBCC_Z     = pool.has_SBCC_kernel(outputLength[2], precision);
+        auto scheme         = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
+        auto sbccZ          = NodeFactory::CreateNodeFromScheme(scheme, this);
+        sbccZ->length       = {outputLength[2], (outputLength[0] / 2 + 1) * outputLength[1]};
+        sbccZ->dimension    = 1;
+        sbccZ->outputLength = sbccZ->length;
 
-        auto xyPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_2D_SINGLE, this);
-        xyPlan->length    = {outputLength[0] / 2, outputLength[1], outputLength[2]};
-        xyPlan->dimension = 2;
+        auto xyPlan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_2D_SINGLE, this);
+        xyPlan->length       = {outputLength[0] / 2, outputLength[1], outputLength[2]};
+        xyPlan->outputLength = xyPlan->length;
+        xyPlan->dimension    = 2;
         xyPlan->RecursiveBuildTree();
         xyPlan->ebtype = EmbeddedType::C2Real_PRE;
 
@@ -1221,7 +1219,8 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         sbccZ->length = remainingLength;
         std::swap(sbccZ->length[1], sbccZ->length[2]);
         std::swap(sbccZ->length[0], sbccZ->length[1]);
-        sbccZ->outputLength = remainingLength;
+        sbccZ->outputLength      = sbccZ->length;
+        sbccZ->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
         childNodes.emplace_back(std::move(sbccZ));
 
         // SBCC along Y dimension
@@ -1236,7 +1235,8 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         auto sbccY    = NodeFactory::CreateNodeFromScheme(scheme, this);
         sbccY->length = remainingLength;
         std::swap(sbccY->length[0], sbccY->length[1]);
-        sbccY->outputLength = remainingLength;
+        sbccY->outputLength      = sbccY->length;
+        sbccY->legacyOutputOrder = OutputAxisOrder::SWAP_01;
         childNodes.emplace_back(std::move(sbccY));
     };
 
@@ -1263,8 +1263,9 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         static_cast<RealTransEvenNode*>(rcplan.get())->try_fuse_pre_post_processing
             = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
-        rcplan->length    = length;
-        rcplan->dimension = 1;
+        rcplan->length       = length;
+        rcplan->outputLength = outputLength;
+        rcplan->dimension    = 1;
         rcplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
         // if we have SBCC kernels for the other two dimensions, transform them using SBCC and avoid transposes
@@ -1294,8 +1295,9 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
             = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
-        crplan->length    = outputLength;
-        crplan->dimension = 1;
+        crplan->length       = length;
+        crplan->outputLength = outputLength;
+        crplan->dimension    = 1;
         crplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
         childNodes.emplace_back(std::move(crplan));
 
@@ -1326,19 +1328,22 @@ void Real3DEvenNode::BuildTree_internal_SBCR(SchemeTreeVec& child_scheme_trees)
         }
     }
 
-    auto sbcrZ       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
-    sbcrZ->length    = {outputLength[2], (outputLength[0] / 2 + 1) * outputLength[1]};
-    sbcrZ->dimension = 1;
+    auto sbcrZ          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
+    sbcrZ->length       = {outputLength[2], (outputLength[0] / 2 + 1) * outputLength[1]};
+    sbcrZ->dimension    = 1;
+    sbcrZ->outputLength = sbcrZ->length;
     childNodes.emplace_back(std::move(sbcrZ));
 
-    auto sbcrY       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
-    sbcrY->length    = {outputLength[1], outputLength[2] * (outputLength[0] / 2 + 1)};
-    sbcrY->dimension = 1;
+    auto sbcrY          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
+    sbcrY->length       = {outputLength[1], outputLength[2] * (outputLength[0] / 2 + 1)};
+    sbcrY->dimension    = 1;
+    sbcrY->outputLength = sbcrY->length;
     childNodes.emplace_back(std::move(sbcrY));
 
-    auto sbcrX       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
-    sbcrX->length    = {outputLength[0] / 2, outputLength[1] * outputLength[2]};
-    sbcrX->dimension = 1;
+    auto sbcrX          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CR, this);
+    sbcrX->length       = {outputLength[0] / 2, outputLength[1] * outputLength[2]};
+    sbcrX->dimension    = 1;
+    sbcrX->outputLength = sbcrX->length;
     childNodes.emplace_back(std::move(sbcrX));
 }
 
@@ -1369,43 +1374,50 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         // first row fft + postproc is mandatory for fastest dimension
         auto rcplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
 
-        rcplan->length    = length;
-        rcplan->dimension = 1;
+        rcplan->length       = length;
+        rcplan->outputLength = outputLength;
+        rcplan->dimension    = 1;
         rcplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
         // first transpose
-        auto trans1    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-        trans1->length = rcplan->outputLength;
-        trans1->SetTransposeOutputLength();
-        trans1->dimension = 3;
+        auto trans1          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
+        trans1->length       = rcplan->outputLength;
+        trans1->outputLength = trans1->length;
+        trans1->dimension    = 3;
 
         // first column
         NodeMetaData c1planData(this);
-        c1planData.length    = trans1->outputLength;
-        c1planData.dimension = 1;
+        c1planData.length = trans1->outputLength;
+        std::swap(c1planData.length[0], c1planData.length[1]);
+        std::swap(c1planData.length[1], c1planData.length[2]);
+        c1planData.dimension    = 1;
+        c1planData.outputLength = c1planData.length;
         auto c1plan = NodeFactory::CreateExplicitNode(c1planData, this, determined_scheme_2);
         c1plan->allowOutofplace = false; // let it be inplace
         c1plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
         // second transpose
-        auto trans2    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-        trans2->length = trans1->outputLength;
-        trans2->SetTransposeOutputLength();
-        trans2->dimension = 3;
+        auto trans2          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
+        trans2->length       = c1planData.outputLength;
+        trans2->outputLength = trans2->length;
+        trans2->dimension    = 3;
 
         // second column
         NodeMetaData c2planData(this);
-        c2planData.length    = trans2->outputLength;
-        c2planData.dimension = 1;
+        c2planData.length = trans2->outputLength;
+        std::swap(c2planData.length[0], c2planData.length[1]);
+        std::swap(c2planData.length[1], c2planData.length[2]);
+        c2planData.dimension    = 1;
+        c2planData.outputLength = c2planData.length;
         auto c2plan = NodeFactory::CreateExplicitNode(c2planData, this, determined_scheme_4);
         c2plan->allowOutofplace = false; // let it be inplace
         c2plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[4].get());
 
         // third transpose
-        auto trans3    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-        trans3->length = trans2->outputLength;
-        trans3->SetTransposeOutputLength();
-        trans3->dimension = 3;
+        auto trans3          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
+        trans3->length       = c2planData.outputLength;
+        trans3->outputLength = trans3->length;
+        trans3->dimension    = 3;
 
         // --------------------------------
         // Fuse Shims: [RealEven + T][RT][RT]
@@ -1490,39 +1502,44 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         // transpose
         auto trans3    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
         trans3->length = length;
-        trans3->SetTransposeOutputLength();
         std::swap(trans3->length[1], trans3->length[2]);
-        trans3->dimension = 3;
+        trans3->outputLength = trans3->length;
+        trans3->dimension    = 3;
 
         // column
         NodeMetaData c2planData(this);
-        c2planData.length    = trans3->outputLength;
-        c2planData.dimension = 1;
+        c2planData.length = trans3->outputLength;
+        // The transpose input already has axes 1 and 2 swapped.
+        std::swap(c2planData.length[0], c2planData.length[1]);
+        c2planData.dimension    = 1;
+        c2planData.outputLength = c2planData.length;
         auto c2plan = NodeFactory::CreateExplicitNode(c2planData, this, determined_scheme_1);
         c2plan->allowOutofplace = false; // let it be inplace
         c2plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
 
         // transpose
         auto trans2    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
-        trans2->length = trans3->outputLength;
-        trans2->SetTransposeOutputLength();
+        trans2->length = c2planData.outputLength;
         std::swap(trans2->length[1], trans2->length[2]);
-        trans2->dimension = 3;
+        trans2->outputLength = trans2->length;
+        trans2->dimension    = 3;
 
         // column
         NodeMetaData c1planData(this);
-        c1planData.length    = trans2->outputLength;
-        c1planData.dimension = 1;
+        c1planData.length = trans2->outputLength;
+        std::swap(c1planData.length[0], c1planData.length[1]);
+        c1planData.dimension    = 1;
+        c1planData.outputLength = c1planData.length;
         auto c1plan = NodeFactory::CreateExplicitNode(c1planData, this, determined_scheme_3);
         c1plan->allowOutofplace = false; // let it be inplace
         c1plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[3].get());
 
         // transpose
         auto trans1    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, this);
-        trans1->length = trans2->outputLength;
-        trans1->SetTransposeOutputLength();
+        trans1->length = c1planData.outputLength;
         std::swap(trans1->length[1], trans1->length[2]);
-        trans1->dimension = 3;
+        trans1->outputLength = trans1->length;
+        trans1->dimension    = 3;
 
         // --------------------------------
         // Fuse Shims:
@@ -1548,8 +1565,9 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         // c2r
         auto crplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
 
-        crplan->length    = outputLength;
-        crplan->dimension = 1;
+        crplan->length       = length;
+        crplan->outputLength = outputLength;
+        crplan->dimension    = 1;
         crplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[5].get());
         childNodes.emplace_back(std::move(crplan));
 
@@ -1926,7 +1944,7 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     switch(ppOffDim)
     {
@@ -1966,6 +1984,7 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             zPartialPassPlan->length.push_back((*complexLength)[2]);
             zPartialPassPlan->length.push_back((*complexLength)[0]);
             zPartialPassPlan->length.push_back((*complexLength)[1]);
+            zPartialPassPlan->outputLength = zPartialPassPlan->length;
             zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 
             childNodes.emplace_back(std::move(xPartialPassPlan));
@@ -1984,7 +2003,8 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             zPartialPassPlan->length.push_back((*complexLength)[2]);
             zPartialPassPlan->length.push_back((*complexLength)[0]);
             zPartialPassPlan->length.push_back((*complexLength)[1]);
-            zPartialPassPlan->outputLength = *complexLength;
+            zPartialPassPlan->outputLength      = zPartialPassPlan->length;
+            zPartialPassPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
             zPartialPassPlan->comments.push_back("partial-pass enabled for first dimension.");
 
             // use explicit SBRR partial-pass kernel
@@ -1997,6 +2017,7 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             xPartialPassPlan->allowInplace = true;
             xPartialPassPlan->length       = *realLength;
             xPartialPassPlan->length[0] /= 2;
+            xPartialPassPlan->outputLength = xPartialPassPlan->length;
             xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 
             childNodes.emplace_back(std::move(zPartialPassPlan));
@@ -2119,6 +2140,8 @@ void Real3DPPNode::AssignParams_internal()
 
 size_t PrePostKernelNode::GetTwiddleTableLength()
 {
+    assert(outputLength.size() == length.size());
+
     if(scheme == CS_KERNEL_R_TO_CMPLX || scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
         return 2 * length[0];
     if(scheme == CS_KERNEL_CMPLX_TO_R)
