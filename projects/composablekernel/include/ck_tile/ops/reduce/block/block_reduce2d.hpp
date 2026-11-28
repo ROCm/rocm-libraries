@@ -36,7 +36,8 @@ namespace ck_tile {
 // ========================================================
 // - Performs reduction across multiple warps within the same thread block
 // - Uses shared memory (LDS) to facilitate data exchange between warps
-// - Each warp's lane-0 thread stores its partial results to shared memory
+// - Each warp's lane-0 thread stores its partial results to shared memory, so every lane of a
+//   warp must hold the same rows (one row per warp along the kept dimension)
 // - All threads participate in loading and reducing data from shared memory
 // - Implements block-level synchronization to ensure memory consistency
 
@@ -300,6 +301,33 @@ struct BlockReduce2dSync
     }
 };
 
+namespace detail {
+
+// Whether every lane of a warp holds the same y elements: the lane P dimension maps only to R
+// dimensions and H dimensions of length 1. Otherwise the lanes of a warp hold different rows.
+template <typename YDistributedTensor_>
+CK_TILE_HOST_DEVICE constexpr bool is_y_same_across_lanes()
+{
+    using DstrEncode = typename YDistributedTensor_::StaticTileDistribution::DstrEncode;
+
+    constexpr index_t idim_p_lane = DstrEncode::NDimP - 1;
+    constexpr auto rh_majors      = DstrEncode::ps_to_rhss_major_[number<idim_p_lane>{}];
+    constexpr auto rh_minors      = DstrEncode::ps_to_rhss_minor_[number<idim_p_lane>{}];
+
+    index_t lane_h_length = 1;
+    static_for<0, rh_majors.size(), 1>{}([&](auto i) {
+        constexpr index_t rh_major = rh_majors[i];
+        if constexpr(rh_major != 0)
+        {
+            constexpr index_t rh_minor = rh_minors[i];
+            lane_h_length *= DstrEncode::hs_lengthss_[number<rh_major - 1>{}][number<rh_minor>{}];
+        }
+    });
+    return lane_h_length == 1;
+}
+
+} // namespace detail
+
 // BlockReduce2dCrossWarpSync: Cross-warp reduction (Stage 3)
 template <typename Problem_, typename Policy_ = void>
 struct BlockReduce2dCrossWarpSync
@@ -394,6 +422,13 @@ struct BlockReduce2dCrossWarpSync
 
         constexpr index_t num_warps        = BlockShape::BlockSize / get_warp_size();
         constexpr index_t num_reduce_warps = GetReduceWarps<YDistributedTensor_>();
+        // Only lane 0 of each warp exchanges its partials, so this needs one row per warp
+        // (https://github.com/ROCm/rocm-libraries/issues/15789).
+        static_assert(num_reduce_warps == 1 ||
+                          detail::is_y_same_across_lanes<YDistributedTensor_>(),
+                      "cross-warp reduction needs every lane of a warp to hold the same rows: use "
+                      "one row per warp (ThreadPerWarp_M == 1) or one warp along the reduced "
+                      "dimension");
 
         if constexpr(num_reduce_warps == 1)
             return;
@@ -576,6 +611,13 @@ struct BlockReduce2dLinearCrossWarpSync
         constexpr auto num_reduce_warps = GetReduceWarps<YDistributedTensor_>();
         constexpr index_t num_warps     = BlockShape::BlockSize / get_warp_size();
         const index_t smem_offset       = warp_id;
+        // Only lane 0 of each warp exchanges its partials, so this needs one row per warp
+        // (https://github.com/ROCm/rocm-libraries/issues/15789).
+        static_assert(num_reduce_warps == 1 ||
+                          detail::is_y_same_across_lanes<YDistributedTensor_>(),
+                      "cross-warp reduction needs every lane of a warp to hold the same rows: use "
+                      "one row per warp (ThreadPerWarp_M == 1) or one warp along the reduced "
+                      "dimension");
 
         // skip if nonthing to do
         if constexpr(num_reduce_warps == 1)

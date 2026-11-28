@@ -18,6 +18,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 
+* Fixed CK Tile `BlockReduce2dCrossWarpSync` and `BlockReduce2dLinearCrossWarpSync` silently giving every row row 0's result when a warp holds several rows and the reduction spans several warps (`ThreadPerWarp_M > 1` with `WarpPerBlock_N > 1`), as `ReduceKernel` and `PoolKernel` shapes allow: such shapes are now a compile-time error, since only lane 0 of each warp exchanges its partials ([#15789](https://github.com/ROCm/rocm-libraries/issues/15789)).
+
 ### Known issues
 
 ### Upcoming changes
