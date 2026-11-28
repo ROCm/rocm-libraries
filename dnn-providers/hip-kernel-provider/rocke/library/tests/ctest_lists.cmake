@@ -293,6 +293,35 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 180)\n")
 
+# Paged/strided admission and emission are a separate host cohort: their full
+# profile corpus must not consume the existing attention CPU lane's budget.
+set(_ROCKE_LIBRARY_PAGED_DECODE_CPU_RELPATHS
+    "tests/library/tests/test_attention_kv_loader.py"
+    "tests/library/tests/test_attention_paged_bounds.py"
+    "tests/library/tests/test_decode_numeric_support.py"
+    "tests/library/tests/test_paged_feature_admission.py"
+    "tests/library/tests/test_paged_kv_decode.py"
+    "tests/library/tests/test_paged_metadata_containment.py"
+    "tests/library/tests/test_paged_metadata_identity.py"
+    "tests/library/tests/test_paged_lds_admission.py"
+    "tests/library/tests/test_paged_bounded_runtime_numeric.py::test_cohort_selects_bounded_specs"
+    "tests/library/tests/test_paged_bounded_runtime_numeric.py::test_cohort_rejects_top_left_band_alias"
+    "tests/library/tests/test_paged_bounded_runtime_numeric.py::test_reference_empty_and_windowed_rows"
+    "tests/library/tests/test_paged_lse.py"
+    "tests/library/tests/test_strided_kv_decode.py"
+    "tests/library/tests/test_strided_kv_lds.py")
+set(_ROCKE_LIBRARY_PAGED_DECODE_CPU_TESTS "")
+foreach(_test IN LISTS _ROCKE_LIBRARY_PAGED_DECODE_CPU_RELPATHS)
+  string(APPEND _ROCKE_LIBRARY_PAGED_DECODE_CPU_TESTS
+         " \"${ROCKE_TEST_CTEST_REL}${_test}\"")
+endforeach()
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_paged_decode_cpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_PAGED_DECODE_CPU_TESTS} -v -rs --timeout=30)\n"
+       "set_tests_properties(rocke_library_paged_decode_cpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 180)\n")
+
 # The pure runner policy and the real subprocess/process-tree contracts run as
 # two entries, each with its own whole-entry budget.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -601,6 +630,11 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_one_binary_serves_every_shape"
     "tests/library/tests/test_attention_dense_gfx942_numeric.py"
     "tests/library/tests/test_attention_scalar_block_table_numeric.py"
+    "tests/library/tests/test_paged_kv_decode_numeric.py"
+    "tests/library/tests/test_paged_bounded_runtime_numeric.py::test_bounded_mapping_and_metadata_recovery"
+    "tests/library/tests/test_paged_metadata_containment_numeric.py"
+    "tests/library/tests/test_paged_lse_numeric.py"
+    "tests/library/tests/test_strided_kv_decode_numeric.py"
     "tests/library/tests/test_attention_unified_lse_numeric.py"
     "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"
     "tests/library/tests/sdpa/test_unified_sdpa_numeric.py"

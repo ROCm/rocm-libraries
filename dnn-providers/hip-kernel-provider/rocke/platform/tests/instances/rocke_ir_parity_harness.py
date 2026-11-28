@@ -257,6 +257,7 @@ def build_attention_reduce_own_module(
     dtype,
     num_segments,
     emit_lse=False,
+    metadata_containment=False,
 ):
     """Split-KV reduce built from ``arch``'s own module (``build_attention_reduce``
     above always builds the gfx950 module), with or without the LSE output."""
@@ -272,6 +273,7 @@ def build_attention_reduce_own_module(
             dtype=dtype,
             num_segments=num_segments,
             emit_lse=emit_lse,
+            metadata_containment=metadata_containment,
         )
         return mod.build_unified_attention_reduce_tiled(spec, arch=arch)
 
@@ -831,6 +833,24 @@ def cases():
 
     def add(family, case_id, arch, build):
         out.append({"family": family, "case_id": case_id, "arch": arch, "build": build})
+
+    for arch in ("gfx942", "gfx950"):
+        add(
+            "attention",
+            f"attention/{arch}/reduce_bounds_lse_bf16_d128",
+            arch,
+            build_attention_reduce_own_module(
+                f"irhash_attn_{arch}_reduce_bounds_lse",
+                arch,
+                head_size=128,
+                num_query_heads=4,
+                num_kv_heads=2,
+                dtype="bf16",
+                num_segments=4,
+                emit_lse=True,
+                metadata_containment=True,
+            ),
+        )
 
     # GEMM: tile/atom/pipeline variants across CDNA and RDNA arches.
     add(

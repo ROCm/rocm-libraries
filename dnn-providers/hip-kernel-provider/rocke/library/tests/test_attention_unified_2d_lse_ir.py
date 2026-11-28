@@ -155,8 +155,19 @@ def _canonical_names(kernel):
                 continue
             values[id(value)] = value
             names.setdefault(value.name, f"%v{len(names)}")
+        if op.name == "scf.for":
+            names.setdefault(op.attrs["iv"], f"%v{len(names)}")
+            for entry in op.attrs.get("iter_args", []):
+                names.setdefault(entry["name"], f"%v{len(names)}")
     for value in values.values():
         value.name = names[value.name]
+    # Loop arguments are declared by metadata rather than op result objects.
+    # Keep those declarations in sync with the renamed body uses.
+    for op in _walk(kernel.body):
+        if op.name == "scf.for":
+            op.attrs["iv"] = names[op.attrs["iv"]]
+            for entry in op.attrs.get("iter_args", []):
+                entry["name"] = names[entry["name"]]
 
 
 def test_canonical_names_keep_reused_values_distinct():
@@ -171,6 +182,22 @@ def test_canonical_names_keep_reused_values_distinct():
     first.name, second.name = "%v1", "%v0"
     _canonical_names(b.kernel)
     assert (first.name, second.name, third.name) == ("%v0", "%v1", "%v2")
+
+
+def test_canonical_names_keep_loop_declarations_and_uses_in_sync():
+    from rocke.core.ir import I32, IRBuilder
+
+    b = IRBuilder("canonical_loop")
+    zero, one = b.const_i32(0), b.const_i32(1)
+    limit = b.param("limit", I32)
+    loop = b.scf_for_iter(zero, limit, one, [("total", zero)], iv_name="index")
+    with loop as (index, carried):
+        b.scf_yield(b.add(carried[0], index))
+    _canonical_names(b.kernel)
+    assert loop.op.attrs["iv"] == loop.iv.name
+    assert loop.op.attrs["iter_args"][0]["name"] == loop.iter_vars[0].name
+    # Exercise the selected backend's parser/lowerer, not just the Python uses.
+    lower_kernel_to_llvm(b.kernel, arch="gfx942")
 
 
 def _lse_store_count(ir):

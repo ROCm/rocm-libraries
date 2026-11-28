@@ -9,29 +9,35 @@
  * builders the Python module exposes:
  *
  *   Python (attention_tiled_3d.py)                C99 (this header)
- *   ------------------------------------------    -------------------------------------
- *   @dataclass UnifiedAttention3DTiledSpec        rocke_unified_attention_3d_tiled_spec_t
- *     (the dataclass + __post_init__ + @property)   + rocke_..._spec_default()
+ *   ------------------------------------------
+ * -------------------------------------
+ *   @dataclass UnifiedAttention3DTiledSpec
+ * rocke_unified_attention_3d_tiled_spec_t (the dataclass + __post_init__ +
+ * @property)   + rocke_..._spec_default()
  *                                                   + rocke_..._spec_validate()
  *                                                   + the @property accessors
- *   @dataclass UnifiedAttentionReduceTiledSpec    rocke_unified_attention_reduce_tiled_spec_t
- *   supports_tiled_3d(...)                        rocke_gfx942_attention_tiled_3d_supports
- *   build_unified_attention_3d_tiled(spec, arch)  rocke_build_unified_attention_3d_tiled_gfx942
- *   build_unified_attention_reduce_tiled(...)     rocke_build_unified_attention_reduce_tiled_gfx942
- *   (build -> lower .ll convenience, NEW)         rocke_..._lower_to_llvm
+ *   @dataclass UnifiedAttentionReduceTiledSpec
+ * rocke_unified_attention_reduce_tiled_spec_t supports_tiled_3d(...)
+ * rocke_gfx942_attention_tiled_3d_supports
+ *   build_unified_attention_3d_tiled(spec, arch)
+ * rocke_build_unified_attention_3d_tiled_gfx942
+ *   build_unified_attention_reduce_tiled(...)
+ * rocke_build_unified_attention_reduce_tiled_gfx942 (build -> lower .ll
+ * convenience, NEW)         rocke_..._lower_to_llvm
  *
- * The gfx942_attention_tiled_3d prefix is carried on EVERY symbol/macro to avoid
- * clashing with the same-named common/ and gfx950 ports (the gfx950 sibling
- * exports the unprefixed rocke_build_unified_attention_3d_tiled name).
+ * The gfx942_attention_tiled_3d prefix is carried on EVERY symbol/macro to
+ * avoid clashing with the same-named common/ and gfx950 ports (the gfx950
+ * sibling exports the unprefixed rocke_build_unified_attention_3d_tiled name).
  *
- * SEGMENT KERNEL (build_unified_attention_3d_tiled, lines 234-969). 64 threads /
- * single wave; per-segment tiles over [tile_start, tile_end) with double-
- * buffered K/V LDS. gfx942-specific narrow MFMA 16x16x16 atoms (no wide-K atom):
- * QK with K-step 16 + <4 x dtype> operands; PV with strided-V B-operand
- * reconstruction (no ds_read_*_tr_*). Async global->LDS DMA caps at 1 DWORD/lane
- * on gfx942 (vs gfx950's 4), so 4x more async_buffer_load_lds calls per tile.
- * fp8 K/V dequant via cvt_pk_f32_fp8x4 (dequant_fp8x8_to_dtype). Online-softmax
- * with a 4-reg-per-lane accumulator decoded via _mfma_16x16_c_row.
+ * SEGMENT KERNEL (build_unified_attention_3d_tiled, lines 234-969). 64 threads
+ * / single wave; per-segment tiles over [tile_start, tile_end) with double-
+ * buffered K/V LDS. gfx942-specific narrow MFMA 16x16x16 atoms (no wide-K
+ * atom): QK with K-step 16 + <4 x dtype> operands; PV with strided-V B-operand
+ * reconstruction (no ds_read_*_tr_*). Async global->LDS DMA caps at 1
+ * DWORD/lane on gfx942 (vs gfx950's 4), so 4x more async_buffer_load_lds calls
+ * per tile. fp8 K/V dequant via cvt_pk_f32_fp8x4 (dequant_fp8x8_to_dtype).
+ * Online-softmax with a 4-reg-per-lane accumulator decoded via
+ * _mfma_16x16_c_row.
  *
  * REDUCE KERNEL (build_unified_attention_reduce_tiled, lines 1002-1133). Arch-
  * neutral, pure f32 load / exp2 / store (the gfx950 reduce with a runtime
@@ -41,21 +47,20 @@
  * REUSED HELPER PORTS (no IR re-emitted here):
  *   rocke/helper_helper_rocke.helpers.attention.h   -- apply_softcap_log2,
  *       binary_search_seq_idx, mfma_16x16x16_for_dtype, wave64_reduce_max,
- *       wave64_reduce_sum (the five "new helpers" named by the port map; ALREADY
- *       present)
- *   rocke/helper_rocke.helpers.attention.h          -- warp_xor_reduce_sum,
- *       (warp_xor_reduce_max via the same module), masks, safe_inv_l
- *   rocke/helper_rocke.helpers.atoms.h              -- MfmaAtom.f16_16x16x16,
- *       make_c_warp_dstr_encoding
- *   rocke/helper_rocke.helpers.distribution.h       -- make_static_tile_distribution,
- *       calculate_x (the _C16_DIST C-warp accumulator decode)
- *   rocke/helper_rocke.helpers.transforms.h         -- TensorDescriptor naive/
- *       transform, embed/indirect/unmerge (paged-KV + segm + Q descriptors)
+ *       wave64_reduce_sum (the five "new helpers" named by the port map;
+ * ALREADY present) rocke/helper_rocke.helpers.attention.h          --
+ * warp_xor_reduce_sum, (warp_xor_reduce_max via the same module), masks,
+ * safe_inv_l rocke/helper_rocke.helpers.atoms.h              --
+ * MfmaAtom.f16_16x16x16, make_c_warp_dstr_encoding
+ *   rocke/helper_rocke.helpers.distribution.h       --
+ * make_static_tile_distribution, calculate_x (the _C16_DIST C-warp accumulator
+ * decode) rocke/helper_rocke.helpers.transforms.h         -- TensorDescriptor
+ * naive/ transform, embed/indirect/unmerge (paged-KV + segm + Q descriptors)
  *   rocke/helper_rocke.instances.common.fmha_arch.h -- validate/require tiled
  *       attention arch gate (validate_tiled_attention_arch)
  *
- * ERROR MODEL. Mirrors the rest of the C port: pure accessors return a sentinel;
- * the build / validate variants route the first Python ValueError /
+ * ERROR MODEL. Mirrors the rest of the C port: pure accessors return a
+ * sentinel; the build / validate variants route the first Python ValueError /
  * NotImplementedError through the sticky-error IRBuilder (a dead builder is a
  * NULL no-op). The lower convenience returns a rocke_status_t and writes a
  * diagnostic into the caller's err buffer.
@@ -80,8 +85,8 @@
 extern "C" {
 #endif
 
-/* -------------------------------------------------------------- module consts *
- * MFMA_M / MFMA_N (module-level in the Python). */
+/* -------------------------------------------------------------- module consts
+ * * MFMA_M / MFMA_N (module-level in the Python). */
 #define ROCKE_GFX942_ATTN_TILED_3D_MFMA_M 16
 #define ROCKE_GFX942_ATTN_TILED_3D_MFMA_N 16
 /* gfx942 narrow atom: K-step is 16 for both QK and PV (no wide-K atom). */
@@ -103,7 +108,8 @@ extern "C" {
  * the Python reason; on true it points to "supported". Pure, emits no IR.
  *
  * q_dtype is an Optional[str]: pass NULL for Python None. kv_storage_dtype is
- * Optional[str] ("fp8e4m3" or NULL). arch NULL == the Python default "gfx942". */
+ * Optional[str] ("fp8e4m3" or NULL). arch NULL == the Python default "gfx942".
+ */
 bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
                                               int block_size,
                                               const char* dtype,
@@ -156,26 +162,26 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     bool use_invariant_hoist; /* False; inert, kept so saved specs still load */
     bool use_wide_kv_load; /* False */
     /* 64-bit paged-KV addressing for caches > 2 GiB (gfx950 segment kernel folds
-     * the per-block byte base into a 64-bit buffer base). Kept byte-identical
-     * with the gfx950 header (the two share this struct). */
+   * the per-block byte base into a 64-bit buffer base). Kept byte-identical
+   * with the gfx950 header (the two share this struct). */
     bool use_i64_kv_addr; /* False */
     /* All-decode launch grid: seq_idx = block_id_x, one query block per
-     * sequence, no binary search (legal only when every sequence has one query
-     * token; the launcher sizes grid x to num_seqs). */
+   * sequence, no binary search (legal only when every sequence has one query
+   * token; the launcher sizes grid x to num_seqs). */
     bool use_decode_grid; /* False */
     /* Cache policy of the K/V copies ("all", "global", "stream", "nt";
-     * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
-     * "stream"; fp8 K/V keeps "all". */
+   * rocke_cache_policy_from_name). gfx942's wide K/V loader takes "all" or
+   * "stream"; fp8 K/V keeps "all". */
     const char* kv_cache_policy; /* "all" */
     /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row.
-     * Implemented for fp16/bf16 K/V, which can be extended. */
+   * Implemented for fp16/bf16 K/V, which can be extended. */
     bool use_kv_lds_swizzle; /* False */
     /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
-     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
-     * can be extended. */
+   * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
+   * can be extended. */
     bool use_wave_page_id_load; /* False */
     /* gfx950 emit_lse (False, kw_only): the packaged module's reduce writes LSE.
-     * The segment IR is unchanged; its kernel name gains a trailing "lse". */
+   * The segment IR is unchanged; its kernel name gains a trailing "lse". */
     bool emit_lse;
 } rocke_unified_attention_3d_tiled_spec_t;
 
@@ -190,8 +196,8 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
 bool rocke_unified_attention_3d_tiled_spec_validate(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* s);
 
-/* ------------------------------------------------ derived @property accessors *
- * Pure, IR-free; faithful ports of the dataclass @property bodies. */
+/* ------------------------------------------------ derived @property accessors
+ * * Pure, IR-free; faithful ports of the dataclass @property bodies. */
 /* num_queries_per_kv = num_query_heads // num_kv_heads */
 int rocke_unified_attention_3d_tiled_spec_num_queries_per_kv(
     const rocke_unified_attention_3d_tiled_spec_t* s);
@@ -199,7 +205,7 @@ int rocke_unified_attention_3d_tiled_spec_num_queries_per_kv(
 int rocke_unified_attention_3d_tiled_spec_block_m(const rocke_unified_attention_3d_tiled_spec_t* s);
 /* block_q = block_m // num_queries_per_kv */
 int rocke_unified_attention_3d_tiled_spec_block_q(const rocke_unified_attention_3d_tiled_spec_t* s);
-/* tile_size = tile_size_override if has_tile_size_override else block_size */
+/* Override, otherwise block_size; one-token pages default to tile size 32. */
 int rocke_unified_attention_3d_tiled_spec_tile_size(
     const rocke_unified_attention_3d_tiled_spec_t* s);
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
@@ -228,8 +234,9 @@ typedef struct rocke_unified_attention_reduce_tiled_spec
 
     bool has_waves_per_eu; /* Optional[int] None */
     int waves_per_eu;
-    /* emit_lse (False): add a trailing lse_ptr param and write the FP32 natural-log
-     * LSE [total_q, num_query_heads, 1]; kernel name gains a trailing "lse". */
+    /* emit_lse (False): add a trailing lse_ptr param and write the FP32
+   * natural-log LSE [total_q, num_query_heads, 1]; kernel name gains a trailing
+   * "lse". */
     bool emit_lse;
 } rocke_unified_attention_reduce_tiled_spec_t;
 
@@ -272,10 +279,10 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
  * Build -> lower-to-.ll convenience (NEW; not in the Python)
  * ============================================================ *
  *
- * Build into an internally-owned builder, then lower to LLVM .ll text. On ROCKE_OK
- * *out_ll is a malloc'd NUL-terminated string the caller frees with free(); on
- * failure *out_ll is left NULL and (if err != NULL, capacity err_cap) a
- * diagnostic is written. */
+ * Build into an internally-owned builder, then lower to LLVM .ll text. On
+ * ROCKE_OK *out_ll is a malloc'd NUL-terminated string the caller frees with
+ * free(); on failure *out_ll is left NULL and (if err != NULL, capacity
+ * err_cap) a diagnostic is written. */
 rocke_status_t rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
     const rocke_unified_attention_3d_tiled_spec_t* spec,
     const char* arch,

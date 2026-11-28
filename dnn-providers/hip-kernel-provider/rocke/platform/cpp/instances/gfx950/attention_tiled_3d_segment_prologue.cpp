@@ -1,29 +1,30 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * instance_gfx950_attention_tiled_3d_gfx950_attention_tiled_3d_segment_prologue.c --
- * one part-file of the chunked C99 port of
+ * instance_gfx950_attention_tiled_3d_gfx950_attention_tiled_3d_segment_prologue.c
+ * -- one part-file of the chunked C99 port of
  * rocke/instances/gfx950/attention_tiled_3d.py (arch gfx950).
  *
  * SCOPE OF THIS PART-FILE: the segment-kernel prologue + load-issuer closures +
  * inner IR helpers of build_unified_attention_3d_tiled:
  *
- *   rocke_gfx950_attention_tiled_3d_declare_params        (params, lines 310-358)
- *   rocke_gfx950_attention_tiled_3d_emit_prologue         (lines 360-534)
- *   rocke_gfx950_attention_tiled_3d_emit_early_zero_fill  (lines 416-461)
- *   rocke_gfx950_attention_tiled_3d_emit_q_to_lds         (lines 482-512)
- *   rocke_gfx950_attention_tiled_3d_emit_async_infra      (lines 564-601)
- *   rocke_gfx950_attention_tiled_3d_mfma_16x16_c_row      (lines 81-96)
+ *   rocke_gfx950_attention_tiled_3d_declare_params        (params, lines
+ * 310-358) rocke_gfx950_attention_tiled_3d_emit_prologue         (lines
+ * 360-534) rocke_gfx950_attention_tiled_3d_emit_early_zero_fill  (lines
+ * 416-461) rocke_gfx950_attention_tiled_3d_emit_q_to_lds         (lines
+ * 482-512) rocke_gfx950_attention_tiled_3d_emit_async_infra      (lines
+ * 564-601) rocke_gfx950_attention_tiled_3d_mfma_16x16_c_row      (lines 81-96)
  *   rocke_gfx950_attention_tiled_3d_tile_page_ids         (page-id loader)
  *   rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads (lines 645-701)
  *   rocke_gfx950_attention_tiled_3d_issue_k               (lines 703-707)
  *   rocke_gfx950_attention_tiled_3d_issue_v               (lines 709-713)
  *
- * GFX950 DELTAS vs the gfx942 segment_setup sibling: WIDE-K config (no wide-b128
- * sync load path, no invariant-hoist); the PV transpose reader is BOUND here
- * (pv_tr_reader + tr_col_lane); the paged-KV descriptor is the single-block
- * (T==BS-style) indirect+unmerge chain with inline byte strides; the async DMA
- * delivers 4 DWORDS (8 halves) per lane and there is no WIDE_* path.
+ * GFX950 DELTAS vs the gfx942 segment_setup sibling: WIDE-K config (no
+ * wide-b128 sync load path, no invariant-hoist); the PV transpose reader is
+ * BOUND here (pv_tr_reader + tr_col_lane); the paged-KV descriptor is the
+ * single-block (T==BS-style) indirect+unmerge chain with inline byte strides;
+ * the async DMA delivers 4 DWORDS (8 halves) per lane and there is no WIDE_*
+ * path.
  *
  * The builder-call sequence is a byte-identical translation of those Python
  * spans. Every peer phase (loop init, softmax loop, epilogue, reduce kernel,
@@ -35,6 +36,7 @@
  * individually.
  */
 
+#include "rocke/instance_attention_paged_kv_internal.h"
 #include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf */
 #include <string.h>
@@ -160,8 +162,8 @@ static rocke_value_t* rocke__q_offset(rocke_gfx950_attention_tiled_3d_build_ctx_
     return off;
 }
 
-/* paged_kv_desc.offset(b, tile_idx=, linear_half=, kv_head=) -> i32 element off.
- * The Python supplies exactly these three upper coords; the descriptor's
+/* paged_kv_desc.offset(b, tile_idx=, linear_half=, kv_head=) -> i32 element
+ * off. The Python supplies exactly these three upper coords; the descriptor's
  * remaining lowers resolve through the transform chain. */
 static rocke_value_t* rocke__paged_kv_offset(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
@@ -188,7 +190,8 @@ static rocke_value_t* rocke__paged_kv_offset(rocke_gfx950_attention_tiled_3d_bui
  *
  * The ~21 params in the load-bearing AITER order (segm_* workspace ptrs FIRST).
  * dtype / kv_io_dtype are taken from cfg (F16/BF16 ; FP8E4M3 when KV_FP8 else
- * dtype). Also sets the kernel attrs (max_workgroup_size, optional waves_per_eu).
+ * dtype). Also sets the kernel attrs (max_workgroup_size, optional
+ * waves_per_eu).
  * ============================================================ */
 void rocke_gfx950_attention_tiled_3d_declare_params(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx)
@@ -198,7 +201,7 @@ void rocke_gfx950_attention_tiled_3d_declare_params(
     const rocke_type_t* kv_io_dtype = CFG.kv_io_dtype;
 
     /* kernel attrs: max_workgroup_size = THREADS, optional waves_per_eu
-     * (lines 303-305). */
+   * (lines 303-305). */
     rocke_attr_set_int(B, &ctx->kernel->attrs, "max_workgroup_size", CFG.THREADS);
     if(ctx->spec != NULL && ctx->spec->has_waves_per_eu)
     {
@@ -331,7 +334,9 @@ void rocke_gfx950_attention_tiled_3d_declare_params(
     ctx->num_qh_p = rocke_b_param(B, "num_query_heads", rocke_i32(), NULL);
     ctx->num_kv_p = rocke_b_param(B, "num_kv_heads", rocke_i32(), NULL);
     ctx->sliding_window_p = rocke_b_param(B, "sliding_window", rocke_i32(), NULL);
-    if(ctx->strided_kv)
+    if(ctx->metadata_containment)
+        rocke_bounds_declare(B, &ctx->bounds, CFG.SLIDING_WINDOW);
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->k_strides = rocke_declare_strided_kv_params(B, "k");
         ctx->v_strides = rocke_declare_strided_kv_params(B, "v");
@@ -357,7 +362,7 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     ctx->tid = rocke_b_thread_id_x(B);
 
     /* ---- binary search seq_idx (lines 365-372) ----
-     * per_token=False (the Python helper default for the block-q search). */
+   * per_token=False (the Python helper default for the block-q search). */
     if(CFG.DECODE_GRID)
     {
         /* all-decode grid: one CTA per sequence along x, no search. */
@@ -371,10 +376,23 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     }
 
     /* ---- cu_q bounds / per-sequence geometry (lines 373-379) ---- */
+    if(ctx->metadata_containment)
+    {
+        rocke_bounds_checked_start(B,
+                                   &ctx->bounds,
+                                   ctx->seq_idx,
+                                   ctx->kv_head_idx,
+                                   ctx->seg_idx,
+                                   ctx->tid,
+                                   ctx->num_seqs_p,
+                                   CFG.NUM_KV,
+                                   CFG.NUM_SEG);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(B, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         B, ctx->cu_q, rocke_b_add(B, ctx->seq_idx, rocke_b_const_i32(B, 1)), 0);
-    ctx->cur_batch_q_len = rocke_b_sub(B, ctx->cu_q_stop, ctx->cu_q_start);
+    ctx->cur_batch_q_len
+        = ctx->metadata_containment ? NULL : rocke_b_sub(B, ctx->cu_q_stop, ctx->cu_q_start);
     if(CFG.DECODE_GRID)
     {
         ctx->q_block_start_idx = NULL;
@@ -387,12 +405,35 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
         ctx->q_block_local_idx = rocke_b_sub(B, ctx->q_block_global_idx, ctx->q_block_start_idx);
     }
     ctx->seq_len = rocke_b_global_load_i32(B, ctx->seq_lens, ctx->seq_idx, 0);
+    if(ctx->metadata_containment)
+    {
+        rocke_bounds_row_t row = rocke_bounds_checked_metadata(B,
+                                                               &ctx->bounds,
+                                                               ctx->seq_idx,
+                                                               ctx->kv_head_idx,
+                                                               ctx->seg_idx,
+                                                               ctx->tid,
+                                                               ctx->cu_q_start,
+                                                               ctx->cu_q_stop,
+                                                               ctx->seq_len,
+                                                               ctx->segm_output_ptr,
+                                                               ctx->segm_max_ptr,
+                                                               ctx->segm_expsum_ptr,
+                                                               CFG.HD,
+                                                               CFG.NQK,
+                                                               CFG.NUM_QH,
+                                                               CFG.NUM_SEG);
+        ctx->cu_q_start = row.query_start;
+        ctx->cur_batch_q_len = row.query_length;
+        ctx->seq_len = row.sequence_length;
+    }
     ctx->context_len = rocke_b_sub(B, ctx->seq_len, ctx->cur_batch_q_len);
 
     /* qb_start_pos = q_block_local_idx * BLOCK_Q (line 381) */
     ctx->qb_start_pos = rocke_b_mul(B, ctx->q_block_local_idx, rocke_b_const_i32(B, BLOCK_Q));
 
-    /* early return guard: if qb_start_pos >= cur_batch_q_len: ret() (lines 382-383) */
+    /* early return guard: if qb_start_pos >= cur_batch_q_len: ret() (lines
+   * 382-383) */
     {
         rocke_if_t g
             = rocke_b_scf_if(B, rocke_b_cmp_ge(B, ctx->qb_start_pos, ctx->cur_batch_q_len));
@@ -409,7 +450,7 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     }
 
     /* ---- descriptors (lines 399-413) ----
-     * The head count is a kernarg, so each token stride is too. */
+   * The head count is a kernarg, so each token stride is too. */
     {
         static const char* const ml_coords[3] = {"token", "head", "seg"};
         rocke_value_t* ml_dyn[3]
@@ -442,6 +483,29 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     }
 
     /* early-out zero-fill block (lines 416-461) */
+    if(ctx->metadata_containment)
+    {
+        rocke_value_t* t1 = rocke_b_cmp_ge(B, ctx->seg_start_tile_pos, ctx->seq_len);
+        {
+            rocke_if_t g2 = rocke_b_scf_if(B, t1);
+            rocke_b_region_enter(B, g2.then_region);
+            rocke_bounds_neutral(B,
+                                 ctx->seq_idx,
+                                 ctx->kv_head_idx,
+                                 ctx->seg_idx,
+                                 ctx->tid,
+                                 ctx->segm_output_ptr,
+                                 ctx->segm_max_ptr,
+                                 ctx->segm_expsum_ptr,
+                                 CFG.HD,
+                                 CFG.NQK,
+                                 CFG.NUM_QH,
+                                 CFG.NUM_SEG);
+            rocke_bounds_finish(B, &ctx->bounds);
+            rocke_b_ret(B);
+            rocke_b_region_leave(B);
+        }
+    }
     rocke_gfx950_attention_tiled_3d_emit_early_zero_fill(ctx);
 
     /* ---- LDS layout (lines 464-467) ---- */
@@ -456,8 +520,8 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     }
 
     /* ---- PV transpose-read state (gfx950-only) ----
-     * pv_tr_reader = TransposeLdsReader(K=16, M=16).bind(b, tid)
-     * tr_col_lane  = pv_tr_reader.col */
+   * pv_tr_reader = TransposeLdsReader(K=16, M=16).bind(b, tid)
+   * tr_col_lane  = pv_tr_reader.col */
     {
         rocke_transpose_lds_reader_t r;
         r.K = 16;
@@ -504,10 +568,10 @@ void rocke_gfx950_attention_tiled_3d_emit_prologue(rocke_gfx950_attention_tiled_
     ctx->lane_col = rocke_b_mod(B, ctx->tid, rocke_b_const_i32(B, 16));
 
     /* NOTE: the async DMA infra (lines 564-585) and the paged-KV descriptor
-     * (lines 587-601) are emitted AFTER acc_zero in Python's single linear
-     * build; they are emitted by emit_loop_init (via
-     * rocke_gfx950_attention_tiled_3d_emit_async_infra) so the SSA emission order
-     * matches Python byte-for-byte. */
+   * (lines 587-601) are emitted AFTER acc_zero in Python's single linear
+   * build; they are emitted by emit_loop_init (via
+   * rocke_gfx950_attention_tiled_3d_emit_async_infra) so the SSA emission order
+   * matches Python byte-for-byte. */
 }
 
 /* ============================================================ *
@@ -528,7 +592,7 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
 
     /* ---- async DMA infra (lines 565-585) ---- */
     ctx->big_bytes = rocke_b_const_i32(B, 0x7FFF0000);
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->key_rsrc = rocke_strided_kv_resource(
             B, ctx->key, &ctx->k_strides, ctx->seq_idx, ctx->kv_head_idx);
@@ -537,12 +601,14 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     }
     else
     {
-        ctx->key_rsrc = rocke_b_buffer_rsrc(B, ctx->key, ctx->big_bytes);
-        ctx->value_rsrc = rocke_b_buffer_rsrc(B, ctx->value, ctx->big_bytes);
+        ctx->key_rsrc = rocke_b_buffer_rsrc(
+            B, ctx->key, ctx->metadata_containment ? ctx->bounds.k_bytes : ctx->big_bytes);
+        ctx->value_rsrc = rocke_b_buffer_rsrc(
+            B, ctx->value, ctx->metadata_containment ? ctx->bounds.v_bytes : ctx->big_bytes);
     }
     /* The token and page byte strides scale with the runtime kv head count.
-     * kv_block_bytes_c is the page stride: the one-block buffer bound for the
-     * i64-addressing path (unused in the i32 path, where it is DCE'd). */
+   * kv_block_bytes_c is the page stride: the one-block buffer bound for the
+   * i64-addressing path (unused in the i32 path, where it is DCE'd). */
     ctx->kv_stride_tok_b = rocke_b_mul(B, ctx->num_kv_p, rocke_b_const_i32(B, HD * CFG.KV_BYTES));
     ctx->kv_stride_blk_b = rocke_b_mul(B, ctx->kv_stride_tok_b, rocke_b_const_i32(B, CFG.BS));
     ctx->kv_block_bytes_c = ctx->kv_stride_blk_b;
@@ -557,7 +623,7 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     ctx->kv_stride_blk_i64 = NULL;
     ctx->paged_kv_desc = NULL;
     /* seq_base = seq_idx * bt_stride_p (line 592) */
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         return;
     }
@@ -565,8 +631,8 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     if(!CFG.PAGE_IDS)
     {
         /* paged_kv_desc = DynamicTensorDescriptor("paged_kv_bytes", byte
-         * strides).transform(indirect("tile_idx" -> "physical_block",
-         * base=seq_base), unmerge("linear_half" -> ("token","dim"), (T, HD))) */
+     * strides).transform(indirect("tile_idx" -> "physical_block",
+     * base=seq_base), unmerge("linear_half" -> ("token","dim"), (T, HD))) */
         const int strides[4] = {1, 1, CFG.kv_stride_h_b, CFG.KV_BYTES};
         rocke_value_t* dyn[4] = {ctx->kv_stride_blk_b, ctx->kv_stride_tok_b, NULL, NULL};
         static const char* const coords[4] = {"physical_block", "token", "kv_head", "dim"};
@@ -583,14 +649,14 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
     else if(CFG.N_BLOCKS_PER_TILE > 1 || CFG.WAVE_PAGE_ID_LOAD)
     {
         /* A sequence's last tile can reach past its last page; the table entries
-         * there are not the sequence's. Those pages reuse the tile's first page
-         * id (always live); the in_prefix mask discards their tokens. */
+     * there are not the sequence's. Those pages reuse the tile's first page
+     * id (always live); the in_prefix mask discards their tokens. */
         rocke_value_t* rounded = rocke_b_add(B, ctx->seq_len, rocke_b_const_i32(B, CFG.BS - 1));
         ctx->seq_pages = rocke_b_div(B, rounded, rocke_b_const_i32(B, CFG.BS));
     }
 
     /* Page-id loader (fp16/bf16): the per-lane part of the address is
-     * loop-invariant; the page base goes into soffset per tile. */
+   * loop-invariant; the page base goes into soffset per tile. */
     if(CFG.PAGE_IDS)
     {
         rocke_value_t* lane_tok = rocke_b_div(B, ctx->lane_half_base, rocke_b_const_i32(B, HD));
@@ -602,10 +668,11 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
         if(CFG.KV_SWZ)
         {
             /* A call's LDS rows are ph + lane_tok (mod chunks per row), with ph =
-             * its first row; ph is a multiple of tokens_per_call and lane_tok <
-             * tokens_per_call, so the sum never wraps. The lane writing LDS
-             * chunk c fetches chunk c ^ row. */
-            /* n_ph = HD * HD / 4096 <= 16 (HD <= 256, as the PV carry arrays assume). */
+       * its first row; ph is a multiple of tokens_per_call and lane_tok <
+       * tokens_per_call, so the sum never wraps. The lane writing LDS
+       * chunk c fetches chunk c ^ row. */
+            /* n_ph = HD * HD / 4096 <= 16 (HD <= 256, as the PV carry arrays assume).
+       */
             const int n_ph = CFG.KV_CHUNKS_PER_ROW / CFG.tokens_per_call;
             rocke_value_t* lane_chunk = rocke_b_div(B, lane_dim, rocke_b_const_i32(B, 8));
             int ph_i;
@@ -625,9 +692,9 @@ void rocke_gfx950_attention_tiled_3d_emit_async_infra(
             ctx->lane_within_b[0] = rocke_b_add(B, tok_head, dim_b);
         }
         /* The token stride is a kernarg, so each call's token offset within the
-         * page is a multiply. They are wave-uniform and loop-invariant: build
-         * them once here rather than in every tile's copies. Calls that cover a
-         * partial row (head_size 192) compute their own offsets instead. */
+     * page is a multiply. They are wave-uniform and loop-invariant: build
+     * them once here rather than in every tile's copies. Calls that cover a
+     * partial row (head_size 192) compute their own offsets instead. */
         {
             int call;
             const int n_calls = CFG.KV_HALVES_PER_CALL % CFG.HD == 0 ? CFG.kv_calls_per_tile : 0;
@@ -700,7 +767,8 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_load_page_id_window(
 }
 
 /* _window_tile_ids(page_id_window, kv_tile_idx): the tile's page ids from the
- * 64-page window (v_readlane); dead pages reuse the tile's first id, always live. */
+ * 64-page window (v_readlane); dead pages reuse the tile's first id, always
+ * live. */
 void rocke_gfx950_attention_tiled_3d_window_tile_ids(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
     rocke_value_t* page_id_window,
@@ -727,8 +795,8 @@ void rocke_gfx950_attention_tiled_3d_window_tile_ids(
  * iteration. If tile kv_tile_idx + 2 starts a new window, load it now (after
  * this tile's copies, so the explicit waits still cover V(t)); the loop-top
  * wait completes it before the next iteration reads it. A wave-uniform 0/1-trip
- * loop is an if with a result (scf_if has none): 0 trips keep the window, 1 trip
- * loads the next one. It compiles to a scalar branch around the load. */
+ * loop is an if with a result (scf_if has none): 0 trips keep the window, 1
+ * trip loads the next one. It compiles to a scalar branch around the load. */
 rocke_value_t* rocke_gfx950_attention_tiled_3d_refill_page_id_window(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
     rocke_value_t* page_id_window,
@@ -807,7 +875,7 @@ static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t*
         if(CFG.KV_HALVES_PER_CALL % CFG.HD != 0)
         {
             /* The call covers a partial row (head_size 192), so each lane takes
-             * its own (row, dim); the tile is one page (spec check). */
+       * its own (row, dim); the tile is one page (spec check). */
             rocke_value_t* lin = rocke_b_add(
                 B, rocke_b_const_i32(B, call * CFG.KV_HALVES_PER_CALL), ctx->lane_half_base);
             rocke_value_t* row = rocke_b_div(B, lin, rocke_b_const_i32(B, CFG.HD));
@@ -1013,14 +1081,49 @@ static void rocke__issue_strided_tile(rocke_gfx950_attention_tiled_3d_build_ctx_
     {
         rocke_value_t* linear_half
             = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        rocke_value_t* voff = rocke_strided_kv_offset(
-            B,
-            strides,
-            kv_tile_idx,
-            rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
-            ctx->seq_len,
-            CFG.HD,
-            CFG.T);
+        rocke_value_t* voff;
+        if(ctx->metadata_containment)
+        {
+            voff = rocke_bounds_offset(
+                B,
+                &ctx->bounds,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
+        }
+        else if(ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+        {
+            voff = rocke_paged_kv_offset(
+                B,
+                ctx->block_tables,
+                ctx->seq_base,
+                ctx->kv_head_idx,
+                kv_tile_idx,
+                rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.BS,
+                CFG.T,
+                CFG.NUM_KV);
+        }
+        else
+        {
+            voff = rocke_strided_kv_offset(
+                B,
+                strides,
+                kv_tile_idx,
+                rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.T);
+        }
         rocke_value_t* dst = rocke_b_smem_ptr_add(
             B, buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(
@@ -1032,8 +1135,9 @@ static void rocke__issue_strided_tile(rocke_gfx950_attention_tiled_3d_build_ctx_
  * is_value: false => "K" (key, k_scale, K_lds), true => "V".
  *
  * Sync per-thread fp8 -> cvt_pk_f32_fp8x4 -> *scale (UNFUSED fmul) -> dtype ->
- * LDS via rocke_dequant_fp8x8_to_dtype. The unfused fmul is the CRITICAL invariant
- * (the fused E8M0 cvt would truncate non-power-of-two per-tensor scales). */
+ * LDS via rocke_dequant_fp8x8_to_dtype. The unfused fmul is the CRITICAL
+ * invariant (the fused E8M0 cvt would truncate non-power-of-two per-tensor
+ * scales). */
 void rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(
     rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
     bool is_value,
@@ -1064,12 +1168,12 @@ void rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(
         rocke_value_t* lhf_mul = rocke_b_mul(B, row, rocke_b_const_i32(B, HD));
         rocke_value_t* linear_half_first = rocke_b_add(B, lhf_mul, col);
         /* I64_KV_ADDR fp8: the Python fp8 sync loader uses the full per-lane
-         * offset_i64 here (caches > 2 GiB). That non-split i64 paged variant is
-         * not yet on the frozen C transforms surface (same limitation the 2D C
-         * fp8 twin documents), so the C fp8 path resolves through the i32 offset
-         * regardless. The byte-identity gate never pairs fp8 with i64 KV, so this
-         * does not affect the gate; the fp16/bf16 i64 async loaders above are the
-         * shipping correctness fix and are fully mirrored. */
+     * offset_i64 here (caches > 2 GiB). That non-split i64 paged variant is
+     * not yet on the frozen C transforms surface (same limitation the 2D C
+     * fp8 twin documents), so the C fp8 path resolves through the i32 offset
+     * regardless. The byte-identity gate never pairs fp8 with i64 KV, so this
+     * does not affect the gate; the fp16/bf16 i64 async loaders above are the
+     * shipping correctness fix and are fully mirrored. */
         rocke_value_t* voff
             = rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half_first, ctx->kv_head_idx);
         rocke_value_t* fp8_vec = rocke_b_global_load_vN(
@@ -1093,7 +1197,8 @@ void rocke_gfx950_attention_tiled_3d_issue_k(rocke_gfx950_attention_tiled_3d_bui
     {
         rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(ctx, false, tile_idx, buf_idx);
     }
-    else if(ctx->strided_kv)
+    else if(ctx->metadata_containment || ctx->strided_kv
+            || ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
     {
         rocke__issue_strided_tile(
             ctx, ctx->key_rsrc, &ctx->k_strides, ctx->K_lds_addr, tile_idx, buf_idx);
@@ -1114,7 +1219,8 @@ void rocke_gfx950_attention_tiled_3d_issue_v(rocke_gfx950_attention_tiled_3d_bui
     {
         rocke_gfx950_attention_tiled_3d_issue_fp8_dequant_loads(ctx, true, tile_idx, buf_idx);
     }
-    else if(ctx->strided_kv)
+    else if(ctx->metadata_containment || ctx->strided_kv
+            || ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
     {
         rocke__issue_strided_tile(
             ctx, ctx->value_rsrc, &ctx->v_strides, ctx->V_lds_addr, tile_idx, buf_idx);

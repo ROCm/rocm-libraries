@@ -255,6 +255,7 @@ class TestRouteAlgorithmCoverage(unittest.TestCase):
     _NOT_SERVED_BY_SDPA = frozenset({PREFILL_ALGORITHM, DECODE_ALGORITHM}) | {
         "wmma_attention_fwd",  # gfx1250.py
         "strided_decode",  # strided_decode.py
+        "paged_decode_t32",  # paged_decode.py; direct attention API only
     }
 
     def test_every_route_algorithm_is_accounted_for(self):
@@ -446,11 +447,12 @@ class TestFp8DenseGuards(unittest.TestCase):
 
         for flag, bad in (("use_fp8", "false"), ("fp8_fnuz", None)):
             with self.subTest(flag=flag):
-                req = self._fp8_req(**{flag: bad})
-                self.assertIn(
-                    f"{flag} must be a bool",
-                    " ".join(_request_errors(req)),
-                )
+                with self.assertRaisesRegex(ValueError, flag):
+                    self._fp8_req(**{flag: bad})
+                req = self._fp8_req()
+                object.__setattr__(req, flag, bad)
+                with self.assertRaisesRegex(ValueError, f"{flag} must be a bool"):
+                    _request_errors(req)
                 # And it is fatal through dispatch, not merely reported.
                 with self.assertRaises(ValueError):
                     attention_tuning_spec(req, "gfx950_dense_grid")
@@ -601,7 +603,11 @@ class TestFp8DenseGuards(unittest.TestCase):
         problem = attention_problem(req)
         self.assertEqual(problem.use_fp8, use_fp8)
         spec = SimpleNamespace(
-            path="2d", launch_grid=lambda _p: (1, 1, 1), launch_block=lambda: (64, 1, 1)
+            path="2d",
+            arch="gfx950",
+            kernel_spec=SimpleNamespace(metadata_containment=False),
+            launch_grid=lambda _p: (1, 1, 1),
+            launch_block=lambda: (64, 1, 1),
         )
         tensors = dict.fromkeys(
             ("q", "k", "v", "out", "cu_seqlens_q", "seqused_k", "block_table")

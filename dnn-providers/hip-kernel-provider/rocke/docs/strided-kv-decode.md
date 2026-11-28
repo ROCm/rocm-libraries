@@ -22,11 +22,11 @@ including padding, with these bounds:
 The selected segment and reducer must each fit the target's LDS capacity.
 Admission uses the resolved tile dimensions and LDS allocation dtypes (the
 segment kernel keeps Q, two K tiles and one V tile in LDS; P stays in
-registers). In particular, automatic gfx942 D256/block64 selection uses a
-32-token tile and fits its 65,536-byte capacity, while an explicit block-sized
-64-token tile there exceeds it and is rejected before compilation. An explicit
-tile is checked using its actual footprint; selection does not silently resize
-it. gfx950 D256/block64 fits its target capacity.
+registers). In particular, gfx942 D256/T32 requires 57,344 bytes, within its
+65,536-byte capacity, while D256/T64 requires 106,496 bytes and is rejected
+before compilation. An explicit tile is checked using its actual footprint;
+selection does not silently resize it. gfx950 D256/block64 fits its target
+capacity.
 
 Capacity need not be a page or tile multiple. Device `seqused_k` is contiguous
 int32 `[B]`, with each value in `[0, problem.max_seqlen_k]`, and
@@ -158,6 +158,7 @@ K/V strides, padding, unpadded capacity tails, changing valid lengths, empty
 sequences, windows, paged regressions, and graph replay. Concurrency tests cover
 eager calls, internal graphs, and separate external graphs captured on one
 stream and replayed on different streams. They check scratch isolation and
-replay after temporary launch references are drained. Set
-`ROCKE_REQUIRE_DECODE_GPU=gfx942` or `gfx950` to require the target GPU rather
-than skip. No performance claim follows from this correctness coverage.
+replay after temporary launch references are drained. Tests detect the available
+GPU and skip when ROCm torch or a supported target is unavailable. Native parity
+tests run when `rocke_engine` is importable and otherwise skip.
+No performance claim follows from this correctness coverage.

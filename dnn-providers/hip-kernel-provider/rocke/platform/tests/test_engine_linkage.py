@@ -754,6 +754,72 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         assert "ffm-quick" in labels.get(name, set()), name
 
 
+@requires_cmake
+@pytest.mark.parametrize("provider_subdir", ["", "hip_kernel_provider"])
+def test_installed_paged_decode_cohort_is_disjoint_and_enrolled(
+    tmp_path, provider_subdir
+):
+    """Keep the paged profile corpus on its own budget and host/GPU split."""
+    if not (PLATFORM.parent / "library/tests/ctest_lists.cmake").is_file():
+        pytest.skip("the paged cohort needs the sibling library tree")
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}"
+    )
+    tests = list_installed_ctests(ctest_dir)
+    name = "rocke_library_paged_decode_cpu_pytest"
+    cohort = [test for test in tests if test["name"] == name]
+    assert len(cohort) == 1
+    cohort = cohort[0]
+    library_root = ("./" if provider_subdir else "../") + "tests/library"
+    root = library_root + "/tests/"
+    expected = {
+        "test_attention_kv_loader.py",
+        "test_attention_paged_bounds.py",
+        "test_decode_numeric_support.py",
+        "test_paged_feature_admission.py",
+        "test_paged_kv_decode.py",
+        "test_paged_metadata_containment.py",
+        "test_paged_metadata_identity.py",
+        "test_paged_lds_admission.py",
+        "test_paged_lse.py",
+        "test_strided_kv_decode.py",
+        "test_strided_kv_lds.py",
+        "test_paged_bounded_runtime_numeric.py::test_cohort_selects_bounded_specs",
+        "test_paged_bounded_runtime_numeric.py::test_cohort_rejects_top_left_band_alias",
+        "test_paged_bounded_runtime_numeric.py::test_reference_empty_and_windowed_rows",
+    }
+    selection = cohort["command"][6:-3]
+    assert len(selection) == len(expected)
+    assert set(selection) == {root + path for path in expected}
+    assert cohort["command"][1:6] == PYTEST_WITH_SHARD_PLUGIN
+    assert cohort["command"][-3:] == ["-v", "-rs", "--timeout=30"]
+    properties = {prop["name"]: prop["value"] for prop in cohort["properties"]}
+    assert properties["TIMEOUT"] == 180
+    assert properties["ENVIRONMENT"] == ["PYTHONPATH=" + library_root]
+    legacy = next(
+        test for test in tests if test["name"] == "rocke_library_attention_cpu_pytest"
+    )
+    assert not set(selection).intersection(legacy["command"])
+    assert (
+        next(
+            prop["value"] for prop in legacy["properties"] if prop["name"] == "TIMEOUT"
+        )
+        == 180
+    )
+    gpu = next(test for test in tests if test["name"] == "rocke_library_gpu_pytest")
+    runtime_case = (
+        root
+        + "test_paged_bounded_runtime_numeric.py::test_bounded_mapping_and_metadata_recovery"
+    )
+    assert gpu["command"].count(runtime_case) == 1
+    assert runtime_case not in selection
+    category_scratch = tmp_path / "categories"
+    category_scratch.mkdir()
+    labels = provider_category_labels([name, legacy["name"]], category_scratch)
+    assert labels[name] == labels[legacy["name"]]
+    assert {"quick", "standard", "ffm-quick"} <= labels[name]
+
+
 # (exported target, installed header, extern "C" symbol it declares). The
 # library case links only ckc::rocke_library, so it also proves the archive
 # brings ckc::rocke_core and Threads with it.

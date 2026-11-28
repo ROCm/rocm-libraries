@@ -191,7 +191,11 @@ def test_module_predicate_rejects_segment_lds_overflow():
     ],
 )
 def test_module_predicate_rejects_unsupported(kwargs, needle):
-    ok, reason = mod.supports_unified_attention_3d_tiled_module(_segment(**kwargs))
+    # Exercise the final gate on a descriptor that bypassed constructor checks.
+    segment = _segment()
+    for name, value in kwargs.items():
+        object.__setattr__(segment, name, value)
+    ok, reason = mod.supports_unified_attention_3d_tiled_module(segment)
     assert not ok
     assert needle in reason
 
@@ -208,7 +212,9 @@ def test_module_predicate_rejects_other_arch():
 def test_module_predicate_refuses_a_tile_the_builder_cannot_walk(block_size, tile):
     # 24 and 64 do not divide 32 (the builder asserts BS % T == 0); 8 divides 64 but
     # is not a whole 16-wide MFMA step (T // MFMA_N would be 0); 0 is no tile.
-    seg = _segment(block_size=block_size, tile_size_override=tile)
+    seg = _segment()
+    object.__setattr__(seg, "block_size", block_size)
+    object.__setattr__(seg, "tile_size_override", tile)
     ok, reason = mod.supports_unified_attention_3d_tiled_module(seg, arch="gfx942")
     assert not ok
     assert "KV tile" in reason
