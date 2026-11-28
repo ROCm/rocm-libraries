@@ -1,0 +1,37 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "hipblaslt"
+dynamic = ["version"]
+description = "Low-level Python bindings for the hipBLASLt GEMM API (a development and testing tool, not a ROCm deliverable)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[build-system]
+# nanobind 3.0.0 doesn't build with clang on Windows (see tensilelite/rocisa/pyproject.toml).
+# 1.1.2 is the oldest scikit-build-core tested with the [[tool.dynamic-metadata]] entry below.
+requires = ["scikit-build-core>=1.1.2", "nanobind>=2.0,!=3.0.0"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.version = ">=3.25"
+cmake.build-type = "Release"
+wheel.packages = ["src/hipblaslt"]
+
+# The package version is hipBLASLt's own version, read from the hipblaslt-version.h of the
+# hipBLASLt the bindings are built against. CMakeLists.txt checks that
+# find_package(hipblaslt) found the same version.
+[[tool.dynamic-metadata]]
+provider = { path = "skbuild_plugins", module = "hipblaslt_version_provider" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: needs a visible HIP device; fails instead of skipping when HIPBLASLT_PY_REQUIRE_GPU=1",
+]
