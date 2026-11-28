@@ -125,8 +125,12 @@ struct magic_division16_bit_range
             shift_u32++;
         };
 
-        uint32_t one            = 1;
-        uint32_t multiplier_u32 = ((one << 16) * ((one << shift_u32) - divisor)) / divisor + 1;
+        uint32_t one       = 1;
+        uint32_t numerator = (one << 16) * ((one << shift_u32) - divisor);
+        // Ceiling division: when 2^shift == divisor the numerator is 0 and the
+        // unconditional "+1" would produce a multiplier that is one too large,
+        // causing do_magic_division to return n+1 for n==divisor at shift==0.
+        uint32_t multiplier_u32 = (numerator + divisor - 1) / divisor;
 
         return make_tuple(multiplier_u32, shift_u32);
     }

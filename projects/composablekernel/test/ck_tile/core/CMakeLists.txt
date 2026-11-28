@@ -4,3 +4,4 @@
 add_subdirectory(arch)
 add_subdirectory(container)
 add_subdirectory(tensor)
+add_subdirectory(utility)
