@@ -13,6 +13,7 @@ before any logic is read.
 """
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -126,3 +127,168 @@ def test_parse_argv_rejects_a_separate_changed_files_value(script, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["run_tensile_logic_check.py", "--changed-files", "list.txt"])
     with pytest.raises(SystemExit):
         script._parse_argv(_SCRIPT.parents[1])
+
+
+def _fake_git(script, monkeypatch, has_parent: bool, base: dict) -> list:
+    """Replace ``git`` in the script with an in-memory stand-in.
+
+    Args:
+        script: The loaded check script.
+        monkeypatch: Pytest monkeypatch fixture.
+        has_parent: Whether ``git rev-parse HEAD^`` succeeds.
+        base: Base-revision text keyed by repository-relative path.
+
+    Returns:
+        The list that records each git argument vector.
+
+    Raises:
+        None.
+    """
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        if args[1] == "rev-parse":
+            return subprocess.CompletedProcess(args, 0 if has_parent else 1, b"", b"")
+        rel = args[2].split(":", 1)[1]
+        if rel not in base:
+            return subprocess.CompletedProcess(args, 128, b"", b"fatal")
+        return subprocess.CompletedProcess(args, 0, base[rel].encode(), b"")
+
+    monkeypatch.setattr(script.subprocess, "run", run)
+    return calls
+
+
+def test_base_revision_text_reads_the_parent_commit(script, monkeypatch, tmp_path):
+    """``git show HEAD^:path`` gives the text; a missing blob gives None.
+
+    Args:
+        script: The loaded check script.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the text or the git arguments are wrong.
+    """
+    calls = _fake_git(script, monkeypatch, True, {"a.yaml": "old\n"})
+    assert script._base_revision_text(tmp_path, "a.yaml") == "old\n"
+    assert script._base_revision_text(tmp_path, "b.yaml") is None
+    assert calls[0] == ["git", "show", "HEAD^:a.yaml"]
+
+
+def test_check_logic_changes_fails_a_new_list_file(script, project, tmp_path, monkeypatch, capsys):
+    """A new list-format logic file exits 1 and names the file.
+
+    Args:
+        script: The loaded check script.
+        project: Synthetic hipBLASLt project root.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest output capture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the new list file passes.
+    """
+    rel = "projects/hipblaslt" / _LOGIC_REL / "gfx1151/Equality/new.yaml"
+    (project.parents[1] / rel).parent.mkdir(parents=True)
+    (project.parents[1] / rel).write_text("- [a]\n")
+    _fake_git(script, monkeypatch, True, {})
+    with pytest.raises(SystemExit) as raised:
+        script._check_logic_changes(project, _changed(tmp_path, rel))
+    assert raised.value.code == 1
+    assert f"{rel.as_posix()}: List-format library logic was added" in capsys.readouterr().err
+
+
+def test_check_logic_changes_passes_an_unchanged_rule(script, project, tmp_path, monkeypatch):
+    """An edited list file that was already a list passes.
+
+    Args:
+        script: The loaded check script.
+        project: Synthetic hipBLASLt project root.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the edit is rejected.
+    """
+    rel = "projects/hipblaslt" / _LOGIC_REL / "gfx1151/Equality/old.yaml"
+    (project.parents[1] / rel).parent.mkdir(parents=True)
+    (project.parents[1] / rel).write_text("- [a]\n- [b]\n")
+    _fake_git(script, monkeypatch, True, {rel.as_posix(): "- [a]\n"})
+    assert script._check_logic_changes(project, _changed(tmp_path, rel)) is None
+
+
+def test_check_logic_changes_needs_the_parent_commit(script, project, tmp_path, monkeypatch):
+    """Without ``HEAD^`` a logic change cannot be compared, so the run stops.
+
+    Args:
+        script: The loaded check script.
+        project: Synthetic hipBLASLt project root.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the run continues.
+    """
+    rel = _write_logic(project, "gfx1151/Equality/a.yaml", "gfx1151")
+    _fake_git(script, monkeypatch, False, {})
+    with pytest.raises(SystemExit, match="HEAD\\^ is not available"):
+        script._check_logic_changes(project, _changed(tmp_path, rel))
+
+
+def test_check_logic_changes_skips_git_without_logic_files(script, project, tmp_path, monkeypatch):
+    """A change with no logic file does not call git.
+
+    Args:
+        script: The loaded check script.
+        project: Synthetic hipBLASLt project root.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If git is called.
+    """
+    calls = _fake_git(script, monkeypatch, False, {})
+    script._check_logic_changes(project, _changed(tmp_path, "README.md"))
+    assert calls == []
+
+
+def test_main_compares_changed_logic_before_scoping(script, monkeypatch, tmp_path, capsys):
+    """``main`` runs the base-revision comparison on a ``--changed-files`` run.
+
+    Args:
+        script: The loaded check script.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory.
+        capsys: Pytest output capture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the comparison is skipped.
+    """
+    listFile = _changed(tmp_path, "README.md")
+    compared = []
+    monkeypatch.setattr(sys, "argv", ["run_tensile_logic_check.py", f"--changed-files={listFile}"])
+    monkeypatch.setattr(script, "_ensure_paths", lambda *args: None)
+    monkeypatch.setattr(script, "_check_logic_changes", lambda root, path: compared.append(path))
+    monkeypatch.setattr(script, "_changed_architectures", lambda root, path: set())
+    script.main()
+    assert compared == [listFile]
+    assert "nothing to check" in capsys.readouterr().out
