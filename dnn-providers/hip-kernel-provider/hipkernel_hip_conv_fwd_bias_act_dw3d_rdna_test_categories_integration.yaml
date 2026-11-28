@@ -1,0 +1,87 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider hipkernel:hip_conv_fwd_bias_act_dw3d_rdna external integration test
+# categories.
+#
+# Pinned to hipkernel:hip_conv_fwd_bias_act_dw3d_rdna via --test-engine. Selects the shared
+# integration-test-bundles/<tier>/ConvolutionFwdPointwise/Default (conv -> activation) and
+# Variant2 (conv -> bias ADD -> activation) sweeps. Engine pinning and support claims do the rest:
+# a claimed case the engine declines fails its lane, an unclaimed one it declines (anything but a
+# depthwise 3-D convolution, a bias of another shape or dtype) skips, and an unclaimed one it
+# accepts runs and is reported as unclaimed support. Tiers cascade: standard runs quick +
+# standard, comprehensive runs quick + standard + comprehensive; only "full" runs the full-tier
+# bundles.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Quick RDNA HIP depthwise 3D conv + (bias) + activation coverage"
+    test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
+      - "quick_ConvolutionFwdPointwise_Variant2*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard RDNA HIP depthwise 3D conv + (bias) + activation coverage"
+    test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
+      - "quick_ConvolutionFwdPointwise_Variant2*"
+      - "standard_ConvolutionFwdPointwise_Default*"
+      - "standard_ConvolutionFwdPointwise_Variant2*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive RDNA HIP depthwise 3D conv + (bias) + activation coverage"
+    test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
+      - "quick_ConvolutionFwdPointwise_Variant2*"
+      - "standard_ConvolutionFwdPointwise_Default*"
+      - "standard_ConvolutionFwdPointwise_Variant2*"
+      - "comprehensive_ConvolutionFwdPointwise_Default*"
+      - "comprehensive_ConvolutionFwdPointwise_Variant2*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full RDNA HIP depthwise 3D conv + (bias) + activation coverage"
+    test_patterns:
+      - "*ConvolutionFwdPointwise_Default*"
+      - "*ConvolutionFwdPointwise_Variant2*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback quick tier: RDNA HIP depthwise 3D conv + (bias) + activation quick bundles"
+    test_patterns:
+      - "quick_ConvolutionFwdPointwise_Default*"
+      - "quick_ConvolutionFwdPointwise_Variant2*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

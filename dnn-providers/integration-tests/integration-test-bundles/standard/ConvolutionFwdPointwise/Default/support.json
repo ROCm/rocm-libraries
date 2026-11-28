@@ -19,6 +19,20 @@
           ]
         }
       }
+    ],
+    "hipkernel:hip_conv_fwd_bias_act_dw3d_rdna": [
+      {
+        "cases": [
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl_identity",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cf_identity",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cl_relu"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

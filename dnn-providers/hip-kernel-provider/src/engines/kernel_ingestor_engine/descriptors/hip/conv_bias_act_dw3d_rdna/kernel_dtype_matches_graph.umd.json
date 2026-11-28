@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "b585247f-0c86-480f-a10e-9533597c233f",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.hip_conv_fwd_bias_act_dw3d_rdna.kernel_match"
+}

@@ -22,6 +22,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 | `hip/conv_dw3d_rdna/` | `hipkernel:hip_conv_fwd_dw3d_rdna` | `packs/HipConvFwdDw3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaDw3d.cpp`) |
 | `hip/conv_bias_dw3d_rdna/` | `hipkernel:hip_conv_fwd_bias_dw3d_rdna` | `packs/HipConvFwdBiasDw3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaDw3d.cpp`) |
+| `hip/conv_bias_act_dw3d_rdna/` | `hipkernel:hip_conv_fwd_bias_act_dw3d_rdna` | `packs/HipConvFwdBiasActDw3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaDw3d.cpp`, `packs/ConvRdnaFusedEpilogue.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_2d`, `gfx942_attention_unified_3d`, `gfx942_attention_dense`,
@@ -57,6 +58,11 @@ plus one generic variant per dtype and layout. Its descriptors are generated fro
 depthwise 3-D kernel, built with its bias epilogue (`DW_HAS_BIAS`). Its
 descriptors are generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_bias_dw3d_rdna.yaml`.
+
+`hip/conv_bias_act_dw3d_rdna/` holds no kernel source of its own: its UKDs name the same
+depthwise 3-D kernel, built with its bias and activation epilogues (`DW_HAS_BIAS`, `DW_HAS_ACT`). Its
+descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_bias_act_dw3d_rdna.yaml`.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

@@ -86,6 +86,7 @@ compilation::KpackModuleCache& convFwdKpackModuleCache();
 compilation::KpackModuleCache& hipConvFwdFmaIgemmRdnaKpackModuleCache();
 compilation::KpackModuleCache& hipConvFwdDw3dRdnaKpackModuleCache();
 compilation::KpackModuleCache& hipConvFwdBiasDw3dRdnaKpackModuleCache();
+compilation::KpackModuleCache& hipConvFwdBiasActDw3dRdnaKpackModuleCache();
 compilation::KpackModuleCache& flydslRmsNormKpackModuleCache();
 compilation::KpackModuleCache& flydslRmsNormBwdKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaRdnaKpackModuleCache();

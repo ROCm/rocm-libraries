@@ -121,6 +121,30 @@
           ]
         }
       }
+    ],
+    "hipkernel:hip_conv_fwd_bias_act_dw3d_rdna": [
+      {
+        "cases": [
+          "l13a_3d_i32x32x32_n2c32k32g32_f3x3x3_fp16_cl_tanh",
+          "l13b_3d_i32x32x32_n2c32k64g32_f3x3x3_bf16_cf_elu",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cf_relu",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl_relu_lo",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cf_softplus",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cf_gelu_tanh",
+          "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cl_swish",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cf_tanh",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cl_elu",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cf_relu_leaky",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cl_sigmoid",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf_relu6",
+          "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cl_relu_clamp"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1
