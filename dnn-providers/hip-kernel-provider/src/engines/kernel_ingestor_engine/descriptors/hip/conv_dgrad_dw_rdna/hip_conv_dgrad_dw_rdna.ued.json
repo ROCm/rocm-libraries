@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "c5003daa-525f-4ecd-b3a1-428ba76f797f",
+  "name": "hipkernel:hip_conv_dgrad_dw_rdna",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.hip_conv_dgrad_dw_rdna.graph_match"
+  },
+  "metadata": "ec27a0ce-e4f7-4349-9992-3a26fba8c522",
+  "sort_kernel_catalog": {
+    "default": "29d25cae-dbf2-4295-9f8f-3f4dad79a6a5"
+  }
+}
