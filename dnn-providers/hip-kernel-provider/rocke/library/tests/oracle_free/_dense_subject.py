@@ -14,8 +14,8 @@ functions that use them, so CPU collection and the analytical contracts need
 neither a GPU nor ROCm.
 
 A lane describes its case through :class:`DenseCase`. Adding an architecture is
-one :data:`DENSE_SUBJECTS` entry plus its cases in :data:`QUICK_SUBJECT_CASES` or
-:data:`PERMUTATION_SUBJECT_CASES`.
+one :data:`DENSE_SUBJECTS` entry plus its cases in :data:`QUICK_SUBJECT_CASES`,
+:data:`PERMUTATION_SUBJECT_CASES` or the masked-token poisoning matrices.
 """
 
 from __future__ import annotations
@@ -30,6 +30,11 @@ from typing import Protocol
 import numpy as np
 
 from ._analytical import UNIFORM_QUICK_CASES, UniformCase
+from ._masked_poison import (
+    MASKED_POISON_QUICK_CASES,
+    MASKED_POISON_STANDARD_CASES,
+    MaskedPoisonCase,
+)
 from ._permutation import PERMUTATION_QUICK_CASES, PermutationCase
 
 _POINTER_ALIGNMENT = 16
@@ -104,6 +109,14 @@ QUICK_SUBJECT_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
 # The key-permutation lane's (arch, case) matrix: unmasked cases on gfx942.
 PERMUTATION_SUBJECT_CASES: tuple[tuple[str, PermutationCase], ...] = tuple(
     ("gfx942", case) for case in PERMUTATION_QUICK_CASES
+)
+# The masked-token poisoning lanes' (arch, case) matrices: causal and window
+# cases on gfx942, split between the quick and the standard tier.
+MASKED_POISON_QUICK_SUBJECT_CASES: tuple[tuple[str, MaskedPoisonCase], ...] = tuple(
+    ("gfx942", case) for case in MASKED_POISON_QUICK_CASES
+)
+MASKED_POISON_STANDARD_SUBJECT_CASES: tuple[tuple[str, MaskedPoisonCase], ...] = tuple(
+    ("gfx942", case) for case in MASKED_POISON_STANDARD_CASES
 )
 
 
@@ -307,6 +320,22 @@ def compile_dense_subject(arch: str, resolved: ResolvedDenseSubject):
             f"compiled {artifact.kernel_name!r}, expected {spec.kernel_name()!r}"
         )
     return artifact
+
+
+def launch_geometry(
+    arch: str, resolved: ResolvedDenseSubject
+) -> tuple[tuple[int, int, int], int]:
+    """The work-group grid and the threads per work group a resolved subject is
+    launched with, from the runner's own launch helpers.
+
+    A lane that executes the kernel's position arithmetic on the host needs the
+    range of the work-group and thread coordinates; it reads them where the
+    launcher does, so the adapter keeps no copy of the geometry."""
+    runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
+    spec = resolved.tuning_spec.kernel_spec
+    grid = tuple(int(item) for item in runner.attention_dense_grid(spec))
+    threads = int(runner.attention_dense_block(spec)[0])
+    return grid, threads
 
 
 def run_dense_case(

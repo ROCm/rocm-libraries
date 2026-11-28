@@ -220,8 +220,13 @@ the strategy's biggest holes live (see
   relation on unmasked GQA cases: the outputs for K and V permuted together
   must agree with the unpermuted ones within a bound derived from the kernel's
   arithmetic path, and each mutation that breaks the key-value pairing must
-  leave that bound in every head. The lane needs NumPy and HIP only; its CPU
-  contracts run in `rocke_library_attention_cpu_pytest`.
+  leave that bound in every head. It also runs the masked-token poisoning
+  relation on causal and sliding-window GQA cases: K and V are changed at
+  tokens that are masked for some rows, those rows must come back bit for bit,
+  and the rows that can see the changed tokens must be taken over by them; two
+  more cases run at the standard tier
+  (`rocke_oracle_free_masked_poison_standard_pytest`). The lane needs NumPy and
+  HIP only; its CPU contracts run in `rocke_library_attention_cpu_pytest`.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
