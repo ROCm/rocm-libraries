@@ -262,6 +262,9 @@ struct Arguments
 
     bool flush;
     int  tensile_solution_selection_method;
+    // Kernel names the first solutions must contain, separated by newlines.
+    // Empty means the case does not care which kernel ran.
+    char expected_kernel[256];
 
     /*************************************************************************
      *                     End Of Arguments                                  *
@@ -401,7 +404,8 @@ struct Arguments
     OPER(print_solution_found) SEP   \
     OPER(print_kernel_info) SEP      \
     OPER(flush) SEP                  \
-    OPER(tensile_solution_selection_method) SEP
+    OPER(tensile_solution_selection_method) SEP \
+    OPER(expected_kernel) SEP
 
     // clang-format on
 

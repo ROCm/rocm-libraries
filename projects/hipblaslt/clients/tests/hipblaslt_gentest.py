@@ -368,7 +368,11 @@ def write_test(test):
         try:
             if issubclass(ctype, ctypes.Array):
                 if issubclass(ctype._type_, ctypes.c_char):
-                    arg.append(char_array_bytes(name, test[name], ctype))
+                    value = test[name]
+                    # A list is the first N solution names, one per line.
+                    if isinstance(value, (list, tuple)):
+                        value = "\n".join(str(item) for item in value)
+                    arg.append(char_array_bytes(name, value, ctype))
                 else:
                     try:
                         arg.append(ctype(*test[name]))

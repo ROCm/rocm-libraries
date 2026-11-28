@@ -6659,6 +6659,50 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
+    // expected_kernel is one name, or several separated by newlines, matched
+    // in order against the first solutions. A name matches when the launched
+    // kernel contains it.
+    if(arg.expected_kernel[0] != '\0')
+    {
+        std::string spec(arg.expected_kernel);
+        std::size_t pos = 0;
+        int         i   = 0;
+        while(pos < spec.size())
+        {
+            std::size_t end  = spec.find('\n', pos);
+            std::string name = spec.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+            pos              = end == std::string::npos ? spec.size() : end + 1;
+            if(name.empty())
+                continue;
+            if(i >= static_cast<int>(heuristicResult.size()))
+            {
+#ifdef GOOGLE_TEST
+                ADD_FAILURE() << "expected kernel " << name << " as solution " << i
+                              << " but the library returned " << heuristicResult.size();
+#else
+                hipblaslt_cerr << "expected kernel " << name << " as solution " << i
+                               << " but the library returned " << heuristicResult.size()
+                               << std::endl;
+#endif
+                return;
+            }
+            const std::string got
+                = hipblaslt_ext::getKernelNameFromAlgo(handle, heuristicResult[i].algo);
+            if(got.find(name) == std::string::npos)
+            {
+#ifdef GOOGLE_TEST
+                ADD_FAILURE() << "solution " << i << " is '" << got << "', expected '" << name
+                              << "'";
+#else
+                hipblaslt_cerr << "solution " << i << " is '" << got << "', expected '" << name
+                               << "'" << std::endl;
+#endif
+                return;
+            }
+            ++i;
+        }
+    }
+
     // A Stream-K case that got no Stream-K kernel (TileProcessingStrategy StreamK, "TPSSK" in the
     // kernel name) would pass while testing none.
     if(arg.requires_streamk)
