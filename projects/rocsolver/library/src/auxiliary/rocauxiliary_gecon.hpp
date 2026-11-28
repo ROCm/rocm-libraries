@@ -249,8 +249,9 @@ rocblas_status rocsolver_gecon_template(rocblas_handle handle,
         do
         {
             // Call LACN2 to get next operation (simplified parameter list)
-            rocsolver_lacn2_template<T, I, S>(handle, n, &x, &v, isgn, d_est, d_max_idx, d_kase,
-                                              d_jump, &h_kase, &h_jump, &h_iters, max_iter, stream);
+            THROW_IF_ROCBLAS_ERROR(rocsolver_lacn2_template<T, I, S>(
+                handle, n, &x, &v, isgn, d_est, d_max_idx, d_kase, d_jump, &h_kase, &h_jump,
+                &h_iters, max_iter, stream));
 
             if(h_kase == 0)
                 break; // converged, d_est contains ||inv(A)||_1

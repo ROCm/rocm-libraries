@@ -1172,7 +1172,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sorgbr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side2storev(side),
@@ -1182,7 +1183,7 @@ try
                                                          nullptr,
                                                          lda,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -1219,7 +1220,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dorgbr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side2storev(side),
@@ -1229,7 +1231,7 @@ try
                                                          nullptr,
                                                          lda,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -1266,7 +1268,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cungbr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side2storev(side),
@@ -1276,7 +1279,7 @@ try
                                                          nullptr,
                                                          lda,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -1313,7 +1316,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zungbr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side2storev(side),
@@ -1323,7 +1327,7 @@ try
                                                          nullptr,
                                                          lda,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -1526,10 +1530,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_sorgqr((rocblas_handle)handle, m, n, k, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -1559,10 +1564,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dorgqr((rocblas_handle)handle, m, n, k, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -1598,10 +1604,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cungqr((rocblas_handle)handle, m, n, k, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -1637,10 +1644,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zungqr((rocblas_handle)handle, m, n, k, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -1842,10 +1850,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_sorgtr(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -1880,10 +1889,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dorgtr(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -1918,10 +1928,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cungtr(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -1956,10 +1967,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zungtr(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -2160,7 +2172,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sormqr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2173,7 +2186,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -2213,7 +2226,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dormqr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2226,7 +2240,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -2266,7 +2280,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cunmqr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2279,7 +2294,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -2319,7 +2334,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zunmqr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2332,7 +2348,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -2581,7 +2597,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sormtr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2594,7 +2611,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -2634,7 +2651,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dormtr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2647,7 +2665,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -2687,7 +2705,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cunmtr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2700,7 +2719,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -2740,7 +2759,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zunmtr((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_side(side),
@@ -2753,7 +2773,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          ldc));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -2991,10 +3011,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_sgebrd(
         (rocblas_handle)handle, m, n, nullptr, m, nullptr, nullptr, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3020,10 +3041,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dgebrd(
         (rocblas_handle)handle, m, n, nullptr, m, nullptr, nullptr, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3049,10 +3071,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cgebrd(
         (rocblas_handle)handle, m, n, nullptr, m, nullptr, nullptr, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3078,10 +3101,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zgebrd(
         (rocblas_handle)handle, m, n, nullptr, m, nullptr, nullptr, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3260,7 +3284,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_sgels((rocblas_handle)handle,
                                                                              rocblas_operation_none,
                                                                              m,
@@ -3284,7 +3309,7 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3320,7 +3345,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dgels((rocblas_handle)handle,
                                                                              rocblas_operation_none,
                                                                              m,
@@ -3344,7 +3370,7 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3380,7 +3406,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cgels((rocblas_handle)handle,
                                                                              rocblas_operation_none,
                                                                              m,
@@ -3404,7 +3431,7 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3440,7 +3467,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zgels((rocblas_handle)handle,
                                                                              rocblas_operation_none,
                                                                              m,
@@ -3464,7 +3492,7 @@ try
                                                                    nullptr,
                                                                    ldx,
                                                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3707,7 +3735,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sgels_batched((rocblas_handle)handle,
                                                                 roc_trans,
@@ -3720,7 +3749,7 @@ try
                                                                 ldc,
                                                                 nullptr,
                                                                 batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3756,7 +3785,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dgels_batched((rocblas_handle)handle,
                                                                 roc_trans,
@@ -3769,7 +3799,7 @@ try
                                                                 ldc,
                                                                 nullptr,
                                                                 batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3805,7 +3835,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cgels_batched((rocblas_handle)handle,
                                                                 roc_trans,
@@ -3818,7 +3849,7 @@ try
                                                                 ldc,
                                                                 nullptr,
                                                                 batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -3854,7 +3885,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zgels_batched((rocblas_handle)handle,
                                                                 roc_trans,
@@ -3867,7 +3899,7 @@ try
                                                                 ldc,
                                                                 nullptr,
                                                                 batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4177,10 +4209,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_sgeqrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4207,10 +4240,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dgeqrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4237,10 +4271,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cgeqrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4267,10 +4302,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zgeqrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4422,10 +4458,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_sgeqrf_ptr_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4450,10 +4487,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dgeqrf_ptr_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4483,10 +4521,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cgeqrf_ptr_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4516,10 +4555,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zgeqrf_ptr_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4760,7 +4800,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sgesv_outofplace((rocblas_handle)handle,
                                                                    n,
@@ -4775,7 +4816,7 @@ try
                                                                    nullptr));
     hipsolver::rocblas2hip_status(rocsolver_sgesv(
         (rocblas_handle)handle, n, nrhs, nullptr, lda, nullptr, nullptr, ldb, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4809,7 +4850,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dgesv_outofplace((rocblas_handle)handle,
                                                                    n,
@@ -4824,7 +4866,7 @@ try
                                                                    nullptr));
     hipsolver::rocblas2hip_status(rocsolver_dgesv(
         (rocblas_handle)handle, n, nrhs, nullptr, lda, nullptr, nullptr, ldb, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4858,7 +4900,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cgesv_outofplace((rocblas_handle)handle,
                                                                    n,
@@ -4873,7 +4916,7 @@ try
                                                                    nullptr));
     hipsolver::rocblas2hip_status(rocsolver_cgesv(
         (rocblas_handle)handle, n, nrhs, nullptr, lda, nullptr, nullptr, ldb, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -4907,7 +4950,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zgesv_outofplace((rocblas_handle)handle,
                                                                    n,
@@ -4922,7 +4966,7 @@ try
                                                                    nullptr));
     hipsolver::rocblas2hip_status(rocsolver_zgesv(
         (rocblas_handle)handle, n, nrhs, nullptr, lda, nullptr, nullptr, ldb, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -5128,7 +5172,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sgesvd((rocblas_handle)handle,
                                                          hipsolver::char2rocblas_svect(jobu),
@@ -5145,15 +5190,15 @@ try
                                                          nullptr,
                                                          rocblas_outofplace,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array (aka rwork)
     size_t size_E = std::min(m, n) > 0 ? sizeof(float) * std::min(m, n) : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -5183,7 +5228,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dgesvd((rocblas_handle)handle,
                                                          hipsolver::char2rocblas_svect(jobu),
@@ -5200,15 +5246,15 @@ try
                                                          nullptr,
                                                          rocblas_outofplace,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array (aka rwork)
     size_t size_E = std::min(m, n) > 0 ? sizeof(double) * std::min(m, n) : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -5238,7 +5284,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cgesvd((rocblas_handle)handle,
                                                          hipsolver::char2rocblas_svect(jobu),
@@ -5255,15 +5302,15 @@ try
                                                          nullptr,
                                                          rocblas_outofplace,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array (aka rwork)
     size_t size_E = std::min(m, n) > 0 ? sizeof(float) * std::min(m, n) : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -5293,7 +5340,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zgesvd((rocblas_handle)handle,
                                                          hipsolver::char2rocblas_svect(jobu),
@@ -5310,15 +5358,15 @@ try
                                                          nullptr,
                                                          rocblas_outofplace,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array (aka rwork)
     size_t size_E = std::min(m, n) > 0 ? sizeof(double) * std::min(m, n) : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -5652,7 +5700,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_sgesvdj_notransv((rocblas_handle)handle,
                                    hipsolver::hip2rocblas_evect2svect(jobz, econ),
@@ -5671,12 +5720,12 @@ try
                                    nullptr,
                                    ldv,
                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -5721,7 +5770,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dgesvdj_notransv((rocblas_handle)handle,
                                    hipsolver::hip2rocblas_evect2svect(jobz, econ),
@@ -5740,12 +5790,12 @@ try
                                    nullptr,
                                    ldv,
                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -5790,7 +5840,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cgesvdj_notransv((rocblas_handle)handle,
                                    hipsolver::hip2rocblas_evect2svect(jobz, econ),
@@ -5809,12 +5860,12 @@ try
                                    nullptr,
                                    ldv,
                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -5859,7 +5910,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zgesvdj_notransv((rocblas_handle)handle,
                                    hipsolver::hip2rocblas_evect2svect(jobz, econ),
@@ -5878,12 +5930,12 @@ try
                                    nullptr,
                                    ldv,
                                    nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -6213,7 +6265,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_sgesvdj_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 0),
@@ -6237,12 +6290,12 @@ try
                                                    ldv * n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -6287,7 +6340,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dgesvdj_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 0),
@@ -6311,12 +6365,12 @@ try
                                                    ldv * n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -6361,7 +6415,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cgesvdj_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 0),
@@ -6385,12 +6440,12 @@ try
                                                    ldv * n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -6435,7 +6490,8 @@ try
     *lwork                      = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zgesvdj_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 0),
@@ -6459,12 +6515,12 @@ try
                                                    ldv * n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -6863,7 +6919,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_sgesvdx_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 1),
@@ -6891,7 +6948,7 @@ try
                                                    n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for nsv array
     size_t size_nsv = sizeof(int) * batch_count;
@@ -6900,9 +6957,9 @@ try
     size_t size_ifail = sizeof(int) * std::min(m, n) * batch_count;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_nsv, size_ifail);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -6948,7 +7005,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dgesvdx_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 1),
@@ -6976,7 +7034,7 @@ try
                                                    n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for nsv array
     size_t size_nsv = sizeof(int) * batch_count;
@@ -6985,9 +7043,9 @@ try
     size_t size_ifail = sizeof(int) * std::min(m, n) * batch_count;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_nsv, size_ifail);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -7033,7 +7091,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cgesvdx_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 1),
@@ -7061,7 +7120,7 @@ try
                                                    n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for nsv array
     size_t size_nsv = sizeof(int) * batch_count;
@@ -7070,9 +7129,9 @@ try
     size_t size_ifail = sizeof(int) * std::min(m, n) * batch_count;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_nsv, size_ifail);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -7117,7 +7176,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zgesvdx_notransv_strided_batched((rocblas_handle)handle,
                                                    hipsolver::hip2rocblas_evect2svect(jobz, 1),
@@ -7145,7 +7205,7 @@ try
                                                    n,
                                                    nullptr,
                                                    batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for nsv array
     size_t size_nsv = sizeof(int) * batch_count;
@@ -7154,9 +7214,9 @@ try
     size_t size_ifail = sizeof(int) * std::min(m, n) * batch_count;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_nsv, size_ifail);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -7643,12 +7703,13 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_sgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
         rocsolver_sgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -7677,12 +7738,13 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
         rocsolver_dgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -7711,12 +7773,13 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
         rocsolver_cgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -7745,12 +7808,13 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
         rocsolver_zgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -7915,6 +7979,7 @@ try
     size_t sz;
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_sgetrf_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, strideP, nullptr, batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_sgetrf_npvt_batched(
@@ -7953,6 +8018,7 @@ try
     size_t sz;
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_dgetrf_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, strideP, nullptr, batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_dgetrf_npvt_batched(
@@ -7991,6 +8057,7 @@ try
     size_t sz;
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_cgetrf_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, strideP, nullptr, batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_cgetrf_npvt_batched(
@@ -8029,6 +8096,7 @@ try
     size_t sz;
 
     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_zgetrf_batched(
         (rocblas_handle)handle, m, n, nullptr, lda, nullptr, strideP, nullptr, batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_zgetrf_npvt_batched(
@@ -8227,7 +8295,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sgetri_outofplace_batched((rocblas_handle)handle,
                                                                             n,
@@ -8242,7 +8311,7 @@ try
     hipsolverStatus_t npvt_status
         = hipsolver::rocblas2hip_status(rocsolver_sgetri_npvt_outofplace_batched(
             (rocblas_handle)handle, n, nullptr, lda, nullptr, ldc, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -8277,7 +8346,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dgetri_outofplace_batched((rocblas_handle)handle,
                                                                             n,
@@ -8292,7 +8362,7 @@ try
     hipsolverStatus_t npvt_status
         = hipsolver::rocblas2hip_status(rocsolver_dgetri_npvt_outofplace_batched(
             (rocblas_handle)handle, n, nullptr, lda, nullptr, ldc, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -8327,7 +8397,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cgetri_outofplace_batched((rocblas_handle)handle,
                                                                             n,
@@ -8342,7 +8413,7 @@ try
     hipsolverStatus_t npvt_status
         = hipsolver::rocblas2hip_status(rocsolver_cgetri_npvt_outofplace_batched(
             (rocblas_handle)handle, n, nullptr, lda, nullptr, ldc, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -8377,7 +8448,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zgetri_outofplace_batched((rocblas_handle)handle,
                                                                             n,
@@ -8392,7 +8464,7 @@ try
     hipsolverStatus_t npvt_status
         = hipsolver::rocblas2hip_status(rocsolver_zgetri_npvt_outofplace_batched(
             (rocblas_handle)handle, n, nullptr, lda, nullptr, ldc, nullptr, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -8614,12 +8686,13 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_sgetrs(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_sgetrs_npvt(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -8658,12 +8731,13 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_dgetrs(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_dgetrs_npvt(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -8702,12 +8776,13 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_cgetrs(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_cgetrs_npvt(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -8746,12 +8821,13 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_zgetrs(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_zgetrs_npvt(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9001,7 +9077,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_sgetrs_batched((rocblas_handle)handle,
                                                                  roc_trans,
@@ -9016,7 +9093,7 @@ try
                                                                  batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_sgetrs_npvt_batched(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9055,7 +9132,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dgetrs_batched((rocblas_handle)handle,
                                                                  roc_trans,
@@ -9070,7 +9148,7 @@ try
                                                                  batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_dgetrs_npvt_batched(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9109,7 +9187,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cgetrs_batched((rocblas_handle)handle,
                                                                  roc_trans,
@@ -9124,7 +9203,7 @@ try
                                                                  batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_cgetrs_npvt_batched(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9163,7 +9242,8 @@ try
 
     rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zgetrs_batched((rocblas_handle)handle,
                                                                  roc_trans,
@@ -9178,7 +9258,7 @@ try
                                                                  batch_count));
     hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_zgetrs_npvt_batched(
         (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9562,10 +9642,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_spotrf(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9592,10 +9673,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dpotrf(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9626,10 +9708,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cpotrf(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9660,10 +9743,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zpotrf(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9812,7 +9896,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_spotrf_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -9821,7 +9906,7 @@ try
                                                                  lda,
                                                                  nullptr,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9853,7 +9938,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dpotrf_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -9862,7 +9948,7 @@ try
                                                                  lda,
                                                                  nullptr,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9894,7 +9980,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cpotrf_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -9903,7 +9990,7 @@ try
                                                                  lda,
                                                                  nullptr,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -9935,7 +10022,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zpotrf_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -9944,7 +10032,7 @@ try
                                                                  lda,
                                                                  nullptr,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10104,10 +10192,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_spotri(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10134,10 +10223,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dpotri(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10168,10 +10258,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cpotri(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10202,10 +10293,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zpotri(
         (rocblas_handle)handle, hipsolver::hip2rocblas_fill(uplo), n, nullptr, lda, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10356,7 +10448,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_spotrs((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -10366,7 +10459,7 @@ try
                                                          lda,
                                                          nullptr,
                                                          ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10400,7 +10493,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dpotrs((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -10410,7 +10504,7 @@ try
                                                          lda,
                                                          nullptr,
                                                          ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10444,7 +10538,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cpotrs((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -10454,7 +10549,7 @@ try
                                                          lda,
                                                          nullptr,
                                                          ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10488,7 +10583,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zpotrs((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -10498,7 +10594,7 @@ try
                                                          lda,
                                                          nullptr,
                                                          ldb));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10674,7 +10770,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_spotrs_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -10685,7 +10782,7 @@ try
                                                                  nullptr,
                                                                  ldb,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10720,7 +10817,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dpotrs_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -10731,7 +10829,7 @@ try
                                                                  nullptr,
                                                                  ldb,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10766,7 +10864,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cpotrs_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -10777,7 +10876,7 @@ try
                                                                  nullptr,
                                                                  ldb,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -10812,7 +10911,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zpotrs_batched((rocblas_handle)handle,
                                                                  hipsolver::hip2rocblas_fill(uplo),
@@ -10823,7 +10923,7 @@ try
                                                                  nullptr,
                                                                  ldb,
                                                                  batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
@@ -11017,7 +11117,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_ssyevd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_evect(jobz),
@@ -11028,15 +11129,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(float) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -11072,7 +11173,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dsyevd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_evect(jobz),
@@ -11083,15 +11185,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(double) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -11127,7 +11229,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cheevd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_evect(jobz),
@@ -11138,15 +11241,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(float) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -11182,7 +11285,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zheevd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_evect(jobz),
@@ -11193,15 +11297,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(double) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -11468,7 +11572,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_ssyevdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_evect(jobz),
@@ -11485,7 +11590,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -11527,7 +11632,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dsyevdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_evect(jobz),
@@ -11544,7 +11650,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -11586,7 +11692,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cheevdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_evect(jobz),
@@ -11603,7 +11710,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -11645,7 +11752,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zheevdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_evect(jobz),
@@ -11662,7 +11770,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -11931,7 +12039,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_ssyevj((rocblas_handle)handle,
                                                          rocblas_esort_ascending,
@@ -11946,7 +12055,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -11986,7 +12095,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dsyevj((rocblas_handle)handle,
                                                          rocblas_esort_ascending,
@@ -12001,7 +12111,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -12041,7 +12151,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_cheevj((rocblas_handle)handle,
                                                          rocblas_esort_ascending,
@@ -12056,7 +12167,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -12096,7 +12207,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zheevj((rocblas_handle)handle,
                                                          rocblas_esort_ascending,
@@ -12111,7 +12223,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -12389,7 +12501,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_ssyevj_strided_batched(
         (rocblas_handle)handle,
         (params->sort_eig ? rocblas_esort_ascending : rocblas_esort_none),
@@ -12407,7 +12520,7 @@ try
         n,
         nullptr,
         batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -12448,7 +12561,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dsyevj_strided_batched(
         (rocblas_handle)handle,
         (params->sort_eig ? rocblas_esort_ascending : rocblas_esort_none),
@@ -12466,7 +12580,7 @@ try
         n,
         nullptr,
         batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -12507,7 +12621,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_cheevj_strided_batched(
         (rocblas_handle)handle,
         (params->sort_eig ? rocblas_esort_ascending : rocblas_esort_none),
@@ -12525,7 +12640,7 @@ try
         n,
         nullptr,
         batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -12566,7 +12681,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zheevj_strided_batched(
         (rocblas_handle)handle,
         (params->sort_eig ? rocblas_esort_ascending : rocblas_esort_none),
@@ -12584,7 +12700,7 @@ try
         n,
         nullptr,
         batch_count));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -12880,7 +12996,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_ssygvd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -12894,15 +13011,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(float) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -12941,7 +13058,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dsygvd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -12955,15 +13073,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(double) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -13002,7 +13120,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_chegvd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -13016,15 +13135,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(float) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -13063,7 +13182,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zhegvd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -13077,15 +13197,15 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     // space for E array
     size_t size_E = n > 0 ? sizeof(double) * n : 0;
 
     // update size
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
     rocblas_set_optimal_device_memory_size((rocblas_handle)handle, sz, size_E);
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -13379,7 +13499,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_ssygvdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_eform(itype),
@@ -13399,7 +13520,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -13444,7 +13565,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dsygvdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_eform(itype),
@@ -13464,7 +13586,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -13509,7 +13631,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_chegvdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_eform(itype),
@@ -13529,7 +13652,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -13574,7 +13697,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zhegvdx_inplace((rocblas_handle)handle,
                                   hipsolver::hip2rocblas_eform(itype),
@@ -13594,7 +13718,7 @@ try
                                   nullptr,
                                   nullptr,
                                   nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -13950,7 +14074,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_ssygvj((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -13967,7 +14092,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -14010,7 +14135,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dsygvj((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -14027,7 +14153,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -14070,7 +14196,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_chegvj((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -14087,7 +14214,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -14130,7 +14257,8 @@ try
     *lwork                     = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zhegvj((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_eform(itype),
@@ -14147,7 +14275,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -14441,7 +14569,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_ssytrd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -14451,7 +14580,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -14488,7 +14617,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_dsytrd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -14498,7 +14628,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -14535,7 +14665,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_chetrd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -14545,7 +14676,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -14582,7 +14713,8 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status
         = hipsolver::rocblas2hip_status(rocsolver_zhetrd((rocblas_handle)handle,
                                                          hipsolver::hip2rocblas_fill(uplo),
@@ -14592,7 +14724,7 @@ try
                                                          nullptr,
                                                          nullptr,
                                                          nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);
@@ -14795,10 +14927,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_ssytrf(
         (rocblas_handle)handle, rocblas_fill_upper, n, nullptr, lda, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(float);
@@ -14828,10 +14961,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_dsytrf(
         (rocblas_handle)handle, rocblas_fill_upper, n, nullptr, lda, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(double);
@@ -14861,10 +14995,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_csytrf(
         (rocblas_handle)handle, rocblas_fill_upper, n, nullptr, lda, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_float_complex);
@@ -14894,10 +15029,11 @@ try
     *lwork = 0;
     size_t sz;
 
-    rocblas_start_device_memory_size_query((rocblas_handle)handle);
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query((rocblas_handle)handle));
+    hipsolverSizeQueryGuard size_query_guard{(rocblas_handle)handle};
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(rocsolver_zsytrf(
         (rocblas_handle)handle, rocblas_fill_upper, n, nullptr, lda, nullptr, nullptr));
-    rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz));
 
     if(std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") == nullptr)
         sz /= sizeof(rocblas_double_complex);

@@ -113,6 +113,18 @@ void lauum_getError(const rocblas_handle handle,
     // initialize data
     lauum_initData<true, true, T>(handle, uplo, n, dA, lda, hA);
 
+    // a workspace size query must only report the size, without reading or writing A
+    size_t size_null, size_dA;
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+    CHECK_ALLOC_QUERY(rocsolver_lauum(handle, uplo, n, (T*)nullptr, lda));
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size_null));
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+    CHECK_ALLOC_QUERY(rocsolver_lauum(handle, uplo, n, dA.data(), lda));
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size_dA));
+    EXPECT_EQ(size_null, size_dA);
+    CHECK_HIP_ERROR(hAr.transfer_from(dA));
+    EXPECT_EQ(norm_error('F', n, n, lda, hA[0], hAr[0]), 0);
+
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_lauum(handle, uplo, n, dA.data(), lda));

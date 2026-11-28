@@ -69,7 +69,8 @@ void rocsolver_labrd_getMemorySize(const rocblas_int m,
         s1 = 0;
 
     // extra requirements for calling larfg
-    rocsolver_larfg_getMemorySize<T>(std::max(m, n), batch_count, &s2, size_norms);
+    THROW_IF_ROCBLAS_ERROR(
+        rocsolver_larfg_getMemorySize<T>(std::max(m, n), batch_count, &s2, size_norms));
 
     // size_work_workArr is maximum of re-usable work space and array of pointers to workspace
     *size_work_workArr = std::max(s1, s2);
