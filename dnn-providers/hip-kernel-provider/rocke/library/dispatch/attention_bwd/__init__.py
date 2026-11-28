@@ -13,13 +13,19 @@
   knobs are the general axes) and the tuned dense table.
 * :mod:`.unified_tuning`: the unified (paged KV) family's knobs, its legality
   :func:`unified_spec_legality` and its tuned page-tile table.
-* :mod:`.gfx942_tuning`, :mod:`.gfx950_tuning`: the per-arch tuned tables
-  (general and dense; an entry is a key whose winner passed the bench's
+* :mod:`.gfx942_tuning`, :mod:`.gfx950_tuning`, :mod:`.gfx1151_tuning`,
+  :mod:`.gfx1201_tuning`: the per-arch tuned tables (general and dense; general
+  only on RDNA; an entry is a key whose winner passed the bench's
   confirm stage) and :mod:`.tuned_tables`, the check every entry passes (its
   knobs are registered values and plan on representative requests of its
   key; run on every entry when the package is imported) and that turns the
   sweep's emitted entries into table entries. The performance-status tables
-  are empty by policy (information only).
+  are empty by policy (information only). The RDNA tables apply a different
+  selection rule (few or no keys beat the competitor there, so an entry is the
+  best rocKE configuration of its key instead), stated and unit-tested in
+  ``benchmarks/common/attention_bwd_rdna_entry_rule.py`` (offline; no
+  runtime path imports it); its provenance is ``rdna_entries_manifest.json``
+  and ``rdna_general_tuning_case_study.md``.
 * :mod:`.routing`: the route of an accepted request (dense when its dense key
   is in the tuned pack, else general) and the plan of exactly one family;
   a rocKE unified (paged KV) request has its own entry,
