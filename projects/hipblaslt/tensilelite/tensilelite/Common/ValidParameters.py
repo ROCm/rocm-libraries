@@ -1326,6 +1326,13 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # Store D through LDS with tensor_store_from_lds in place of buffer_store in the epilogue
+    # store paths (Components/TDMStoreInst.py). gfx1250 only.
+    # Off keeps the buffer_store epilogue. On stores every tile of a final-D store through
+    # the TDM block, bounded by tensor_dim. Without per-element outputs beyond C and D that is
+    # one store path per beta, with no edge checks. With those outputs the edge cascade stays.
+    # Off by default.
+    "TDMStoreInst": [False, True],
     # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.

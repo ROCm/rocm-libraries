@@ -169,10 +169,13 @@ namespace TensileLite
             size_t expectedStride       = 1;
 
             // Optimize the number of copy operations by coalescing all the
-            // dimensions that are contiguous in memory.
+            // dimensions that are contiguous in memory. A zero-stride dimension
+            // (a bias shared by all batches) repeats the same elements, so it is
+            // not coalesced, the first one included: that would copy the wrong
+            // number of elements.
             for(size_t i = 0; i < desc.dimensions(); i++)
             {
-                if(strides[i] > expectedStride)
+                if(strides[i] > expectedStride || strides[i] == 0)
                     break;
 
                 contiguousDimensions = i + 1;
@@ -183,9 +186,13 @@ namespace TensileLite
 
             auto copyCount = CoordCount(sizes.begin() + contiguousDimensions, sizes.end());
 
-            size_t maxStride
-                = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions);
-            size_t copyBytes = multiplyElementSize(maxStride * sizes.at(contiguousDimensions - 1), desc.elementBytes());
+            // With no dimension to coalesce, each coordinate copies one element.
+            size_t copyElements = 1;
+            if(contiguousDimensions > 0)
+                copyElements
+                    = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions)
+                      * sizes.at(contiguousDimensions - 1);
+            size_t copyBytes = multiplyElementSize(copyElements, desc.elementBytes());
 
             for(size_t idx = 0; idx < copyCount; idx++)
             {
@@ -222,10 +229,13 @@ namespace TensileLite
             size_t expectedStride       = 1;
 
             // Optimize the number of copy operations by coalescing all the
-            // dimensions that are contiguous in memory.
+            // dimensions that are contiguous in memory. A zero-stride dimension
+            // (a bias shared by all batches) repeats the same elements, so it is
+            // not coalesced, the first one included: that would copy the wrong
+            // number of elements.
             for(size_t i = 0; i < desc.dimensions(); i++)
             {
-                if(strides[i] > expectedStride)
+                if(strides[i] > expectedStride || strides[i] == 0)
                     break;
 
                 contiguousDimensions = i + 1;
@@ -236,9 +246,13 @@ namespace TensileLite
 
             auto copyCount = CoordCount(sizes.begin() + contiguousDimensions, sizes.end());
 
-            size_t maxStride
-                = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions);
-            size_t copyBytes = maxStride * sizes.at(contiguousDimensions - 1) * sizeof(T);
+            // With no dimension to coalesce, each coordinate copies one element.
+            size_t copyElements = 1;
+            if(contiguousDimensions > 0)
+                copyElements
+                    = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions)
+                      * sizes.at(contiguousDimensions - 1);
+            size_t copyBytes = copyElements * sizeof(T);
 
             for(size_t idx = 0; idx < copyCount; idx++)
             {

@@ -5,6 +5,9 @@
 
 import copy
 import itertools
+import sys
+
+from tensilelite.Components.TDMStoreInst import _handoffBarriersLds
 
 import pytest
 
@@ -18,6 +21,11 @@ from tensilelite.ExecutionPolicy import (
     hasHybridAssignment,
     isStreamKSpatialCluster,
 )
+
+# tensilelite.Component initialises tensilelite.Components; importing WorkAssignment
+# directly first hits a circular import via Components/TileProcessingStrategy.
+import tensilelite.Component  # noqa: F401
+from tensilelite.Components.WorkAssignment import StaticGrid
 
 pytestmark = pytest.mark.unit
 
@@ -355,3 +363,92 @@ def test_inherited_streamk_cluster_payload_is_rederived_when_source_policy_chang
     assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == version
     assert state["AssignedDerivedParameters"] is False
     assert state["AssignedProblemIndependentDerivedParameters"] is False
+
+
+@pytest.mark.parametrize("strategy, assignment, overrides, fences", [
+    ("DataParallel", "StaticGrid", {}, True),
+    ("DataParallel", "StaticGrid", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("StreamK", "DynamicWorkQueue", {"enableTDMA": False, "enableTDMB": False}, True),
+    ("StreamK", "Hybrid", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("StreamK", "DynamicWorkQueue",
+     {"enableTDMA": False, "enableTDMB": False, "DebugPersistentKernelLoopForever": True}, False),
+    ("DataParallel", "StaticGrid",
+     {"enableTDMA": False, "enableTDMB": False, "_PersistentVectorEpilogueLds": True}, True),
+    ("DataParallel", "StaticGrid", {"NumThreads": 32, "WavefrontSize": 32}, False),
+], ids=["tdm", "no_tdm", "queue", "hybrid", "queue_debug", "epilogue_lds", "one_wave"])
+def test_handoff_fences_lds(strategy, assignment, overrides, fences):
+    """The persistent tile handoff ends with a workgroup barrier with TDM loads on more than one
+    wave, with the epilogue vectors in LDS, in a spatial cluster or with the dynamic work queue; the
+    TDM flush relies on it and emits none of its own. _handoffBarriersLds mirrors the predicate of
+    WorkAssignment.splitPersistentTileHandoff for the kernels TDMStoreInst accepts, which have
+    PrefetchAcrossPersistent off, and the rows below pin it.
+
+    The DynamicWorkQueue row is True: DynamicWorkQueue.closeLoop emits both phases of the handoff
+    before its back-edge and checks the next work item only after re-entry, so every tile ends with
+    the queue barrier. The Hybrid row is False: its static arm runs StaticGrid.closeLoop, which has
+    no queue barrier, and emitTDMStoreFlush fences that arm at run time. With
+    DebugPersistentKernelLoopForever the handoff drops the queue barrier, so that row is False.
+    DataParallel pairs only with StaticGrid -- resolve_policy rejects every other assignment -- so
+    the queue and hybrid rows exercise those assignments under StreamK.
+    """
+    kernel = {"TileProcessingStrategy": strategy, "WorkAssignment": assignment, "ClusterDim": [1, 1],
+              "NumThreads": 128, "WavefrontSize": 32, "enableTDMA": True, "enableTDMB": True}
+    kernel.update(overrides)
+    assert _handoffBarriersLds(kernel) == fences
+
+
+def test_handoff_barriers_lds_mirrors_split_persistent_tile_handoff(gfx1250_iim):
+    """_handoffBarriersLds against the barrier WorkAssignment.splitPersistentTileHandoff emits, over its inputs: TDM
+    loads of A, of B or of both (TDMInst 1, 2 and 3) on one wave or four, the epilogue vectors in LDS, a spatial
+    cluster with and without ClusterBarrier, DebugPersistentKernelLoopForever and each assignment, with
+    PrefetchAcrossPersistent off, as in every kernel TDMStoreInst accepts. Where it reports a barrier every arm of
+    the handoff emits one. Outside
+    DebugPersistentKernelLoopForever it reports the barrier of the static arm (StaticGrid, and the static arm of
+    Hybrid) or of the queue (DynamicWorkQueue), and where a Hybrid kernel has none the queue fences its dynamic arm.
+    With DebugPersistentKernelLoopForever it reports none, so the flush keeps its own. The handoff of a spatial cluster
+    signals the next cluster tile through the writer's SGPR pool, for which a stub stands in, and its arrive signal is
+    an SBarrier too, so a cell finds the workgroup barrier by its comment. With DebugPersistentKernelLoopForever the
+    cluster handoff also reads the static partition of a whole writer, so those cells check only that the predicate
+    reports no barrier; test_flush_has_no_duplicate_persistent_barrier emits a StreamK 3 cluster kernel."""
+    import itertools
+    from types import SimpleNamespace
+
+    from tensilelite.Components.TDMStoreInst import _hybridStaticArmOnly
+    from tensilelite.Components.WorkAssignment import DynamicWorkQueue, StaticGrid
+    from toolchain_test_helpers import use_isa
+
+    use_isa((12, 5, 0), 32)
+    writer = SimpleNamespace(states=SimpleNamespace(memTokenEpilogue=0, asmCaps={"HasClusterBarrier": True}),
+                             labels=SimpleNamespace(getNameInc=lambda name: name + "_0"),
+                             sgprPool=SimpleNamespace(checkOut=lambda num, tag=None, **kwargs: 100,
+                                                      checkIn=lambda idx: None))
+    workgroupBarriers = ("hand compute LDS back to persistent TDM prefetch",
+                         "hand epilogue LDS back to persistent compute", "Sync before persistent re-entry")
+
+    def barrier(arm, kernel):
+        text = "".join(str(module) for module in arm().splitPersistentTileHandoff(writer, kernel))
+        return any(comment in text for comment in workgroupBarriers)
+
+    arms = {"StaticGrid": [StaticGrid], "DynamicWorkQueue": [DynamicWorkQueue], "Hybrid": [StaticGrid, DynamicWorkQueue]}
+    checked = 0
+    for assignment, (tdmA, tdmB), waves, vectors, (clusterDim, clusterBarrier), debug in itertools.product(
+            arms, ((False, False), (True, False), (False, True), (True, True)), (1, 4), (False, True),
+            (([1, 1], True), ([2, 1], True), ([2, 1], False)), (False, True)):
+        kernel = {"TileProcessingStrategy": "StreamK", "WorkAssignment": assignment, "ClusterDim": clusterDim,
+                  "ClusterBarrier": clusterBarrier, "NumThreads": 32 * waves, "WavefrontSize": 32,
+                  "PrefetchAcrossPersistent": 0, "enableTDMA": tdmA, "enableTDMB": tdmB,
+                  "_PersistentVectorEpilogueLds": vectors, "DebugPersistentKernelLoopForever": debug}
+        fences = _handoffBarriersLds(kernel)
+        if debug:
+            assert not fences, kernel
+            if clusterDim != [1, 1]:
+                continue
+        emitted = [barrier(arm, kernel) for arm in arms[assignment]]
+        assert not fences or all(emitted), kernel
+        if not debug:
+            assert fences == emitted[0], kernel
+            if assignment == "Hybrid":
+                assert _hybridStaticArmOnly(kernel) and emitted[1], kernel
+        checked += 1
+    # Without a cluster with and without the debug loop, and the two cluster settings without it.
+    assert checked == 3 * 4 * 2 * 2 * (2 + 2)

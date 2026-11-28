@@ -1,0 +1,107 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): LDS write-after-read (WAR) against a tensor store.
+# The mirror image of waitcnt_insertion_lds_war_tensor_load.stir.
+#
+# tensor_store_from_lds READS the LDS region and writes global memory, so it is an LDS consumer
+# with no register destination (StinkyAsmIR.hpp isTensorStore). The SSA use-def chain therefore
+# cannot order a later LDS WRITE against it -- the store has no def for the writer to depend on.
+# That is the same shape as global_store_async_from_lds, which scanAsyncAntiDeps orders;
+# scanTensorAntiDeps is the tensor-counter equivalent.
+#
+# Here two tensor_store_from_lds on token 0 are followed by a ds_store_b64 that rewrites the same
+# region. Both stores must land before the writer is issued, so the pass must emit
+# s_wait_tensorcnt 0 immediately before the ds_store.
+#
+# Note the counter is NOT dscnt: a tensor op lives on tensorcnt (both TENSOR_LOAD_TO_LDS and
+# TENSOR_STORE_FROM_LDS count on TENSORcnt), so the DS queue at the writer is empty and no
+# s_wait_dscnt is warranted.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_tensor_store
+# CHECK: tensor_store_from_lds
+# CHECK-NEXT: tensor_store_from_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: ds_store_b64
+# CHECK-NOT: s_wait_loadcnt
+
+st.func @waitcnt_insertion_lds_war_tensor_store() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_store_from_lds"(s[4:7], s[20:27]) { mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b64"(v10, v[0:1]) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# A barrier on the store's token is an anchor too: the store has no register result, so only
+# scanTensorAntiDeps puts the wait in front of the barrier.
+# CHECK-LABEL: @lds_war_tensor_store_barrier
+# CHECK: tensor_store_from_lds
+# CHECK: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: s_barrier
+
+st.func @lds_war_tensor_store_barrier() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0] } }
+}
+
+# An untagged tensor store cannot be proved disjoint from a later LDS writer, so it is drained.
+# CHECK-LABEL: @lds_war_untagged_tensor_store
+# CHECK: tensor_store_from_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: tensor_load_to_lds
+
+st.func @lds_war_untagged_tensor_store() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[10:17])
+  "st.tensor_load_to_lds"(s[4:7], s[20:27]) { mod.memtoken = { tokens = [0] } }
+}
+
+# The queue index counts tensor loads too: behind an earlier load on another token, the store is
+# the newest op, so only tlcnt 0 covers it.
+# CHECK-LABEL: @lds_war_tensor_store_after_load
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: tensor_store_from_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: ds_store_b64
+
+st.func @lds_war_tensor_store_after_load() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_store_from_lds"(s[4:7], s[20:27]) { mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b64"(v10, v[0:1]) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# With a later load on a disjoint token, the load waits for nothing and the writer on the store's
+# token needs only the older of the two ops: tlcnt 1.
+# CHECK-LABEL: @lds_war_tensor_store_before_load
+# CHECK: tensor_store_from_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: ds_store_b64
+
+st.func @lds_war_tensor_store_before_load() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[4:7], s[20:27]) { mod.memtoken = { tokens = [1] } }
+  "st.ds_store_b64"(v10, v[0:1]) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# Read after write: StinkyBuildImplicitDependencyPass makes the tensor store a reader of the LDS
+# token the ds_store writes, so the ds_store lands before the store reads it.
+# CHECK-LABEL: @lds_raw_tensor_store
+# CHECK: ds_store_b64
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: tensor_store_from_lds
+
+st.func @lds_raw_tensor_store() {
+^entry:
+  "st.ds_store_b64"(v10, v[0:1]) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_store_from_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+}

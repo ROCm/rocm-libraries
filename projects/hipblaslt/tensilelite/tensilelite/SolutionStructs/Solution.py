@@ -92,6 +92,7 @@ from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
+from ..Components.TDMStoreInst import tdmStoreLdsBytes, tdmStoreRejectReason, tdmStoreVectorRejectReason
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
@@ -3921,6 +3922,14 @@ class Solution(collections.abc.Mapping):
         printRejectionReason):
       return
 
+    if state["TDMStoreInst"] and not isaInfoMap[isa].asmCaps["HasTDM"]:
+      reject(state, printRejectionReason, "TDMStoreInst requires asmCaps HasTDM")
+      return
+    tdmStoreReject = tdmStoreRejectReason(state)
+    if tdmStoreReject:
+      reject(state, printRejectionReason, tdmStoreReject)
+      return
+
     tdmInst: int = state["TDMInst"]
     state["enableTDMA"] = bool(tdmInst & 0x01)
     state["enableTDMB"] = bool(tdmInst & 0x02)
@@ -4582,6 +4591,10 @@ class Solution(collections.abc.Mapping):
     # audited configs -- exactly 40 both times. Anything in 29..52 reproduces both
     # bounds, so there is roughly a fifth of a k-tile of margin either side.
     storeOverhead = 40
+    # With TDMStoreInst on the NonEdge store goes through the TDM block, which holds one more VGPR:
+    # the staged tile's base.
+    if state.get("TDMStoreInst", False):
+      storeOverhead += 1
     slack = (isaInfoMap[isa].regCaps["MaxVgpr"] - valuC
              - elementsPerThread * vgprsPerElement - storeOverhead)
     if slack < residentPerKTile:
@@ -7890,7 +7903,16 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBias"] = epilogueOffset
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
-    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
+    # The TDM block stages the D tile from a 256-byte boundary after the LDS that is live while it is
+    # written, the vectors, which every store batch reads. The tile lies over the main-loop buffers: every
+    # wave is done with them before the tile is staged, and tdmStoreRejectReason rejects
+    # PrefetchAcrossPersistent, whose next tile's loads would write them during the epilogue.
+    tdmStoreBytes = tdmStoreLdsBytes(state)
+    assert not (tdmStoreBytes and state["PrefetchAcrossPersistent"])
+    liveEnd = state["LdsOffsetBias"] + epilogueSize if epilogueSize else 0
+    state["_TDMStoreLdsOffset"] = int(math.ceil(liveEnd / 256) * 256) if tdmStoreBytes else 0
+    assert not tdmStoreBytes or state["_TDMStoreLdsOffset"] >= liveEnd
+    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize, state["_TDMStoreLdsOffset"] + tdmStoreBytes)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
     if state["ProblemType"]["OutputAmaxD"]:
@@ -7938,7 +7960,10 @@ class Solution(collections.abc.Mapping):
     state["LdsNumBytes"] = ldsNumBytes
     ldsSize = ldsNumBytes
     if ldsSize > state["MaxLDS"]:
-      reject(state, printRejectionReason, "Kernel Uses %u > %u bytes of LDS" % ( ldsSize, state["MaxLDS"]))
+      ldsWhy = ""
+      if tdmStoreBytes:
+        ldsWhy = "; TDMStoreInst stages a %u-byte D tile from LDS offset %u" % (tdmStoreBytes, state["_TDMStoreLdsOffset"])
+      reject(state, printRejectionReason, "Kernel Uses %u > %u bytes of LDS%s" % ( ldsSize, state["MaxLDS"], ldsWhy))
       state["ValidDepthU"] = False
       state[Solution.DCP_LDS_CAPACITY_REFUSED] = ldsSize
       return
@@ -8332,6 +8357,11 @@ class Solution(collections.abc.Mapping):
               state["_VectorStore"] = 0
             else:
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
+
+    tdmStoreReject = tdmStoreVectorRejectReason(state)
+    if tdmStoreReject:
+      reject(state, printRejectionReason, tdmStoreReject)
+      return
 
     state["_PrefetchAcrossPersistentEnabled"] = bool(state["PrefetchAcrossPersistent"])
     state["AssignedDerivedParameters"] = True

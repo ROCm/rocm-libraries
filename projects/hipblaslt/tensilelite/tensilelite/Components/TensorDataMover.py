@@ -6,7 +6,7 @@ from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
-    VReadfirstlaneB32, SSubU32
+    TensorStoreFromLds, VReadfirstlaneB32, SSubU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
@@ -714,3 +714,119 @@ class TensorDataMoverLoad(TensorDataMover):
         ldsPadDwords =  ldsPadSize // 4 # bytes to dwords
         assert ldsPadDwords > 0
         return ldsPadDwords - 1
+
+
+class TensorDataMoverStore:
+    """Descriptor builder for tensor_store_from_lds (LDS -> global) and tensor_load_to_lds, two-group form.
+
+    Not a Component: TensorDataMoverLoad already matches TDMInst/HasTDM, and a second match would
+    make Component.find() raise. The descriptor layout is the one tensor_load_to_lds uses; for the
+    tile of D or C, tile_dim0 = MacroTile0 (contiguous), tile_dim1 = the columns of one wave and
+    tensor_dim0_stride = StrideD or StrideC, with tile_dim0 and the stride in data_size units: elements,
+    except complex double, whose element is two 8-byte units.
+    Elements outside tensor_dim0/tensor_dim1 are neither written nor read, which is what clamps an edge tile.
+    mem_token is the LDS memory token of the tile the instruction reads or writes.
+    """
+    GROUP0_NUM_SGPR = 4
+    GROUP1_NUM_SGPR = 8
+
+    def __init__(self, mem_token: list[int]):
+        self.mem_token = mem_token
+
+    @staticmethod
+    def _sg(base: int | str, off: int = 0):
+        # allocTmpSgpr yields int indices -> numeric arithmetic; defined-symbol names -> "name+off".
+        if isinstance(base, int):
+            return sgpr(base + off)
+        return sgpr(base if off == 0 else f"{base}+{off}")
+
+    def initOperands(self, group0: int | str, group1: int | str) -> Module:
+        # The caller writes group0+1..3, type field included, and setTensorStride0 writes group1+5..6, so only the
+        # other words are cleared. Each setter below ORs its field into a word that holds no other bits there yet.
+        mod = Module("tdmInit")
+        mod.add(SMovB32(self._sg(group0, 0), 1))  # group0[0] bit0 = count = 1
+        for i in (0, 1, 2, 3, 4, 7):
+            mod.add(SMovB32(self._sg(group1, i), 0))
+        return mod
+
+    def setDataSize(self, numBytes: int, group1: str | int) -> Module:
+        mod = Module()
+        assert numBytes in (1, 2, 4, 8), f"unsupported element size for TDM data_size: {numBytes}"
+        dataSizeOp = int(log2(numBytes))
+        if dataSizeOp:
+            mod.add(SOrB32(self._sg(group1), self._sg(group1), hex(dataSizeOp << 16), f"Set data_size to {dataSizeOp}"))
+        return mod
+
+    def setTensorDim0(self, group1: int | str, sgprDim0: int | str, sgprTmp: int) -> Module:
+        # tensor_dim0 bit176: group1+1 hi16 + group1+2 lo16; sgprTmp is overwritten
+        mod = Module()
+        mod.addComment("TDM set tensor dim 0")
+        mod.add(SLShiftLeftB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim0)))
+        mod.add(SOrB32(self._sg(group1, 1), self._sg(group1, 1), sgpr(sgprTmp)))
+        mod.add(SLShiftRightB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim0)))
+        mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(sgprTmp)))
+        return mod
+
+    def setTensorDim1(self, group1: int | str, sgprDim1: int | str, sgprTmp: int) -> Module:
+        # tensor_dim1 bit208: group1+2 hi16 + group1+3 lo16; sgprTmp is overwritten
+        mod = Module()
+        mod.addComment("TDM set tensor dim 1")
+        mod.add(SLShiftLeftB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim1)))
+        mod.add(SOrB32(self._sg(group1, 2), self._sg(group1, 2), sgpr(sgprTmp)))
+        mod.add(SLShiftRightB32(sgpr(sgprTmp), hex(16), sgpr(sgprDim1)))
+        mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), sgpr(sgprTmp)))
+        return mod
+
+    def setTensorTile0(self, group1: int | str, tile0: int) -> Module:
+        # tile_dim0 bit240: group1+3 hi16 (immediate); 0 makes the transfer a NOP
+        assert 0 < tile0 <= 0xFFFF, f"tile_dim0 {tile0} is outside 1..0xFFFF"
+        mod = Module()
+        mod.addComment("TDM set tensor tile 0")
+        mod.add(SOrB32(self._sg(group1, 3), self._sg(group1, 3), hex(tile0 << 16), f"set tile0 to {tile0}"))
+        return mod
+
+    def setTensorTile1(self, group1: int | str, tile1: int) -> Module:
+        # tile_dim1 bit256: group1+4 lo16 (immediate), 1 to 0xFFFF.
+        assert 0 < tile1 <= 0xFFFF, f"tile_dim1 {tile1} is outside 1..0xFFFF"
+        mod = Module()
+        mod.addComment("TDM set tensor tile 1")
+        mod.add(SOrB32(self._sg(group1, 4), self._sg(group1, 4), hex(tile1), f"set tile1 to {tile1}"))
+        return mod
+
+    def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer, units: int = 1) -> Module:
+        # tensor_dim0_stride bit288: 48 bits, group1+5 and the low half of group1+6, whose high half is tensor_dim1_stride
+        # (unused in the two-group form). sgprStride0 holds a 32-bit stride in elements; an element is `units`
+        # data_size units. group1+5 is odd and 64-bit SGPR operands must be even-aligned, so a doubled stride is
+        # added with carry.
+        mod = Module()
+        mod.addComment("TDM set tensor stride 0")
+        stride = sgprStride0 if isinstance(sgprStride0, RegisterContainer) else sgpr(sgprStride0)
+        if units == 1:
+            mod.add(SMovB32(self._sg(group1, 5), stride))
+            mod.add(SMovB32(self._sg(group1, 6), 0))
+        else:
+            assert units == 2, f"unsupported data_size units per element: {units}"
+            mod.add(SAddU32(dst=self._sg(group1, 5), src0=stride, src1=stride, comment="stride in data_size units"))
+            mod.add(SAddCU32(dst=self._sg(group1, 6), src0=0, src1=0, comment="bit 32 of the stride"))
+        return mod
+
+    def _syncComment(self) -> str:
+        return "sync LDS%u" % self.mem_token[0] if len(self.mem_token) == 1 else f"sync LDS {self.mem_token}"
+
+    def issueStore(self, group0: int | str, group1: int | str,
+                   tensor: Optional[TENSORModifiers] = None) -> Module:
+        mod = Module("tensor store")
+        tensorStore = TensorStoreFromLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),
+                                         None, None, comment=self._syncComment(), tensor=tensor)
+        tensorStore.setMemToken(MemTokenData(self.mem_token))
+        mod.add(tensorStore)
+        return mod
+
+    def issueLoad(self, group0: int | str, group1: int | str,
+                  tensor: Optional[TENSORModifiers] = None) -> Module:
+        mod = Module("tensor load")
+        tensorLoad = TensorLoadToLds(sgpr(group0, self.GROUP0_NUM_SGPR), sgpr(group1, self.GROUP1_NUM_SGPR),
+                                     None, None, comment=self._syncComment(), tensor=tensor)
+        tensorLoad.setMemToken(MemTokenData(self.mem_token))
+        mod.add(tensorLoad)
+        return mod

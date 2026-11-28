@@ -17,14 +17,14 @@
 
 ## Hardware background
 
-Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
+Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds` / `tensor_store_from_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
 
 | `CounterKind` | Covers | Wait instruction | Modifier field | Completion order |
 |---------------|--------|------------------|----------------|------------------|
 | `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` | in order |
 | `CK_Load` | global/buffer/flat **load**, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` | in order |
 | `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt 0` | `SWaitCntData.kmcnt` | **out of order** |
-| `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
+| `CK_Tensor` | `tensor_load_to_lds` / `tensor_store_from_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
 
 `s_wait_*cnt N` blocks until the counter has dropped to **at most `N`**. On the in-order counters each op contributes exactly 1, so `N` is an op count and it identifies precisely which ops completed: the `N` most-recently-issued stay in flight and everything older has landed. `kmcnt` is neither in order nor one-per-op (see below).
 
@@ -206,7 +206,7 @@ Loop-carried tensor-token dependencies are controlled separately:
 df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 ```
 
-By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during the solver's first iteration (sweep 0), then freezes the exact tensor queues and tensor PHI waits on later sweeps. `restoreTensorState` skips that restore for any block where `hasUntaggedTensorAnchor` finds an untagged tensor anchor (`s_barrier`, DS read/write, or DS atomic). Those anchors are fences: their live tensor queues must continue through back-edges so the existing conservative fallback can emit `s_wait_tensorcnt 0` when any tensor load or store is still in flight. Freezing exact tensor state elsewhere prevents tagged tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
 
 When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
 
@@ -388,8 +388,9 @@ Per instruction, `required[c]` starts at `kUnused` and is tightened to the min w
 
 1. **RAW from SSA** — walk `getSources()` as above; gated by `rawNeedsWait[c](*inst)`.
 2. **Anti-deps (DS)** — `scanDsAntiDeps` for LDS writers (`tensor_load_to_lds`, `ds_write`) and barriers with `MemTokenData` token overlap against per-pred DS queues; same-pipeline pairs (`ds_write` vs `ds_read`) skipped.
-3. **Tensor untagged scan** — tensor anchors with tagged tokens still scan for in-flight tensor loads lacking `MemTokenData`.
-4. **Conservative fallbacks** — force wait 0 when disjointness cannot be proved (see table below).
+3. **Anti-deps (tensor store)** — `scanTensorAntiDeps` for LDS writers and barriers with `MemTokenData` against per-pred tensor queues: an in-flight `tensor_store_from_lds` that is untagged or whose token overlaps is drained. The queue index counts loads and stores alike, since both complete in order on TENSORcnt.
+4. **Tensor untagged scan** — tensor anchors with tagged tokens still scan for in-flight tensor ops lacking `MemTokenData`.
+5. **Conservative fallbacks** — force wait 0 when disjointness cannot be proved (see table below).
 
 ### Anti-dependencies (WAR-on-LDS and barrier ordering)
 
@@ -410,11 +411,11 @@ Anchor helpers:
 
 | Site | Condition | Effect |
 |------|-----------|--------|
-| Tensor anchor | Anchor lacks `MemTokenData` and any tensor load in flight | `required[CK_Tensor] = 0` |
+| Tensor anchor | Anchor lacks `MemTokenData` and any tensor load or store in flight | `required[CK_Tensor] = 0` |
 | LDS writer | Writer lacks `MemTokenData`, any DS op in flight, writer is not `ds_write` | `required[CK_DS] = 0` |
 | Barrier | Any in-flight DS op and (barrier untagged OR any pending DS op untagged) | `required[CK_DS] = 0` |
 
-These widen waits, never narrow them. In default tensor-freeze mode, blocks with untagged tensor anchors keep live tensor queues specifically so the tensor-anchor fallback can still see loop-carried tensor loads.
+These widen waits, never narrow them. In default tensor-freeze mode, blocks with untagged tensor anchors keep live tensor queues specifically so the tensor-anchor fallback can still see loop-carried tensor loads and stores.
 
 ---
 

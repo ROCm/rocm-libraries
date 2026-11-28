@@ -1,0 +1,660 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""TDMStoreInst: store D through LDS with tensor_store_from_lds in place of buffer_store (gfx1250).
+
+The store blocks TDMStoreInst picks store through the TDM block, which stages the converted D
+tile in LDS over the main-loop buffers and stores it with one tensor_store_from_lds per wave,
+bounded to D by tensor_dim. With beta != 0 it first loads the C tile into the staged tile with
+tensor_load_to_lds, bounded the same way.
+
+  =============  =================================================================
+  TDMStoreInst   Paths stored through the TDM block
+  =============  =================================================================
+  False          off: every block keeps its buffer_store
+  True           on: every tile of a final-D store, the OptNLL store included
+  =============  =================================================================
+
+TDMStoreInst on stores every tile through the TDM block, whatever the alignment of its columns. Without
+per-element outputs beyond C and D, tensor_dim bounds the edge tiles, so each beta of a final-D store is one
+TDM block, generated like the NonEdge path at the store vector width, with no edge check and no EdgeN or EdgeM
+block (tdmStoreSinglePath). With those outputs the cascade stays. The choice is whether to enable TDMStoreInst
+for a kernel, not which paths it covers.
+
+Without TDMStoreInst a final-D store is the store-width cascade generateBetaModules builds, one block per
+vector width: the NonEdge block and the masked EdgeN block of the store vector width and the narrower
+masked EdgeM blocks, picked by edge checks. A kernel with per-element outputs beyond C and D
+(hasEpilogueSideEffects) keeps that cascade with TDMStoreInst on: every block stores through its own copy of
+the TDM block, and the edge blocks keep their masks, vector width and C loads. With AdaptiveGemm=0 the
+narrowest masked block is the only one narrower than the store vector width, which every M-edge workgroup
+takes. With AdaptiveGemm=1, which TDMStoreInst admits only in such kernels (tdmStoreRejectReason), an M-edge
+workgroup takes the widest block whose vector width divides SizeI, so the masked block of the store vector
+width also stores the M-edge tiles of a SizeI it divides. At store vector width 1 the narrowest masked block
+is the one of the store vector width, so EdgeM and EdgeN are that same single block. The stores that do not
+write final D, the partials and atomics of GSU > 1, keep their cascade and buffer_store. A
+MultipleBufferSingleKernel kernel with MbskPrefetchMethod 0 generates its reduced tile twice, through the TDM
+block and through buffer_store, whose copy keeps the cascade, behind a compare of the runtime GSU and a branch
+to the copy (tdmStoreRejectReason).
+
+The block runs in the phases of GlobalWriteBatchWriter. _prolog of the first batch calls
+emitTDMStoreSetup and, with beta != 0, emitTDMStoreLoadC, so the C tile is in LDS before any element
+reads it, and every element reads its C with emitTDMStoreLoadCElement in place of the buffer load,
+except in the edge blocks of a kernel with per-element outputs beyond C and D, which keep their buffer
+loads of C. _emitNonatomicAdd stages the D of every batch with emitTDMStoreStaging; emitTDMStoreFlush
+runs after the last batch, or after the CompactLoopStore loop.
+globalWriteElements hands a final-D store to generateBetaModules as one block where tdmStoreSinglePath
+holds, and generateBetaModules picks the TDM blocks of a cascade with tdmStoreBlocks; Solution checks a configuration
+with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
+tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers.
+"""
+
+from math import log2
+
+from rocisa.code import Label, Module
+from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
+from rocisa.enum import NonVolatile, TemporalHint
+from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBranchSCC0, SCBranchSCC1, SCmpEQU32, \
+  SCmpLeU32, SLShiftLeftB64, SLShiftRightB32, SMinU32, SMulHIU32, SMulI32, SOrB32, SSubU32, SWaitAlu, SWaitCnt, \
+  SWaitTensorcnt, VAddU32, VLShiftLeftB32, VMulLOU32, VReadfirstlaneB32, VSubU32
+
+from ..AsmMemoryHelpers import DS_STORE_WIDTHS, dsLoad, dsStore
+from ..Common import persistentSpatialCluster
+from ..ExecutionPolicy import isPersistent
+from ..SolutionStructs.Problem import isFusedA2A
+from .NonTemporal import tdmCacheModifiers
+
+# PackData and TensorDataMover are imported where they are used: they load every component
+# (Component.py), and GlobalWriteBatch imports Solution, which imports this module.
+
+
+# The DS instruction offset field is 16-bit unsigned.
+DS_OFFSET_MAX = 0xFFFF
+
+# tile_dim0 and tile_dim1 of a TDM descriptor are 16-bit, and a tile_dim0 of 0 makes the transfer a NOP.
+TDM_TILE_DIM_MAX = 0xFFFF
+
+
+def hasEpilogueSideEffects(pt):
+  """Whether the epilogue writes or reduces per-element outputs beyond C and D (E, Gradient, gate residual,
+  AmaxD). The TDM blocks of the edge paths of such a kernel keep the masks, the vector width and the C loads of
+  the edge block, so the elements outside D reach neither those outputs nor their reductions.
+
+  The bias store of a BiasSrc=D reduction is a fifth such output, covered through Gradient rather than named:
+  useBias is only ever DataDirection.WRITE inside the Gradient branch of KernelWriter's bias setup, so a kernel
+  that emits it is already a Gradient kernel. Decoupling the two would leave that store unmasked here."""
+  return pt["UseE"] or pt["Gradient"] or pt["UseGateResidual"] or pt["OutputAmaxD"]
+
+
+def tdmStoreRejectReason(state):
+  """Return why a TDMStoreInst solution is outside the configurations the TDM block is built for, or None.
+
+  Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
+  block stages the converted D tile in LDS and stores it once, after the last store batch, with one
+  tensor_store_from_lds per wave. That needs fp32 D, fp64, complex float or complex double D from accumulators of their
+  type, int32 or int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators. The D
+  tile must be written directly to D, by a GlobalSplitU=1 kernel, by the workgroup that reduces a
+  MultipleBufferSingleKernel tile (below), or by a persistent kernel, which stores each tile it completes, and no LDS
+  data may be kept from one persistent tile to the next. A StreamKAtomic
+  kernel adds its tiles to D with atomics, so none of its blocks would store through the TDM block.
+  TDMStoreInst does not support PrefetchAcrossPersistent. PrefetchAcrossPersistent issues the next tile's loads
+  before the epilogue; with TDM loads they are tensor_load_to_lds, and a wave's TENSORcnt completes in issue order,
+  so the s_wait_tensorcnt 0 of the C load and of the store would also wait for that prefetch and leave it nothing
+  to hide. That case motivates the reject, which applies whichever instructions load A and B, so TDMStoreInst has
+  a single rule for PrefetchAcrossPersistent, and the staged tile always lies over the main-loop buffers.
+  ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the staged tile overwrites nothing it
+  reuses.
+  SuppressNoLoadLoop runs the last PrefetchGlobalRead iterations in the main loop and disarms their loads in place.
+  HalfPLR and ReuseAcrossPersistent, which set it, zero the enable words of their TDM descriptors. A
+  SuppressNoLoadLoop set otherwise, which Solution keeps only with BufferLoad, PrefetchGlobalRead 1 and
+  GlobalSplitU 1 or -1, zeroes only the buffer SRD limits, so its tensor_load_to_lds still run, past K. The block
+  drains them before it stages D, but TDMStoreInst does not take that load configuration: it is rejected with
+  TDMInst > 0 outside HalfPLR and ReuseAcrossPersistent, and accepted with TDMInst 0.
+  The block also computes the elements outside D and bounds only the C loads and the D store, so
+  besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
+  M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD. With per-element
+  outputs beyond C and D (hasEpilogueSideEffects) the TDM blocks of the edge paths are generated as the edge
+  block, with its masks, vector width and C loads, and only stage D in place of its store. GroupedGemm sets the sizes, strides and addresses
+  the block reads for each group.
+  AdaptiveGemm=1 adds a block for every halving of the store vector width to the cascade, and an M-edge workgroup
+  takes the widest one whose vector width divides SizeI. Without outputs beyond C and D a final-D store is one TDM
+  block (tdmStoreSinglePath), with no cascade for AdaptiveGemm=1 to extend, so TDMStoreInst requires
+  AdaptiveGemm=0. With them each TDM block of an edge path keeps the width, masks and C loads of its own
+  block, so AdaptiveGemm=1 changes the edge code and is supported.
+  A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block when
+  the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store. The reduced tile of a
+  MultipleBufferSingleKernel GSU>1 branch goes to SrdTD, which addresses D while SrdD addresses the workspace, at
+  the size of D. The block stores a tile that every wave of the workgroup staged, so the reduced tile takes it
+  only where one workgroup reduces the tile with all its waves: with MbskPrefetchMethod 0 and a runtime GSU of at
+  most gsuThreshold (2), where the workgroup of GSUSumIdx GSU-1 waits for the others. For a larger GSU, and with
+  MbskPrefetchMethod 1, each wave takes the last decrement of its own synchronizer slot and reduces on its own.
+  With MbskPrefetchMethod 0 globalWriteElements therefore generates the reduced tile twice, through the block and
+  through buffer_store, and the runtime GSU picks the copy; with MbskPrefetchMethod 1 the reduced tile keeps
+  buffer_store. A static GlobalSplitU > 1 shares its kernel with GlobalSplitU=-1 and a split-K setting overrides
+  it, so the copy is picked at run time for it as well.
+  StoreRemapVectorWidth applies to the blocks that keep buffer_store; a TDM block stages D itself and
+  skips the remap. In a block whose stores run in the CompactLoopStore loop, the block sets up the staged tile and loads C
+  before the loop, steps the staged tile's base by each iteration's rows and stores the tile after the loop.
+  The descriptors hold MacroTile0 in data_size units (tile_dim0) and the columns of a wave (tile_dim1) in 16 bits.
+  The store vectors the block stages are checked by tdmStoreVectorRejectReason, once their widths are final.
+  """
+  if not state["TDMStoreInst"]:
+    return None
+
+  pt = state["ProblemType"]
+  sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
+  converted = sixteenBit or pt["DestDataType"].is8bitFloat()
+  integer = (pt["DestDataType"].isInt32() or pt["DestDataType"].isInt8()) and pt["ComputeDataType"].isInt32()
+  accumType = (pt["DestDataType"].isDouble() and pt["ComputeDataType"].isDouble()) \
+    or (pt["DestDataType"].isSingleComplex() and pt["ComputeDataType"].isSingleComplex()) \
+    or (pt["DestDataType"].isDoubleComplex() and pt["ComputeDataType"].isDoubleComplex())
+  if not (integer or accumType) and (not pt["ComputeDataType"].isSingle()
+                                    or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
+    return "TDMStoreInst supports fp32 D, fp64, complex float and complex double D from accumulators of their type, " \
+           "int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
+  if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1) \
+     and state["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel":
+    return "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"
+  if state["AdaptiveGemm"] and not hasEpilogueSideEffects(pt):
+    return "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: such a kernel " \
+           "stores each beta through one TDM block, with no store-width cascade for AdaptiveGemm=1 to extend"
+  if state["UseSubtileImpl"]:
+    return "TDMStoreInst does not support UseSubtileImpl"
+  if isFusedA2A(pt):
+    return "TDMStoreInst does not support FusedA2A"
+  if pt.get("OutputPeerD", False):
+    # The peer store is a tail recursion inside addStore, which a TDM block never reaches: it
+    # collects its elements and stages them instead. The TDM block writes one tensor, SrdD or
+    # SrdTD, so the peer partition's D would keep its initial value.
+    return "TDMStoreInst does not support OutputPeerD"
+  if state["StreamKAtomic"]:
+    return "TDMStoreInst does not support StreamKAtomic: the kernel adds its tiles to D atomically instead of storing them"
+  if state["PrefetchAcrossPersistent"]:
+    return "TDMStoreInst does not support PrefetchAcrossPersistent, whichever instructions load A and B: with TDM " \
+           "loads the waits for its C load and store would also wait for the next tile's prefetch, which TENSORcnt " \
+           "completes before them, and leave the prefetch nothing to hide"
+  if state["SuppressNoLoadLoop"] and state["TDMInst"] and not (state["HalfPLR"] or state["ReuseAcrossPersistent"]):
+    return "TDMStoreInst does not support SuppressNoLoadLoop with TDM loads outside HalfPLR and ReuseAcrossPersistent: " \
+           "the last PrefetchGlobalRead iterations then zero only the buffer SRD limits, so their tensor_load_to_lds " \
+           "still read past K"
+  if len(state["PackedC0IndicesX"]) != 1 or len(state["PackedC1IndicesX"]) != 1:
+    return "TDMStoreInst requires one free index per operand, not packed free indices"
+  if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
+    return "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
+  return None
+
+
+def tdmStoreVectorRejectReason(state):
+  """Return why the TDM block cannot stage the D vectors of a TDMStoreInst solution, or None.
+
+  Solution asks this once StoreVectorWidth, VectorWidthA and _VectorStore are final. emitTDMStoreStaging writes a
+  vector of bps bytes as bps // width dsStore calls of width = min(bps, 32) bytes, so it writes every byte only when
+  width divides bps and dsStore has that width: any other vector, such as the 48 bytes of fp64 at store vector width
+  6, would lose its last bytes or stop at the assert of dsStore. emitTDMStoreLoadCElement reads the same vectors in
+  pieces of at most 16 bytes, which cover every vector the staging covers. These are the vectors the buffer_store path
+  of chooseGlobalWrite writes too, 1, 2, 4, 8 or 16 bytes or a multiple of 32 in 16-byte stores, and it asserts on any
+  other, so the check turns away no vector that path stores.
+  """
+  if not state["TDMStoreInst"]:
+    return None
+  bpe = int(state["ProblemType"]["DestDataType"].numBytes())
+  for width in _stagedVectorWidths(state):
+    bps = width * bpe
+    piece = min(bps, 32)
+    if bps % piece or piece not in DS_STORE_WIDTHS:
+      return "TDMStoreInst requires D vectors of 1, 2, 4, 8, 16 or a multiple of 32 bytes, not %u (vector width %u)" \
+        % (bps, width)
+  return None
+
+
+def _stagedVectorWidths(state):
+  """The vector widths at which the TDM blocks stage D. The store-width cascade starts at StoreVectorWidth on a WMMA
+  kernel and at VectorWidthA on a VALU kernel, or at 1 without _VectorStore, and halves down to 1; generateBetaModules
+  gets only its first and last widths with AdaptiveGemm=0 or LocalSplitU > 1. A TDM block stages at the first width,
+  except that with per-element outputs beyond C and D (hasEpilogueSideEffects) each block stages at its own.
+  The first width is not capped by KernelWriterAssembly.maxGwvw: the TDM blocks replace the store of the GlobalSplitU=1
+  pass, whose cascade notLocalFullTileElements builds at GlobalSplitU 1, where maxGwvw sets no cap; its cap for the
+  atomics of a GlobalSplitU > 1 or -1 kernel applies to the GSU>1 pass, which keeps buffer_store."""
+  first = state["StoreVectorWidth"] if state["EnableMatrixInstruction"] else state["VectorWidthA"]
+  first = first if state["_VectorStore"] else 1
+  if not hasEpilogueSideEffects(state["ProblemType"]):
+    return [first]
+  if state["AdaptiveGemm"] and state["LocalSplitU"] == 1:
+    return [first >> shift for shift in range(first.bit_length())]
+  return [first, 1]
+
+
+def _waveColumns(kernel):
+  """The columns of the tile each wave stores: MacroTile1 over the waves, rounded up."""
+  return -(-kernel["MacroTile1"] // (kernel["NumThreads"] // kernel["WavefrontSize"]))
+
+
+def _unevenColumns(kernel):
+  """Whether MacroTile1 is not a multiple of the number of waves, so the columns of the last waves reach past
+  the tile."""
+  return kernel["MacroTile1"] % (kernel["NumThreads"] // kernel["WavefrontSize"]) != 0
+
+
+def _dataUnits(bpe):
+  """The TDM data_size units of an element of bpe bytes: data_size is at most 8 bytes, so a complex double element is
+  two units."""
+  return bpe // min(bpe, 8)
+
+
+def _tileDim0(kernel):
+  """tile_dim0 of the staged tile's descriptors: MacroTile0 in data_size units."""
+  return kernel["MacroTile0"] * _dataUnits(int(kernel["ProblemType"]["DestDataType"].numBytes()))
+
+
+def tdmStoreLdsBytes(state):
+  """Return the LDS bytes of the D tile the TDM block stages in LDS (0 without TDMStoreInst).
+
+  The reservation follows the parameter, not the store blocks tdmStoreBlocks picks for the kernel, and
+  covers the columns of the waves that transfer: MacroTile1 rounded up to a multiple of a wave's columns, since a
+  wave that straddles the end of the tile loads and stores all of its columns, and its tensor_load_to_lds writes
+  zeros past the column bound. A wave whose first column lies past the tile skips its transfer.
+  Reserving too much costs LDS only; reserving too little would stage over live LDS.
+  """
+  if not state["TDMStoreInst"]:
+    return 0
+  columns = _waveColumns(state)
+  transferred = -(-state["MacroTile1"] // columns) * columns
+  return state["MacroTile0"] * transferred * int(state["ProblemType"]["DestDataType"].numBytes())
+
+
+def storesFinalD(kernel, atomic):
+  """Whether a store block writes D's final elements: not atomically and not to a GSU workspace. The
+  MultipleBufferSingleKernel store writes the reduced tile to D; it counts with MbskPrefetchMethod 0, whose kernel
+  also keeps a buffer_store copy of it (tdmStoreRejectReason)."""
+  if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
+    return not atomic and kernel.get("MbskPrefetchMethod") == 0
+  return not atomic and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
+
+
+def tdmStoreBlocks(kernel, edge, atomic, vectorWidths):
+  """Return the vector widths of the store blocks of one beta that store through the TDM block.
+
+  vectorWidths are the store blocks generateBetaModules builds, the store-width cascade: the widest,
+  of the store vector width, holds the NonEdge path and, with edge, the masked EdgeN path; the
+  narrower ones are masked. EdgeM is every masked block narrower than the store vector width and the
+  narrowest one; without edge the one block is unmasked, NonEdge, and generateBetaModules picks the
+  NonEdge path of a store with edge the same way, with edge=False. TDMStoreInst on sends every path
+  through the TDM block, so with edge that is every block of the cascade. In a picked block the TDM
+  block replaces the store. A final-D store keeps its edge blocks with TDMStoreInst only in a kernel with
+  per-element outputs beyond C and D (hasEpilogueSideEffects), whose TDM blocks of the edge paths keep the
+  masks and vector width of their block; any other one reaches generateBetaModules without edge, as the one
+  block of the store vector width (tdmStoreSinglePath). Only a block that storesFinalD uses it, not a GSU or
+  StreamK partial-tile store.
+  """
+  if not (kernel["TDMStoreInst"] and storesFinalD(kernel, atomic)):
+    return set()
+  return set(vectorWidths) if edge else {max(vectorWidths)}
+
+
+def tdmStoreSinglePath(kernel, edge, atomic):
+  """Whether a store with edge blocks goes to generateBetaModules as one TDM block in place of its store-width
+  cascade.
+
+  With TDMStoreInst on every block of a store that storesFinalD stores through the TDM block, and without
+  per-element outputs beyond C and D (hasEpilogueSideEffects) each would be generated like the NonEdge path, at
+  the widest vector width and without masks: the same block. tensor_dim bounds the edge tiles, so
+  globalWriteElements passes such a store without edge and with the widest vector width only, and each beta
+  gets that block alone: no edge check, no EdgeN or EdgeM block and none of their labels. A store without edge
+  blocks, such as the OptNLL store, is one block already. A kernel with such outputs keeps the cascade, whose
+  edge blocks need their masks.
+  """
+  return edge and kernel["TDMStoreInst"] and storesFinalD(kernel, atomic) \
+    and not hasEpilogueSideEffects(kernel["ProblemType"])
+
+
+def storeRemapVectorWidth(kernel, tdmStoreLdsBase):
+  """The StoreRemapVectorWidth of a store block: a TDM block, which has the base of the staged tile in
+  tdmStoreLdsBase, stages D itself, so only a buffer_store block remaps D through LDS."""
+  return kernel["StoreRemapVectorWidth"] if tdmStoreLdsBase is None else 0
+
+
+def tdmStoreModifiers(asmCaps, kernel, tc="D"):
+  """Return the TENSORModifiers of the TDM block's transfer of tensor tc, from its hints as addStore and
+  addLoad decode them: the tensor_store_from_lds of D, or the tensor_load_to_lds of C."""
+  hints = [(kernel["NonTemporal%s" % tc], TemporalHint(kernel.get("TemporalHint%s" % tc, 0)),
+            NonVolatile(kernel.get("NonVolatile%s" % tc, 0)))]
+  return tdmCacheModifiers(asmCaps, hints, is_store=tc == "D")
+
+
+def emitTDMStoreSetup(gwb) -> Module:
+  """Fence the main-loop LDS and compute this thread's byte address in the staged D tile.
+
+  The tile is staged M-contiguous from LDS offset _TDMStoreLdsOffset, after the epilogue vectors. It lies
+  over the main-loop buffers, so every wave is fenced here before the staged tile is written; in-flight
+  tensor_load_to_lds are drained first when A or B is loaded with them.
+  """
+  module = Module("TDMStoreSetup")
+  kw = gwb.parentWriter
+  # enableTDMMetadata requires TDMInst > 0 (enableTDMA or enableTDMB), so the metadata load is drained too.
+  if gwb.kernel["enableTDMA"] or gwb.kernel["enableTDMB"]:
+    module.add(SWaitTensorcnt(tensorcnt=0, comment="drain tensor_load_to_lds before reusing its LDS"))
+  module.add(kw._syncThreads(gwb.kernel, "all waves are done with the main-loop LDS"))
+  base = gwb.tdmStoreLdsBase
+  mt0 = gwb.kernel["MacroTile0"]
+  module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
+  module.add(VSubU32(dst=vgpr(base), src0=vgpr(kw.vgprs.coord1), src1=sgpr(gwb.tmpS01), comment="tile column = coord1 - wg1*MT1"))
+  module.add(VMulLOU32(dst=vgpr(base), src0=vgpr(base), src1=mt0, comment="* MT0"))
+  module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(kw.vgprs.coord0), comment="+ coord0"))
+  module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
+  module.add(VSubU32(dst=vgpr(base), src0=vgpr(base), src1=sgpr(gwb.tmpS01), comment="- wg0*MT0"))
+  if kw.states.bpeCexternalGSU1 > 1:
+    module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=int(log2(kw.states.bpeCexternalGSU1)), src=vgpr(base), comment="* bpe"))
+  if gwb.kernel["_TDMStoreLdsOffset"]:
+    module.add(VAddU32(dst=vgpr(base), src0=gwb.kernel["_TDMStoreLdsOffset"], src1=vgpr(base), comment="+ LDS offset of the staged tile"))
+  return module
+
+
+def tdmStoreLdsSplit(offset, span=0):
+  """Split a staged-tile byte offset into (fold into the address register, DS instruction offset).
+
+  span is how far ABOVE the returned offset the caller will still address. An element wider than one DS
+  instruction is written piece by piece as offset + piece * width, so the piece that has to fit the 16-bit
+  offset field is the last one, not the first.
+
+  Folding a whole multiple of 64 KiB keeps the fold cheap, but only while the remainder still leaves room
+  for the span; otherwise the element's whole offset is folded, which puts its pieces in [0, span].
+  """
+  if offset + span <= DS_OFFSET_MAX:
+    return 0, offset
+  high = offset & ~DS_OFFSET_MAX
+  if (offset - high) + span > DS_OFFSET_MAX:
+    high = offset
+  return high, offset - high
+
+
+def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0, folded=None, foldRead=False):
+  """Return the VGPR and DS offset of element (coordOffset0, coordOffset1) of the staged tile, and the fold tmpVgpr
+  then holds. folded is the fold tmpVgpr already holds, base + folded, when the caller knows that nothing has written
+  tmpVgpr since; an element with that fold reuses it. foldRead says that a DS access issued since the last wait for
+  VM_VSRC may still be reading tmpVgpr as its address."""
+  offset = (coordOffset1 * gwb.kernel["MacroTile0"] + coordOffset0) * gwb.parentWriter.states.bpeCexternalGSU1
+  high, low = tdmStoreLdsSplit(offset, span)
+  if not high:
+    return gwb.tdmStoreLdsBase, low, folded
+  if high != folded:
+    # Expert scheduling turns off the hardware VM_VSRC and VA_VDST checks: the fold must not overwrite tmpVgpr before
+    # an earlier DS access has read it as its address, and the next DS access reads the new fold.
+    expert = gwb.kernel.get("ExpertSchedulingMode", 0) > 0
+    if expert and foldRead:
+      module.add(SWaitAlu(vm_vsrc=0, comment="DS accesses done reading the previous fold"))
+    module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=hex(high), src1=vgpr(gwb.tdmStoreLdsBase), comment="LDS offset above 64 KiB"))
+    if expert:
+      module.add(SWaitAlu(va_vdst=0, comment="fold written before a DS access reads it"))
+  return gwb.tmpVgpr, low, high
+
+
+def _foldReadDone(gwb, module: Module, comment):
+  """Wait until the DS accesses issued so far have read tmpVgpr, their address, before code outside the TDM block
+  writes it: expert scheduling turns off the hardware VM_VSRC check."""
+  if gwb.kernel.get("ExpertSchedulingMode", 0) > 0:
+    module.add(SWaitAlu(vm_vsrc=0, comment=comment))
+
+
+def _handoffBarriersLds(kernel):
+  """Whether the persistent tile handoff already ends with a workgroup barrier, so the TDM flush adds none.
+
+  This mirrors the predicate in WorkAssignment.splitPersistentTileHandoff, which is where the handoff
+  decides whether to emit one, for the kernels TDMStoreInst accepts: the handoff also drops its epilogue-vector
+  term with PrefetchAcrossPersistent, which tdmStoreRejectReason rejects. Both guard the same hazard: a slow
+  wave still reading the staged tile when the next tile writes LDS. Where the handoff emits the barrier, a
+  second one here orders nothing and only costs a wait on every tile.
+
+  The queue term holds for a DynamicWorkQueue kernel: DynamicWorkQueue.closeLoop emits both phases of the
+  handoff before its back-edge, and the next work item is checked for exhaustion only after re-entry, so
+  every tile ends with the barrier. A Hybrid kernel runs StaticGrid.closeLoop, which has no
+  queue barrier, on its static arm, so it does not count here (_hybridStaticArmOnly). With
+  DebugPersistentKernelLoopForever the handoff drops the queue barrier, and the flush keeps its own whatever the
+  other terms say.
+  """
+  if kernel.get("DebugPersistentKernelLoopForever", False):
+    return False
+  tdm = (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False)) \
+    and kernel["NumThreads"] > kernel["WavefrontSize"]
+  epilogue = kernel.get("_PersistentVectorEpilogueLds", False)
+  cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
+  queue = kernel.get("WorkAssignment") == "DynamicWorkQueue"
+  return bool(tdm or epilogue or cluster or queue)
+
+
+def _hybridStaticArmOnly(kernel):
+  """Whether a persistent kernel whose handoff has no other barrier lacks it on one runtime arm only: Hybrid.closeLoop
+  runs DynamicWorkQueue.closeLoop, whose handoff ends every tile with a barrier, when WorkAssignmentMode is
+  not 0, and StaticGrid.closeLoop, which has none, when it is 0. WorkAssignmentMode is the same in every wave,
+  so the flush can branch around its barrier on the dynamic arm."""
+  return kernel.get("WorkAssignment") == "Hybrid" and not kernel.get("DebugPersistentKernelLoopForever", False)
+
+
+def _stagedTileToken(gwb):
+  """The memory token of the staged tile's LDS accesses: that of the main-loop buffer the tile lies over.
+  tdmStoreRejectReason rejects PrefetchAcrossPersistent, whose next tile's loads would write those buffers during
+  the epilogue."""
+  return gwb.parentWriter.states.memTokenLdsBuffer0
+
+
+def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
+  """Read this element's C vector from the staged tile, where its D is staged later.
+
+  An odd 2-byte fp16 element goes to the high half of its own VGPR, where readInput loads it, with
+  ds_load_u16_d16_hi. Only that half is read afterwards: the beta multiply selects it with op_sel.
+  tdmStoreRejectReason admits fp16 D only from fp32 accumulators, so readInput's low-half rule for HHH_WMMA kernels
+  never applies here. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
+  ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. A DS load reads at most 16 bytes,
+  so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
+  """
+  module = Module("TDMStoreLoadCElement")
+  kw = gwb.parentWriter
+  bpl = kw.states.bpeCexternalGSU1 * gwb.gwvw
+  # The read-back of each element is emitted between other code of the element loop, which may write tmpVgpr.
+  addr, offset, _ = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1,
+                                        span=max(0, bpl - min(bpl, 16)))
+  comment = "load C element (%u, %u)" % (addrCalc.coordOffset0, addrCalc.coordOffset1)
+  memToken = MemTokenData([_stagedTileToken(gwb)])
+  if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and vc0 % 2:
+    inst = DSLoadD16HIU16(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
+    inst.setMemToken(memToken)
+    module.add(inst)
+  elif bpl == 1:
+    inst = DSLoadU8(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
+    inst.setMemToken(memToken)
+    module.add(inst)
+  else:
+    width = min(bpl, 16)
+    for piece in range(bpl // width):
+      module.add(dsLoad(width, dst=vgpr(data + piece * width // kw.states.bpr, max(1, width // kw.states.bpr)),
+                        src=vgpr(addr), ds=DSModifiers(offset=offset + piece * width), comment=comment,
+                        memToken=memToken))
+  if addr == gwb.tmpVgpr:
+    _foldReadDone(gwb, module, "C read done with tmpVgpr before other code writes it")
+  return module
+
+
+def emitTDMStoreStaging(gwb, stagedElements) -> Module:
+  """Write this batch's packed D elements to their (M, N) position in the staged tile.
+
+  An element spans the registers of its type from ValuC + sumIdx times their number, as addStore stores it: two
+  for fp64 and complex float. dsStore writes at most 32 bytes, as two 16-byte stores, so a wider vector, such as fp32 at store vector
+  width 16, is staged 32 bytes at a time.
+  """
+  from .PackData import formatting
+  module = Module("TDMStoreStaging")
+  kw = gwb.parentWriter
+  bps = kw.states.bpeCexternalGSU1 * gwb.gwvw
+  width = min(bps, 32)
+  numRegs = max(1, width // kw.states.bpr)
+  regsPerElement = max(1, kw.states.bpeCexternalGSU1 // kw.states.bpr)
+  # Only the DS stores below run between the elements of the batch, and they write no VGPR, so a fold added to
+  # tmpVgpr for one element still holds for the next.
+  folded, foldRead = None, False
+  for sumIdx, coordOffset0, coordOffset1 in stagedElements:
+    # A 32-byte piece is two 16-byte DS stores, so the span counts the 16 bytes one DS instruction writes.
+    addr, offset, fold = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1,
+                                             span=max(0, bps - min(width, 16)), folded=folded, foldRead=foldRead)
+    foldRead = (foldRead and fold == folded) or addr == gwb.tmpVgpr
+    folded = fold
+    for piece in range(bps // width):
+      src = vgpr(formatting(sumIdx * regsPerElement + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
+      module.add(dsStore(width, dstAddr=vgpr(addr), src=src, ds=DSModifiers(offset=offset + piece * width),
+                         comment="stage D element (%u, %u)" % (coordOffset0, coordOffset1),
+                         memToken=MemTokenData([_stagedTileToken(gwb)])))
+  if foldRead:
+    _foldReadDone(gwb, module, "staging done with tmpVgpr before other code writes it")
+  return module
+
+
+def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
+  """Fill the descriptor of this wave's columns of the tile of tensor tc (C or D) and of the staged tile.
+
+  Each wave covers ceil(MacroTile1/numWaves) consecutive columns: tile MT0 x those columns, M-contiguous
+  from the LDS address of its first column, global address Srd<tc> (SrdTD for the reduced tile of MultipleBufferSingleKernel) + (column*Stride<tc> + wg0*MT0)*bpe,
+  and tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the two tmp SGPRs is left
+  at the first column of the wave. When MacroTile1 is not a multiple of the number of waves, the columns
+  of the last waves reach past the tile, so tensor_dim1 ends at the column bound min(SizeJ, (wg1+1)*MT1),
+  which the second tmp SGPR keeps. The LDS and global addresses are computed in their group0 words, and the
+  other temporaries live in group1+5 and group1+6 until setTensorStride0 writes them last, so the block needs
+  two SGPRs of any alignment besides the descriptor: the epilogue of a kernel with many live SGPRs may have no
+  aligned run of four left. The block assumes one free index per operand, as every GEMM problem
+  type has, so PackedC0IndicesX and PackedC1IndicesX hold one index each; tdmStoreRejectReason rejects any
+  other kernel before its descriptor is built. TDM data_size is at most 8 bytes, so a
+  complex double element is two 8-byte units, in which tensor_dim0, tile0 and the stride count, the doubled stride in
+  the 48 bits of its field; the byte offsets and the staged tile do not change.
+  """
+  assert len(gwb.kernel["PackedC0IndicesX"]) == 1 and len(gwb.kernel["PackedC1IndicesX"]) == 1, \
+    "the TDM block assumes one free index per operand"
+  kw = gwb.parentWriter
+  bpe = kw.states.bpeCexternalGSU1
+  units = _dataUnits(bpe)
+  mt0 = gwb.kernel["MacroTile0"]
+  ws = gwb.kernel["WavefrontSize"]
+  colsPerWave = _waveColumns(gwb.kernel)
+  stride1 = "Stride%s%s" % (tc, kw.states.indexChars[gwb.kernel["PackedC1IndicesX"][0]])
+  srd = "SrdTD" if tc == "D" and gwb.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" else "Srd" + tc
+  sizeI = kw.sizeRef(gwb.kernel["ProblemType"]["Index0"])
+  sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
+  col, dim = tmp.idx, tmp.idx + 1
+  dim1, scratch = g1 + 5, g1 + 6
+  module.add(tdm.initOperands(g0, g1))
+  module.add(tdm.setDataSize(bpe // units, g1))
+  module.add(VReadfirstlaneB32(dst=sgpr(col), src=vgpr("Serial"), comment="first thread id"))
+  module.add(SLShiftRightB32(dst=sgpr(col), shiftHex=int(log2(ws)), src=sgpr(col), comment="waveId"))
+  module.add(SMulI32(dst=sgpr(col), src0=sgpr(col), src1=colsPerWave, comment="first tile column of this wave"))
+  module.add(SMulI32(dst=sgpr(g0 + 1), src0=sgpr(col), src1=mt0 * bpe, comment="its LDS address"))
+  if gwb.kernel["_TDMStoreLdsOffset"]:
+    module.add(SAddU32(dst=sgpr(g0 + 1), src0=sgpr(g0 + 1), src1=gwb.kernel["_TDMStoreLdsOffset"], comment="+ LDS offset of the staged tile"))
+  module.add(SMulHIU32(dst=sgpr(g0 + 3), src0=sgpr(col), src1=sgpr(stride1), comment="hi(column*Stride%s)" % tc))
+  module.add(SMulI32(dst=sgpr(g0 + 2), src0=sgpr(col), src1=sgpr(stride1), comment="lo(column*Stride%s)" % tc))
+  module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
+  module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(dim), comment="+ wg0*MT0"))
+  module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=0, comment="carry"))
+  if bpe > 1:
+    module.add(SLShiftLeftB64(dst=sgpr(g0 + 2, 2), src=sgpr(g0 + 2, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from %s" % srd))
+  module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(srd), comment="global address lo"))
+  module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr("%s+1" % srd), comment="global address hi"))
+  # The type field, bits 30-31, is ORed in after the add, which cannot carry into it: the address is 57-bit.
+  module.add(SOrB32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=hex(2 << 30), comment="set type field to 2(image)"))
+  module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
+  if units > 1:
+    module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=sgpr(dim), comment="tensor_dim0 in 8-byte units"))
+  module.add(tdm.setTensorDim0(g1, dim, scratch))
+  module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup1"), src1=gwb.kernel["MacroTile1"], comment="wg1*MT1"))
+  module.add(SAddU32(dst=sgpr(col), src0=sgpr(col), src1=sgpr(dim), comment="first %s column of this wave" % tc))
+  if _unevenColumns(gwb.kernel):
+    module.add(SAddU32(dst=sgpr(dim), src0=sgpr(dim), src1=gwb.kernel["MacroTile1"], comment="end of the tile"))
+    module.add(SMinU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(dim), comment="column bound = min(SizeJ, end of the tile)"))
+    module.add(SSubU32(dst=sgpr(dim1), src0=sgpr(dim), src1=sgpr(col), comment="tensor_dim1 = column bound - first column"))
+    module.add(tdm.setTensorDim1(g1, dim1, scratch))
+  else:
+    module.add(SSubU32(dst=sgpr(dim), src0=sizeJ, src1=sgpr(col), comment="tensor_dim1 = SizeJ - first column"))
+    module.add(tdm.setTensorDim1(g1, dim, scratch))
+  module.add(tdm.setTensorTile0(g1, _tileDim0(gwb.kernel)))
+  module.add(tdm.setTensorTile1(g1, colsPerWave))
+  module.add(tdm.setTensorStride0(g1, stride1, units))
+
+
+def _skipTest(gwb, sizeJ, tmp):
+  """The compare whose SCC skips this wave's transfer: none of its columns is before the column bound, SizeJ or,
+  when MacroTile1 is not a multiple of the number of waves, min(SizeJ, end of the tile)."""
+  if _unevenColumns(gwb.kernel):
+    return SCmpLeU32(src0=sgpr(tmp.idx + 1), src1=sgpr(tmp.idx), comment="all columns of this wave at or past the column bound?")
+  return SCmpLeU32(src0=sizeJ, src1=sgpr(tmp.idx), comment="all columns of this wave at or past SizeJ?")
+
+
+def emitTDMStoreLoadC(gwb) -> Module:
+  """Load the C tile into the staged tile with one tensor_load_to_lds per wave.
+
+  Each wave loads the columns it stores. tensor_dim0/1 clip the load at the end of C, so no load
+  reads past it; a wave whose columns all lie at or past the column bound skips its load. Each thread then
+  reads its C elements where it stages their D, so only the barrier after the loads is needed. The
+  load carries C's cache hints, as the buffer loads of C would.
+  """
+  from .TensorDataMover import TensorDataMoverStore
+  module = Module("TDMStoreLoadC")
+  kw = gwb.parentWriter
+  sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
+  skipLoad = Label(kw.labels.getNameInc("TDMStoreLoadCSkip"), "no column of this wave is inside C")
+  tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
+  with kw.allocTmpSgpr(8, alignment=4, tag="TDMStoreInst load-C descriptor group1") as group1, \
+      kw.allocTmpSgpr(4, alignment=4, tag="TDMStoreInst load-C descriptor group0") as group0:
+    with kw.allocTmpSgpr(2, tag="TDMStoreInst load-C temporaries") as tmp:
+      _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "C")
+      module.add(_skipTest(gwb, sizeJ, tmp))
+      module.add(SCBranchSCC1(labelName=skipLoad.getLabelName(), comment="skip the load"))
+      module.add(tdm.issueLoad(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel, "C")))
+      module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM load of C"))
+      module.add(skipLoad)
+  module.add(kw._syncThreads(gwb.kernel, "every wave has loaded its part of the C tile"))
+  return module
+
+
+def _storeWaitNeeded(kernel):
+  """Whether a wave waits for its tensor_store_from_lds before going on.
+
+  Every epilogue of a non-persistent kernel ends the program, and s_endpgm waits for outstanding tensor stores, so the
+  staged tile stays allocated until its store is done. A persistent kernel reuses that LDS for its next tile.
+  """
+  return isPersistent(kernel)
+
+
+def emitTDMStoreFlush(gwb) -> Module:
+  """Store the staged D tile with one tensor_store_from_lds per wave.
+
+  Each wave stores ceil(MacroTile1/numWaves) consecutive columns of the tile. In a persistent kernel the next tile
+  must not write LDS before every wave's store has read the staged tile: each wave waits for its store
+  (_storeWaitNeeded), and the barrier that ends the tile handoff orders the waves when the handoff has one
+  (WorkAssignment.splitPersistentTileHandoff); otherwise the flush ends with its own, which a Hybrid kernel executes on
+  its static arm only. tensor_dim0/1 bound the store to the part of the tile inside D; a wave whose columns all lie at
+  or past the column bound skips its store instead of relying on a zero tensor_dim.
+  """
+  from .TensorDataMover import TensorDataMoverStore
+  module = Module("TDMStoreFlush")
+  kw = gwb.parentWriter
+  sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
+  skipStore = Label(kw.labels.getNameInc("TDMStoreSkip"), "no column of this wave is inside D")
+  tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
+  with kw.allocTmpSgpr(8, alignment=4, tag="TDMStoreInst store descriptor group1") as group1, \
+      kw.allocTmpSgpr(4, alignment=4, tag="TDMStoreInst store descriptor group0") as group0:
+    with kw.allocTmpSgpr(2, tag="TDMStoreInst store temporaries") as tmp:
+      _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "D")
+      module.add(SWaitCnt(dscnt=0, comment="staging stores done"))
+      module.add(kw._syncThreads(gwb.kernel, "every wave has staged its part of the tile"))
+      module.add(_skipTest(gwb, sizeJ, tmp))
+      module.add(SCBranchSCC1(labelName=skipStore.getLabelName(), comment="skip the store"))
+      module.add(tdm.issueStore(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel)))
+      if _storeWaitNeeded(gwb.kernel):
+        module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store"))
+      module.add(skipStore)
+  k = gwb.kernel
+  # syncThreads emits no barrier for one wave without a cluster barrier; the Hybrid branch would then skip nothing.
+  if isPersistent(k) and not _handoffBarriersLds(k) and (k["NumThreads"] > k["WavefrontSize"] or k.get("ClusterBarrier")):
+    sync = kw._syncThreads(k, "every TDM store is done with the staged tile before the next tile writes LDS")
+    if _hybridStaticArmOnly(gwb.kernel):
+      dynamicArm = Label(kw.labels.getNameInc("TDMStoreFlushDynamicArm"), "the queue handoff barrier fences this arm")
+      module.add(SCmpEQU32(src0=sgpr("WorkAssignmentMode"), src1=0, comment="Hybrid: static assignment selected?"))
+      module.add(SCBranchSCC0(labelName=dynamicArm.getLabelName(), comment="dynamic arm: DynamicWorkQueue.closeLoop fences"))
+      module.add(sync)
+      module.add(dynamicArm)
+    else:
+      module.add(sync)
+  return module

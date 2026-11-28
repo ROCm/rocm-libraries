@@ -698,6 +698,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SMFMA("bf16", "f32", 16, 16, 32, 1, false, sgpr(0), sgpr(1), sgpr(2), sgpr(3));
         case logical::TensorLoadToLds:
             return TensorLoadToLds(vgpr(0), vgpr(1));
+        case logical::TensorStoreFromLds:
+            return TensorStoreFromLds(vgpr(0), vgpr(1));
         case logical::Label:
             return Label("test_label");
         case logical::IntrinsicCall:
@@ -1149,8 +1151,6 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::BufferStoreD16B16,
         logical::FlatStoreD16B16,
         logical::DSLoadB16,
-        logical::DSLoadD16HIU8,
-        logical::DSLoadD16HIU16,
         logical::DSStoreU16,
         logical::DSStoreB256,
     };
@@ -1164,7 +1164,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         {logical::DSLoadB96TrB6, {{12, 5, 0}}},   {logical::DSLoadB64TrB4, {{12, 5, 0}}},
         {logical::DSLoadB64TrB8, {{12, 5, 0}}},   {logical::DSLoadB128TrB16, {{12, 5, 0}}},
         {logical::DSLoadB192, {{12, 5, 0}}},      {logical::DSStoreB192, {{12, 5, 0}}},
-        {logical::DSStoreB256, {{12, 5, 0}}},
+        {logical::DSStoreB256, {{12, 5, 0}}},     {logical::TensorStoreFromLds, {{12, 5, 0}}},
     };
 
     std::cout << "Testing " << testedOpcodes.size() << " instructions on " << archs.size()
@@ -1326,6 +1326,7 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions) {
     // Architecture-specific instructions for gfx1250
     std::map<logical::Opcode, std::string> gfx1250Instructions = {
         {logical::TensorLoadToLds, "tensor_load_to_lds"},
+        {logical::TensorStoreFromLds, "tensor_store_from_lds"},
         // Add more gfx1250-specific instructions here as they are discovered
     };
 

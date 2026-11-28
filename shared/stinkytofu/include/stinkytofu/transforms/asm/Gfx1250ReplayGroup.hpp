@@ -45,7 +45,7 @@ inline ReplayGroupKind getReplayGroupKind(const StinkyInstruction& inst, ReplayM
         isFLATStore(inst) || isFLATAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
         isGLOBALAtomic(inst))
         return ReplayGroupKind::VMEM;
-    if (isTensorLoad(inst))
+    if (isTensorOp(inst))
         return replayMode == ReplayMode::SingleGroup ? ReplayGroupKind::Other
                                                      : ReplayGroupKind::VMEM;
     return ReplayGroupKind::None;

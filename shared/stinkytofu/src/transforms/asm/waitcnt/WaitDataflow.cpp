@@ -114,8 +114,8 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         {[](const StinkyInstruction& i) { return isSMemLoad(i); },
          [](const StinkyInstruction&) { return true; }, CounterOrder::OutOfOrder},
 
-        // CK_Tensor: tensor_load_to_lds; every consumer drains.
-        {[](const StinkyInstruction& i) { return isTensorLoad(i); },
+        // CK_Tensor: tensor_load_to_lds and tensor_store_from_lds; every consumer drains.
+        {[](const StinkyInstruction& i) { return isTensorOp(i); },
          [](const StinkyInstruction& i) { return true; }, CounterOrder::InOrder},
 
         // CK_Async: global_store_async_from_lds_*; drains via the LDS WAR
@@ -946,6 +946,34 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     if (isLdsWriterAnchor(*inst) || isBarrier(*inst)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanAsyncAntiDeps(tk->tokens);
+    }
+
+    // WAR-on-LDS for the tensor counter, mirroring scanAsyncAntiDeps. tensorcnt tracks
+    // tensor_store_from_lds, an LDS reader with no register dest, so the SSA UD chain cannot
+    // order a later LDS write against it; an LDS writer (tensor_load / ds_write) or a barrier
+    // reusing a buffer the store is still reading must drain tensorcnt first. tensor_load_to_lds
+    // needs no equivalent here: it WRITES LDS, so its consumers are ordinary UD-chain readers.
+    // idx indexes the whole queue, loads included -- tensor loads and stores share TENSORcnt and
+    // complete in order within a wave, so skipping a load's slot would under-drain.
+    auto scanTensorAntiDeps = [&](const std::vector<int>& anchorTokens) {
+        for (const auto& q : state.queues[CK_Tensor]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                StinkyInstruction* op = q.ops[idx];
+                if (op == inst) continue;
+                if (!isTensorStore(*op)) continue;
+                auto* opTokens = op->getModifier<MemTokenData>();
+                bool overlap =
+                    (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
+                if (!overlap) continue;
+                tightenRequired(CK_Tensor, waitToDrain(CK_Tensor, qsize - idx));
+            }
+        }
+    };
+
+    if (isLdsWriterAnchor(*inst) || isBarrier(*inst)) {
+        const auto* tk = inst->getModifier<MemTokenData>();
+        if (tk != nullptr) scanTensorAntiDeps(tk->tokens);
     }
 
     // Conservative MemTokenData fallbacks. An untagged anchor or

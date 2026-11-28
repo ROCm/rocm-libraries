@@ -28,6 +28,8 @@ from rocisa.instruction import \
 
 _BPS_TO_DS_STORE = {1: DSStoreB8, 2: DSStoreB16, 4: DSStoreB32, 8: DSStoreB64, 16: DSStoreB128}
 _BPL_TO_DS_LOAD  = {2: DSLoadU16, 4: DSLoadB32, 8: DSLoadB64, 16: DSLoadB128}
+# The byte widths dsStore takes: one DS store each, and 32 as two 16-byte stores.
+DS_STORE_WIDTHS = frozenset(_BPS_TO_DS_STORE) | {32}
 
 def dsStore(bps, dstAddr, src, ds, comment="", memToken=None):
     """Select and return a DSStore instruction by byte width (1/2/4/8/16/32).

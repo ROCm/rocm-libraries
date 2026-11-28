@@ -54,6 +54,8 @@ from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
+from ..Components.TDMStoreInst import emitTDMStoreFlush, emitTDMStoreLoadC, emitTDMStoreLoadCElement, emitTDMStoreSetup, emitTDMStoreStaging, \
+  hasEpilogueSideEffects, storeRemapVectorWidth
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
@@ -207,13 +209,13 @@ class GlobalWriteBatchComponent(GlobalWriteComponents):
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
-    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0) -> Module:
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None) -> Module:
     return GlobalWriteBatchWriter(kernel, tPA, tPB, activation, ss, batchIdx, applyAlpha, \
       beta, edge, atomic, gwvw, atomicW, \
       batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, \
       codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion, numBatches,
-      inter_iter_rowInc, direct_next_rowInc).emit()
+      inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase).emit()
 
 class GlobalWriteBatchWriter:
   def __init__(self, kernel: Solution, tPA, tPB, activation: ActivationModule, ss: StoreState, \
@@ -221,7 +223,7 @@ class GlobalWriteBatchWriter:
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
-    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0):
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0, tdmStoreLdsBase: int | None = None):
     self.kernel = kernel
     self.tPA    = tPA
     self.tPB    = tPB
@@ -297,6 +299,13 @@ class GlobalWriteBatchWriter:
     # Next batch's first-elt rowInc (look-ahead at the last emitting elt). 0 = none.
     self.inter_iter_rowInc = inter_iter_rowInc
     self.direct_next_rowInc = direct_next_rowInc
+    # VGPR holding this thread's LDS byte address in the staged D tile; None = buffer_store.
+    self.tdmStoreLdsBase = tdmStoreLdsBase
+    # With beta != 0 the TDM block loads the C tile into the staged tile and reads C from there, unless it is
+    # generated as the edge block, which keeps the edge block's C loads: generateBetaModules hands a TDM block
+    # edge=True only then (hasEpilogueSideEffects).
+    self.tdmStoreLoadC = bool(beta) and tdmStoreLdsBase is not None and not edge
+    self.storeRemap = storeRemapVectorWidth(self.kernel, tdmStoreLdsBase)
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -669,12 +678,21 @@ class GlobalWriteBatchWriter:
 
       clsLabel = getattr(self.ss, "_clsLoopLabel", None)
       if clsLabel is not None and (self._computeBatchesPerCLSBody() - 1 == self.batchIdx) and self.ss.elementAddr:
+        if self.tdmStoreLdsBase is not None and self._computeCLSIterCount() > 1:
+          # The staged offsets are the first iteration's; the next iteration starts at the last element's row plus
+          # the look-ahead's row advance.
+          rows = self.ss.elementAddr[len(self.batchElements) - 1].coordOffset1 + self.direct_next_rowInc
+          module.add(VAddU32(dst=vgpr(self.tdmStoreLdsBase), src1=vgpr(self.tdmStoreLdsBase),
+                             src0=rows * self.kernel["MacroTile0"] * self.parentWriter.states.bpeCexternalGSU1,
+                             comment="next iteration's rows of the staged tile"))
         module.add(SSubI32(dst=sgpr("CLSLoopCounter"), src0=sgpr("CLSLoopCounter"), src1=1))
         module.add(SCmpEQU32(src0=sgpr("CLSLoopCounter"), src1=0))
         # 32-bit-offset backward branch: the replay hazard protection 7bfd03f
         # can overflow simm16 ("branch size exceeds simm16"). longBranchScc0 emits a
         # getpc/setpc sequence that handles the full 32-bit distance.
         module.add(self.parentWriter.longBranchScc0(clsLabel, posNeg=-1, comment="loop while counter != 0"))
+        if self.tdmStoreLdsBase is not None:
+          module.add(emitTDMStoreFlush(self))
         # if not hasStaticAssignment(self.kernel):
         #   module.add(SEndpgm(comment="stop here after CLS loop"))
         self.ss._clsLoopLabel = None
@@ -690,8 +708,11 @@ class GlobalWriteBatchWriter:
       waitLocalLoadCntStrList = []
       waitLoadCnt = 0
       waitLoadCntStrList = []
-      # Calculate global loads
-      if self.beta:
+      # Calculate global loads; the TDM block reads C from LDS
+      if self.tdmStoreLoadC:
+        waitLocalLoadCnt += self.betaLoadIssued[elementIdx]
+        waitLocalLoadCntStrList.append("%d (beta)"%self.betaLoadIssued[elementIdx])
+      elif self.beta:
         waitLoadCnt += self.betaLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (beta)"%self.betaLoadIssued[elementIdx])
       if self.loadE:
@@ -765,8 +786,11 @@ class GlobalWriteBatchWriter:
         return SWaitCnt(dscnt=dscnt, vlcnt=vlcnt, vscnt=vscnt, comment="%s (interleaved)"%comment)
     else:
       commentList = []
-      # Global read wait
-      if self.beta:
+      # Global read wait; the TDM block reads C from LDS
+      if self.tdmStoreLoadC:
+        dscnt = 0
+        commentList.append("Beta")
+      elif self.beta:
         vlcnt = 0
         commentList.append("Beta")
       if self.loadE:
@@ -1000,7 +1024,7 @@ class GlobalWriteBatchWriter:
       module.add(SMovB32(dst=sgpr("CLSGateRowInc"), src=0, comment="Init Gate CLS row offset"))
     if self.kernel["CompactLoopStore"] and self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]:
       module.add(SMovB32(dst=sgpr("CLSERowInc"), src=0, comment="Init E CLS row offset"))
-    if self.kernel["StoreRemapVectorWidth"] and self.kernel["CompactLoopStore"]:
+    if self.storeRemap and self.kernel["CompactLoopStore"]:
       # Batch 0 checks out; later batches reuse parentWriter.compactLoopStoreVgpr.
       self.CompactLoopStoreVgpr = self.parentWriter.vgprPool.checkOut(1, tag="CompactLoopStoreVgpr_tmpVgpr")
       self.parentWriter.compactLoopStoreVgpr = self.CompactLoopStoreVgpr
@@ -1195,6 +1219,10 @@ class GlobalWriteBatchWriter:
     #when factorDim = 1 the bias's gwvw is alwasy be 1.
     factor_gwvw = 1 if self.factorDim else self.ss.cfg.gwvw
 
+    if self.tdmStoreLdsBase is not None and self.batchIdx == 0:
+      module.add(emitTDMStoreSetup(self))
+      if self.tdmStoreLoadC:
+        module.add(emitTDMStoreLoadC(self))
     # CompactLoopStore CLS header (batch 0 only): preamble + sgpr setup + CLS
     # label + M0 assignment + M0 step. Wrapped in `if CompactLoopStore` as a
     # unit so non-CLS .s emits ONLY the original module.addComment2(commentStr)
@@ -1276,7 +1304,12 @@ class GlobalWriteBatchWriter:
         if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
           module.addComment1("edge Protect")
       # create code Module to push mov vgpr,acc instructions
-      if self.beta:
+      if self.tdmStoreLoadC:
+        if dataBeta not in self.loadedDataBeta:
+          (loadInputCode if self.kernel["GroupLoadStore"] else module).add(emitTDMStoreLoadCElement(self, addrCalc, data, vc0))
+          self.loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
+          self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
+      elif self.beta:
         tmpInrSgpr = self._epilogScratchSgpr(1)
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
         self._epilogScratchFree(tmpInrSgpr)
@@ -1442,7 +1475,9 @@ class GlobalWriteBatchWriter:
       else:
         self.gateLoadIssued.append(0)
 
-      if self.kernel["GlobalSplitU"] == 1 or (self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel"): # "SingleBuffer" or "MultipleBuffer"
+      # A TDM block stages D in LDS, so only an output beyond C and D still reads the D buffer address.
+      dAddressUnread = self.tdmStoreLdsBase is not None and not hasEpilogueSideEffects(self.kernel["ProblemType"])
+      if not dAddressUnread and (self.kernel["GlobalSplitU"] == 1 or (self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel")): # "SingleBuffer" or "MultipleBuffer"
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrDVgpr, self.addrD, 0))
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
@@ -1490,7 +1525,7 @@ class GlobalWriteBatchWriter:
           module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -1 -> exec"))
 
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.storeRemap > 0:
           module.addComment1("StoreRemap: shift coord1 address MultipleBufferSingleKernel")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
@@ -1603,14 +1638,14 @@ class GlobalWriteBatchWriter:
                                                 overrideAfterPrimerRows=self._lookaheadRowInc(elementIdx), comment="store E"))
 
         sumIdx = self.ss.elementSumIdx[elementIdx]
-        if self.kernel["StoreRemapVectorWidth"]:
+        if self.storeRemap:
           rpe = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
           module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe))
           # Column Block Shape has been written to LDS
           # Now read back and write out to global memory
       # module.add(storeCodeGSUSK)
 
-    if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" and self.kernel["StoreRemapVectorWidth"]:
+    if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" and self.storeRemap:
       if self.parentWriter.StoreRemapLastBatch == 1:
         module.addComment1("Handle local read and global write")
         tmpInrSgpr = self._epilogScratchSgpr(2)
@@ -1731,7 +1766,7 @@ class GlobalWriteBatchWriter:
 
     self.ss.firstBatch = False
     self.ss.checkInTempVgprC()
-    if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel" and self.kernel["StoreRemapVectorWidth"]:
+    if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel" and self.storeRemap:
       if self.parentWriter.StoreRemapLastBatch == 1:
         module.addComment1("Handle local read and global write")
         # this seems buggy? it's possible to issue more than one stores for SR
@@ -2082,7 +2117,12 @@ class GlobalWriteBatchWriter:
     needStoreWaitAlu = False
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
+    if self.tdmStoreLoadC:
+      vlcntTotalIssued -= self.loadsBetaIssued
+      dscntTotalIssued += self.loadsBetaIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
+    tdmStore = self.tdmStoreLdsBase is not None
+    tdmStagedElements = []
     for elementIdx in range(0, len(self.batchElements)):
       element = self.batchElements[elementIdx]
       self._emitPlsinStageBoundary(module, element)
@@ -2123,7 +2163,7 @@ class GlobalWriteBatchWriter:
       # Already write wave column block into LDS
       # Now read lds data back to registers and write to global memroy
       if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.storeRemap > 0:
           module.addComment1("StoreRemap: shift coord1 address")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
@@ -2558,7 +2598,7 @@ class GlobalWriteBatchWriter:
                           comment="Pack with neighbor"))
 
       if self.kernel["ExpertSchedulingMode"] > 0:
-        if self.kernel["GroupLoadStore"]:
+        if self.kernel["GroupLoadStore"] or tdmStore:
           needStoreWaitAlu = True
         else:
           packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
@@ -2587,7 +2627,7 @@ class GlobalWriteBatchWriter:
         module.add(convertModule)
         module.add(packModule)
 
-      if not self.kernel["StoreRemapVectorWidth"]:
+      if not self.storeRemap:
         # 16bit UseSubtileImpl non-edge: emit paired dwordx4 stores combining sba=0
         # with sba=1 subtile data into one buffer_store_dwordx4.  Works for both
         # bf16 and fp16 HPA output types.
@@ -2760,6 +2800,8 @@ class GlobalWriteBatchWriter:
               if orphanSkipLabel is not None:
                 storeCodeModule.add(orphanSkipLabel)
               self.storesIssued += 1
+        elif tdmStore:
+          tdmStagedElements.append((sumIdx, addrCalc.coordOffset0, addrCalc.coordOffset1))
         elif self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
           # elt0/batch0 still forceinitrow0 when rowInc==0.
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
@@ -2909,6 +2951,11 @@ class GlobalWriteBatchWriter:
       module.add(peel)
     else:
       module.add(storeCode)
+
+    if tdmStore:
+      module.add(emitTDMStoreStaging(self, tdmStagedElements))
+      if self.batchIdx == self.numBatches - 1 and getattr(self.ss, "_clsLoopLabel", None) is None:
+        module.add(emitTDMStoreFlush(self))
 
     if self.parentWriter.db["CheckStoreC"]>=0:
       useBuffer = self.kernel["BufferStore"]
