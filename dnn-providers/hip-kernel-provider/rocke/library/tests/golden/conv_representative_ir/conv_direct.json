@@ -93,10 +93,10 @@
         },
         "conv_direct/gfx942/4c_bf16_n1h8": {
           "arch": "gfx942",
-          "bytes": 47540,
+          "bytes": 46028,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_942_bf16_N1H8W8_g16_c4k4_bq8_bg16_bf16",
-          "sha256": "0916115097801ca27397961ce4083120d40c3a85d0d6a8c260ae2f576271833b",
+          "sha256": "c94d2a0465e2a1c704adf3f16287a061e3cf3834e630bfeb9f897e9e6def86c4",
           "status": "ok"
         },
         "conv_direct/gfx942/8c_n4h16": {
@@ -173,10 +173,10 @@
         },
         "conv_direct/gfx950/4c_bf16_n2h13": {
           "arch": "gfx950",
-          "bytes": 27548,
+          "bytes": 26792,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_950_bf16_N2H13W13_g32_c4k4_bq4_bg16_bf16",
-          "sha256": "f78f4e831745b8cb70b2cccdb68a0c616a6e119d89b0ce3c0bb4083d8d3f1fdc",
+          "sha256": "38e2f03a709fd42aa43cb9415624e7a5f68b40de028d87fcca762299bd99829a",
           "status": "ok"
         },
         "conv_direct/gfx950/4c_n1h8_small": {
@@ -386,10 +386,10 @@
         },
         "conv_direct/gfx942/4c_bf16_n1h8": {
           "arch": "gfx942",
-          "bytes": 47679,
+          "bytes": 46167,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_942_bf16_N1H8W8_g16_c4k4_bq8_bg16_bf16",
-          "sha256": "80e840cfd0fd24dab2d8f37004e0507c719ce278307e7989809c71d45c96dfe4",
+          "sha256": "6359642cc1af4c0f1f74d35b3f1c76ec3a4bfd1730f862519baa9c39bc4a81e1",
           "status": "ok"
         },
         "conv_direct/gfx942/8c_n4h16": {
@@ -466,10 +466,10 @@
         },
         "conv_direct/gfx950/4c_bf16_n2h13": {
           "arch": "gfx950",
-          "bytes": 27681,
+          "bytes": 26925,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_950_bf16_N2H13W13_g32_c4k4_bq4_bg16_bf16",
-          "sha256": "f7edcf39f0871bcee47442f3e4ae28e9d6822aff0dbfe26d72caf6083d423544",
+          "sha256": "42e7da686729377d1dbf2c21bb47c3a8d98d1adeffbf22058de0471982c485ad",
           "status": "ok"
         },
         "conv_direct/gfx950/4c_n1h8_small": {
@@ -679,10 +679,10 @@
         },
         "conv_direct/gfx942/4c_bf16_n1h8": {
           "arch": "gfx942",
-          "bytes": 47743,
+          "bytes": 46231,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_942_bf16_N1H8W8_g16_c4k4_bq8_bg16_bf16",
-          "sha256": "989e05cc595b7afa1401a2b102952f607e21825d059d14197eb38916e066d15e",
+          "sha256": "4ac7761054750492dd219bd2e5eca500ceb273b06fc8000506c62e0ef3bea81b",
           "status": "ok"
         },
         "conv_direct/gfx942/8c_n4h16": {
@@ -759,10 +759,10 @@
         },
         "conv_direct/gfx950/4c_bf16_n2h13": {
           "arch": "gfx950",
-          "bytes": 27745,
+          "bytes": 26989,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_950_bf16_N2H13W13_g32_c4k4_bq4_bg16_bf16",
-          "sha256": "fcd83eff04cf67598f465c86b2afd8c478fdf7b4e7b2223c8bca83d2e6654302",
+          "sha256": "a79c7fdbe06783bb4acc43531f87cde71d5189afc5a3892a8aca2cd5c58d5b2d",
           "status": "ok"
         },
         "conv_direct/gfx950/4c_n1h8_small": {
@@ -972,10 +972,10 @@
         },
         "conv_direct/gfx942/4c_bf16_n1h8": {
           "arch": "gfx942",
-          "bytes": 47743,
+          "bytes": 46231,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_942_bf16_N1H8W8_g16_c4k4_bq8_bg16_bf16",
-          "sha256": "989e05cc595b7afa1401a2b102952f607e21825d059d14197eb38916e066d15e",
+          "sha256": "4ac7761054750492dd219bd2e5eca500ceb273b06fc8000506c62e0ef3bea81b",
           "status": "ok"
         },
         "conv_direct/gfx942/8c_n4h16": {
@@ -1052,10 +1052,10 @@
         },
         "conv_direct/gfx950/4c_bf16_n2h13": {
           "arch": "gfx950",
-          "bytes": 27745,
+          "bytes": 26989,
           "family": "conv_direct",
           "kernel_name": "irhash_direct4c_950_bf16_N2H13W13_g32_c4k4_bq4_bg16_bf16",
-          "sha256": "fcd83eff04cf67598f465c86b2afd8c478fdf7b4e7b2223c8bca83d2e6654302",
+          "sha256": "a79c7fdbe06783bb4acc43531f87cde71d5189afc5a3892a8aca2cd5c58d5b2d",
           "status": "ok"
         },
         "conv_direct/gfx950/4c_n1h8_small": {

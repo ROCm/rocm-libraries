@@ -1079,10 +1079,10 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
 /* f16 / bf16 / f32 / f64 dense MFMA atoms (table-driven)                 */
 /* ====================================================================== */
 
-/* The plain / scalar / bf16-bitcast MFMA atoms are structural twins: each one
+/* The plain / scalar / bf16 / XF32 MFMA atoms are structural twins: each one
  * guards (live + exactly 3 operands), tracks one intrinsic decl key, optionally
- * prepends a fixed two-line operand bitcast (the bf16 `_1k` atoms widen
- * <4 x bfloat> -> <4 x i16>), then emits a single MFMA call. They differ only
+ * prepends a fixed two-line operand bitcast (the XF32 atoms' <2 x i32> carriers
+ * become <2 x float>), then emits a single MFMA call. They differ only
  * by five literal strings (decl key, intrinsic, src0/src1 element-vector
  * spelling, src2 spelling, dst spelling) plus the optional bitcast target. This
  * mirrors the WMMA_SPECS / _emit_wmma idiom already used in this file. */
@@ -1097,8 +1097,10 @@ typedef struct _mfma_spec
     const char* bitcast_to; /* operand bitcast target (NULL = no bitcast)     */
     /* The A/B register type when A and B pass through mma_operand (a value of
      * another shape is reinterpreted); NULL prints them as is, as Python does
-     * for every atom but the f32 and f64 scalar ones. */
+     * for every atom but the f32, f64 and bf16 `_1k` ones. With
+     * ab_register_count > 0 it is a vector of that many ab_register elements. */
     const rocke_type_t* (*ab_register)(void);
+    int ab_register_count;
 } _mfma_spec_t;
 
 static const _mfma_spec_t MFMA_SPECS[] = {
@@ -1130,14 +1132,16 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "<4 x float>",
      "<4 x float>",
      NULL},
-    /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> before the call. */
+    /* bf16 `_1k`: A and B reach the call as <4 x i16>, through mma_operand. */
     {"mfma_f32_16x16x16_bf16",
      "mfma.f32.16x16x16bf16.1k",
      "llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
      "<4 x bfloat>",
      "<4 x float>",
      "<4 x float>",
-     "<4 x i16>"},
+     NULL,
+     rocke_i16,
+     4},
     {"mfma_f32_16x16x32_bf16",
      "mfma.f32.16x16x32.bf16",
      "llvm.amdgcn.mfma.f32.16x16x32.bf16",
@@ -1152,14 +1156,16 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "<16 x float>",
      "<16 x float>",
      NULL},
-    /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> exactly like 16x16x16. */
+    /* bf16 `_1k`: A and B as <4 x i16> exactly like 16x16x16. */
     {"mfma_f32_32x32x8_bf16",
      "mfma.f32.32x32x8bf16.1k",
      "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
      "<4 x bfloat>",
      "<16 x float>",
      "<16 x float>",
-     "<4 x i16>"},
+     NULL,
+     rocke_i16,
+     4},
     /* fp64 scalar atom: A/B are single doubles per lane. */
     {"mfma_f64_16x16x4_f64",
      "mfma.f64.16x16x4f64",
@@ -1207,18 +1213,20 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "<4 x float>",
      "<4 x float>",
      NULL},
-    /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> exactly like 16x16x16. */
+    /* bf16 `_1k`: A and B as <4 x i16> exactly like 16x16x16. */
     {"mfma_f32_4x4x4_bf16",
      "mfma.f32.4x4x4bf16.1k",
      "llvm.amdgcn.mfma.f32.4x4x4bf16.1k",
      "<4 x bfloat>",
      "<4 x float>",
      "<4 x float>",
-     "<4 x i16>"},
+     NULL,
+     rocke_i16,
+     4},
 };
 static const int MFMA_SPECS_N = (int)(sizeof(MFMA_SPECS) / sizeof(MFMA_SPECS[0]));
 
-/* Emit one plain/scalar/bf16-bitcast MFMA call from its spec. Reproduces the
+/* Emit one plain/scalar/bf16/XF32 MFMA call from its spec. Reproduces the
  * exact per-atom fragment order: guard, _need, optional fixed two-line operand
  * bitcast, then the single MFMA call. Subexpressions are hoisted to temporaries
  * left-to-right so the emitted text is independent of argument-evaluation order
@@ -1246,7 +1254,7 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
 
     if(spec->bitcast_to != NULL)
     {
-        /* bf16 `_1k`: bitcast the A/B operands to the integer vector the
+        /* XF32: bitcast the A/B carriers to the float vector the
          * intrinsic expects. Fresh names are allocated A-then-B, matching the
          * original per-atom order, before either bitcast line is emitted. */
         const char* a_cast = rocke_ll_fresh(L, "mfma_a_i16");
@@ -1269,10 +1277,13 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
     }
     else if(spec->ab_register != NULL)
     {
-        const rocke_type_t* register_type = spec->ab_register();
+        const rocke_type_t* register_type
+            = spec->ab_register_count > 0
+                  ? mma_register_vector(L, spec->ab_register(), spec->ab_register_count)
+                  : spec->ab_register();
         a_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_SRC0, register_type);
         b_arg = mma_operand(L, op, spec->op_id, ROCKE_MMA_ROLE_SRC1, register_type);
-        call_ty = spec->src01_ty;
+        call_ty = rocke_ll_llvm_type(L, register_type);
     }
     else
     {

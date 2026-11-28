@@ -940,8 +940,8 @@ static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw
     idx = op->operands[1];
     val = op->operands[2];
     rocke_h_emitf(lw,
-                  "bf16x2 %s = __builtin_amdgcn_global_atomic_fadd_v2bf16("
-                  "%s + %s, %s);",
+                  "bf16x2 %s = __builtin_bit_cast(bf16x2, "
+                  "__builtin_amdgcn_global_atomic_fadd_v2bf16(%s + %s, %s));",
                   rocke_h_name(lw, op->results[0]),
                   rocke_h_name(lw, ptr),
                   rocke_h_name(lw, idx),
@@ -1217,7 +1217,7 @@ static rocke_status_t _op_tile_buffer_load_vN_f16(rocke_h_lowerer_t* lw, const r
     }
     else
     {
-        raw_t = rocke_arena_printf(&lw->b->arena, "i32x%lld", (long long)dwords);
+        raw_t = rocke_arena_printf(&lw->b->arena, "u32x%lld", (long long)dwords);
     }
     res = rocke_h_name(lw, op->results[0]);
     tmp = rocke_arena_printf(&lw->b->arena, "_blraw_%s", res);
@@ -1252,8 +1252,8 @@ static const hip_buffer_access_t hip_buffer_accesses[] = {
     {1, "_b8", "unsigned char"},
     {2, "_b16", "unsigned short"},
     {4, "_b32", "int"},
-    {8, "_b64", "i32x2"},
-    {16, "_b128", "i32x4"},
+    {8, "_b64", "u32x2"},
+    {16, "_b128", "u32x4"},
 };
 
 /* The access of the buffer load or store `op` (Python _buffer_op_bytes, then
@@ -1453,7 +1453,7 @@ static rocke_status_t _op_tile_buffer_store_vN_f16(rocke_h_lowerer_t* lw, const 
     {
         b_suffix = (dwords == 2) ? "_b64" : "_b128";
         rocke_h_emitf(lw,
-                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
+                      "u32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
                       "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
                       (long long)dwords,
                       tmp,
@@ -1558,7 +1558,7 @@ static rocke_status_t _op_tile_buffer_load_vN_bf16(rocke_h_lowerer_t* lw, const 
     }
     else
     {
-        raw_t = rocke_arena_printf(&lw->b->arena, "i32x%lld", (long long)dwords);
+        raw_t = rocke_arena_printf(&lw->b->arena, "u32x%lld", (long long)dwords);
     }
     res = rocke_h_name(lw, op->results[0]);
     tmp = rocke_arena_printf(&lw->b->arena, "_blraw_%s", res);
@@ -1642,7 +1642,7 @@ static rocke_status_t _op_tile_buffer_store_vN_bf16(rocke_h_lowerer_t* lw, const
     {
         b_suffix = (dwords == 2) ? "_b64" : "_b128";
         rocke_h_emitf(lw,
-                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
+                      "u32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
                       "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
                       (long long)dwords,
                       tmp,
@@ -1727,7 +1727,7 @@ static rocke_status_t _op_tile_buffer_store_vN_f32(rocke_h_lowerer_t* lw, const 
     {
         b_suffix = (dwords == 2) ? "_b64" : "_b128";
         rocke_h_emitf(lw,
-                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
+                      "u32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
                       "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
                       (long long)dwords,
                       tmp,

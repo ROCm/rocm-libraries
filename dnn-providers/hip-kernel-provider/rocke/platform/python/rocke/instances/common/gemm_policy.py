@@ -50,10 +50,13 @@ class GemmPipelinePolicy:
     ) -> List[Tuple[int, int, int]]:
         """The legal MFMA warp-tile shapes for ``dtypes=(a,b,c)`` on ``target``,
         sourced from the target's MMA catalog (so a new arch picks up its atoms
-        with no edit here)."""
+        with no edit here). Atoms without verified A/B lane maps are left out,
+        as :meth:`validate` rejects them."""
         a, b, c = dtypes
         return sorted(
-            op.shape for op in target.mma.enumerate(a_dtype=a, b_dtype=b, c_dtype=c)
+            op.shape
+            for op in target.mma.enumerate(a_dtype=a, b_dtype=b, c_dtype=c)
+            if op.has_ab_layouts()
         )
 
     def validate(self, target: ArchTarget, spec) -> ValidationResult:

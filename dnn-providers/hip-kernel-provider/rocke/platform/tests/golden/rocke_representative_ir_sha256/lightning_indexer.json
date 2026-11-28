@@ -21,18 +21,18 @@
         },
         "lightning_indexer/gfx942/mfma_deepseek_hi64": {
           "arch": "gfx942",
-          "bytes": 14634,
+          "bytes": 14410,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "dc8465f2b9b6971db2ba7e41ab2738b9acbf7ef687021a2d5bf243870c287482",
+          "sha256": "1ede488da7447d421dc5ec4aa33441a21978113aa9a45a2d0f1290279804e05d",
           "status": "ok"
         },
         "lightning_indexer/gfx942/mfma_glm_hi32": {
           "arch": "gfx942",
-          "bytes": 14634,
+          "bytes": 14410,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "8d714f594293362bb72bc09522069f924e4954ee176c0c4e87ce773e5b49aeb6",
+          "sha256": "0503e81371b13d55df625f95fff63482fd2f3b0360cf1045a3f9407426af7489",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -61,18 +61,18 @@
         },
         "lightning_indexer/gfx950/mfma_deepseek_hi64": {
           "arch": "gfx950",
-          "bytes": 14634,
+          "bytes": 14410,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "dc8465f2b9b6971db2ba7e41ab2738b9acbf7ef687021a2d5bf243870c287482",
+          "sha256": "1ede488da7447d421dc5ec4aa33441a21978113aa9a45a2d0f1290279804e05d",
           "status": "ok"
         },
         "lightning_indexer/gfx950/mfma_glm_hi32": {
           "arch": "gfx950",
-          "bytes": 14634,
+          "bytes": 14410,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "8d714f594293362bb72bc09522069f924e4954ee176c0c4e87ce773e5b49aeb6",
+          "sha256": "0503e81371b13d55df625f95fff63482fd2f3b0360cf1045a3f9407426af7489",
           "status": "ok"
         },
         "lightning_indexer/gfx950/small": {
@@ -106,18 +106,18 @@
         },
         "lightning_indexer/gfx942/mfma_deepseek_hi64": {
           "arch": "gfx942",
-          "bytes": 14641,
+          "bytes": 14417,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "686c3f3a3fdecd1614a7d8b68d811cbc98b9cbcd9d3f433888b28cd5211a732c",
+          "sha256": "ede96147381b34a93f9c9b77f2eba331f425e3f01879cf7cce93fb4cd75b408f",
           "status": "ok"
         },
         "lightning_indexer/gfx942/mfma_glm_hi32": {
           "arch": "gfx942",
-          "bytes": 14641,
+          "bytes": 14417,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "0381e0a0ad22f125b3f130b730bb868e4571069ba2a71ea87a76a83e00765840",
+          "sha256": "62a733ad6ec36c6bfdc37446a2a50ad84366967081469d3d2f892f6bbd91ff79",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -146,18 +146,18 @@
         },
         "lightning_indexer/gfx950/mfma_deepseek_hi64": {
           "arch": "gfx950",
-          "bytes": 14641,
+          "bytes": 14417,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "686c3f3a3fdecd1614a7d8b68d811cbc98b9cbcd9d3f433888b28cd5211a732c",
+          "sha256": "ede96147381b34a93f9c9b77f2eba331f425e3f01879cf7cce93fb4cd75b408f",
           "status": "ok"
         },
         "lightning_indexer/gfx950/mfma_glm_hi32": {
           "arch": "gfx950",
-          "bytes": 14641,
+          "bytes": 14417,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "0381e0a0ad22f125b3f130b730bb868e4571069ba2a71ea87a76a83e00765840",
+          "sha256": "62a733ad6ec36c6bfdc37446a2a50ad84366967081469d3d2f892f6bbd91ff79",
           "status": "ok"
         },
         "lightning_indexer/gfx950/small": {
@@ -191,18 +191,18 @@
         },
         "lightning_indexer/gfx942/mfma_deepseek_hi64": {
           "arch": "gfx942",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507",
+          "sha256": "f0243a6fd098e8bf47728166e763f845b6a1ce896a0728c668e6119a226b3a76",
           "status": "ok"
         },
         "lightning_indexer/gfx942/mfma_glm_hi32": {
           "arch": "gfx942",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f",
+          "sha256": "0e0c84c357eb17725e35d5baf9fadff14ff18d34f1b8fe8fa93d3d4101d0f252",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -231,18 +231,18 @@
         },
         "lightning_indexer/gfx950/mfma_deepseek_hi64": {
           "arch": "gfx950",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507",
+          "sha256": "f0243a6fd098e8bf47728166e763f845b6a1ce896a0728c668e6119a226b3a76",
           "status": "ok"
         },
         "lightning_indexer/gfx950/mfma_glm_hi32": {
           "arch": "gfx950",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f",
+          "sha256": "0e0c84c357eb17725e35d5baf9fadff14ff18d34f1b8fe8fa93d3d4101d0f252",
           "status": "ok"
         },
         "lightning_indexer/gfx950/small": {
@@ -276,18 +276,18 @@
         },
         "lightning_indexer/gfx942/mfma_deepseek_hi64": {
           "arch": "gfx942",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507",
+          "sha256": "f0243a6fd098e8bf47728166e763f845b6a1ce896a0728c668e6119a226b3a76",
           "status": "ok"
         },
         "lightning_indexer/gfx942/mfma_glm_hi32": {
           "arch": "gfx942",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f",
+          "sha256": "0e0c84c357eb17725e35d5baf9fadff14ff18d34f1b8fe8fa93d3d4101d0f252",
           "status": "ok"
         },
         "lightning_indexer/gfx942/small": {
@@ -316,18 +316,18 @@
         },
         "lightning_indexer/gfx950/mfma_deepseek_hi64": {
           "arch": "gfx950",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI64_D128_bf16_b64_mfma",
-          "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507",
+          "sha256": "f0243a6fd098e8bf47728166e763f845b6a1ce896a0728c668e6119a226b3a76",
           "status": "ok"
         },
         "lightning_indexer/gfx950/mfma_glm_hi32": {
           "arch": "gfx950",
-          "bytes": 14705,
+          "bytes": 14481,
           "family": "lightning_indexer",
           "kernel_name": "rocke_lightning_indexer_HI32_D128_bf16_b64_mfma",
-          "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f",
+          "sha256": "0e0c84c357eb17725e35d5baf9fadff14ff18d34f1b8fe8fa93d3d4101d0f252",
           "status": "ok"
         },
         "lightning_indexer/gfx950/small": {

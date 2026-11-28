@@ -5,50 +5,50 @@
       "cases": {
         "kda_chunkwise/gfx942/fused_default": {
           "arch": "gfx942",
-          "bytes": 217013,
+          "bytes": 215809,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "3d420a014e62518d91665299e3060b1fe94999649a25f1e57642cafcccd182d7",
+          "sha256": "812ba9cd78bc65b95ba58aa6a1fba432571ba8fed1183203bf25c0e0db826afa",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_dk64": {
           "arch": "gfx942",
-          "bytes": 167656,
+          "bytes": 167012,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk64_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "b23df4e789f026f89b0a6460b9f6662b1872197b7265dc0206ff77636d234489",
+          "sha256": "18d6655f1e8d1d437fb2b01b1cf43dd6d56a50bb7c240c45936bb5856cddf845",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_h0_noht": {
           "arch": "gfx942",
-          "bytes": 217985,
+          "bytes": 216781,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16_h0_noht",
-          "sha256": "1b1867e88f3ec6a7e99f45a384f7ee0cf71af4c40829cba139b68b6d514d85dc",
+          "sha256": "6585476d4fded8b6fec3730cd172d5e348dfb52989664b181ef3e4b235d6e029",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/prep_default": {
           "arch": "gfx942",
-          "bytes": 127312,
+          "bytes": 126836,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_prep_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "d09db5ddb3c170ec3359706a985be4a1b94b053bd3ab8e528caeadc17da78a9e",
+          "sha256": "bfadb2d82b7bc76827cb025d98479d60474d9471b864d49aaaa14223e7446e2b",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_default": {
           "arch": "gfx942",
-          "bytes": 89769,
+          "bytes": 89041,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16",
-          "sha256": "6ac8bc41cb18a9a90dcfeba744eb159002d17eac1b3c5115ef6fa7ed4dff95cc",
+          "sha256": "24165fcf1c4756dcfb84ea33f403cc196a02bdcc750841d6590fda945e914fca",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_h0_noht": {
           "arch": "gfx942",
-          "bytes": 89971,
+          "bytes": 89243,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16_h0_noht",
-          "sha256": "e301169b6e63d0ddfccbaf62df00abedbcb880f32b5505a8400b29e89ac0e41d",
+          "sha256": "8da0d4cba3cfac26165dc1635c098ac85a2a0d46441e49715a526890ec803d1c",
           "status": "ok"
         },
         "kda_chunkwise/gfx950/fused_default": {
@@ -114,50 +114,50 @@
       "cases": {
         "kda_chunkwise/gfx942/fused_default": {
           "arch": "gfx942",
-          "bytes": 217020,
+          "bytes": 215816,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "0f7aec534b2a8d89c536209acc16bb05c8b89daf61daecf0cbaaf601448c3235",
+          "sha256": "8e641654798d8cd7f95b18afba44f436893a58420f05f0529e42b9695a5cb97a",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_dk64": {
           "arch": "gfx942",
-          "bytes": 167663,
+          "bytes": 167019,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk64_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "d9081c013e5836a89d8590b0c98e0d88493d239f1b9ebd5048ea81ec40aac01c",
+          "sha256": "690792837a3e81de58974e31cffc2dea834cc1b72e22a2f1c07ad9929ddea2d4",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_h0_noht": {
           "arch": "gfx942",
-          "bytes": 217992,
+          "bytes": 216788,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16_h0_noht",
-          "sha256": "6d3dc81b0fe28f507215259af88416078171c3e003a12d06bfc7e933d5c8d619",
+          "sha256": "37d253566db7c221c8be217501505ed0ba492236add352ac6bf33b4796ddfeda",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/prep_default": {
           "arch": "gfx942",
-          "bytes": 127319,
+          "bytes": 126843,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_prep_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "954b5c9d268902fc1506a1fd11dcb5b3e964a30a353d817e916ba514a35d10db",
+          "sha256": "9a09a4fdde55a20f7b16276a37031389099895ec561ef2f3b111241d4c14e95c",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_default": {
           "arch": "gfx942",
-          "bytes": 89776,
+          "bytes": 89048,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16",
-          "sha256": "c8cee7ad6a23db515dbfacbf7adc44b33e0099387a193dbc92a5fa8e9545cebd",
+          "sha256": "eb91095bafb0b6c4d4dbcb3d3e8aba7d5514a804e25389f8c62bc768f0935b70",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_h0_noht": {
           "arch": "gfx942",
-          "bytes": 89978,
+          "bytes": 89250,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16_h0_noht",
-          "sha256": "968ebfe2238263f08600d5f447bafc7a31e91c5c2803d72f56af6906c4518420",
+          "sha256": "c6b055de3aeeab4793c2935e12aaff0c26a32a13028a0b7822521122678b7391",
           "status": "ok"
         },
         "kda_chunkwise/gfx950/fused_default": {
@@ -223,50 +223,50 @@
       "cases": {
         "kda_chunkwise/gfx942/fused_default": {
           "arch": "gfx942",
-          "bytes": 217084,
+          "bytes": 215880,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "325bca939ee4431045c84001d6cee39913b7bf2fe13c48873af7ec7a3cfa18bf",
+          "sha256": "7cb837a6f1ced6766af5d72ad02bfaad0e84b39b474943e4475f1c0f56a483d1",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_dk64": {
           "arch": "gfx942",
-          "bytes": 167727,
+          "bytes": 167083,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk64_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "9ee735074fb798044402f286d636e18532649d13cd06f34aa4bfb42324e2512b",
+          "sha256": "9bc202ab0f52c8c62dc2316c6a3127e3b16d6ff8952e77c5837fddbe11fdd49c",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_h0_noht": {
           "arch": "gfx942",
-          "bytes": 218056,
+          "bytes": 216852,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16_h0_noht",
-          "sha256": "4c389e513303efeeb7749f4b7aee8fe72dcb101668eab20259ec92b3256547c6",
+          "sha256": "a5a5e87a7da14c930fe3fe667c40f019bd9cd231b86003a730c5edf98f7cc198",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/prep_default": {
           "arch": "gfx942",
-          "bytes": 127383,
+          "bytes": 126907,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_prep_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "95e76df48431bbe9e810f966a7c25aeb19bf46644d160dd3c815d997260a59bf",
+          "sha256": "1e0bb026b38765eb928c52ad39b25b0b41428e51e4c1f61f26f488a945e6093b",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_default": {
           "arch": "gfx942",
-          "bytes": 89840,
+          "bytes": 89112,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16",
-          "sha256": "98fb7d18989b32bfe847b9adf4e777baeb6075ffb1ba043eb7be32549b2bc726",
+          "sha256": "4d7463ae3e89530b77a6f9df5c3bcf9eb67016096d4753940cc4c99aa4614ff7",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_h0_noht": {
           "arch": "gfx942",
-          "bytes": 90042,
+          "bytes": 89314,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16_h0_noht",
-          "sha256": "45c34376c504ba0d2aae5d1bbc1d675e74deda2f3b6a9af687f947ef858ba2ee",
+          "sha256": "592205f1fa3ceb05cfa9a039d8e6cf132c4a9c30829d78c3558765b0507019c6",
           "status": "ok"
         },
         "kda_chunkwise/gfx950/fused_default": {
@@ -332,50 +332,50 @@
       "cases": {
         "kda_chunkwise/gfx942/fused_default": {
           "arch": "gfx942",
-          "bytes": 217084,
+          "bytes": 215880,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "325bca939ee4431045c84001d6cee39913b7bf2fe13c48873af7ec7a3cfa18bf",
+          "sha256": "7cb837a6f1ced6766af5d72ad02bfaad0e84b39b474943e4475f1c0f56a483d1",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_dk64": {
           "arch": "gfx942",
-          "bytes": 167727,
+          "bytes": 167083,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk64_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "9ee735074fb798044402f286d636e18532649d13cd06f34aa4bfb42324e2512b",
+          "sha256": "9bc202ab0f52c8c62dc2316c6a3127e3b16d6ff8952e77c5837fddbe11fdd49c",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/fused_h0_noht": {
           "arch": "gfx942",
-          "bytes": 218056,
+          "bytes": 216852,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_fused_dk128_dv64_bf16_c16_b256_sb8_sa16_h0_noht",
-          "sha256": "4c389e513303efeeb7749f4b7aee8fe72dcb101668eab20259ec92b3256547c6",
+          "sha256": "a5a5e87a7da14c930fe3fe667c40f019bd9cd231b86003a730c5edf98f7cc198",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/prep_default": {
           "arch": "gfx942",
-          "bytes": 127383,
+          "bytes": 126907,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_prep_dk128_dv64_bf16_c16_b256_sb8_sa16",
-          "sha256": "95e76df48431bbe9e810f966a7c25aeb19bf46644d160dd3c815d997260a59bf",
+          "sha256": "1e0bb026b38765eb928c52ad39b25b0b41428e51e4c1f61f26f488a945e6093b",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_default": {
           "arch": "gfx942",
-          "bytes": 89840,
+          "bytes": 89112,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16",
-          "sha256": "98fb7d18989b32bfe847b9adf4e777baeb6075ffb1ba043eb7be32549b2bc726",
+          "sha256": "4d7463ae3e89530b77a6f9df5c3bcf9eb67016096d4753940cc4c99aa4614ff7",
           "status": "ok"
         },
         "kda_chunkwise/gfx942/scan_h0_noht": {
           "arch": "gfx942",
-          "bytes": 90042,
+          "bytes": 89314,
           "family": "kda_chunkwise",
           "kernel_name": "rocke_kda_chunk_scan_dk128_dv64_bf16_c16_b256_sa16_h0_noht",
-          "sha256": "45c34376c504ba0d2aae5d1bbc1d675e74deda2f3b6a9af687f947ef858ba2ee",
+          "sha256": "592205f1fa3ceb05cfa9a039d8e6cf132c4a9c30829d78c3558765b0507019c6",
           "status": "ok"
         },
         "kda_chunkwise/gfx950/fused_default": {

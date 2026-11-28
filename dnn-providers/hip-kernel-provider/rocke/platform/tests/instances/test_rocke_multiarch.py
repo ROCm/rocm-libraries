@@ -627,6 +627,20 @@ class TestGemmPolicy(unittest.TestCase):
             [(16, 16, 16), (32, 32, 8)],
         )
 
+    def test_valid_warp_tiles_skip_atoms_without_lane_maps(self):
+        from rocke.instances.common.gemm_policy import GemmPipelinePolicy
+
+        pol = GemmPipelinePolicy()
+        for gfx in ("gfx90a", "gfx942", "gfx950"):
+            target = ArchTarget.from_gfx(gfx)
+            tiles = pol.valid_warp_tiles(target, ("bf16", "bf16", "fp32"))
+            # The catalog lists mfma_f32_4x4x4_bf16 without lane maps.
+            self.assertNotIn((4, 4, 4), tiles)
+            for wtm, wtn, wtk in tiles:
+                self.assertTrue(
+                    pol.validate(target, self._spec(wtm, wtn, wtk, dt="bf16")).ok
+                )
+
 
 class TestHybridLayoutShim(unittest.TestCase):
     def test_canonical_layout_public_api(self):

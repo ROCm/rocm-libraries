@@ -6752,6 +6752,7 @@ class TestHipLoweringCoverage(unittest.TestCase):
             ("bf16x", [1, 2, 4, 8, 16]),
             ("f32x", [1, 2, 4, 8, 16]),
             ("i32x", [1, 2, 3, 4, 8]),
+            ("u32x", [2, 4]),
             ("i8x", [4, 8, 16]),
         ]
         for token in named:
@@ -6764,7 +6765,7 @@ class TestHipLoweringCoverage(unittest.TestCase):
                 # internal whitespace varies for column alignment, so we
                 # match with a small regex that allows any spacing.
                 pattern = re.compile(
-                    rf"_ROCKE_VEC\(\s*\S+\s*,\s*{re.escape(family)}\s*,\s*{n}\s*\)"
+                    rf"_ROCKE_VEC\(\s*[^,]+,\s*{re.escape(family)}\s*,\s*{n}\s*\)"
                 )
                 self.assertRegex(
                     HIP_PROLOGUE,

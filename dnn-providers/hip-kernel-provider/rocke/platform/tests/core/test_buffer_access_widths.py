@@ -9,7 +9,9 @@ per access. Covers the LLVM IR each width lowers to, that both engines emit the
 same LLVM IR and the same HIP source, the builder's, the verifier's and the
 lowerers' refusals, and, when a GPU is present, a bit-exact copy through both compile routes (LLVM
 through COMGR, HIP through hipcc). The C++ builder's refusal texts are checked
-in the ``rocke_future_intrinsic_lowering`` ctest, the same texts as here.
+in the ``rocke_future_intrinsic_lowering`` ctest, the same texts as here. The HIP
+payload of each width has the builtin's type, also for the typed f16 / bf16 / f32
+variants.
 """
 
 from __future__ import annotations
@@ -41,11 +43,14 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.core.verify import verify
 from rocke.tests.engines import (
+    ENGINES,
     assert_both_engines_reject,
     assert_both_engines_reject_hip,
     lower_hip_with_both_engines,
+    lower_hip_with_engine,
     lower_with_both_engines,
 )
+from rocke.tests.hipcc import assert_hipcc_accepts
 
 FLAVORS = ("llvm20", "llvm22", "llvm23")
 
@@ -72,13 +77,14 @@ WIDTHS = (
     (F64, 2),
 )
 
-# Access bytes -> (LLVM integer type, intrinsic suffix, HIP builtin suffix).
+# Access bytes -> (LLVM integer type, intrinsic suffix, HIP builtin suffix, HIP
+# type of the builtin's payload).
 FORMS = {
-    1: ("i8", "i8", "_b8"),
-    2: ("i16", "i16", "_b16"),
-    4: ("i32", "i32", "_b32"),
-    8: ("<2 x i32>", "v2i32", "_b64"),
-    16: ("<4 x i32>", "v4i32", "_b128"),
+    1: ("i8", "i8", "_b8", "unsigned char"),
+    2: ("i16", "i16", "_b16", "unsigned short"),
+    4: ("i32", "i32", "_b32", "int"),
+    8: ("<2 x i32>", "v2i32", "_b64", "u32x2"),
+    16: ("<4 x i32>", "v4i32", "_b128", "u32x4"),
 }
 
 _LLVM_ELEM = {
@@ -138,7 +144,7 @@ def test_load_lowers_to_one_load_of_its_width(width):
     dtype, n = width
     kernel, _ = _copy_kernel("buffer_load_width", [width])
     text = _lower_kernel_to_llvm_python(kernel, arch="gfx942")
-    llvm_int, suffix, _ = FORMS[_nbytes(dtype, n)]
+    llvm_int, suffix, _, _ = FORMS[_nbytes(dtype, n)]
     assert f" = call {llvm_int} @llvm.amdgcn.raw.ptr.buffer.load.{suffix}(" in text
     assert f" to <{n} x {_LLVM_ELEM[dtype.name]}>" in text
     assert text.count("@llvm.amdgcn.raw.ptr.buffer.load.") == 2  # declare + call
@@ -149,7 +155,7 @@ def test_store_lowers_to_one_store_of_its_width(width):
     dtype, n = width
     kernel, _ = _copy_kernel("buffer_store_width", [width])
     text = _lower_kernel_to_llvm_python(kernel, arch="gfx942")
-    llvm_int, suffix, _ = FORMS[_nbytes(dtype, n)]
+    llvm_int, suffix, _, _ = FORMS[_nbytes(dtype, n)]
     assert f"bitcast <{n} x {_LLVM_ELEM[dtype.name]}> " in text
     assert f"call void @llvm.amdgcn.raw.ptr.buffer.store.{suffix}({llvm_int} " in text
     assert text.count("@llvm.amdgcn.raw.ptr.buffer.store.") == 2  # declare + call
@@ -178,15 +184,17 @@ def test_both_engines_emit_the_same_llvm_ir():
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("width", WIDTHS, ids=_id)
-def test_hip_uses_the_builtin_of_its_width(width):
+def test_hip_uses_the_builtin_of_its_width(width, engine):
     dtype, n = width
     kernel, _ = _copy_kernel("buffer_hip_width", [width])
-    hip = lower_hip_with_both_engines(kernel, "gfx942")
+    hip = lower_hip_with_engine(kernel, "gfx942", engine=engine)
     nbytes = _nbytes(dtype, n)
-    _, _, builtin = FORMS[nbytes]
+    _, _, builtin, payload = FORMS[nbytes]
     assert f"= __builtin_amdgcn_raw_buffer_load{builtin}(" in hip
-    assert f"__builtin_memcpy(&_bs, &bl{n}" in hip
+    assert f" {payload} _blraw_bl{n}" in hip
+    assert f"{{ {payload} _bs; __builtin_memcpy(&_bs, &bl{n}" in hip
     assert f", {nbytes}); __builtin_amdgcn_raw_buffer_store{builtin}(_bs, " in hip
 
 
@@ -204,6 +212,34 @@ def test_hip_scopes_the_store_temporary():
     stores = [line for line in hip.splitlines() if "raw_buffer_store_b32" in line]
     assert len(stores) == 2
     assert all(line.strip().startswith("{ int _bs;") for line in stores), stores
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("dwords", [2, 4])
+def test_hip_typed_variants_use_the_payload_type_of_their_width(
+    dwords, engine, tmp_path
+):
+    b = IRBuilder("buffer_typed_hip")
+    x = b.param("X", PtrType(I8, "global"))
+    rsrc = b.buffer_rsrc(x, b.const_i32(64))
+    zero = b.const_i32(0)
+    f16 = b.buffer_load_vN_f16(rsrc, zero, zero, dwords)
+    b.buffer_store_vN_f16(rsrc, zero, zero, f16, dwords)
+    bf16 = b.buffer_load_vN_bf16(rsrc, zero, zero, dwords)
+    b.buffer_store_vN_bf16(rsrc, zero, zero, bf16, dwords)
+    f32 = b.buffer_load_vN(rsrc, zero, zero, F32, dwords)
+    b.buffer_store_vN_f32(rsrc, zero, zero, f32, dwords)
+    b.ret()
+    hip = lower_hip_with_engine(b.kernel, "gfx942", engine=engine)
+    _, _, builtin, payload = FORMS[4 * dwords]
+    lines = [line.strip() for line in hip.splitlines()]
+    loads = [line for line in lines if f"raw_buffer_load{builtin}(" in line]
+    stores = [line for line in lines if f"raw_buffer_store{builtin}(" in line]
+    assert len(loads) == 3
+    assert all(line.startswith(f"{payload} _blraw_") for line in loads), loads
+    assert len(stores) == 3
+    assert all(line.startswith(f"{payload} _ub") for line in stores), stores
+    assert_hipcc_accepts(hip, "gfx942", tmp_path)
 
 
 # --------------------------------------------------------------------------

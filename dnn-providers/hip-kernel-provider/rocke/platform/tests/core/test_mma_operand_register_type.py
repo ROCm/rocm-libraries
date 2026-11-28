@@ -12,14 +12,12 @@ in the LLVM and HIP lowerings.
 
 Every LLVM case lowers with both engines and requires the same IR, or the same
 error. The HIP cases do the same for the f32 MFMAs and the batched 4x4x4
-f16/bf16 MFMAs; the C++ HIP lowerer has no integer or gfx1250 fp8 WMMA lowering,
-so those cases run the Python HIP lowering and require the LLVM lowering's error
-text.
+f16/bf16 MFMAs; the C++ HIP lowerer has no integer or gfx1250 fp8 WMMA lowering
+and no 16x16x16 / 32x32x8 bf16 MFMA lowering, so those cases run the Python HIP
+lowering (the WMMA cases require the LLVM lowering's error text).
 """
 
 import re
-import shutil
-import subprocess
 
 import pytest
 from rocke.core.arch import ArchTarget
@@ -30,6 +28,7 @@ from rocke.core.ir import (
     F32,
     FP8E4M3,
     I8,
+    I16,
     I32,
     IRBuilder,
     KernelDef,
@@ -39,11 +38,15 @@ from rocke.core.ir import (
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.mma_operand import mma_operand_needs_reinterpret
 from rocke.tests.engines import (
+    ENGINES,
     assert_both_engines_reject,
     assert_both_engines_reject_hip,
     lower_hip_with_both_engines,
+    lower_hip_with_engine,
     lower_with_both_engines,
+    lower_with_engine,
 )
+from rocke.tests.hipcc import assert_hipcc_accepts
 from rocke.tests.ir_validity import assert_target_accepts
 
 
@@ -84,6 +87,11 @@ def _zeros(elem, count):
 
 
 _F32_MFMAS = [("mfma_f32_16x16x4_f32", 4), ("mfma_f32_32x32x2_f32", 16)]
+_BF16_1K_MFMAS = [
+    ("mfma_f32_4x4x4_bf16", 4),
+    ("mfma_f32_16x16x16_bf16", 4),
+    ("mfma_f32_32x32x8_bf16", 16),
+]
 
 
 @pytest.mark.parametrize("role", ["a", "b"])
@@ -104,6 +112,24 @@ def test_mma_register_bridge_rejects_non_integer_vector_counts(role, count, fiel
     assert str(caught.value) == (
         f"MMA operand {role} of {op_id!r} requires an integer "
         f"{rejected} vector count, got {count!r}"
+    )
+
+
+@pytest.mark.parametrize("op_id", [op_id for op_id, _ in _BF16_1K_MFMAS])
+@pytest.mark.parametrize("role", ["a", "b"])
+@pytest.mark.parametrize("arch", ["gfx90a", "gfx942", "gfx950"])
+def test_a_bf16_1k_mfma_takes_bf16_operands_as_its_short_register(arch, role, op_id):
+    # The `_1k` instructions take A and B as <4 x i16>; the catalog's bf16 dtype
+    # admits a bf16x4 operand, and another number format is refused.
+    target, register = ArchTarget.from_gfx(arch), VectorType(I16, 4)
+    assert mma_operand_needs_reinterpret(
+        op_id, role, VectorType(BF16, 4), register, target
+    )
+    with pytest.raises(ValueError) as caught:
+        mma_operand_needs_reinterpret(op_id, role, VectorType(F16, 4), register, target)
+    assert str(caught.value) == (
+        f"MMA operand {role} of {op_id!r} holds f16 values; the instruction takes "
+        "bf16 or i16 -- convert the values first"
     )
 
 
@@ -140,6 +166,31 @@ def test_an_f32_mfma_reinterprets_only_the_one_element_vector(
     )
     assert re.search(
         rf"\(float {re.escape(reinterpreted)}, float 0x3FF0000000000000,",
+        _mma_call(text),
+    )
+    assert_target_accepts(text, arch)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(("op_id", "accumulator_count"), _BF16_1K_MFMAS)
+@pytest.mark.parametrize("arch", ["gfx90a", "gfx942", "gfx950"])
+def test_a_bf16_1k_mfma_reinterprets_both_operands(
+    arch, op_id, accumulator_count, engine
+):
+    kernel = _mma_kernel(
+        arch,
+        op_id,
+        _zeros(BF16, 4),
+        _zeros(BF16, 4),
+        _zeros(F32, accumulator_count),
+        F32,
+    )
+    text = lower_with_engine(kernel, arch, engine=engine)
+    a_register, b_register = re.findall(
+        r"(%reg\.\d+) = bitcast <4 x bfloat> \S+ to <4 x i16>", text
+    )
+    assert re.search(
+        rf"\(<4 x i16> {re.escape(a_register)}, <4 x i16> {re.escape(b_register)}, ",
         _mma_call(text),
     )
     assert_target_accepts(text, arch)
@@ -358,26 +409,6 @@ def _mma_builtin_call(source: str) -> str:
     )
 
 
-def _assert_hipcc_accepts(source: str, arch: str, tmp_path) -> None:
-    """Compile ``source`` for ``arch`` with hipcc, when hipcc is present."""
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
-    path = tmp_path / "kernel.hip"
-    path.write_text(source)
-    subprocess.run(
-        [
-            "hipcc",
-            f"--offload-arch={arch}",
-            "--cuda-device-only",
-            "-fsyntax-only",
-            str(path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
 @pytest.mark.parametrize(("op_id", "accumulator_count"), _F32_MFMAS)
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_hip_f32_mfma_takes_scalars_unchanged(arch, op_id, accumulator_count, tmp_path):
@@ -391,7 +422,7 @@ def test_hip_f32_mfma_takes_scalars_unchanged(arch, op_id, accumulator_count, tm
     )
     source = lower_hip_with_both_engines(kernel, arch)
     assert "__builtin_bit_cast" not in _mma_builtin_call(source)
-    _assert_hipcc_accepts(source, arch, tmp_path)
+    assert_hipcc_accepts(source, arch, tmp_path)
 
 
 @pytest.mark.parametrize(("op_id", "accumulator_count"), _F32_MFMAS)
@@ -411,22 +442,29 @@ def test_hip_f32_mfma_reinterprets_only_the_one_element_vector(
     call = _mma_builtin_call(source)
     assert re.search(r"\(\w+, __builtin_bit_cast\(float, \w+\), \w+, 0, 0, 0\);", call)
     assert call.count("__builtin_bit_cast") == 1
-    _assert_hipcc_accepts(source, arch, tmp_path)
+    assert_hipcc_accepts(source, arch, tmp_path)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
-    ("op_id", "elem", "builtin"),
+    ("op_id", "elem", "builtin", "operand"),
     [
-        ("mfma_f32_4x4x4_f16", F16, "mfma_f32_4x4x4f16"),
-        ("mfma_f32_4x4x4_bf16", BF16, "mfma_f32_4x4x4bf16_1k"),
+        ("mfma_f32_4x4x4_f16", F16, "mfma_f32_4x4x4f16", r"\w+"),
+        # The `_1k` builtin takes short vectors, as the LLVM lowering's <4 x i16>.
+        (
+            "mfma_f32_4x4x4_bf16",
+            BF16,
+            "mfma_f32_4x4x4bf16_1k",
+            r"__builtin_bit_cast\(i16x4, \w+\)",
+        ),
     ],
 )
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_hip_batched_4x4x4_mfma_lowers_in_both_engines(
-    arch, op_id, elem, builtin, tmp_path
+    arch, op_id, elem, builtin, operand, engine, tmp_path
 ):
-    # Not in the arch MMA catalog (the kernels emit them by op_id), so the op_id
-    # goes to b.mma as it is.
+    # The f16 atom is not in the arch MMA catalog (the kernels emit it by op_id),
+    # so both go to b.mma by op_id.
     b = IRBuilder(f"mma_operand_{op_id}")
     out = b.param("D", PtrType(F32, "global"))
     a_value, b_value, c_value = (
@@ -434,12 +472,40 @@ def test_hip_batched_4x4x4_mfma_lowers_in_both_engines(
     )
     result = b.mma(op_id, a_value, b_value, c_value)
     b.global_store(out, b.thread_id_x(), b.vec_extract(result, 0))
-    source = lower_hip_with_both_engines(b.kernel, arch)
+    source = lower_hip_with_engine(b.kernel, arch, engine=engine)
     assert re.search(
-        rf"= __builtin_amdgcn_{builtin}\(\w+, \w+, \w+, 0, 0, 0\);",
+        rf"= __builtin_amdgcn_{builtin}\({operand}, {operand}, \w+, 0, 0, 0\);",
         _mma_builtin_call(source),
     )
-    _assert_hipcc_accepts(source, arch, tmp_path)
+    assert_hipcc_accepts(source, arch, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("op_id", "builtin", "accumulator_count"),
+    [
+        ("mfma_f32_16x16x16_bf16", "mfma_f32_16x16x16bf16_1k", 4),
+        ("mfma_f32_32x32x8_bf16", "mfma_f32_32x32x8bf16_1k", 16),
+    ],
+)
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_hip_bf16_1k_mfma_reinterprets_both_operands(
+    arch, op_id, builtin, accumulator_count, tmp_path
+):
+    kernel = _mma_kernel(
+        arch,
+        op_id,
+        _loaded(BF16, 4),
+        _loaded(BF16, 4),
+        _loaded(F32, accumulator_count),
+        F32,
+    )
+    source = lower_kernel_to_hip(kernel, arch=arch)
+    operand = r"__builtin_bit_cast\(i16x4, \w+\)"
+    assert re.search(
+        rf"= __builtin_amdgcn_{builtin}\({operand}, {operand}, \w+, 0, 0, 0\);",
+        _mma_builtin_call(source),
+    )
+    assert_hipcc_accepts(source, arch, tmp_path)
 
 
 def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
@@ -456,7 +522,7 @@ def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
         r"\(true, __builtin_bit_cast\(i32x4, \w+\), true, \w+, \w+, false\);",
         _mma_builtin_call(source),
     )
-    _assert_hipcc_accepts(source, "gfx1151", tmp_path)
+    assert_hipcc_accepts(source, "gfx1151", tmp_path)
 
 
 def test_hip_integer_wmma_takes_packed_words_unchanged():
