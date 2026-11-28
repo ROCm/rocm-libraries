@@ -121,6 +121,51 @@
           ]
         }
       }
+    ],
+    "hipkernel:hip_conv_fwd_bias_act_dw2d_rdna": [
+      {
+        "cases": [
+          "l13a_1d_i1024_n4c128k128g128_f3_bf16_cl_elu",
+          "l13a_2d_i56x56_n4c128k128g128_f3x3_fp16_cl_sigmoid",
+          "l13b_1d_i1024_n4c128k256g128_f3_fp32_cf_gelu",
+          "l13b_2d_i56x56_n4c128k256g128_f3x3_bf16_cf_tanh",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_bf16_cf_tanh",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_bf16_cl_elu",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_fp16_cf_relu_leaky",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_fp16_cl_sigmoid",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_fp32_cf_relu6",
+          "m6_2d_i56x56_n8c96k96g96_f3x3_fp32_cl_relu_clamp",
+          "s13a_1d_i16_n2c16k16g16_f3_bf16_cf_tanh",
+          "s13a_1d_i16_n2c16k16g16_f3_bf16_cl_elu",
+          "s13a_1d_i16_n2c16k16g16_f3_fp16_cf_relu_leaky",
+          "s13a_1d_i16_n2c16k16g16_f3_fp16_cl_sigmoid",
+          "s13a_1d_i16_n2c16k16g16_f3_fp32_cf_relu6",
+          "s13a_1d_i16_n2c16k16g16_f3_fp32_cl_relu_clamp",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cf_elu",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cl_gelu",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_fp16_cf_sigmoid",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_fp16_cl_tanh",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cf_relu_clamp",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cl_relu_leaky",
+          "s13b_1d_i16_n2c16k32g16_f3_bf16_cf_identity",
+          "s13b_1d_i16_n2c16k32g16_f3_bf16_cl_relu",
+          "s13b_1d_i16_n2c16k32g16_f3_fp16_cf_swish",
+          "s13b_1d_i16_n2c16k32g16_f3_fp16_cl_softplus",
+          "s13b_1d_i16_n2c16k32g16_f3_fp32_cf_gelu",
+          "s13b_1d_i16_n2c16k32g16_f3_fp32_cl_gelu_tanh",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cf_relu",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cl_relu_lo",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_fp16_cf_softplus",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_fp16_cl_identity",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cf_gelu_tanh",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cl_swish"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

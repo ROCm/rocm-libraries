@@ -29,10 +29,15 @@
 //
 // Compile-time parameters (one set per variant): IO_DTYPE, FILTER_H/W,
 // PAD_H/W, STRIDE_H/W, DILATION_H/W, OUT_PER_LANE, ROW_CHUNK, WORKGROUP_SIZE,
-// LANE_ON_DILATION_GRID, PAIR_COLUMNS, HAS_BIAS.
+// LANE_ON_DILATION_GRID, PAIR_COLUMNS, HAS_BIAS, HAS_ACT.
 //
 // HAS_BIAS adds bias[c] (one value per channel, IO_DTYPE) to every output before
 // it is stored; the kernel then takes the bias pointer after `output`.
+//
+// HAS_ACT applies an activation to every output, after the bias, before it is
+// stored; the kernel then takes the activation (ACT_* below), its three
+// parameters and has_bias after oW. Built with HAS_BIAS; a graph without a bias
+// passes has_bias 0, and the bias pointer is not read.
 
 #ifndef IO_DTYPE
 #define IO_DTYPE __half
@@ -78,6 +83,9 @@
 #endif
 #ifndef HAS_BIAS
 #define HAS_BIAS 0
+#endif
+#ifndef HAS_ACT
+#define HAS_ACT 0
 #endif
 
 #include <hip/hip_bf16.h>
@@ -196,6 +204,67 @@ __device__ inline void from_float(float v, float& d)
 
 } // namespace
 
+#if HAS_ACT
+// The activations, numbered as conv_rdna::ActivationMode.
+#define ACT_RELU 0
+#define ACT_SIGMOID 1
+#define ACT_TANH 2
+#define ACT_ELU 3
+#define ACT_GELU 4
+#define ACT_GELU_APPROX_TANH 5
+#define ACT_SWISH 6
+#define ACT_SOFTPLUS 7
+#define ACT_IDENTITY 8
+
+// The forward activations of hipDNN's pointwise reference, in fp32. `act` is a kernel argument,
+// so every thread takes the same branch.
+//   ACT_RELU      p0 lower clip, p1 upper clip, p2 slope below the lower clip
+//   ACT_ELU       p0 alpha
+//   ACT_SWISH     p0 beta
+//   ACT_SOFTPLUS  p0 beta
+// A call, not inlined: the store loops are unrolled so that the output tile is indexed by
+// constants and stays in registers, and inlined there the switch would be copied once per
+// output of the tile. In a loop that is not unrolled the tile moves to scratch; inlined into
+// the unrolled loops the code grows several times, which on gfx1151 was slower than the call.
+__device__ static __attribute__((noinline)) float
+    activate(float v, int act, float p0, float p1, float p2)
+{
+    switch(act)
+    {
+    case ACT_RELU:
+        return v <= p0 ? p2 * (v - p0) + p0 : (v >= p1 ? p1 : v);
+    case ACT_SIGMOID:
+        return 1.f / (1.f + expf(-v));
+    case ACT_TANH:
+        return tanhf(v);
+    case ACT_ELU:
+        return v > 0.f ? v : p0 * expm1f(v);
+    case ACT_GELU:
+        return 0.5f * v * (1.f + erff(v * 0.70710678118654752f));
+    case ACT_GELU_APPROX_TANH:
+        return 0.5f * v * (1.f + tanhf(0.79788456080286536f * (v + 0.044715f * v * v * v)));
+    case ACT_SWISH:
+        return v / (1.f + expf(-p0 * v));
+    case ACT_SOFTPLUS:
+    {
+        // Linear above 20, where log1p(exp(s)) / beta equals v in fp32 and exp would overflow.
+        const float s = p0 * v;
+        return s > 20.f ? v : log1pf(expf(s)) / p0;
+    }
+    default:
+        return v;
+    }
+}
+
+// ReLU, the common case, inline; the other activations through the call above. `act` is a
+// kernel argument, so the branch is uniform.
+__device__ static inline float apply_activation(float v, int act, float p0, float p1, float p2)
+{
+    return act == ACT_RELU ? (v <= p0 ? p2 * (v - p0) + p0 : (v >= p1 ? p1 : v))
+                           : activate(v, act, p0, p1, p2);
+}
+#endif
+
 extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
     ConvFwdDepthwise2d(const IO_DTYPE* __restrict__ input, // [N, C, iH, iW]
                        const IO_DTYPE* __restrict__ weights, // [C, 1, FILTER_H, FILTER_W]
@@ -208,7 +277,16 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
                        int iH,
                        int iW,
                        int oH,
-                       int oW)
+                       int oW
+#if HAS_ACT
+                       ,
+                       int act,
+                       float act_p0,
+                       float act_p1,
+                       float act_p2,
+                       int has_bias
+#endif
+    )
 {
 #if LANE_ON_DILATION_GRID
     // Flat tile index over (n, c, row tile, column tile). A column tile covers
@@ -239,7 +317,9 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
 
         float taps[kFilterH][kFilterW];
         const IO_DTYPE* wptr = weights + static_cast<size_t>(c) * kWeightSize;
-#if HAS_BIAS
+#if HAS_ACT
+        const float bv = has_bias != 0 ? to_float(bias[c]) : 0.0f;
+#elif HAS_BIAS
         const float bv = to_float(bias[c]);
 #endif
 #pragma unroll
@@ -324,6 +404,9 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
 #if HAS_BIAS
                     acc[o] += bv;
 #endif
+#if HAS_ACT
+                    acc[o] = apply_activation(acc[o], act, act_p0, act_p1, act_p2);
+#endif
                     from_float(acc[o], out[o * kColStep]);
                 }
             }
@@ -373,7 +456,9 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
 
         float taps[kFilterH][kFilterW];
         const IO_DTYPE* wptr = weights + static_cast<size_t>(c) * kWeightSize;
-#if HAS_BIAS
+#if HAS_ACT
+        const float bv = has_bias != 0 ? to_float(bias[c]) : 0.0f;
+#elif HAS_BIAS
         const float bv = to_float(bias[c]);
 #endif
 #pragma unroll
@@ -462,6 +547,9 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
                 {
 #if HAS_BIAS
                     acc[o] += bv;
+#endif
+#if HAS_ACT
+                    acc[o] = apply_activation(acc[o], act, act_p0, act_p1, act_p2);
 #endif
                     from_float(acc[o], out[o]);
                 }

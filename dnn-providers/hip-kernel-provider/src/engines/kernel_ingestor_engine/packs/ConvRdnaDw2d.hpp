@@ -17,6 +17,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "compilation/KernelCompileOptions.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvRdnaFusedEpilogue.hpp"
 
 /**
  * @file ConvRdnaDw2d.hpp
@@ -26,7 +27,9 @@
  *        which variant a problem takes and how it walks the output, how a variant is compiled
  *        and launched, and the problem half of a saved launch. `hip_conv_fwd_dw2d_rdna` runs them
  *        as they are, `hip_conv_fwd_bias_dw2d_rdna` with their bias epilogue (HAS_BIAS in the
- *        specialized kernel, DW_HAS_BIAS in the generic one).
+ *        specialized kernel, DW_HAS_BIAS in the generic one) and
+ *        `hip_conv_fwd_bias_act_dw2d_rdna` with the bias and activation epilogues (HAS_ACT,
+ *        DW_HAS_ACT on top).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_rdna::dw2d
 {
@@ -68,16 +71,20 @@ bool isVariantOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
 void addCompileOptions(compilation::KernelCompileOptions& options,
                        const ConvProblem& problem,
                        const Geometry& geometry,
-                       bool hasBias = false);
+                       bool hasBias = false,
+                       bool hasActivation = false);
 
 /// The argument list of the specialized or the generic kernel: in, wei, out, [bias,] then the
-/// ints.
+/// ints [, then the activation, its three float parameters and has_bias].
 const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>&
-    kernelSignature(bool generic, bool hasBias = false);
+    kernelSignature(bool generic, bool hasBias = false, bool hasActivation = false);
 
 /// Launches the kernel over the grid of @p problem and @p geometry (set by the caller).
-/// @p hasBias is set exactly when the kernel was built with its bias epilogue; @p bias is then
-/// passed after `y` whatever its value, so the argument list always matches the kernel's.
+/// Without @p activation, @p hasBias is set exactly when the kernel was built with its bias
+/// epilogue, and @p bias is then passed after `y` whatever its value. @p activation is given
+/// exactly when the kernel was built with its activation epilogue, which this engine family only
+/// builds together with the bias one: @p bias is then always passed, and @p hasBias false
+/// (has_bias 0) launches without a bias (@p bias may then be null).
 void launch(const compilation::IRunnableKernel& kernel,
             hipStream_t stream,
             const void* x,
@@ -86,7 +93,8 @@ void launch(const compilation::IRunnableKernel& kernel,
             const ConvProblem& problem,
             const Geometry& geometry,
             const void* bias = nullptr,
-            bool hasBias = false);
+            bool hasBias = false,
+            const Activation* activation = nullptr);
 
 /// The problem and geometry values of a saved launch: `n`, `c`, `k`, per spatial axis (`_h`,
 /// `_w`) `in_`, `filter_`, `out_`, `pad_`, `stride_`, `dilation_`, and the geometry `generic`,

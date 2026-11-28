@@ -19,6 +19,22 @@
           ]
         }
       }
+    ],
+    "hipkernel:hip_conv_fwd_bias_act_dw2d_rdna": [
+      {
+        "cases": [
+          "s13a_1d_i16_n2c16k16g16_f3_bf16_cl_swish",
+          "s13a_1d_i16_n2c16k16g16_f3_fp16_cf_swish",
+          "s13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cf_relu",
+          "s13b_1d_i16_n2c16k32g16_f3_fp16_cl_softplus",
+          "s13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cl_relu_lo"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1
