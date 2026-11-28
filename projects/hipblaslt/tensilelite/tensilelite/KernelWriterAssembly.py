@@ -1317,6 +1317,7 @@ class KernelWriterAssembly(KernelWriter):
       "LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
       "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
       "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
+      "ScaleByteOffMXSA", "ScaleByteOffMXSB",
     ]
     for name in sgprsToUndefine:
       if name in self.sgprs:
@@ -5928,9 +5929,18 @@ class KernelWriterAssembly(KernelWriter):
 
         # This is guaranteed to fit in 32-bit since the WG*MT is a number of elements in some unsigned direction:
         if useFixedSrd2:
-          # UseSubtileImpl fixedSrd2 case (including swizzle and nonSwizzle): tile start uses roundup(MT/swizzleSize0)
+          # UseSubtileImpl fixedSrd2 case (including swizzle and nonSwizzle).
+          # The per-tensor tile-count `mt` (roundUp(MT/swizzleSize0)) still drives
+          # the Srd+2 limit below.  The per-workgroup base, however, is the floor
+          # floor(WG*MT / swizzleSize0): for MT >= swizzleSize0 that equals WG*mt,
+          # but for a sub-group macrotile (MT < swizzleSize0 -- a 16-row MX-scale
+          # tile in a 32-row swizzle group) it keeps two adjacent workgroups in the
+          # SAME swizzle group (WG 0,1 -> group 0; WG 2,3 -> group 1) instead of
+          # overshooting a whole group per workgroup and running off the tensor.
           mt = roundUp(kernel[tP["mt"]] / swizzleSize0)
-          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), mt, comment="WorkGroup[01] * roundup(MT/%u)"%swizzleSize0))
+          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
+          if swizzleSize0 > 1:
+            module.add(SLShiftRightB32(dst=sgpr(tileStart+0), shiftHex=log2(swizzleSize0), src=sgpr(tileStart+0), comment="floor(WG*MT / %u) -> swizzle-group units"%swizzleSize0))
         else:
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
@@ -6007,6 +6017,16 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+          if isMxSwizzledScaleLayout and ("ScaleByteOff%s"%tc) in self.sgprs:
+            # Macrotile of an odd number of 16-row MMA tiles (16, 48, 80, ...):
+            # workgroup WG starts at MMA tile WG*odd, i.e. in the second half
+            # of a 32-row swizzle group when WG is odd.  The global read stays
+            # at the GROUP base (floor above) and so is in bounds exactly like
+            # an even tile's; the parity is recorded here and applied on the
+            # LDS side (lraTileAssignmentScaleSwizzled), which points each
+            # tile's scale ds_read_b32 at the group and byte that hold it.
+            module.add(SAndB32(dst=sgpr("ScaleByteOff%s"%tc), src0=sgpr(tP["wg"]), src1=1,
+                               comment="%s: workgroup starts in the 2nd half of a swizzle group? (LR parity)"%tc))
           if isPreShuffledAB:
             module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                       swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))

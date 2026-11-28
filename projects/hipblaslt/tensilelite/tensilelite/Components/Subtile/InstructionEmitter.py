@@ -196,8 +196,11 @@ class InstructionEmitter:
                 mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
                 kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
                 kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                sAsel = (a % mShapeA) + mShapeA * (scalePhase % kShapeA)
-                sBsel = (b % mShapeB) + mShapeB * (scalePhase % kShapeB)
+                # Per-tile scale read already rotated the tile's byte to byte 0.
+                mSelA = 0 if self.tileInfoMap['SA'].perTileScale else (a % mShapeA)
+                mSelB = 0 if self.tileInfoMap['SB'].perTileScale else (b % mShapeB)
+                sAsel = mSelA + mShapeA * (scalePhase % kShapeA)
+                sBsel = mSelB + mShapeB * (scalePhase % kShapeB)
             else:
                 scaleAVgpr = scaleBVgpr = -1
                 sAsel = sBsel = 0
@@ -267,17 +270,30 @@ class InstructionEmitter:
             if nUnroll > 1:
                 k_start %= self._per_uid_k[tensor]
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
-                scaleGroupIdx = tileId // lrGran.mn
-                groupKey = scaleGroupIdx * lrGran.mn
                 kGroupIdx = k_start // ti.lrSubtileShape[1]
                 numKGroups = ti.lrLocalSubtileGrid[1]
+                if ti.perTileScale:
+                    # One dword per tile.  Even-numbered tiles read through
+                    # address register 0, odd-numbered through register 1; the
+                    # setup code (lraTileAssignmentScaleSwizzled) has pointed
+                    # each at the right swizzle group and byte for the runtime
+                    # start parity, so only the tile-pair index is static here.
+                    scaleGroupIdx = tileId // SCALE_SUBTILES_PER_GROUP
+                    groupKey = tileId
+                    srcReg = ti.sharedVgprLROffset[tileId % SCALE_SUBTILES_PER_GROUP]
+                    what = f"tile{tileId}"
+                else:
+                    scaleGroupIdx = tileId // lrGran.mn
+                    groupKey = scaleGroupIdx * lrGran.mn
+                    srcReg = ti.sharedVgprLROffset[0]
+                    what = f"group{scaleGroupIdx}"
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),
-                    src=vgpr(ti.sharedVgprLROffset[0]),
+                    src=vgpr(srcReg),
                     ds=DSModifiers(offset=dsOffset),
-                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
+                    comment=f"scale{tc}[{what},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
         return list(module.flatitems())
 
     def emit_gr(self, placement, unroll_iter=0):

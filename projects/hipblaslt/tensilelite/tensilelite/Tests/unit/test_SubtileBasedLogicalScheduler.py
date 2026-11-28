@@ -111,6 +111,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "MIInputPerThreadA": matrixInstK // 4,
         "MIInputPerThreadB": matrixInstK // 4,
         "MIWaveGroup": list(miWaveGroup),
+        "MIWaveTile": [MT0 // (16 * miWaveGroup[0]), MT1 // (16 * miWaveGroup[1])],
         "WavefrontSize": waveSize,
         "SourceSwap": sourceSwap,
         "MIArchVgpr": is_gfx1250,
@@ -244,6 +245,7 @@ def create_kernel_fp8(MT0, MT1, waveGroup, depthU=128):
         "MatrixInstN": 16,
         "MatrixInstK": 128,
         "MIWaveGroup": list(waveGroup),
+        "MIWaveTile": [MT0 // (16 * waveGroup[0]), MT1 // (16 * waveGroup[1])],
         "WavefrontSize": 64,
         "SourceSwap": False,
         "MIArchVgpr": False,
@@ -3292,6 +3294,26 @@ class TestNormalizePartitionSizes:
         assert self.norm(4, 23, 'N') == [4, 4, 3, 4, 4, 4]
         # num_full=3, remainder=2, mid=1 → [4,2,4,4]
         assert self.norm(4, 14, 'N') == [4, 2, 4, 4]
+
+    def test_align_moves_odd_boundary_onto_load_width(self):
+        """align = tile strips per global read: no boundary may fall inside a load."""
+        # unaligned request: same partition count, leading partitions rounded down, rest last
+        assert self.norm(7, 13, 'M', align=2) == [6, 7]
+        assert self.norm(3, 5, 'M', align=2) == [2, 3]
+        assert self.norm(5, 9, 'M', align=2) == [4, 5]
+        # already aligned requests are unchanged
+        assert self.norm(8, 15, 'M', align=2) == [8, 7]
+        assert self.norm(6, 11, 'M', align=2) == [6, 5]
+        assert self.norm(2, 3, 'M', align=2) == [2, 1]
+        assert self.norm(6, 14, 'M', align=2) == [6, 2, 6]
+        # an odd remainder may not sit in the middle
+        assert self.norm(4, 13, 'M', align=2) == [4, 4, 4, 1]
+        # nothing smaller than one load: stay unpartitioned
+        assert self.norm(1, 13, 'M', align=2) == [13]
+
+    def test_align_default_is_unchanged(self):
+        assert self.norm(7, 13, 'M') == [7, 6]
+        assert self.norm(4, 13, 'M') == [4, 1, 4, 4]
 
     def test_remainder_placed_last(self):
         # Multi-DU path: short partition must come LAST.

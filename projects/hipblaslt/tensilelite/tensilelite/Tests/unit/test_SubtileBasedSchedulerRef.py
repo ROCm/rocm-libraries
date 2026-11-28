@@ -60,6 +60,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
         "MatrixInstN": 16,
         "MatrixInstK": matrixInstK,
         "MIWaveGroup": list(waveGroup),
+        "MIWaveTile": [MT0 // (16 * waveGroup[0]), MT1 // (16 * waveGroup[1])],
         "WavefrontSize": 64,
         "SourceSwap": False,
         "MIArchVgpr": False,

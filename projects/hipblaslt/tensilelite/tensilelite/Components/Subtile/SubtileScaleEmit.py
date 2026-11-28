@@ -22,7 +22,7 @@ from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SSubU32, SLShiftLeftB32, SMovB32, SNop, SXorB32,
+    SAddCU32, SAddU32, SSubU32, SLShiftLeftB32, SMovB32, SMulI32, SNop, SXorB32,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
@@ -246,8 +246,23 @@ def _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveId):
   else:
     module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=int(math.log2(kernel["MIWaveGroup"][0])), src=vgpr(waveId), comment="scale%s: waveId / numWavesM"%tc))
 
-  module.add(SMovB32(dst=sgpr(tmpSgpr), src=totalScaleBytes, comment="scale%s: scale region"%tc))
-  module.add(VMulLOU32(dst=vgpr(ti_.sharedVgprLROffset[0]), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="scale%s: partition offset"%tc))
+  waveTiles = int(ti_.localMMATileGrid[0])
+  if ti_.perTileScale and kernel["MIWaveGroup"][index] > 1:
+    # Odd per-wave tile count with several waves in this dim: wave w starts at
+    # tile w*waveTiles of the macrotile, i.e. in swizzle group (w*waveTiles)>>1
+    # and in its second half when w*waveTiles is odd.  (The macrotile itself is
+    # a whole number of groups because the wave count is even.)
+    groupBytes = int(ti_.lrSubtileSize) * int(ti_.lrLocalSubtileGrid[1])
+    ti_._scaleParityVgpr = writer.vgprPool.checkOut(1, tag="_applyScaleWavePartitionLROffset_parity")
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=waveTiles, comment="scale%s: MMA tiles per wave"%tc))
+    module.add(VMulLOU32(dst=vgpr(tmp), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="scale%s: wave's first tile in the macrotile"%tc))
+    module.add(VAndB32(dst=vgpr(ti_._scaleParityVgpr), src0=1, src1=vgpr(tmp), comment="scale%s: wave starts in the 2nd half of a swizzle group?"%tc))
+    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="scale%s: wave's first swizzle group"%tc))
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=groupBytes, comment="scale%s: LDS bytes per swizzle group"%tc))
+    module.add(VMulLOU32(dst=vgpr(ti_.sharedVgprLROffset[0]), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="scale%s: partition offset"%tc))
+  else:
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=totalScaleBytes, comment="scale%s: scale region"%tc))
+    module.add(VMulLOU32(dst=vgpr(ti_.sharedVgprLROffset[0]), src0=sgpr(tmpSgpr), src1=vgpr(tmp), comment="scale%s: partition offset"%tc))
 
   writer.vgprPool.checkIn(tmp)
   writer.sgprPool.checkIn(tmpSgpr)
@@ -306,6 +321,41 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
   module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(tiA_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleA: +=LDS offset"))
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetMXSB), comment="scale: LDS offset for B scale"))
   module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(tiB_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleB: +=LDS offset"))
+  # Per-tile scale read (odd per-wave tile count, see TileInfo.perTileScale).
+  # p = 1 when this wave's first tile is the second half of a 32-row swizzle
+  # group: a runtime wave parity when the dim has several waves, else the
+  # workgroup parity recorded by computeLoadSrd (ScaleByteOff).  Reading a
+  # scale dword one byte later rotates the second-half tile into byte 0, so
+  #   even-numbered tiles: address + p                  (same group, byte p)
+  #   odd-numbered tiles:  address + (p ? group : 1)    (next group byte 0, or byte 1)
+  # Applied before the swap value below so the XOR toggle keeps the offsets.
+  for ti_ in [tiA_, tiB_]:
+    if not ti_.perTileScale:
+      continue
+    tc_ = ti_.tc
+    vE = ti_.sharedVgprLROffset[0]
+    vPar = getattr(ti_, "_scaleParityVgpr", None)
+    sPar = "ScaleByteOff%s" % tc_
+    assert (vPar is not None) != (sPar in writer.sgprs), "scale%s: exactly one start-parity source expected" % tc_
+    if len(ti_.sharedVgprLROffset) > 1:
+      vO = ti_.sharedVgprLROffset[1]
+      groupBytes = int(ti_.lrSubtileSize) * int(ti_.lrLocalSubtileGrid[1])
+      module.add(VAddU32(dst=vgpr(vO), src0=vgpr(vE), src1=1, comment="scale%s odd tiles: byte 1 of the same group (p=0)" % tc_))
+      if vPar is not None:
+        vtmp = writer.vgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_oddAdj")
+        module.add(SMovB32(dst=sgpr(tmpSgpr), src=groupBytes - 1, comment="scale%s: group bytes - 1" % tc_))
+        module.add(VMulLOU32(dst=vgpr(vtmp), src0=sgpr(tmpSgpr), src1=vgpr(vPar), comment="scale%s: p * (group - 1)" % tc_))
+        module.add(VAddU32(dst=vgpr(vO), src0=vgpr(vO), src1=vgpr(vtmp), comment="scale%s odd tiles: byte 0 of the next group (p=1)" % tc_))
+        writer.vgprPool.checkIn(vtmp)
+      else:
+        module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(sPar), src1=groupBytes - 1, comment="scale%s: p * (group - 1)" % tc_))
+        module.add(VAddU32(dst=vgpr(vO), src0=vgpr(vO), src1=sgpr(tmpSgpr), comment="scale%s odd tiles: byte 0 of the next group (p=1)" % tc_))
+    if vPar is not None:
+      module.add(VAddU32(dst=vgpr(vE), src0=vgpr(vE), src1=vgpr(vPar), comment="scale%s even tiles: += p (byte-rotated LR)" % tc_))
+      writer.vgprPool.checkIn(vPar)
+      ti_._scaleParityVgpr = None
+    else:
+      module.add(VAddU32(dst=vgpr(vE), src0=vgpr(vE), src1=sgpr(sPar), comment="scale%s even tiles: += p (byte-rotated LR)" % tc_))
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=writer.ldsTotalSize, comment="scale: total LDS size for swap"))
   for ti_ in [tiA_, tiB_]:
     for i in range(len(ti_.sharedVgprLROffset)):

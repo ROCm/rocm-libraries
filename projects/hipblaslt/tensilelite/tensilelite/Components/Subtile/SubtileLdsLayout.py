@@ -167,6 +167,30 @@ def computeLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
   return layout
 
 
+def _perTileScaleTailPad(writer, layout: SubtileLdsLayout) -> int:
+  """Bytes to allocate past the last LDS region for a per-tile scale read.
+
+  A per-tile scale ds_read_b32 (TileInfo.perTileScale) reads its dword one byte
+  late to rotate the second-half tile into byte 0, so the last lane of the last
+  swizzle group touches one byte past that group.  Inside LDS that byte is
+  never selected and harmless, but when the group ends exactly at the end of
+  the kernel's LDS allocation -- the last region is a scale region its groups
+  fill completely, in the upper double-buffer half -- the read is out of range
+  and returns 0 for the whole dword.  Keep one dword of allocation behind it.
+  """
+  if not layout.offsets:
+    return 0
+  lastTc = max(layout.offsets, key=lambda tc: layout.offsets[tc])
+  if lastTc not in _MX_SCALE_OPERANDS:
+    return 0
+  ti = tileInfoOf(writer, lastTc)
+  if not getattr(ti, "perTileScale", False):
+    return 0
+  usedBytes = int(ti.lrGlobalSubtileGrid[0]) * int(ti.lrGlobalSubtileGrid[1]) * int(ti.lrSubtileSize)
+  regionBytes = layout.totalSize - layout.offsets[lastTc]
+  return 4 if usedBytes >= regionBytes else 0
+
+
 def applyLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
   """Build the subtile TileInfos, lay out LDS, and publish the result.
 
@@ -180,7 +204,7 @@ def applyLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
     setattr(writer, _LDS_START_ATTR[tc], offset)
   writer.ldsTotalSize = layout.totalSize
 
-  kernel["LdsNumBytes"] = max(1, int(layout.totalSize * kernel["NumLdsBlk"]))
+  kernel["LdsNumBytes"] = max(1, int(layout.totalSize * kernel["NumLdsBlk"])) + _perTileScaleTailPad(writer, layout)
   if kernel["LdsNumBytes"] > writer.states.archCaps["DeviceLDS"]:
     writer.states.overflowedResources = _LDS_OVERFLOW_RESOURCE_CODE
   return layout

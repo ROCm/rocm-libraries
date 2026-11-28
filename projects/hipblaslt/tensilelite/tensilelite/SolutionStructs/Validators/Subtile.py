@@ -195,4 +195,21 @@ def validateSubtileGRKPartition(state, printRejectionReason):
              "multiple of loadRatioGR and there is more than one K-partition)"
              % (tc, loadRatioGR, localSubtileGrid, localSubtileGrid[0]))
       return False
+    # Same cooperative-group limitation, reached without a second K-partition:
+    # with an odd per-wave strip count and several waves along this dim, every
+    # other wave starts on the second strip of a two-strip buffer_load, which
+    # the GR emit does not handle (wrong results on GPU, also with unit
+    # scales).  Only the mxfp8 odd-MIWaveTile tiles can get here; other odd
+    # tiles are multi-K-partition and rejected above.
+    d = 0 if tc == "A" else 1
+    if (state["ProblemType"]["MXBlock%s" % tc]
+        and loadRatioGR > 1
+        and localSubtileGrid[0] % int(loadRatioGR) != 0
+        and state["MIWaveGroup"][d] > 1):
+      reject(state, printRejectionReason,
+             "UseSubtileImpl=1 mxfp8 odd MIWaveTile on tensor %s: loadRatioGR=%s with "
+             "%d strips per wave and MIWaveGroup=%d (a wave would start on the second "
+             "strip of a shared global read; not supported)"
+             % (tc, loadRatioGR, localSubtileGrid[0], state["MIWaveGroup"][d]))
+      return False
   return True
