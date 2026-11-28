@@ -29,6 +29,7 @@
 #include <msgpack.hpp>
 
 #include <Tensile/msgpack/SolutionState.hpp>
+#include "DeviceTestUtils.hpp"
 
 using namespace TensileLite;
 
@@ -557,9 +558,7 @@ TEST(SolutionState, BuildsWithoutADevice)
 
     auto problem = ContractionProblemGemm::GEMM(
         false, false, 1024, 1024, 1024, 1024, 1024, 1024, 1.0, false, 1);
-    int        deviceCount = 0;
-    hipError_t deviceErr   = hipGetDeviceCount(&deviceCount);
-    if(deviceErr != hipSuccess || deviceCount == 0)
+    if(TensileLite::TestUtils::deviceCountOrFail() == 0)
     {
         EXPECT_THROW((*xcc)(problem), std::runtime_error);
         return;

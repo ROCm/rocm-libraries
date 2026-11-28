@@ -24,6 +24,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "DeviceTestUtils.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::Client;
@@ -156,9 +157,7 @@ namespace
     protected:
         void SetUp() override
         {
-            int n = 0;
-            if(hipGetDeviceCount(&n) != hipSuccess || n < 1)
-                GTEST_SKIP() << "needs a device";
+            SKIP_IF_NO_DEVICE();
             factory          = std::make_unique<ClientProblemFactory>(args);
             dataInit         = std::make_shared<ReferenceInputWriter>(args, *factory);
             problem          = factory->problems()[0].get();
@@ -253,6 +252,8 @@ TEST_F(ReferenceValidatorTest, HostWriteWithEpochAdvanceRecomputesBeforeReuse)
 
 TEST(ReferenceValidatorSplit, RecomputeAndVerificationUseEachDevicesProblem)
 {
+    // ReferenceInputWriter's DataInitialization calls hipGetDevice in its constructor.
+    SKIP_IF_NO_DEVICE();
     auto args = makeValidatorArgs();
     setOption(args, "split-devices", 2);
     setOption(args, "split-dim", std::string("N"));
@@ -313,9 +314,7 @@ TEST_F(ReferenceValidatorTest, OneShotValidatesOnlyTheFirstRun)
 
 TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferIsAligned)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
-        GTEST_SKIP() << "needs a device";
+    SKIP_IF_NO_DEVICE();
 
     auto args = makeValidatorArgs();
     setOption(args, "problem-size", std::vector<std::vector<size_t>>{{64, 63, 1, 65}});
@@ -337,9 +336,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferIsAligned)
 
 TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
-        GTEST_SKIP() << "needs a device";
+    SKIP_IF_NO_DEVICE();
 
     auto args = makeValidatorArgs();
     setOption(args, "fused-a2a", FusedA2A::GemmA2A);

@@ -5,6 +5,7 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationHelpers.hpp"
+#include "DeviceTestUtils.hpp"
 #include "ProgramOptions.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -433,6 +434,7 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
 // reference silently).
 TEST(DataInitializationInputEpoch, PerSolutionEpochRequiresPreSolution)
 {
+    SKIP_IF_NO_DEVICE();
     hipDeviceProp_t prop{};
     ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
     auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
@@ -526,9 +528,7 @@ TEST_P(DataInitializationCopyExtentTest, GpuInputsMatchCpuInputsWhenProblemsShri
 {
     using TensileLite::Client::InitMode;
 
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
 
     auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
     for(auto const* name : {"type",
@@ -635,9 +635,7 @@ TEST_P(DataInitializationBatchedPointersTest, FollowBoundsCheckRunsAndProblems)
 {
     using TensileLite::Client::BoundsCheckMode;
 
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
 
     auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
     for(auto const* name : {"type",
@@ -759,9 +757,7 @@ class DataInitializationCopyBoundaryTest : public ::testing::TestWithParam<CopyB
 
 TEST_P(DataInitializationCopyBoundaryTest, LeavesUnusedCurrentBufferTailsUntouched)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
     auto args = makeFloatUploadArgs();
     setOption(args, "bounds-check", GetParam().bounds);
     setOption(args, "sparse", GetParam().sparse);
@@ -867,9 +863,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(DataInitializationRotatingTest, EmptyModeOnePoolsKeepOnlyOriginalInputs)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
     auto args = makeFloatUploadArgs();
     setOption(args, "rotating-buffer-size", 2);
     setOption(args, "rotating-buffer-mode", 1);
@@ -893,9 +887,7 @@ class DataInitializationUploadVerificationTest : public ::testing::TestWithParam
 
 TEST_P(DataInitializationUploadVerificationTest, RejectsCorruptionAndRepairsAfterInvalidation)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
     auto                                      args = makeFloatUploadArgs();
     TensileLite::Client::ClientProblemFactory factory(args);
     UploadCacheProbe                          init(args, factory);
@@ -949,9 +941,7 @@ INSTANTIATE_TEST_SUITE_P(Buffers,
 
 TEST(DataInitializationCopyExtent, GroupedGemmsCopyTheWholePristineBuffer)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
     auto args = makeFloatUploadArgs();
     setOption(args, "grouped-gemm", true);
     TensileLite::Client::ClientProblemFactory factory(args);
@@ -1077,6 +1067,7 @@ class DataInitializationCanonicalEpoch : public ::testing::TestWithParam<int>
 
 TEST_P(DataInitializationCanonicalEpoch, HostRewriteAdvancesButSwizzleAndCacheReuseDoNot)
 {
+    SKIP_IF_NO_DEVICE();
     using Tensor = ContractionProblemGemm::TENSOR;
     auto args    = makeMXLaunchArgs({{128, 128, 1, 512}});
     setOption(args, "mx-data-generator", GetParam());
@@ -1126,6 +1117,7 @@ INSTANTIATE_TEST_SUITE_P(GeneratorModes, DataInitializationCanonicalEpoch, ::tes
 
 TEST(DataInitializationInputEpoch, NonMXGeneratorWriterAdvancesOnlyOnDescriptorMiss)
 {
+    SKIP_IF_NO_DEVICE();
     using Tensor = ContractionProblemGemm::TENSOR;
     auto args    = makeMXLaunchArgs({{128, 128, 1, 512}});
     setOption(args, "mx-b-block", 0);
@@ -1151,9 +1143,7 @@ class DataInitializationMXUploadTest : public ::testing::TestWithParam<int>
 
 TEST_P(DataInitializationMXUploadTest, CanonicalAndSwizzledTransitionsReplaceWholeScaleBuffers)
 {
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        GTEST_SKIP() << "No HIP device";
+    SKIP_IF_NO_DEVICE();
     auto args = makeMXLaunchArgs({{128, 128, 1, 512}, {256, 256, 1, 512}});
     setOption(args, "mx-data-generator", GetParam());
     setOption(args, "verify-upload-skip", true);
@@ -1312,6 +1302,7 @@ namespace
 // swizzled layout and uploads it (a second call reuses the cached staging).
 TEST(DataInitializationSwizzle, UploadsTheStagedLayoutForAAndB)
 {
+    SKIP_IF_NO_DEVICE();
     using TensileLite::Client::detail::stageSwizzledTensor;
     using TensileLite::Client::detail::swizzleStageGeometry;
 
@@ -2141,6 +2132,7 @@ TEST(SwizzledStaging, RejectsAnUnpackedSubByteLeadingDimension)
 // =============================================================================
 TEST(CopyTensorVoid, CopiesSource)
 {
+    SKIP_IF_NO_DEVICE();
     TensorDescriptor   desc("t", rocisa::DataType::Float, {3, 2});
     std::vector<float> src(desc.totalAllocatedElements());
     std::iota(src.begin(), src.end(), 1.0f);
