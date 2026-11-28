@@ -40,7 +40,8 @@ _HARNESS_NUM_CUS = 120
 # The compile route of every launch: COMGR, which every test environment has.
 # The runner's automatic choice compiles some long prefills with hipcc, which
 # the CI test environment does not have; these cases check the kernels, not
-# the route, whose hipcc side the additive-bias lane covers.
+# the route. The additive-bias lane covers its hipcc side where hipcc is
+# installed; in CI those launches wait in rocke.tests.pending_lanes.
 _COMPILE_BACKEND = "llvm"
 
 

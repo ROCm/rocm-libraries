@@ -14,13 +14,19 @@ skips everywhere looks green and checks nothing.
 from __future__ import annotations
 
 import os
+import shutil
 import unittest
 from typing import NoReturn
 
 from ..analysis.isa import missing_hsaco_tools
 from .lanes import BUILD_VARIANT, skip_until_reason
 
-__all__ = ["REQUIRE_COMPILER_TOOLS_ENV", "require_hsaco_tools", "require_tools_or_skip"]
+__all__ = [
+    "REQUIRE_COMPILER_TOOLS_ENV",
+    "require_hipcc",
+    "require_hsaco_tools",
+    "require_tools_or_skip",
+]
 
 # platform/CMakeLists.txt sets it to "1" only for the installed CTest entries whose tests consume
 # it, where ROCM_PATH supplies the tools (Linux); see TESTING.md section 5.1.4.
@@ -49,3 +55,13 @@ def require_hsaco_tools() -> None:
         require_tools_or_skip(
             f"HSACO introspection unavailable: missing tool: {', '.join(missing)}"
         )
+
+
+def require_hipcc() -> None:
+    """Skip the running test (see :func:`require_tools_or_skip`) unless
+    ``hipcc``, which ``rocke.helpers.compile.compile_kernel_via_hipcc`` runs, is
+    on PATH. A case whose subject is the hipcc compile route calls it before it
+    compiles; a case that only checks a kernel compiles through COMGR instead,
+    which every test environment has."""
+    if shutil.which("hipcc") is None:
+        require_tools_or_skip("hipcc is not on PATH (compile_kernel_via_hipcc runs it)")

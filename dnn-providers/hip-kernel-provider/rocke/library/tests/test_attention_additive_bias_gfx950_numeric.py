@@ -14,7 +14,10 @@ single-batch), which selects the transposed 32x32 path, plus a multi-batch
 group past max_seqlen_q=512 that compiles through hipcc. Softcap and
 sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
 covers the transposed 32x32 combo stack. Every 2D group asserts its score path
-and compile backend so the coverage cannot silently drift.
+and compile backend so the coverage cannot silently drift. The hipcc group
+skips its launch where hipcc is not on PATH, as waiting for a test environment
+that has it (``rocke.tests.compiler_tools.require_hipcc``); its route is still
+asserted there.
 
 Bias addressing (element strides; Sk stride is always 1):
 ``bias[seq_idx*batch_stride + q_head*head_stride + q_local*sq_stride + k_abs]``.
@@ -38,6 +41,7 @@ import numpy as np
 import pytest
 from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 from rocke.runtime.device_array import DeviceArray
+from rocke.tests.compiler_tools import require_hipcc
 from rocke.tests.gpu import current_device_arch, current_device_arch_in
 from rocke.tests.host_arrays import HostArray
 
@@ -293,6 +297,8 @@ def _check_case(
             f"{case}/{dtype}/{heads}: expected (path, compile backend) "
             f"{_ROUTES[case][dtype]}, got {route}"
         )
+        if route[1] == "hipcc":
+            require_hipcc()
     out = launch_unified(
         problem,
         q,

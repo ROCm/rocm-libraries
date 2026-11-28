@@ -1232,6 +1232,13 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _BUILD_VARIANT_TOOLS,
+        "its cases whose subject is the hipcc compile route need hipcc, which the CI "
+        "test image does not have",
+        _LIBRARY,
+        "library/tests/test_attention_additive_bias_gfx950_numeric.py",
+    ),
+    *_waiting(
+        _BUILD_VARIANT_TOOLS,
         "its cases that lower through the C++ engine's library module "
         "(rocke_library_engine) skip in CI, whose build's Python has no pybind11 to "
         "build it",

@@ -11,13 +11,17 @@ compiler whose LLVM major the table records as refusing the option
 ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` requires the tools, and that no other error
 is turned into a skip. They also pin that ``compile_or_skip``, the compile
 helper of the attention backward tests, applies the same policy to a real
-``compile_kernel`` call, and that ``compiled_resources``, the GDN/KDA one,
-applies it where no ``llvm-objdump`` can read the code object.
+``compile_kernel`` call, that ``compiled_resources``, the GDN/KDA one,
+applies it where no ``llvm-objdump`` can read the code object, and that
+``require_hipcc``, the gate of the hipcc-route cases, applies it where no
+``hipcc`` is on PATH.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import os
+import re
 import unittest
 
 import pytest
@@ -27,7 +31,7 @@ from rocke.runtime import comgr
 from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
 from rocke.tests.comgr import compile_kernel_or_skip
-from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV
+from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV, require_hipcc
 from rocke.tests.lanes import BUILD_VARIANT, skip_until_reason
 
 from . import _attention_bwd_resources, _parallel_compile
@@ -232,6 +236,46 @@ def test_gdn_compiled_resources_applies_the_policy(
     monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
     with pytest.raises(outcome, match=reason):
         compiled_resources(kernel)
+
+
+HIPCC_MISSING = "hipcc is not on PATH (compile_kernel_via_hipcc runs it)"
+
+
+@pytest.mark.parametrize(
+    ("required", "outcome", "reason"),
+    [
+        (
+            "0",
+            unittest.SkipTest,
+            "^" + re.escape(skip_until_reason(BUILD_VARIANT, reason=HIPCC_MISSING)),
+        ),
+        (
+            "1",
+            AssertionError,
+            "^" + re.escape(f"{REQUIRE_COMPILER_TOOLS_ENV}=1 but {HIPCC_MISSING}"),
+        ),
+    ],
+    ids=["skips", "fails-where-tools-are-required"],
+)
+def test_require_hipcc_applies_the_policy_without_hipcc(
+    monkeypatch, tmp_path, required, outcome, reason
+):
+    # An empty PATH is a host without hipcc, as the CI test image is.
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
+    with pytest.raises(outcome, match=reason):
+        require_hipcc()
+
+
+def test_require_hipcc_returns_where_hipcc_is_on_path(monkeypatch, tmp_path):
+    # Only the presence of an executable named hipcc is checked; this one never
+    # runs. Windows finds a command by its PATHEXT extension.
+    hipcc = tmp_path / ("hipcc.bat" if os.name == "nt" else "hipcc")
+    hipcc.write_text("exit 0\n")
+    hipcc.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+    assert require_hipcc() is None
 
 
 def test_a_batch_reports_each_kernels_failure_on_that_kernel(monkeypatch):
