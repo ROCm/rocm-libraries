@@ -39,7 +39,10 @@ typedef enum
     ROCKE_CONV_ARG_D, /* "d"    -- pointer with the D operand dtype */
     ROCKE_CONV_ARG_F32_PTR, /* "f32*" */
     ROCKE_CONV_ARG_I32_PTR, /* "i32*" */
-    ROCKE_CONV_ARG_I32 /* "i32"  -- scalar */
+    ROCKE_CONV_ARG_I32, /* "i32"  -- scalar */
+    /* "i64" -- scalar. Large-tensor (addr64) ABI. Produced by
+     * rocke_conv_arg_names_ex(..., addr64=true, ...) for direction="fwd". */
+    ROCKE_CONV_ARG_I64
 } rocke_conv_arg_kind_t;
 
 #define ROCKE_CONV_ARG_NAME_CAP 32
@@ -57,7 +60,7 @@ typedef struct
     int count;
 } rocke_conv_arg_list_t;
 
-/* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32"). */
+/* The Python kind string ("a", "b", "d", "f32*", "i32*", "i32", "i64"). */
 const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind);
 
 /* Implicit-GEMM ABI for one direction ("fwd", "wgrad", "dgrad"). two_stage
@@ -70,16 +73,24 @@ bool rocke_conv_arg_names(const char* direction,
                           bool two_stage,
                           rocke_conv_arg_list_t* out);
 
-/* As above, plus wgrad's stream-K variant: `streamk` names the reduction
- * ("atomic", "workspace", "linear" or "tree") of a stream-K kernel, or is NULL
- * for a kernel without stream-K. A stream-K list carries the reduction's
- * buffers after ks_count and then the partition block. Returns false for a
- * non-wgrad direction, an unknown reduction, or stream-K combined with
- * two_stage -- the cases conv_arg_names() raises on. */
+/* As above, plus wgrad's stream-K variant and fwd's addr64 large-tensor
+ * variant: `streamk` names the reduction ("atomic", "workspace", "linear" or
+ * "tree") of a stream-K kernel, or is NULL for a kernel without stream-K. A
+ * stream-K list carries the reduction's buffers after ks_count and then the
+ * partition block. `addr64` selects the large-tensor forward-addressing ABI:
+ * fwd-only, 2D-only, and mutually exclusive with two_stage (no split-K
+ * builder for it yet) -- widens the byte triple, p_M, and the strides
+ * multiplying a possibly-huge leading coord to i64, and drops the m_ magic
+ * pair (addr64's M-decode is exact division, not magic). Returns false for a
+ * non-wgrad direction with streamk set, an unknown reduction, stream-K
+ * combined with two_stage, addr64 on a non-fwd direction, addr64 combined
+ * with is_3d, or addr64 combined with two_stage -- the cases
+ * conv_arg_names()/_fwd_arg_names() raise on. */
 bool rocke_conv_arg_names_ex(const char* direction,
                              bool is_3d,
                              bool two_stage,
                              const char* streamk,
+                             bool addr64,
                              rocke_conv_arg_list_t* out);
 
 /* Direct grouped conv ABI ("fwd", "dgrad" or "wgrad"); false for any other

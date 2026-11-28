@@ -681,6 +681,85 @@ def unmerge_magic_dynamic(
     return UnmergeMagicDynamic(upper, into, magic_triples)
 
 
+class UnmergeAddr64(Transform):
+    """``Unmerge`` via the addr64 tile-origin + per-lane carry decode: no
+    magic numbers, since the dividend (``m``) is no longer guaranteed to
+    fit i32.
+
+    Unlike :class:`UnmergeMagicDynamic`, whose upper coord is the raw flat
+    index, this transform's upper coord is the **per-lane delta**
+    ``d = m - m0`` (small, bounded by the tile's ``block_m`` -- the actual
+    i32-unsafe ``m``/``m0`` subtraction and the i64 tile-origin decode both
+    happen once per workgroup, in the caller's prologue, via
+    :func:`rocke.helpers.tensor_view.tile_origin_decode_i64`). The decoded
+    tile-origin coords (``origin_coords``, ``[leading, *trailing]``, each
+    narrowed to i32 by the caller) and the trailing extents (``dims_i32``,
+    same trailing order) are supplied at construction time, not as upper
+    coords, since they are workgroup-uniform constants from the transform
+    chain's point of view.
+
+    ``lowers`` must have the same length as ``origin_coords``
+    (``len(dims_i32) + 1``), in ``[leading, *trailing]`` order.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    _origin_coords: Tuple[Value, ...]
+    _dims_i32: Tuple[Value, ...]
+
+    def __init__(
+        self,
+        upper_name: str,
+        lowers: Sequence[str],
+        origin_coords: Sequence[Value],
+        dims_i32: Sequence[Value],
+    ) -> None:
+        if len(lowers) != len(origin_coords):
+            raise ValueError(
+                f"UnmergeAddr64 needs len(lowers) == len(origin_coords) "
+                f"(got {len(lowers)} lowers, {len(origin_coords)} origin coords)"
+            )
+        if len(dims_i32) != len(lowers) - 1:
+            raise ValueError(
+                f"UnmergeAddr64 needs len(lowers)-1 dims "
+                f"(got {len(lowers)} lowers, {len(dims_i32)} dims)"
+            )
+        object.__setattr__(self, "upper", (upper_name,))
+        object.__setattr__(self, "lower", tuple(lowers))
+        object.__setattr__(self, "_origin_coords", tuple(origin_coords))
+        object.__setattr__(self, "_dims_i32", tuple(dims_i32))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        from .tensor_view import carry_decode_i32  # local import avoids cycle
+
+        u = coords[self.upper[0]]
+        lane_coords = carry_decode_i32(
+            b, u.value, list(self._origin_coords), list(self._dims_i32)
+        )
+        return {
+            name: CoordVar(name, val, u.valid)
+            for name, val in zip(self.lower, lane_coords)
+        }
+
+
+def unmerge_addr64(
+    upper: str,
+    into: Sequence[str],
+    *,
+    origin_coords: Sequence[Value],
+    dims_i32: Sequence[Value],
+) -> UnmergeAddr64:
+    """``addr64`` counterpart of :func:`unmerge_magic_dynamic`: decodes the
+    per-lane delta ``upper`` (``d = m - m0``) into ``into`` via
+    :class:`UnmergeAddr64`'s carry propagation instead of magic division.
+
+    ``origin_coords`` (``[leading, *trailing]``, i32) and ``dims_i32``
+    (trailing extents, i32) come from the caller's once-per-workgroup
+    :func:`rocke.helpers.tensor_view.tile_origin_decode_i64` call.
+    """
+    return UnmergeAddr64(upper, into, origin_coords, dims_i32)
+
+
 @dataclass(frozen=True)
 class UnmergeDivMod(Transform):
     """``Unmerge`` variant emitting the pow-2 division/mod scan.

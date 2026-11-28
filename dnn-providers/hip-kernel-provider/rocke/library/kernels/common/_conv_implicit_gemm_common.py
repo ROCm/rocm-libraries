@@ -37,6 +37,7 @@ from rocke.core.ir import (
     F16,
     F32,
     I32,
+    I64,
     TF32,
     IRBuilder,
     Type,
@@ -53,6 +54,7 @@ from rocke.helpers.transforms import (
     embed_dynamic,
     pad,
     pad_dynamic,
+    unmerge_addr64,
     unmerge_magic,
     unmerge_magic_dynamic,
 )
@@ -564,6 +566,8 @@ def emit_param_block(
     for name, kind in arg_names:
         if kind == "i32":
             out[name] = b.param(name, I32)
+        elif kind == "i64":
+            out[name] = b.param(name, I64)
         else:
             if declare_ptr is None:
                 raise ValueError(
@@ -1429,6 +1433,30 @@ def spatial_unmerge_dynamic(
     return unmerge_magic_dynamic(upper, into=into, magic_triples=triples)
 
 
+def spatial_unmerge_addr64(
+    params, *, upper: str, origin_coords: Sequence[Value], leading: str = "n"
+):
+    """addr64 counterpart of :func:`spatial_unmerge_dynamic`: ``d`` (the
+    per-lane delta from the tile's i64 origin) -> ``(n, ho, wo)`` via
+    :class:`rocke.helpers.transforms.UnmergeAddr64`'s carry propagation, no
+    magic numbers. 2D only (no ``is_3d`` branch -- Phase 1 slice A's scope).
+
+    ``origin_coords`` is ``[leading, ho0, wo0]`` -- the tile origin decoded
+    by :func:`rocke.helpers.tensor_view.tile_origin_decode_i64`, each
+    narrowed to i32 by the caller (see that function's docstring for why
+    the leading coord may be meaningless when the tensor's leading extent
+    itself exceeds i32: harmless here, since the leading coord this
+    transform produces is never read downstream -- it is folded into the
+    i64 tile origin by the caller instead of being recomputed per lane).
+    """
+    return unmerge_addr64(
+        upper,
+        into=[leading, "ho", "wo"],
+        origin_coords=origin_coords,
+        dims_i32=[params["p_Ho"], params["p_Wo"]],
+    )
+
+
 def channel_unmerge_dynamic(
     params, *, upper: str, prefix: str, is_3d: bool, cdim: Value, last: str = "c"
 ):
@@ -1676,6 +1704,137 @@ def make_d_descriptor_dynamic(
     return DynamicTensorDescriptor.create(
         name, coord_names=coord_names, strides=strides
     ).transform(*transforms)
+
+
+def make_a_descriptor_addr64(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    origin_coords: Sequence[Value],
+    name: Optional[str] = None,
+):
+    """addr64 counterpart of :func:`make_a_descriptor_dynamic`: ``(d, k) ->
+    N[D]HWC``, 2D / non-grouped only (Phase 1 slice A's scope). ``d`` is the
+    per-lane delta from the tile's i64 origin; ``origin_coords`` is that
+    origin's ``(n0, ho0, wo0)`` (see :func:`spatial_unmerge_addr64`).
+
+    Excludes ``"n"``/``p_A_stride_n`` from the descriptor entirely: that
+    product (an operand large enough to need i64 for a huge ``N``) is
+    already folded into the i64 tile origin by
+    :func:`rocke.helpers.tensor_view.make_tile_buffer_resource` /
+    :func:`addr64_a_origin_bytes`, not recomputed per lane in i32.
+
+    **Precondition the caller must uphold:** every lane's delta ``d`` in
+    one call (i.e. the whole tile, ``[0, block_m)``) must decode to the
+    *same* ``n`` as ``origin_coords``' ``n0``. ``hi``/``wi`` are computed
+    *absolutely* here (safe in i32, since ``Ho``/``Wi`` never depend on
+    ``N``) and added to an origin that only contains ``n0``'s contribution
+    -- so a tile whose M-range crosses an image boundary would read through
+    the wrong image's base for every lane past the crossing. Plan section
+    2.2's ``p_image_aligned`` (not implemented in this slice) is precisely
+    the host-side guarantee that prevents this; until it lands, a caller
+    must only reach this descriptor when it already knows the tile cannot
+    cross an image boundary (e.g. ``Ho*Wo`` is a multiple of ``block_m``).
+    """
+    neg_pH = b.sub(b.const_i32(0), params["p_pH"])
+    neg_pW = b.sub(b.const_i32(0), params["p_pW"])
+    transforms = [
+        spatial_unmerge_addr64(params, upper="m", origin_coords=origin_coords),
+        embed_dynamic(
+            upper=["ho", "y"],
+            lower="hi",
+            strides=[params["p_sH"], params["p_dH"]],
+            offset=neg_pH,
+            lo=0,
+            hi=params["p_Hi"],
+        ),
+        embed_dynamic(
+            upper=["wo", "x"],
+            lower="wi",
+            strides=[params["p_sW"], params["p_dW"]],
+            offset=neg_pW,
+            lo=0,
+            hi=params["p_Wi"],
+        ),
+        *_a_channel_decode_dynamic(
+            b, params, is_3d=False, grouped=False, upper="k", prefix="k_"
+        ),
+        *filter_pads_dynamic(params, is_3d=False),
+    ]
+    coord_names = ["hi", "wi", "c"]
+    strides = [params["p_A_stride_hi"], params["p_A_stride_wi"], b.const_i32(1)]
+    return DynamicTensorDescriptor.create(
+        name or "A_nhwc_addr64", coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def make_d_descriptor_addr64(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    origin_coords: Sequence[Value],
+    name: Optional[str] = None,
+):
+    """addr64 counterpart of :func:`make_d_descriptor_dynamic`: ``(d, k_out)
+    -> N[D]HWK``, 2D only. Excludes ``"n"``/``p_D_stride_n`` for the same
+    reason as :func:`make_a_descriptor_addr64` -- same image-boundary
+    precondition applies."""
+    transforms = [spatial_unmerge_addr64(params, upper="m", origin_coords=origin_coords)]
+    coord_names = ["ho", "wo", "k_out"]
+    strides = [params["p_D_stride_ho"], params["p_D_stride_wo"], b.const_i32(1)]
+    return DynamicTensorDescriptor.create(
+        name or "D_nhwk_addr64", coord_names=coord_names, strides=strides
+    ).transform(*transforms)
+
+
+def addr64_a_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The A operand's i64 tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``.
+
+    Only the ``n`` term: :func:`make_a_descriptor_addr64`'s per-lane
+    offset still computes ``hi``/``wi`` *absolutely* (bounded by
+    ``Hi``/``Wi``, never by ``N``, so i32 is safe there regardless of
+    addr64), so folding ``hi_first * stride_hi`` into the origin *as well*
+    would double-count that contribution -- it would be added once here
+    and again through the per-lane ``hi * stride_hi``. (Plan section 2.1's
+    tighter ``hi_first``-based origin is a footprint-shrinking refinement
+    for the host-side admission check in section 6.2, not implemented in
+    this slice; it would need the per-lane offset to compute the *delta*
+    ``hi - hi_first`` instead of the absolute ``hi``.)
+
+    Feed the result to
+    :func:`rocke.helpers.tensor_view.make_tile_buffer_resource`'s
+    ``origin_i64``. ``n0_i64`` is only used here, multiplied by the (i64,
+    under addr64) ``p_A_stride_n`` -- never decoded into a per-lane
+    absolute coordinate, so it is fine even when the true ``N`` exceeds
+    i32 (see :func:`spatial_unmerge_addr64`'s docstring).
+    """
+    origin_elems = b.mul(n0_i64, params["p_A_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
+
+
+def addr64_d_origin_bytes(
+    b: IRBuilder,
+    params: Dict[str, Value],
+    *,
+    n0_i64: Value,
+    elem_bytes: int,
+) -> Value:
+    """The D operand's i64 tile-origin byte offset: ``n0 * stride_n``,
+    elements, times ``elem_bytes``. Only the ``n`` term, for the same
+    reason as :func:`addr64_a_origin_bytes`: :func:`make_d_descriptor_addr64`
+    still computes ``ho``/``wo`` *absolutely* (bounded by ``Ho``/``Wo``,
+    never by ``N``), so folding them into the origin too would double-count
+    that contribution.
+    """
+    origin_elems = b.mul(n0_i64, params["p_D_stride_n"])
+    return b.mul(origin_elems, b.const_i64(elem_bytes))
 
 
 def emit_direct_epilogue_wmma(

@@ -109,40 +109,60 @@ def _grid() -> List[ArgSpec]:
     return [("p_num_pid_m", "i32"), ("p_num_pid_n", "i32")]
 
 
-def _fwd_arg_names(*, is_3d: bool = False, split_k: bool = False) -> List[ArgSpec]:
+def _fwd_arg_names(
+    *, is_3d: bool = False, split_k: bool = False, addr64: bool = False
+) -> List[ArgSpec]:
     """Forward implicit-GEMM conv: ``A`` (N[D]HWC), ``B`` (K[Z]YXC), ``D`` (N[D]HWK).
 
     ``split_k`` is the split-K binary's ABI: the fp32 workspace its slices
     store into, then the slice width and degree (wgrad's ``ks`` /
     ``ks_count``).
+
+    ``addr64`` is the large-tensor forward-addressing variant: the
+    byte-size triple, ``p_M``, and the strides that multiply a
+    possibly-huge leading coordinate (``p_A_stride_n``/``_di``,
+    ``p_D_stride_n``/``_do``, ``p_B_stride_k``) widen to ``"i64"``; the
+    ``m_`` magic pairs are dropped since the addr64 M-decode uses exact
+    division, not magic numbers. Mutually exclusive with
+    ``split_k`` -- addr64 does not yet support the split-K binary (Phase 1
+    slice scope).
     """
+    if addr64 and split_k:
+        raise ValueError("addr64 does not yet support split_k (no split-K ABI/builder)")
+    byte_kind = "i64" if addr64 else "i32"
     out: List[ArgSpec] = [
         ("A", "a"),
         ("B", "b"),
         ("D", "d"),
-        ("A_bytes", "i32"),
-        ("B_bytes", "i32"),
-        ("D_bytes", "i32"),
+        ("A_bytes", byte_kind),
+        ("B_bytes", byte_kind),
+        ("D_bytes", byte_kind),
     ]
     out += _dims(is_3d)
     # K_gemm = [Z*]Y*X*cpg (reduction), M = N*[Do*]Ho*Wo (output spatial).
-    out += [("p_K_gemm", "i32"), ("p_M", "i32")]
-    # Row-major strides in elements.
-    out += [("p_A_stride_n", "i32")]
+    out += [("p_K_gemm", "i32"), ("p_M", byte_kind)]
+    # Row-major strides in elements. Under addr64, the stride that multiplies
+    # the leading (possibly-huge) coord of each operand widens to i64; every
+    # other stride stays i32 (it multiplies a coord bounded by a "normal"
+    # spatial extent, never by N).
+    out += [("p_A_stride_n", byte_kind)]
     if is_3d:
-        out += [("p_A_stride_di", "i32")]
+        out += [("p_A_stride_di", byte_kind)]
     out += [("p_A_stride_hi", "i32"), ("p_A_stride_wi", "i32")]
-    out += [("p_B_stride_k", "i32")]
+    out += [("p_B_stride_k", byte_kind)]
     if is_3d:
         out += [("p_B_stride_z", "i32")]
     out += [("p_B_stride_y", "i32"), ("p_B_stride_x", "i32")]
-    out += [("p_D_stride_n", "i32")]
+    out += [("p_D_stride_n", byte_kind)]
     if is_3d:
-        out += [("p_D_stride_do", "i32")]
+        out += [("p_D_stride_do", byte_kind)]
     out += [("p_D_stride_ho", "i32"), ("p_D_stride_wo", "i32")]
-    # m -> (n, [do,] ho, wo): divisors Wo, Ho[, Do].
-    out += _magic("m_", (["Do"] if is_3d else []) + ["Ho", "Wo"])
-    # k -> ([z,] y, x, c): divisors cpg, X[, Y].
+    if not addr64:
+        # m -> (n, [do,] ho, wo): divisors Wo, Ho[, Do]. addr64 decodes M by
+        # exact i64 division instead (section 3), so it carries no magic pair.
+        out += _magic("m_", (["Do"] if is_3d else []) + ["Ho", "Wo"])
+    # k -> ([z,] y, x, c): divisors cpg, X[, Y]. Unaffected by addr64: bounded
+    # by the filter size, never by the tensor/M size (section 3 item 4).
     out += _magic("k_", (["Y"] if is_3d else []) + ["X", "cpg"])
     out += _grid()
     if split_k:
@@ -151,14 +171,16 @@ def _fwd_arg_names(*, is_3d: bool = False, split_k: bool = False) -> List[ArgSpe
     return out
 
 
-def conv_fwd_problem_block(*, is_3d: bool = False) -> List[ArgSpec]:
+def conv_fwd_problem_block(*, is_3d: bool = False, addr64: bool = False) -> List[ArgSpec]:
     """The forward AOT problem block on its own, without the leading pointers.
 
     A fused kernel that embeds the forward conv body (``deep_fused_conv_pool``)
     keeps its own pointer convention and appends this block, so it picks up the
-    same runtime problem args in the same order.
+    same runtime problem args in the same order. ``addr64`` selects the
+    large-tensor forward-addressing ABI (fwd, 2D only) -- see
+    :func:`_fwd_arg_names`.
     """
-    return _fwd_arg_names(is_3d=is_3d)[_LEADING_ARGS:]
+    return _fwd_arg_names(is_3d=is_3d, addr64=addr64)[_LEADING_ARGS:]
 
 
 # Stream-K reductions of the wgrad kernel, as ABI selectors.
@@ -311,6 +333,7 @@ def conv_arg_names(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    addr64: bool = False,
 ) -> List[ArgSpec]:
     """The implicit-GEMM conv kernarg ABI for one direction.
 
@@ -329,6 +352,9 @@ def conv_arg_names(
     ``streamk`` (wgrad only) is the stream-K reduction, or ``None`` for a
     kernel without stream-K. Stream-K partitions K itself, so it excludes the
     two-stage split-K variant.
+
+    ``addr64`` is the large-tensor forward-addressing variant (fwd only, 2D
+    only for now) -- see :func:`_fwd_arg_names`.
     """
     if two_stage and direction not in ("wgrad", "fwd"):
         raise ValueError(
@@ -346,8 +372,12 @@ def conv_arg_names(
             )
         if two_stage:
             raise ValueError("streamk and two_stage are exclusive: both partition K_wg")
+    if addr64 and direction != "fwd":
+        raise ValueError(f"addr64 is a fwd-only variant (got direction={direction!r})")
+    if addr64 and is_3d:
+        raise ValueError("addr64 does not yet support is_3d (Phase 1 slice A is 2D only)")
     if direction == "fwd":
-        return _fwd_arg_names(is_3d=is_3d, split_k=two_stage)
+        return _fwd_arg_names(is_3d=is_3d, split_k=two_stage, addr64=addr64)
     if direction == "wgrad":
         return _wgrad_arg_names(is_3d=is_3d, two_stage=two_stage, streamk=streamk)
     if direction == "dgrad":
@@ -473,6 +503,9 @@ def _conv_signature(
         "f32*": "ptr<f32, global>",
         "i32*": "ptr<i32, global>",
         "i32": "i32",
+        # Large-tensor (addr64) scalars.
+        # ``runtime/packing.py`` packs it via SCALAR_ARG_FORMATS["i64"].
+        "i64": "i64",
     }
     out: List[Dict[str, Any]] = []
     for name, kind in arg_names:
@@ -490,6 +523,7 @@ def conv_args_signature(
     is_3d: bool = False,
     two_stage: bool = False,
     streamk: Optional[str] = None,
+    addr64: bool = False,
 ) -> List[Dict[str, Any]]:
     """Implicit-GEMM conv launch signature for one direction.
 
@@ -497,7 +531,9 @@ def conv_args_signature(
     three operand types unless ``dtype_b`` / ``dtype_d`` override them, which
     mixed-precision configs need. ``two_stage`` adds wgrad's f32 workspace
     pair and is rejected for the other two directions; ``streamk`` selects a
-    stream-K wgrad kernel's ABI by its reduction.
+    stream-K wgrad kernel's ABI by its reduction. ``addr64`` selects the
+    large-tensor forward-addressing ABI (fwd, 2D only) -- see
+    :func:`conv_arg_names`.
 
     One entry point rather than three: the direction is already a value every
     caller has in hand, so making it an argument removes the per-direction
@@ -505,7 +541,11 @@ def conv_args_signature(
     """
     return _conv_signature(
         conv_arg_names(
-            direction=direction, is_3d=is_3d, two_stage=two_stage, streamk=streamk
+            direction=direction,
+            is_3d=is_3d,
+            two_stage=two_stage,
+            streamk=streamk,
+            addr64=addr64,
         ),
         dtype,
         dtype_b or dtype,

@@ -33,6 +33,11 @@ void push_i32(rocke_conv_arg_list_t* out, const char* name)
     push(out, name, ROCKE_CONV_ARG_I32);
 }
 
+void push_scalar(rocke_conv_arg_list_t* out, const char* name, bool addr64)
+{
+    push(out, name, addr64 ? ROCKE_CONV_ARG_I64 : ROCKE_CONV_ARG_I32);
+}
+
 /* _dims(is_3d): problem extents, filter extents and the conv attributes. */
 void dims(rocke_conv_arg_list_t* out, bool is_3d)
 {
@@ -105,51 +110,65 @@ void grid(rocke_conv_arg_list_t* out)
     push_i32(out, "p_num_pid_n");
 }
 
-/* Pointer triple + byte-size triple that opens every direction's list. */
-void leading(rocke_conv_arg_list_t* out, const char* a, const char* b, const char* d)
+/* Pointer triple + byte-size triple that opens every direction's list.
+ * ``addr64`` widens the byte triple to i64 (large-tensor forward addressing). */
+void leading(rocke_conv_arg_list_t* out,
+             const char* a,
+             const char* b,
+             const char* d,
+             bool addr64 = false)
 {
     char buf[ROCKE_CONV_ARG_NAME_CAP];
     push(out, a, ROCKE_CONV_ARG_A);
     push(out, b, ROCKE_CONV_ARG_B);
     push(out, d, ROCKE_CONV_ARG_D);
     snprintf(buf, sizeof(buf), "%s_bytes", a);
-    push_i32(out, buf);
+    push_scalar(out, buf, addr64);
     snprintf(buf, sizeof(buf), "%s_bytes", b);
-    push_i32(out, buf);
+    push_scalar(out, buf, addr64);
     snprintf(buf, sizeof(buf), "%s_bytes", d);
-    push_i32(out, buf);
+    push_scalar(out, buf, addr64);
 }
 
 const int kLeadingArgs = 6;
 
 /* split_k: the split-K binary's ABI -- the fp32 workspace its slices store
- * into, then the slice width and degree (wgrad's ks / ks_count). */
-void fwd_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool split_k)
+ * into, then the slice width and degree (wgrad's ks / ks_count). addr64:
+ * the large-tensor forward-addressing ABI --
+ * widens the byte triple, p_M, and the strides multiplying a possibly-huge
+ * leading coord (p_A_stride_n[_di], p_B_stride_k, p_D_stride_n[_do]) to i64,
+ * and drops the m_ magic pair (exact i64 division instead of magic
+ * division). Callers reject addr64 combined with split_k or is_3d before
+ * reaching here (see rocke_conv_arg_names_ex). */
+void fwd_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool split_k, bool addr64)
 {
-    leading(out, "A", "B", "D");
+    leading(out, "A", "B", "D", addr64);
     dims(out, is_3d);
     /* K_gemm = [Z*]Y*X*cpg (reduction), M = N*[Do*]Ho*Wo (output spatial). */
     push_i32(out, "p_K_gemm");
-    push_i32(out, "p_M");
+    push_scalar(out, "p_M", addr64);
     /* Row-major strides in elements. */
-    push_i32(out, "p_A_stride_n");
+    push_scalar(out, "p_A_stride_n", addr64);
     if(is_3d)
-        push_i32(out, "p_A_stride_di");
+        push_scalar(out, "p_A_stride_di", addr64);
     push_i32(out, "p_A_stride_hi");
     push_i32(out, "p_A_stride_wi");
-    push_i32(out, "p_B_stride_k");
+    push_scalar(out, "p_B_stride_k", addr64);
     if(is_3d)
         push_i32(out, "p_B_stride_z");
     push_i32(out, "p_B_stride_y");
     push_i32(out, "p_B_stride_x");
-    push_i32(out, "p_D_stride_n");
+    push_scalar(out, "p_D_stride_n", addr64);
     if(is_3d)
-        push_i32(out, "p_D_stride_do");
+        push_scalar(out, "p_D_stride_do", addr64);
     push_i32(out, "p_D_stride_ho");
     push_i32(out, "p_D_stride_wo");
-    /* m -> (n, [do,] ho, wo): divisors Wo, Ho[, Do]. */
-    magic_2d3d(out, "m_", is_3d, "Do", "Ho", "Wo");
-    /* k -> ([z,] y, x, c): divisors cpg, X[, Y]. */
+    if(!addr64)
+    {
+        /* m -> (n, [do,] ho, wo): divisors Wo, Ho[, Do]. */
+        magic_2d3d(out, "m_", is_3d, "Do", "Ho", "Wo");
+    }
+    /* k -> ([z,] y, x, c): divisors cpg, X[, Y]. Unaffected by addr64. */
     magic_2d3d(out, "k_", is_3d, "Y", "X", "cpg");
     grid(out);
     if(split_k)
@@ -280,6 +299,8 @@ const char* rocke_conv_arg_kind_str(rocke_conv_arg_kind_t kind)
         return "i32*";
     case ROCKE_CONV_ARG_I32:
         return "i32";
+    case ROCKE_CONV_ARG_I64:
+        return "i64";
     }
     return "?";
 }
@@ -289,13 +310,14 @@ bool rocke_conv_arg_names(const char* direction,
                           bool two_stage,
                           rocke_conv_arg_list_t* out)
 {
-    return rocke_conv_arg_names_ex(direction, is_3d, two_stage, NULL, out);
+    return rocke_conv_arg_names_ex(direction, is_3d, two_stage, NULL, /*addr64=*/false, out);
 }
 
 bool rocke_conv_arg_names_ex(const char* direction,
                              bool is_3d,
                              bool two_stage,
                              const char* streamk,
+                             bool addr64,
                              rocke_conv_arg_list_t* out)
 {
     out->count = 0;
@@ -313,8 +335,15 @@ bool rocke_conv_arg_names_ex(const char* direction,
         if(strcmp(direction, "wgrad") != 0 || !streamk_reduction_known(streamk) || two_stage)
             return false;
     }
+    if(addr64)
+    {
+        /* fwd-only, 2D-only, no split-K builder for it yet -- same rejections
+         * as the Python conv_arg_names(addr64=True). */
+        if(strcmp(direction, "fwd") != 0 || is_3d || two_stage)
+            return false;
+    }
     if(strcmp(direction, "fwd") == 0)
-        fwd_arg_names(out, is_3d, two_stage);
+        fwd_arg_names(out, is_3d, two_stage, addr64);
     else if(strcmp(direction, "wgrad") == 0)
         wgrad_arg_names(out, is_3d, two_stage, streamk);
     else if(strcmp(direction, "dgrad") == 0)
@@ -377,7 +406,7 @@ void rocke_conv_fwd_problem_block(bool is_3d, rocke_conv_arg_list_t* out)
 {
     rocke_conv_arg_list_t full;
     full.count = 0;
-    fwd_arg_names(&full, is_3d, false);
+    fwd_arg_names(&full, is_3d, false, false);
     out->count = 0;
     for(int i = kLeadingArgs; i < full.count; ++i)
         push(out, full.items[i].name, full.items[i].kind);
@@ -397,6 +426,10 @@ bool rocke_conv_emit_param_block(rocke_ir_builder_t* b,
         if(a->kind == ROCKE_CONV_ARG_I32)
         {
             v = rocke_b_param(b, a->name, rocke_i32(), NULL);
+        }
+        else if(a->kind == ROCKE_CONV_ARG_I64)
+        {
+            v = rocke_b_param(b, a->name, rocke_i64(), NULL);
         }
         else
         {

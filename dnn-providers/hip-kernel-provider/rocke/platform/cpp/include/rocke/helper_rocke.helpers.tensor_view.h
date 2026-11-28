@@ -6,7 +6,8 @@
  *
  * Ported symbols (per phase scope):
  *   make_global_view, make_tile_window, TensorDescriptor, TensorView,
- *   BufferResource, make_buffer_resource, make_buffer_view.
+ *   BufferResource, make_buffer_resource, make_buffer_view,
+ *   make_tile_buffer_resource, tile_origin_decode_i64, carry_decode_i32.
  *
  * Not ported: TensorView.load_scalar_at, store_scalar_at and
  * async_load_lds_at have no C twin in any address space, so their Python
@@ -167,6 +168,53 @@ rocke_status_t rocke_tv_make_buffer_resource(rocke_ir_builder_t* b,
                                              rocke_value_t* ptr,
                                              rocke_value_t* num_bytes,
                                              rocke_value_t* soffset /* NULL => const_i32(0) */);
+
+/* make_tile_buffer_resource(b, ptr, origin_i64=, total_bytes_i64=, soffset=None):
+ * the large-tensor (addr64) forward-addressing primitive.
+ *
+ * Scalarizes origin_i64 to SGPR (to_sgpr_u32), folds it into ptr via
+ * global_ptr_offset (not global_ptr_add: an empty/fully-masked tile's
+ * origin is allowed to land outside the allocation), then clamps
+ * (total_bytes_i64 - origin) to [0, 2**31-1] with cmp+select (not
+ * smax/smin: the scalar smax/smin ops hardcode an i32 LLVM intrinsic
+ * regardless of operand width) before truncating to the i32
+ * num_records make_buffer_resource expects. Mirrors
+ * rocke.helpers.tensor_view.make_tile_buffer_resource op for op. */
+rocke_status_t rocke_tv_make_tile_buffer_resource(rocke_ir_builder_t* b,
+                                                  rocke_tv_buffer_resource_t* out,
+                                                  rocke_value_t* ptr,
+                                                  rocke_value_t* origin_i64,
+                                                  rocke_value_t* total_bytes_i64,
+                                                  rocke_value_t* soffset /* NULL => const_i32(0) */);
+
+/* tile_origin_decode_i64(b, m0_i64, dims_i64, num_dims, out): the addr64
+ * tile-origin M-decode, ``m0 -> (n0, [do0,] ho0, wo0)`` by exact i64
+ * division (no magic numbers), once per workgroup.
+ *
+ * ``dims_i64`` holds ``num_dims`` trailing extents (i64 Values), innermost
+ * last (e.g. {Ho, Wo} for 2D), matching UnmergeMagicDynamic's magic_triples
+ * order. Writes ``num_dims + 1`` coords to out[0..num_dims] in
+ * [leading, *trailing] order (out[0] is the final quotient, the leading
+ * coord). ``out`` must have room for at least ROCKE_TV_MAX_RANK entries. */
+rocke_status_t rocke_tv_tile_origin_decode_i64(rocke_ir_builder_t* b,
+                                               rocke_value_t* m0_i64,
+                                               rocke_value_t* const* dims_i64,
+                                               int num_dims,
+                                               rocke_value_t** out);
+
+/* carry_decode_i32(b, d_i32, origin_coords, dims_i32, num_dims, out): the
+ * addr64 per-lane M-decode carry propagation. ``origin_coords`` is
+ * ``num_dims + 1`` entries in [leading, *trailing] order (as produced by
+ * rocke_tv_tile_origin_decode_i64, each narrowed to i32 by the caller);
+ * ``dims_i32`` is ``num_dims`` entries, same trailing order. Writes this
+ * lane's [leading, *trailing] coords to out[0..num_dims].
+ * Returns ROCKE_ERR_VALUE if num_dims < 0. */
+rocke_status_t rocke_tv_carry_decode_i32(rocke_ir_builder_t* b,
+                                         rocke_value_t* d_i32,
+                                         rocke_value_t* const* origin_coords,
+                                         rocke_value_t* const* dims_i32,
+                                         int num_dims,
+                                         rocke_value_t** out);
 
 /* ----------------------------------------------------------------- TensorView */
 

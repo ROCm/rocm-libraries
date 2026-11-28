@@ -153,6 +153,85 @@ def test_fwd_abi_is_pipeline_independent(label, pipeline, extra):
     )
 
 
+def test_fwd_addr64_abi_widens_only_the_n_facing_fields():
+    """addr64: only the byte triple, ``p_M``, and the strides that
+    multiply a possibly-huge leading coord widen to i64; every other
+    field, and the field *order*, matches the i32 ABI exactly (minus the
+    dropped ``m_`` magic pair)."""
+    i32_names = conv_arg_names(direction="fwd")
+    addr64_names = conv_arg_names(direction="fwd", addr64=True)
+
+    i64_fields = {
+        "A_bytes",
+        "B_bytes",
+        "D_bytes",
+        "p_M",
+        "p_A_stride_n",
+        "p_B_stride_k",
+        "p_D_stride_n",
+    }
+    got_i64 = {n for n, k in addr64_names if k == "i64"}
+    assert got_i64 == i64_fields
+
+    # Every other addr64 entry keeps its i32-ABI kind, and the m_ magic pair
+    # is dropped but nothing else is reordered.
+    i32_filtered = [
+        (n, k) for n, k in i32_names if not n.startswith("p_magic_m_")
+    ]
+    addr64_as_i32 = [(n, "i32" if n in i64_fields else k) for n, k in addr64_names]
+    assert addr64_as_i32 == i32_filtered
+
+
+def test_fwd_addr64_abi_rejects_split_k_and_3d():
+    with pytest.raises(ValueError, match="split_k"):
+        conv_arg_names(direction="fwd", addr64=True, two_stage=True)
+    with pytest.raises(ValueError, match="is_3d"):
+        conv_arg_names(direction="fwd", addr64=True, is_3d=True)
+    with pytest.raises(ValueError, match="fwd-only"):
+        conv_arg_names(direction="wgrad", addr64=True)
+
+
+def test_fwd_addr64_signature_matches_arg_names():
+    sig = conv_args_signature("fp16", addr64=True)
+    assert [a["name"] for a in sig] == [
+        n for n, _ in conv_arg_names(direction="fwd", addr64=True)
+    ]
+    by_name = {a["name"]: a for a in sig}
+    assert by_name["A_bytes"]["type"] == "i64"
+    assert by_name["A_bytes"]["size_bytes"] == 8
+    assert by_name["p_A_stride_hi"]["type"] == "i32"
+    assert by_name["p_A_stride_hi"]["size_bytes"] == 4
+
+
+def test_i64_kernarg_kind_is_8_byte_aligned():
+    """The ``"i64"`` ``ArgSpec`` kind (large-tensor ``addr64`` ABI) is now
+    produced by the fwd addr64 arg-name list -- this pins the signature
+    builder's handling of it in isolation regardless. Existing i32/pointer
+    entries (the non-addr64 ABI) must be unaffected."""
+    from kernels.common.conv_abi import _conv_signature
+
+    sig = _conv_signature(
+        [("A", "a"), ("A_bytes", "i64"), ("p_N", "i32")], "fp16", "fp16", "fp16"
+    )
+    assert [a["type"] for a in sig] == ["ptr<f16, global>", "i64", "i32"]
+    assert [a["size_bytes"] for a in sig] == [8, 8, 4]
+    # Every existing i32-only signature is unaffected by the new kind.
+    assert all(
+        a["type"] != "i64"
+        for a in conv_args_signature("fp16", direction="fwd", is_3d=True)
+    )
+
+
+def test_emit_param_block_declares_an_i64_param():
+    from rocke.core.ir import I64, IRBuilder
+    from kernels.common._conv_implicit_gemm_common import emit_param_block
+
+    b = IRBuilder("i64_param_block")
+    out = emit_param_block(b, [("p_N", "i32"), ("total_bytes", "i64")])
+    assert out["total_bytes"].type is I64
+    assert [p.name for p in b.kernel.params] == ["p_N", "total_bytes"]
+
+
 # ---------------------------------------------------------------------
 # wgrad — one case per optional trailing-arg combination
 # ---------------------------------------------------------------------

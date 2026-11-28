@@ -52,7 +52,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional, Sequence, Tuple, Union
 
-from ..core.ir import BF16, F16, F32, IRBuilder, Value
+from ..core.ir import BF16, F16, F32, I64, IRBuilder, Value
 from .atoms import MfmaAtom
 
 if TYPE_CHECKING:
@@ -153,6 +153,7 @@ class DirectEpilogue:
         d_rsrc: Value,
         bounds: Optional[Tuple[Value, Value]] = None,
         vec_in_acc: bool = False,
+        m_origin_i64: Optional[Value] = None,
     ) -> None:
         """Issue all per-(mi, ni)-tile stores.
 
@@ -166,9 +167,21 @@ class DirectEpilogue:
         `i` -> `k_out`). When true, we emit one `buffer_store_vN_f16`
         per atom-tile per lane instead of `c_per_lane` scalar stores.
 
-        `bounds`: `(M, N)` i32 SSA values; if provided, per-element
-        stores are guarded by `m < M && n < N`. Pass `None` for
-        always-in-bounds tiles.
+        `bounds`: `(M, N)` SSA values; if provided, per-element stores are
+        guarded by `m < M && n < N`. Pass `None` for always-in-bounds tiles.
+        `N` is always i32. `M` is i32, unless `m_origin_i64` is set, in which
+        case it must be i64 (see below).
+
+        `m_origin_i64`: the large-tensor (``addr64``) tile origin.
+        Pass `grid.block_m_off_i64` (from `grid.bind(m_origin_i64=True)`) to
+        opt in. `grid.block_m_off` is `block_id * tile_m` in i32 -- exactly
+        the product `addr64` exists to avoid overflowing for a huge M -- so
+        when this is set, `addr_fn` is called with the bounded *local* M
+        delta (everything but that product) instead of the absolute M row,
+        and the OOB check against `bounds[0]` adds `m_origin_i64` to that
+        delta in i64 instead of comparing the i32 absolute value. Default
+        `None` keeps every existing caller's emitted IR byte-for-byte
+        unchanged -- confirmed by `check_byte_identity.py` (no `--only`).
         """
         atom = self.atom
         grid = self.grid
@@ -192,10 +205,15 @@ class DirectEpilogue:
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):
                 acc = accs[mi * mfmas_n + ni]
-                atom_m_off = b.add(
-                    b.add(grid.block_m_off, warp_m_off),
-                    b.const_i32(mi * atom.m),
-                )
+                if m_origin_i64 is None:
+                    atom_m_off = b.add(
+                        b.add(grid.block_m_off, warp_m_off),
+                        b.const_i32(mi * atom.m),
+                    )
+                else:
+                    # The addr64 path: local delta only (see m_origin_i64's
+                    # docstring) -- grid.block_m_off's product stays unused.
+                    atom_m_off = b.add(warp_m_off, b.const_i32(mi * atom.m))
                 atom_n_off = b.add(
                     b.add(grid.block_n_off, warp_n_off),
                     b.const_i32(ni * atom.n),
@@ -211,7 +229,12 @@ class DirectEpilogue:
                     m_val = b.add(atom_m_off, row_off)
                     n_val = b.add(atom_n_off, col_off)
                     ok = self._bounds_check(
-                        b, m_val, n_val, bounds, vec_n=atom.c_per_lane
+                        b,
+                        m_val,
+                        n_val,
+                        bounds,
+                        vec_n=atom.c_per_lane,
+                        m_origin_i64=m_origin_i64,
                     )
                     off_elems, valid = addr_fn(b, m_val, n_val)
                     if ok is not None:
@@ -272,7 +295,9 @@ class DirectEpilogue:
                         row_off, col_off = atom.lane_to_output(b, grid.lane, i)
                         m_val = b.add(atom_m_off, row_off)
                         n_val = b.add(atom_n_off, col_off)
-                        ok = self._bounds_check(b, m_val, n_val, bounds, vec_n=1)
+                        ok = self._bounds_check(
+                            b, m_val, n_val, bounds, vec_n=1, m_origin_i64=m_origin_i64
+                        )
                         off_elems, valid = addr_fn(b, m_val, n_val)
                         if ok is not None:
                             ok = b.land(ok, valid) if valid is not None else ok
@@ -302,12 +327,21 @@ class DirectEpilogue:
         bounds: Optional[Tuple[Value, Value]],
         *,
         vec_n: int = 1,
+        m_origin_i64: Optional[Value] = None,
     ) -> Optional[Value]:
-        """Compute `m < M && (n + vec_n - 1) < N` (or None)."""
+        """Compute `m < M && (n + vec_n - 1) < N` (or None).
+
+        `m_origin_i64` set (the addr64 tile origin; see `store`'s docstring)
+        means `m` is the local delta, not the absolute M row, and `M` is i64:
+        the check becomes `(m_origin_i64 + zext(m)) < M` in i64.
+        """
         if bounds is None:
             return None
         M, N = bounds
-        m_ok = b.cmp_lt(m, M)
+        if m_origin_i64 is None:
+            m_ok = b.cmp_lt(m, M)
+        else:
+            m_ok = b.cmp_lt(b.add(m_origin_i64, b.zext(m, I64)), M)
         if vec_n > 1:
             n_end = b.add(n, b.const_i32(vec_n))
             n_ok = b.cmp_le(n_end, N)
@@ -493,7 +527,10 @@ class CShuffleEpilogue:
         addr_fn: AddrFn,
         d_rsrc: Value,
         bounds: Optional[Tuple[Value, Value]] = None,
+        m_origin_i64: Optional[Value] = None,
     ) -> None:
+        """See `DirectEpilogue.store` for the `bounds` / `m_origin_i64`
+        contract -- identical here, applied to this store's own `m_val`."""
         atom = self.atom
         op = self.mma_op
         grid = self.grid
@@ -661,9 +698,11 @@ class CShuffleEpilogue:
             col_v = b.mod(vec_idx, c_tile_n_div_vec)
             col = b.mul(col_v, b.const_i32(sv)) if sv > 1 else col_v
 
-            m_val = b.add(grid.block_m_off, row)
+            m_val = row if m_origin_i64 is not None else b.add(grid.block_m_off, row)
             n_val = b.add(grid.block_n_off, col)
-            ok = DirectEpilogue._bounds_check(b, m_val, n_val, bounds, vec_n=sv)
+            ok = DirectEpilogue._bounds_check(
+                b, m_val, n_val, bounds, vec_n=sv, m_origin_i64=m_origin_i64
+            )
             off_elems, valid = addr_fn(b, m_val, n_val)
             ok = (
                 b.land(ok, valid)

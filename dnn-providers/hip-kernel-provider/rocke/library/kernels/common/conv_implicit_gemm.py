@@ -61,6 +61,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 from rocke.core.ir import (
     F32,
     I32,
+    I64,
     IRBuilder,
     KernelDef,
     PtrType,
@@ -77,6 +78,8 @@ from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.tensor_view import (
     make_buffer_resource,
+    make_tile_buffer_resource,
+    tile_origin_decode_i64,
 )
 from rocke.helpers.transforms import (
     TensorDescriptor,
@@ -109,8 +112,12 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     emit_wavelet_kloop_dynamic,
     make_a_descriptor,
     make_a_descriptor_dynamic,
+    make_a_descriptor_addr64,
     make_b_descriptor_dynamic,
     make_d_descriptor_dynamic,
+    make_d_descriptor_addr64,
+    addr64_a_origin_bytes,
+    addr64_d_origin_bytes,
     magic_divmod,
     mul_u24,
 )
@@ -356,6 +363,12 @@ class ImplicitGemmConvSpec:
     # launch. Bakes the degree: the launch passes ks_count == S.
     split_k_cluster: int = 0
 
+    # Large-tensor forward addressing (64-bit tile origin + i32 per-lane
+    # delta, no magic division on the M decode). Phase 0 only --
+    # no builder reads this yet, so ``validate()`` refuses ``True`` rather
+    # than silently building the plain i32 kernel under a tagged name.
+    addr64: bool = False
+
     @property
     def block_size(self) -> int:
         return self.warp_m * self.warp_n * self.wave_size
@@ -462,10 +475,42 @@ class ImplicitGemmConvSpec:
                 # tells it from an fp32 kernel with the same atom shape. Last,
                 # and only when set, so every existing name is unchanged.
                 "tf32": self.data.is_tf32,
+                # Large-tensor addressing (see the field's docstring). Last,
+                # and only when set, so every existing name is unchanged.
+                "a64": self.addr64,
             },
         )
 
     def validate(self) -> None:
+        if self.addr64:
+            # Phase 1 slice A's scope:
+            # 2D, MFMA, non-split, non-grouped, non-merged, non-pointwise,
+            # no chiplet swizzle (it computes block_m_off differently,
+            # bypassing grid.block_m_off/_i64 -- see conv_implicit_gemm.py's
+            # chiplet_swizzle branch). WMMA/op.family is checked in the
+            # builder (arch-dependent, not knowable here).
+            #
+            # KNOWN GAP: this Python-engine path has no C++ mirror yet (only
+            # the ABI/primitives do) -- platform/AGENTS.md's byte-identity
+            # rule is not satisfied for the kernel body. Do not add an
+            # addr64 config to the conv_implicit_gemm byte-identity parity
+            # family until the C++ mirror lands.
+            if self.problem.is_3d:
+                raise ValueError("addr64 does not yet support is_3d (Phase 1 slice A)")
+            if self.split_k > 1 or self.split_k_cluster > 0:
+                raise ValueError("addr64 does not yet support split-K (Phase 1 slice A)")
+            if self.group_merge > 1:
+                raise ValueError("addr64 does not yet support group_merge (Phase 1 slice A)")
+            if self.problem.groups > 1:
+                raise ValueError("addr64 does not yet support grouped conv (Phase 1 slice A)")
+            if self.problem.is_pointwise:
+                raise ValueError("addr64 does not yet support is_pointwise (Phase 1 slice A)")
+            if self.chiplet_swizzle:
+                raise ValueError(
+                    "addr64 does not yet support chiplet_swizzle (Phase 1 slice A)"
+                )
+            if self.pipeline == "wavelet":
+                raise ValueError("addr64 does not yet support the wavelet pipeline")
         # ``ImplicitGemmConvSpec.groups`` (the legacy P86 field) must not
         # contradict the authoritative ``problem.groups``. The kernel body reads
         # the problem's grouping; the spec field is kept for back-compat and, if
@@ -1397,9 +1442,13 @@ def _build_implicit_gemm_conv_impl(
         "D", PtrType(ir_dtype_d, "global"), noalias=True, writeonly=True, align=16
     )
     extra_context = extra_params(b) if extra_params is not None else None
-    A_bytes = b.param("A_bytes", I32)
-    B_bytes = b.param("B_bytes", I32)
-    D_bytes = b.param("D_bytes", I32)
+    # addr64 (large-tensor forward addressing, plan section 4): the byte
+    # triple widens to i64. Every other kernarg kind this builder declares
+    # directly (as opposed to through emit_param_block below) stays i32.
+    _bytes_kind = I64 if spec.addr64 else I32
+    A_bytes = b.param("A_bytes", _bytes_kind)
+    B_bytes = b.param("B_bytes", _bytes_kind)
+    D_bytes = b.param("D_bytes", _bytes_kind)
 
     # ---- Runtime problem-dimension parameters (AOT) -------------------------
     # Every problem dimension that was previously baked as b.const_i32(p.X) is
@@ -1410,7 +1459,9 @@ def _build_implicit_gemm_conv_impl(
     #
     # The block is emitted straight from the ordered ABI list so the kernel's
     # parameter order and conv_args_signature() cannot drift apart.
-    params = emit_param_block(b, conv_fwd_problem_block(is_3d=p.is_3d))
+    params = emit_param_block(
+        b, conv_fwd_problem_block(is_3d=p.is_3d, addr64=spec.addr64)
+    )
     p_N = params["p_N"]
     p_Hi = params["p_Hi"]
     p_Wi = params["p_Wi"]
@@ -1481,6 +1532,11 @@ def _build_implicit_gemm_conv_impl(
     # legacy ``MfmaAtom`` (``spec.atom``) is only used by the MFMA-specific
     # phases; it is ``None`` on the WMMA path.
     op = _resolve_conv_op(spec, arch)
+    if spec.addr64 and op.family != "mma":
+        raise ValueError(
+            f"addr64 is only implemented for the MFMA path (got op.family="
+            f"{op.family!r} for arch={arch!r})"
+        )
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
@@ -1518,7 +1574,7 @@ def _build_implicit_gemm_conv_impl(
         warp_m=spec.warp_m,
         warp_n=spec.warp_n,
         wave_size=spec.wave_size,
-    ).bind(b, block_m_axis="y", block_n_axis="x")
+    ).bind(b, block_m_axis="y", block_n_axis="x", m_origin_i64=spec.addr64)
     tid = grid.tid
     lane = grid.lane
     warp_id = grid.warp_id
@@ -1579,6 +1635,26 @@ def _build_implicit_gemm_conv_impl(
     else:
         block_m_off_v = grid.block_m_off
         block_n_off_v = grid.block_n_off
+
+    # addr64 (large-tensor forward addressing, plan section 3): decode the
+    # tile's i64 origin once per workgroup from grid.block_m_off_i64 (see
+    # WarpGrid.bind(m_origin_i64=True) above). validate() keeps addr64 off
+    # the chiplet_swizzle / split / grouped / 3-D / pointwise paths, so this
+    # is the only place in the kernel that reads block_m_off_i64.
+    if spec.addr64:
+        _ho_dim_i64 = b.zext(p_Ho, I64)
+        _wo_dim_i64 = b.zext(p_Wo, I64)
+        _n0_i64, _ho0_i64, _wo0_i64 = tile_origin_decode_i64(
+            b, grid.block_m_off_i64, [_ho_dim_i64, _wo_dim_i64]
+        )
+        _addr64_origin_coords = [
+            b.trunc(_n0_i64, I32),
+            b.trunc(_ho0_i64, I32),
+            b.trunc(_wo0_i64, I32),
+        ]
+    else:
+        _n0_i64 = None
+        _addr64_origin_coords = None
 
     # Grouped conv (groups > 1): the group index lives on grid.z (CK Tile puts
     # the group on the grid and offsets per-group). Each block computes one
@@ -1689,6 +1765,17 @@ def _build_implicit_gemm_conv_impl(
         # at g*cpg. Ungrouped, cpg == C and the base is zero, so nothing is
         # emitted and the flat A offset stays byte-identical.
         _pw_a_chan_base = b.mul(group_idx, p_cpg) if grouped else None
+    elif spec.addr64:
+        A_desc = make_a_descriptor_addr64(
+            b, params, origin_coords=_addr64_origin_coords
+        )
+        # p_B_stride_k is i64 under the addr64 ABI (the byte triple's
+        # sibling strides widen together), but B's descriptor still does
+        # i32 arithmetic (its footprint is bounded by the filter size,
+        # never by N -- plan section 3), so narrow it back for this call.
+        _b_params = dict(params, p_B_stride_k=b.trunc(params["p_B_stride_k"], I32))
+        B_desc = make_b_descriptor_dynamic(b, _b_params, is_3d=False)
+        _c_M_ir = _c_C_ir = _c_K_ir = _always_valid = None
     else:
         A_desc = make_a_descriptor_dynamic(
             b,
@@ -1708,9 +1795,47 @@ def _build_implicit_gemm_conv_impl(
     # stores -- the canonical AMDGPU tail-safe load idiom used for
     # both the conv padding-zone reads and the tail-of-grid epilogue
     # stores.
-    a_buf_rsrc = make_buffer_resource(b, A, num_bytes=A_bytes)
-    b_buf_rsrc = make_buffer_resource(b, Bp, num_bytes=B_bytes)
-    d_buf_rsrc = make_buffer_resource(b, D, num_bytes=D_bytes)
+    #
+    # addr64: A/D route through make_tile_buffer_resource instead, with an
+    # i64 tile origin (n0 * stride_n -- see addr64_a_origin_bytes /
+    # addr64_d_origin_bytes) folded into the pointer, since A_bytes/D_bytes
+    # and the strides are i64 under this ABI. B is unaffected (plan section
+    # 3: its footprint is bounded by the filter size, never by N).
+    if spec.addr64:
+        _a_elem_bytes = {"fp16": 2, "f16": 2, "bf16": 2, "fp32": 4}.get(
+            spec.data.dtype_a, 2
+        )
+        a_buf_rsrc = make_tile_buffer_resource(
+            b,
+            A,
+            origin_i64=addr64_a_origin_bytes(
+                b, params, n0_i64=_n0_i64, elem_bytes=_a_elem_bytes
+            ),
+            total_bytes_i64=A_bytes,
+        )
+    else:
+        a_buf_rsrc = make_buffer_resource(b, A, num_bytes=A_bytes)
+    # B's footprint is always small (bounded by the filter size, never by N
+    # -- plan section 3), so its buffer resource stays i32 even under
+    # addr64, where B_bytes is an i64 kernarg (the ABI widens the whole
+    # byte triple together, but only A/D route through an i64 origin).
+    b_buf_rsrc = make_buffer_resource(
+        b, Bp, num_bytes=b.trunc(B_bytes, I32) if spec.addr64 else B_bytes
+    )
+    if spec.addr64:
+        _d_elem_bytes = {"fp16": 2, "f16": 2, "bf16": 2, "fp32": 4}.get(
+            spec.data.dtype_d, 2
+        )
+        d_buf_rsrc = make_tile_buffer_resource(
+            b,
+            D,
+            origin_i64=addr64_d_origin_bytes(
+                b, params, n0_i64=_n0_i64, elem_bytes=_d_elem_bytes
+            ),
+            total_bytes_i64=D_bytes,
+        )
+    else:
+        d_buf_rsrc = make_buffer_resource(b, D, num_bytes=D_bytes)
     a_rsrc = a_buf_rsrc.rsrc
     b_rsrc = b_buf_rsrc.rsrc
     d_rsrc = d_buf_rsrc.rsrc
@@ -1747,6 +1872,11 @@ def _build_implicit_gemm_conv_impl(
         if a_mhw_index_fn is not None:
             n_v, ho_v, wo_v = a_mhw_index_fn(b_, row, grid)
             return A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val, **_a_group_kw)
+        if spec.addr64:
+            # The local delta from the tile's i64 origin -- not
+            # block_m_off_v + row, which would read a (possibly already
+            # i32-wrapped) absolute M row. See make_a_descriptor_addr64.
+            return A_desc.offset(b_, m=row, k=k_val)
         m_val = (
             m_index_fn(b_, row, grid)
             if m_index_fn is not None
@@ -1806,6 +1936,11 @@ def _build_implicit_gemm_conv_impl(
             k_ok = b_.cmp_lt(n_val, _c_K_ir)
             c_ok = b_.cmp_lt(kg, _c_C_ir)
             return off, b_.land(k_ok, c_ok)
+        if spec.addr64:
+            # b_offset_split reads params["p_B_stride_k"] directly, which is
+            # i64 under this ABI; B_desc (built from _b_params, narrowed
+            # back to i32 -- see above) is the addr64-safe path.
+            return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
         if split_ab:
             return b_offset_split(b_, k_out, kg)
         return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
@@ -2273,6 +2408,15 @@ def _build_implicit_gemm_conv_impl(
                 return b_.add(b_.mul(m_val, p_K), k_out), _always_valid_d
             return b_.add(b_.mul(m_val, p_kpg), n_val), _always_valid_d
 
+    elif spec.addr64:
+        D_desc = make_d_descriptor_addr64(b, params, origin_coords=_addr64_origin_coords)
+        _k_out_grp_base = None
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            # m_val is already the local delta from the tile's i64 origin
+            # (CShuffleEpilogue/DirectEpilogue.store's m_origin_i64 path).
+            return D_desc.offset(b_, m=m_val, k_out=n_val)
+
     else:
         D_desc = make_d_descriptor_dynamic(b, params, is_3d=p.is_3d)
         # Grouped conv: the per-warp N coord is within-group (n_val < kpg);
@@ -2345,6 +2489,7 @@ def _build_implicit_gemm_conv_impl(
                 addr_fn=d_addr,
                 d_rsrc=d_rsrc,
                 bounds=(p_M, c_N_bound),
+                m_origin_i64=grid.block_m_off_i64 if spec.addr64 else None,
             )
         elif op.family == "wmma":
             # RDNA/WMMA keeps the explicit per-warp/lane decomposition; it
@@ -2374,6 +2519,7 @@ def _build_implicit_gemm_conv_impl(
                 addr_fn=d_addr,
                 d_rsrc=d_rsrc,
                 bounds=(p_M, c_N_bound),
+                m_origin_i64=grid.block_m_off_i64 if spec.addr64 else None,
             )
 
     if spec.pipeline == "wavelet":

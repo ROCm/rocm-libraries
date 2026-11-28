@@ -429,6 +429,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
             "dy_halo_kouter_pad",
             "halo_max_wo",
             "split_k_cluster",
+            "addr64",
         ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]

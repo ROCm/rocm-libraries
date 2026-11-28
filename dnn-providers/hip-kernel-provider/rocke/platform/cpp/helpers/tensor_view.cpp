@@ -1076,6 +1076,117 @@ rocke_status_t rocke_tv_make_buffer_resource(rocke_ir_builder_t* b,
     return ROCKE_OK;
 }
 
+rocke_status_t rocke_tv_make_tile_buffer_resource(rocke_ir_builder_t* b,
+                                                  rocke_tv_buffer_resource_t* out,
+                                                  rocke_value_t* ptr,
+                                                  rocke_value_t* origin_i64,
+                                                  rocke_value_t* total_bytes_i64,
+                                                  rocke_value_t* soffset)
+{
+    /* Python make_tile_buffer_resource:
+     *   origin_sgpr = b.to_sgpr_u32(origin_i64)
+     *   base_ptr = b.global_ptr_offset(ptr, origin_sgpr)
+     *   remaining = b.sub(total_bytes_i64, origin_sgpr)
+     *   zero = b.const_i64(0); cap = b.const_i64(2**31-1)
+     *   nonneg = b.select(b.cmp_lt(remaining, zero), zero, remaining)
+     *   clamped = b.select(b.cmp_gt(nonneg, cap), cap, nonneg)
+     *   num_records = b.trunc(clamped, I32)
+     *   return make_buffer_resource(b, base_ptr, num_bytes=num_records, soffset=soffset)
+     */
+    rocke_value_t* origin_sgpr;
+    rocke_value_t* base_ptr;
+    rocke_value_t* remaining;
+    rocke_value_t* zero;
+    rocke_value_t* cap;
+    rocke_value_t* nonneg;
+    rocke_value_t* clamped;
+    rocke_value_t* num_records;
+    if(b == NULL || out == NULL)
+        return ROCKE_ERR_VALUE;
+    origin_sgpr = rocke_b_to_sgpr_u32(b, origin_i64);
+    base_ptr = rocke_b_global_ptr_offset(b, ptr, origin_sgpr);
+    remaining = rocke_b_sub(b, total_bytes_i64, origin_sgpr);
+    zero = rocke_b_const_i64(b, 0);
+    /* Same 2**31-1 value as ROCKE_TV_OOB_SENTINEL above, for a different
+     * reason here: the AMDGPU buffer descriptor's num_records field is i32,
+     * so the i64 "remaining bytes" term must be clamped to it before the
+     * truncate below. */
+    cap = rocke_b_const_i64(b, ROCKE_TV_OOB_SENTINEL);
+    nonneg = rocke_b_select(b, rocke_b_cmp_lt(b, remaining, zero), zero, remaining);
+    clamped = rocke_b_select(b, rocke_b_cmp_gt(b, nonneg, cap), cap, nonneg);
+    num_records = rocke_b_trunc(b, clamped, rocke_i32());
+    return rocke_tv_make_buffer_resource(b, out, base_ptr, num_records, soffset);
+}
+
+rocke_status_t rocke_tv_tile_origin_decode_i64(rocke_ir_builder_t* b,
+                                               rocke_value_t* m0_i64,
+                                               rocke_value_t* const* dims_i64,
+                                               int num_dims,
+                                               rocke_value_t** out)
+{
+    /* Python tile_origin_decode_i64:
+     *   rank = len(dims_i64) + 1
+     *   tmp = m0_i64
+     *   for i in range(rank - 1, 0, -1):
+     *       dim = dims_i64[i - 1]
+     *       quot = b.div(tmp, dim)
+     *       rem = b.sub(tmp, b.mul(quot, dim))
+     *       coords[i] = rem
+     *       tmp = quot
+     *   coords[0] = tmp
+     */
+    rocke_value_t* tmp;
+    int i;
+    if(b == NULL || out == NULL || num_dims < 0)
+        return ROCKE_ERR_VALUE;
+    tmp = m0_i64;
+    for(i = num_dims; i >= 1; --i)
+    {
+        rocke_value_t* dim = dims_i64[i - 1];
+        rocke_value_t* quot = rocke_b_div(b, tmp, dim);
+        rocke_value_t* rem = rocke_b_sub(b, tmp, rocke_b_mul(b, quot, dim));
+        out[i] = rem;
+        tmp = quot;
+    }
+    out[0] = tmp;
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_tv_carry_decode_i32(rocke_ir_builder_t* b,
+                                         rocke_value_t* d_i32,
+                                         rocke_value_t* const* origin_coords,
+                                         rocke_value_t* const* dims_i32,
+                                         int num_dims,
+                                         rocke_value_t** out)
+{
+    /* Python carry_decode_i32:
+     *   trailing_origin = origin_coords[1:]
+     *   out_trailing = list(trailing_origin)
+     *   carry = d_i32
+     *   for i in range(len(trailing_origin) - 1, -1, -1):
+     *       dim = dims_i32[i]
+     *       v = b.add(trailing_origin[i], carry)
+     *       carry = b.div(v, dim)
+     *       out_trailing[i] = b.mod(v, dim)
+     *   leading = b.add(origin_coords[0], carry)
+     *   return [leading] + out_trailing
+     */
+    rocke_value_t* carry;
+    int i;
+    if(b == NULL || out == NULL || num_dims < 0)
+        return ROCKE_ERR_VALUE;
+    carry = d_i32;
+    for(i = num_dims - 1; i >= 0; --i)
+    {
+        rocke_value_t* dim = dims_i32[i];
+        rocke_value_t* v = rocke_b_add(b, origin_coords[i + 1], carry);
+        carry = rocke_b_div(b, v, dim);
+        out[i + 1] = rocke_b_mod(b, v, dim);
+    }
+    out[0] = rocke_b_add(b, origin_coords[0], carry);
+    return ROCKE_OK;
+}
+
 rocke_status_t rocke_tv_make_buffer_view(rocke_tensor_view_t* out,
                                          const rocke_tv_buffer_resource_t* rsrc,
                                          const int* shape,

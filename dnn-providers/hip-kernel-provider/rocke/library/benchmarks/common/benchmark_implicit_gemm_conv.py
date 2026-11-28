@@ -1763,6 +1763,15 @@ def main() -> int:
         "and no GPU is used. Parallelised with --jobs.",
     )
     cache_grp.add_argument(
+        "--addr64",
+        action="store_true",
+        dest="addr64",
+        help="--compile-all only: also compile the large-tensor forward-"
+        "addressing (addr64) subset -- fwd, MFMA, 2D, pipeline=mem, "
+        "non-grouped (Phase 1 slice A). Off by "
+        "default: these kernels have no C++ engine mirror yet.",
+    )
+    cache_grp.add_argument(
         "--run-from-cache",
         default=None,
         metavar="DIR",
@@ -4856,6 +4865,7 @@ def _cache_dispatch(args, arch, target, cases) -> int:
                     limit=args.limit,
                     streamk_modes=args.streamk_modes,
                     streamk_reductions=args.streamk_reductions,
+                    addr64=args.addr64,
                 ),
             )
         return rc

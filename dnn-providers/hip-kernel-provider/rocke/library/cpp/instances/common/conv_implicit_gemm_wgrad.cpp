@@ -4424,7 +4424,7 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         };
         rocke_conv_arg_list_t abi;
         ctx.params_is_3d = is_3d;
-        if(!rocke_conv_arg_names_ex("wgrad", is_3d, is_two_stage, is_streamk ? sk_red : NULL, &abi))
+        if(!rocke_conv_arg_names_ex("wgrad", is_3d, is_two_stage, is_streamk ? sk_red : NULL, /*addr64=*/false, &abi))
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: no kernarg ABI for this variant");
             return NULL;
