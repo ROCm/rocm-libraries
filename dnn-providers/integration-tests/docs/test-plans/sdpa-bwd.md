@@ -986,6 +986,13 @@ on gfx942 and gfx950 (AITER's choice there is for speed, not correctness), and g
 bound 0 and right bound 0 or unbounded (AITER's Python gate does not count them as windows; the band
 kernel computes them).
 
+On gfx950 the engine declines Dqk = Dv = 64, and Dqk = Dv with 128 < D ≤ 192, as AITER's Python gate
+does, although shipped kernels could serve them. Their DQDKDV rows are the gfx942 kernels rebuilt for
+gfx950, which AITER's C++ `fmha_v3_bwd()` would run. On MI355X they ran 1.02–1.40× the time of
+`hipkernel:flydsl_sdpa_bwd_split` at D = 64 and 1.58–3.24× at D = 192, and their FP16 DQDKDV kernels
+round toward zero, so the FlyDSL backward engines serve these graphs instead (the kernel README has
+the measurement and how the two FlyDSL engines are ranked).
+
 A dispatch outside the
 [Verified Kernel Matrix](../../../hip-kernel-provider/src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#verified-kernel-matrix)
 (kernels that passed the provider's backward GPU tests on MI300X and MI355X in PR #15484, run at

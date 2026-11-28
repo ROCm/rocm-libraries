@@ -107,7 +107,9 @@ HeadDims paddedHeadDims(const std::string& archId, int hdimQ, int hdimV);
 // backward on archId (aiter/ops/mha.py _flash_attn_backward and
 // mha_bwd.cu fmha_v3_bwd()): D % 8 != 0 on either tensor; on gfx942 anything
 // but 64 <= D <= 192 with D_qk == D_v; on gfx950 anything but
-// 64 < D <= 128 with D_qk == D_v, or D_qk = 192 with D_v = 128.
+// 64 < D <= 128 with D_qk == D_v, or D_qk = 192 with D_v = 128. gfx950 ships
+// hd64 and hd192 x hd192 rows that fmha_v3_bwd() would run; the engine
+// declines them on purpose (see the definition).
 bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t headDimV);
 
 // False for a batch-mode sliding window (MaskType::SLIDING_WINDOW) that AITER

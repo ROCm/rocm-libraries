@@ -69,11 +69,30 @@ Not every row is dispatched:
   group row, and the engine declines head dims above 128 on gfx950 except
   D_qk = 192 with D_v = 128.
 - **hd64 and hd192 x hd192 batch rows (gfx950):** vendored but not
-  dispatched. AITER's gfx950 gate (`can_impl_fmha_v3_bwd_gfx950`) sends these
-  head dims to CK, and `isBatchShapeSupported` declines them too. The hd192
-  dq_convert and dq_shuffle rows are used: D_qk = 192 with D_v = 128 keys the
-  post stage on hdim_q 192. The hd192 odo rows are not used, because odo keys
-  on padded hdim_v (128).
+  dispatched. Their DQDKDV rows are the gfx942 kernels rebuilt
+  (`_recompile`). AITER's gfx950 gate (`can_impl_fmha_v3_bwd_gfx950`) sends
+  these head dims to CK, although `fmha_v3_bwd()` would run them, and
+  `isBatchShapeSupported` declines them on purpose:
+  - They are slower. On MI355X GPUs, over bf16 and fp16, no mask and top-left
+    causal, H = 16 and S from 512 to 8192, these rows (the engine's default
+    A32 kernels) ran 1.02-1.40x the time of `hipkernel:flydsl_sdpa_bwd_split`'s
+    default kernels at hd64 and 1.58-3.24x at hd192, while the native gfx950
+    hd128 rows ran 0.71-0.88x of it. A second run on another node repeated
+    every hd64 shape and two hd128 and hd192 sizes, 5 rounds per shape with
+    the engine order rotated; it agreed, and the rounds stayed within 7% of
+    each other (PR #16337).
+  - Their fp16 DQDKDV kernels convert to fp16 by rounding toward zero
+    (`v_cvt_pkrtz_f16_f32`); the gfx950 fp16 kernels the engine dispatches
+    round to nearest even (`v_cvt_pk_f16_f32`).
+
+  The FlyDSL backward engines serve these graphs instead. Under heuristic
+  mode A or B (the frontend's default is A) their engine-level models rank
+  them. Under the static order alone (FALLBACK mode, or when neither engine
+  has a prediction), `hipkernel:flydsl_sdpa_bwd_split` ranks above
+  `hipkernel:flydsl_sdpa_bwd_merged`, which was slower than both, only
+  because its engine ID is lower. The hd192 dq_convert and dq_shuffle rows
+  are used: D_qk = 192 with D_v = 128 keys the post stage on hdim_q 192. The
+  hd192 odo rows are not used, because odo keys on padded hdim_v (128).
 
 ## Data-type contract
 
@@ -153,7 +172,12 @@ of those cases at the row's own head dims.
 
 The gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV,
 although their object names end in `_pssk`. The bf16 rows are the RTNE ones:
-the engine never selects the RTNA or RTZ rows.
+the engine never selects the RTNA or RTZ rows. fp16 rows have no rounding
+variants. Every gfx942 fp16 DQDKDV and DQ_CONVERT kernel converts to fp16 by
+rounding toward zero (`v_cvt_pkrtz_f16_f32`; gfx942 has no round-to-nearest
+packed conversion), which biases dQ, dK and dV toward zero. The FP16
+tolerance in `IntegrationGpuSdpaBackward.cpp` records how large that error
+is.
 
 Every other configuration the engine accepts is unverified, which means any
 padded head dim. That includes the gfx942 hd128 A16 rows with `pddv = 1`
