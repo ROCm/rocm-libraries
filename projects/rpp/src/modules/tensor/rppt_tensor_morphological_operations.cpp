@@ -37,6 +37,7 @@ SOFTWARE.
 RppStatus rppt_erode_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                           RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                           RpptRoiType roiType, rppHandle_t rppHandle) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
     if ((kernelSize != 3) && (kernelSize != 5) && (kernelSize != 7) && (kernelSize != 9))
         return RPP_ERROR_INVALID_ARGUMENTS;
@@ -82,6 +83,7 @@ RppStatus rppt_erode_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
 RppStatus rppt_dilate_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                            RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                            RpptRoiType roiType, rppHandle_t rppHandle) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
     if ((kernelSize != 3) && (kernelSize != 5) && (kernelSize != 7) && (kernelSize != 9))
         return RPP_ERROR_INVALID_ARGUMENTS;
@@ -132,6 +134,7 @@ RppStatus rppt_dilate_host(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 RppStatus rppt_erode(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                      RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                      RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
     if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
@@ -187,6 +190,7 @@ RppStatus rppt_erode(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
 RppStatus rppt_dilate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                       RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                       RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
     if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))

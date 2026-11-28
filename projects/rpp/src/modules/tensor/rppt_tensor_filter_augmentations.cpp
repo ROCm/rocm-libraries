@@ -39,6 +39,7 @@ RppStatus rppt_box_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
                           RpptDescPtr dstDescPtr, Rpp32u kernelSize, RpptImageBorderType borderType,
                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                           RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -203,6 +204,7 @@ RppStatus rppt_median_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t d
                              RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
                              RpptRoiType roiType, rppHandle_t rppHandle,
                              RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((kernelSize != 3) && (kernelSize != 5) && (kernelSize != 7) && (kernelSize != 9))
         return RPP_ERROR_INVALID_ARGUMENTS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
@@ -370,6 +372,7 @@ RppStatus rppt_gaussian_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
                                RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
                                RpptRoiType roiType, rppHandle_t rppHandle,
                                RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((kernelSize != 3) && (kernelSize != 5) && (kernelSize != 7) && (kernelSize != 9))
         return RPP_ERROR_INVALID_ARGUMENTS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
@@ -675,6 +678,7 @@ RppStatus rppt_emboss(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                       RpptDescPtr dstDescPtr, Rpp32f* strength, Rpp32u kernelSize,
                       RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
                       RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((kernelSize != 3) && (kernelSize != 5) && (kernelSize != 7) && (kernelSize != 9))
         return RPP_ERROR_INVALID_ARGUMENTS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
@@ -764,6 +768,7 @@ RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
                                 RpptImageBorderType borderType, RpptROIPtr roiTensorPtrSrc,
                                 RpptRoiType roiType, rppHandle_t rppHandle,
                                 RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((kernelSize != 3) && (kernelSize != 5) && (kernelSize != 7) && (kernelSize != 9))
         return RPP_ERROR_INVALID_ARGUMENTS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
