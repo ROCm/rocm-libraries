@@ -8,6 +8,11 @@ add_gtest_executable(test_tdm_real_lengths test_tdm_real_lengths.cpp)
 
 add_gtest_executable(test_element_space_clamp test_element_space_clamp.cpp)
 
+# The packed fp8/bf8 conversions of cast_tile, on the targets with fp8 support.
+if(CK_USE_OCP_FP8 OR CK_USE_FNUZ_FP8)
+    add_gtest_executable(test_cast_tile_f8 test_cast_tile_f8.cpp)
+endif()
+
 # Negative compile checks: a reference into a temporary tensor view must be rejected.
 # The object libraries are excluded from "all"; a ctest entry builds each one and passes
 # only when the build output contains the -Wdangling diagnostic for the bound reference.

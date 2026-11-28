@@ -18,6 +18,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 
+* Fixed CK Tile `cast_tile<bf8_t>` of a `float` tile encoding with the fp8 (E4M3) instruction, so bf8 tiles held fp8 codes (for example 1.0 read back as 0.5 with OCP formats). It affected bf8 outputs of the default 2D epilogues and bf8 FMHA P tiles ([#15786](https://github.com/ROCm/rocm-libraries/issues/15786)).
+
 ### Known issues
 
 ### Upcoming changes
