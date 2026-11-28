@@ -651,60 +651,25 @@ auto compare_nan_sensitive(const T& a, const T& b) ->
     // when making changes to this function.
 
     static constexpr auto sign_bit = ::rocprim::traits::get<T>().float_bit_mask().sign_bit;
-    using bit_key_type             = std::remove_cv_t<decltype(sign_bit)>;
+    using bit_key_type             = std::make_unsigned_t<std::remove_cv_t<decltype(sign_bit)>>;
+    using signed_bit_key_type      = std::make_signed_t<bit_key_type>;
 
-#if __HIP_NO_HALF_OPERATORS__ || __HIP_NO_HALF_CONVERSIONS__
-    // There are cases where downstream users compile with '__HIP_NO_HALF_OPERATORS__' or
-    // '__HIP_NO_HALF_CONVERSIONS__' set. This means that '__half::operator+' does not work
-    // and we can't apply our trick to convert -0.0 to +0.0. We must fall back to a potentially
-    // slower bit flipping/masking method.
+    // This comparator must order keys exactly like the radix key codec, which sorts the raw bits
+    // with only -0.0 folded into +0.0, because device_radix_sort merges tiles that were sorted by
+    // a radix block sort. Floating point arithmetic must not be used here: e.g. 'a + T(0)' quiets
+    // signaling NaNs, which makes the merge disagree with the block sort and corrupts the output.
     //
-    // Ideally we would use C++20 concepts to check if operator+ is valid for this type.
-    // Alternatively we could use some utility provided by libhipcxx. That way, we can catch
-    // other weird cases.
-    constexpr bool has_operator_plus = !std::is_same_v<T, __half>;
-#else
-    constexpr bool has_operator_plus = true;
-#endif
-
-    bit_key_type a_bits;
-    bit_key_type b_bits;
-    if constexpr(has_operator_plus)
+    // Map the sign-magnitude bits to two's complement: a negative key becomes minus its magnitude.
+    // -0.0 and +0.0 both become 0, and every other bit pattern (NaNs included) keeps its order.
+    const auto to_signed_bits = [](const T& key)
     {
-        // Convert -0.0 to +0.0 using floating point trick.
-        // It was concerned that when the flags -fno-signed-zeros or -funsafe-math-optimizations
-        // (or -ffast-math which controls these two) is enabled then it is optimized away, but
-        // the compiler also seems to correctly model this and does not optimize away the addition
-        // when testing with the compile flags.
-        const T zero{0};
-        const T a_plus = a + zero;
-        const T b_plus = b + zero;
-
-        a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a_plus);
-        b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b_plus);
-    }
-    else
-    {
-        a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
-        b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
-
-        // Convert -0.0 to +0.0 by flipping the sign bit. If value with the flipped signbit
-        // is all zeroes, then we have to return +0.0.
-        // input           : flipped  : bool : result
-        // 0...0000 : +0.0 : 1...0000 : true : 0...0000 : +0.0
-        // 1...0000 : -0.0 : 0...0000 : false: 0...0000 : +0.0
-        // 0...1111 : +x.y : 1...1111 : true : 0...1111 : +x.y
-        // 1...1111 : -x.y : 0...1111 : true : 0...1111 : -x.y
-        a_bits = a_bits == sign_bit ? 0 : a_bits;
-        b_bits = b_bits == sign_bit ? 0 : b_bits;
-    }
-
-    // invert negatives, put 1 into sign bit for positives
-    a_bits ^= (sign_bit & a_bits ? bit_key_type(-1) : 0) | sign_bit;
-    b_bits ^= (sign_bit & b_bits ? bit_key_type(-1) : 0) | sign_bit;
+        const bit_key_type bits = ::rocprim::detail::bit_cast<bit_key_type>(key);
+        return ::rocprim::detail::bit_cast<signed_bit_key_type>(
+            (bits & bit_key_type(sign_bit)) ? bit_key_type(bit_key_type(sign_bit) - bits) : bits);
+    };
 
     // sort numbers and NaNs according to their bit representation
-    return a_bits > b_bits;
+    return to_signed_bits(a) > to_signed_bits(b);
 }
 
 template<class T>

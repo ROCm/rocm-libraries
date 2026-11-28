@@ -21,6 +21,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 
 * Incorrect miscategorization of RDNA4 and CDNA5 GPUs.
+* Fixed `rocprim::radix_sort_keys` and `rocprim::radix_sort_pairs` (and `hipcub::DeviceRadixSort`) losing and duplicating elements when floating-point keys mix signaling and quiet NaNs, for 1025 to 1048576 items (below 100000 for `rocprim::half` and `rocprim::bfloat16`), and the matching mis-ordering of such keys in short segments of `rocprim::segmented_radix_sort_keys` and `rocprim::segmented_radix_sort_pairs`.
 
 ### Upcoming changes
 

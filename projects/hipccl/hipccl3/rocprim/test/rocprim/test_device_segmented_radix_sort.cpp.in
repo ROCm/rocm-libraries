@@ -52,6 +52,13 @@
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysLargeSegments, SortKeysLargeNumSegments);
 #endif
 
+#if ROCPRIM_TEST_SUITE_SLICE == 0 && ROCPRIM_TEST_TYPE_SLICE == 0
+    TEST(SUITE, SortPairsMixedNaNsFloat) { sort_pairs_mixed_nans<float>(); }
+    TEST(SUITE, SortPairsMixedNaNsDouble) { sort_pairs_mixed_nans<double>(); }
+    TEST(SUITE, SortPairsMixedNaNsHalf) { sort_pairs_mixed_nans<rocprim::half>(); }
+    TEST(SUITE, SortPairsMixedNaNsBfloat16) { sort_pairs_mixed_nans<rocprim::bfloat16>(); }
+#endif
+
 #if ROCPRIM_TEST_TYPE_SLICE == 0
     INSTANTIATE(params<signed char,         double,                             true,   0, 8,   0,      1000,  false, config_default>)
     INSTANTIATE(params<int,                 short,                              false,  0, 32,  0,      100,   false, config_semi_custom>)
