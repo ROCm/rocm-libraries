@@ -833,6 +833,13 @@ struct tile_scatter_gather
 
             auto window_adaptor_warp_coord = pre_computed_warp_coords_[iCoord][I0];
             auto bottom_tensor_warp_coord  = pre_computed_warp_coords_[iCoord][I1];
+#if defined(__gfx125__)
+            // gfx1250 async global->LDS loads take a per-lane LDS address (gfx950 takes a
+            // per-wave one), and the LDS tile is not gathered: its coordinate follows the thread
+            // and steps through every Y, including the gather dimensions.
+            auto lds_window_adaptor_coord = pre_computed_coords_[iCoord][I0];
+            auto lds_bottom_tensor_coord  = pre_computed_coords_[iCoord][I1];
+#endif
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -857,8 +864,13 @@ struct tile_scatter_gather
                 }();
 
                 // Use precomputed window origin & tensor descriptor
+#if defined(__gfx125__)
+                auto lds_bottom_tensor_thread_idx =
+                    window_origin + lds_window_adaptor_coord.get_bottom_index();
+#else
                 auto lds_bottom_tensor_thread_idx =
                     window_origin + window_adaptor_warp_coord.get_bottom_index();
+#endif
                 const auto lds_coord =
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
@@ -867,11 +879,32 @@ struct tile_scatter_gather
                                                      lds_coord.get_offset() / Traits::PackedSize +
                                                      lds_ys_offset / Traits::PackedSize;
 
+#if defined(__gfx125__)
+                // The DRAM address of a gathered row comes from page_idx_, so the gather
+                // dimensions must not add to the static Y offset of the DRAM access (they still
+                // do for the LDS address above).
+                constexpr auto dram_idx_ys_offset = [&]() {
+                    constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_off_ys_scatter = generate_array(
+                        [&](auto i) {
+                            return is_gather_dim(i) ? index_t{0} : index_t{idx_off_ys[i]};
+                        },
+                        number<NDimY>{});
+                    constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
+                        StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
+                        container_concat(array<index_t, NDimP>{0},
+                                         to_array<index_t, NDimY>(idx_off_ys_scatter)));
+                    return adapter_ys_offset.get_bottom_index();
+                }();
+#else
+                constexpr auto dram_idx_ys_offset = idx_ys_offset;
+#endif
                 const auto dram_ys_offset = [&]() {
                     if constexpr(static_move_ys)
                     {
                         const auto coord_ys_offset = make_tensor_coordinate(
-                            this->get_bottom_tensor_view().get_tensor_descriptor(), idx_ys_offset);
+                            this->get_bottom_tensor_view().get_tensor_descriptor(),
+                            dram_idx_ys_offset);
                         return coord_ys_offset.get_offset();
                     }
                     else
@@ -925,6 +958,16 @@ struct tile_scatter_gather
                     if constexpr(!static_move_ys)
                         move_window_adaptor_and_bottom_tensor_thread_coordinate(
                             window_adaptor_warp_coord, bottom_tensor_warp_coord, idx_diff_ps_ys);
+#if defined(__gfx125__)
+                    if constexpr(!static_move_ys)
+                    {
+                        constexpr auto lds_idx_diff_ps_ys = container_concat(
+                            generate_tuple([&](auto) { return number<0>{}; }, number<NDimP>{}),
+                            idx_diff_ys);
+                        move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                            lds_window_adaptor_coord, lds_bottom_tensor_coord, lds_idx_diff_ps_ys);
+                    }
+#endif
                 }
             });
         });
