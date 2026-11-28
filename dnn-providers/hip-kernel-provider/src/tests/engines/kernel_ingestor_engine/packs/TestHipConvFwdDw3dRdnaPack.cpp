@@ -498,6 +498,15 @@ TEST(TestHipConvFwdDw3dRdnaLaunchValues, RefusesMalformedValues)
     auto hugeGrid = savedValid();
     hugeGrid.values["n"] = int64_t{std::numeric_limits<int>::max()};
     refused(hugeGrid, "a grid beyond the launch limits");
+
+    // N x K x Do x Ho x ceil(Wo / 4) is 2^64, which wraps to 0 in int64.
+    auto wrappingGrid = savedValid({true, 1, 4, false});
+    for(const auto* name : {"n", "c", "k", "out_d", "out_h"})
+    {
+        wrappingGrid.values[name] = int64_t{1} << 16;
+    }
+    wrappingGrid.values["out_w"] = int64_t{4};
+    refused(wrappingGrid, "a grid whose item count wraps");
 }
 
 } // namespace

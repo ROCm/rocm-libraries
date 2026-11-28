@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -179,17 +180,41 @@ int64_t ceilDiv(int64_t a, int64_t b)
     return (a + b - 1) / b;
 }
 
+/// The product of @p factors (each at least 1), or @p cap + 1 once it would pass @p cap, so
+/// values near INT_MAX (reachable through a saved plan) cannot wrap it.
+int64_t cappedProduct(std::initializer_list<int64_t> factors, int64_t cap)
+{
+    int64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(factor > cap / product)
+        {
+            return cap + 1;
+        }
+        product *= factor;
+    }
+    return product;
+}
+
 /// Threads the kernel indexes along x (all of them unless uniform-k, one volume otherwise).
 int64_t gridXItems(const ConvProblem& problem, const Geometry& geometry)
 {
+    // Saturates at MAX_GRID_X_ITEMS + 1, so launchFits refuses rather than wraps.
     if(geometry.generic)
     {
-        return int64_t{problem.n} * problem.k * problem.out[0] * problem.out[1]
-               * ceilDiv(problem.out[2], GENERIC_TILE_W);
+        return cappedProduct({problem.n,
+                              problem.k,
+                              problem.out[0],
+                              problem.out[1],
+                              ceilDiv(problem.out[2], GENERIC_TILE_W)},
+                             MAX_GRID_X_ITEMS);
     }
-    const int64_t tiles = ceilDiv(problem.out[0], geometry.tileD) * ceilDiv(problem.out[1], TILE_H)
-                          * ceilDiv(problem.out[2], geometry.tileW);
-    return geometry.uniformK ? tiles : int64_t{problem.n} * problem.k * tiles;
+    const int64_t tiles = cappedProduct({ceilDiv(problem.out[0], geometry.tileD),
+                                         ceilDiv(problem.out[1], TILE_H),
+                                         ceilDiv(problem.out[2], geometry.tileW)},
+                                        MAX_GRID_X_ITEMS);
+    return geometry.uniformK ? tiles
+                             : cappedProduct({problem.n, problem.k, tiles}, MAX_GRID_X_ITEMS);
 }
 
 int64_t gridXBlocks(const ConvProblem& problem, const Geometry& geometry)
