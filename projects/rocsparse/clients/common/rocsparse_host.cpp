@@ -2787,10 +2787,13 @@ void host_bsrmm(rocsparse_handle     handle,
         return;
     }
 
-    if(transB != rocsparse_operation_none && transB != rocsparse_operation_transpose)
+    if(transB != rocsparse_operation_none && transB != rocsparse_operation_transpose
+       && transB != rocsparse_operation_conjugate_transpose)
     {
         return;
     }
+
+    const bool conj_B = (transB == rocsparse_operation_conjugate_transpose);
 
     J M = Mb * block_dim;
 
@@ -2833,7 +2836,7 @@ void host_bsrmm(rocsparse_handle     handle,
                     }
 
                     sum = std::fma(static_cast<T>(bsr_val_A[idx_A]),
-                                   static_cast<T>(dense_B[idx_B]),
+                                   static_cast<T>(conj_val(dense_B[idx_B], conj_B)),
                                    static_cast<T>(sum));
                 }
             }

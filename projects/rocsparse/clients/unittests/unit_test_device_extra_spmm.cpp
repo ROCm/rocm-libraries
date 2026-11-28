@@ -31,6 +31,9 @@
 //   library/src/level3/rocsparse_csrmm_template_row_split.cpp
 //                                                  (row-split kernels for every
 //                                                   dense column count)
+//   library/src/level3/rocsparse_bsrmm_template_*.cpp
+//                                                  (BSR kernels for every B
+//                                                   operation)
 //
 // All tests go through the public API (rocsparse_spmm, rocsparse_?csrmm). The
 // complete C matrix is compared with a host reference computed in double
@@ -76,7 +79,7 @@ namespace
                + " oC=" + std::to_string(static_cast<int>(c.order_C)) + " m=" + std::to_string(c.m)
                + " k=" + std::to_string(c.k) + " n=" + std::to_string(c.n) + " dev="
                + std::to_string(c.device) + " base=" + std::to_string(static_cast<int>(c.base))
-               + " bd=" + std::to_string(c.bd);
+               + " bd=" + std::to_string(c.bd) + " dir=" + std::to_string(static_cast<int>(c.dir));
     }
 
     // Scalar (point) CSR of a BSR matrix.
@@ -294,6 +297,41 @@ namespace
     const std::vector<rocsparse_operation> op_none = {rocsparse_operation_none};
     const std::vector<rocsparse_operation> op_nt
         = {rocsparse_operation_none, rocsparse_operation_transpose};
+
+    // BSR with rocsparse_spmm_alg_bsr: every B operation, block direction and
+    // storage order of B and C for each block dimension in bds.
+    template <typename T, typename I, typename J>
+    void bsr_sweep(rocsparse_handle            handle,
+                   const std::vector<int64_t>& bds,
+                   rocsparse_index_base        base,
+                   bool                        device)
+    {
+        for(int64_t bd : bds)
+            for(rocsparse_operation opB : op_list)
+                for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
+                    for(rocsparse_order oB : all_orders)
+                        for(rocsparse_order oC : all_orders)
+                            for(int64_t n : {1, 19})
+                            {
+                                SpmmCase c;
+                                c.fmt     = SFmt::bsr;
+                                c.alg     = rocsparse_spmm_alg_bsr;
+                                c.opB     = opB;
+                                c.order_B = oB;
+                                c.order_C = oC;
+                                c.n       = n;
+                                c.m       = 5;
+                                c.k       = 4;
+                                c.max_nnz = 3;
+                                c.bd      = bd;
+                                c.dir     = dir;
+                                c.base    = base;
+                                c.device  = device;
+                                run_spmm<T, I, J>(handle, c);
+                                if(::testing::Test::HasFatalFailure())
+                                    return;
+                            }
+    }
 
     struct ExtraSpmm : public rocsparse_ut::HandleTest
     {
@@ -634,4 +672,22 @@ TEST_F(ExtraSpmm, alpha_zero_beta_one_is_a_no_op)
             if(HasFatalFailure())
                 return;
         }
+}
+
+// ---------------------------------------------------------------------------
+// BSR: every B operation, block direction and storage order for block
+// dimensions that reach each kernel: csrmm (1), the small kernel (2), the
+// large_ext configurations (3, 5, 9, 17, 32) and the general kernel (33, 40).
+// op(B) = B^H must conjugate B (AISPARSE-1106, rocm-libraries#15880).
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, bsr_operations)
+{
+    const std::vector<int64_t> bds = {1, 2, 3, 5, 9, 17, 32, 33, 40};
+
+    bsr_sweep<rocsparse_float_complex, int32_t, int32_t>(
+        handle, bds, rocsparse_index_base_zero, false);
+    if(HasFatalFailure())
+        return;
+    bsr_sweep<rocsparse_double_complex, int64_t, int64_t>(
+        handle, bds, rocsparse_index_base_one, true);
 }

@@ -38,7 +38,8 @@ namespace rocsparse
               typename C,
               typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void bsrmmnn_small_blockdim_kernel(rocsparse_direction direction,
+    void bsrmmnn_small_blockdim_kernel(bool                conj_B,
+                                       rocsparse_direction direction,
                                        J                   mb,
                                        J                   n,
                                        int64_t             offsets_batch_stride_A,
@@ -67,6 +68,7 @@ namespace rocsparse
         }
 
         rocsparse::bsrmmnn_small_blockdim_device<BLOCKSIZE, WF_SIZE, BSR_BLOCK_DIM>(
+            conj_B,
             direction,
             mb,
             n,
@@ -97,7 +99,8 @@ namespace rocsparse
               typename C,
               typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void bsrmmnt_small_blockdim_kernel(rocsparse_direction direction,
+    void bsrmmnt_small_blockdim_kernel(bool                conj_B,
+                                       rocsparse_direction direction,
                                        J                   mb,
                                        J                   n,
                                        int64_t             offsets_batch_stride_A,
@@ -126,6 +129,7 @@ namespace rocsparse
         }
 
         rocsparse::bsrmmnt_small_blockdim_device<BLOCKSIZE, WF_SIZE, BSR_BLOCK_DIM>(
+            conj_B,
             direction,
             mb,
             n,
@@ -148,9 +152,8 @@ namespace rocsparse
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnn_template_small(rocsparse_handle          handle,
+                                            bool                      conj_B,
                                             rocsparse_direction       dir,
-                                            rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -198,6 +201,7 @@ namespace rocsparse
             bsrmm_threads,
             0,
             stream,
+            conj_B,
             dir,
             mb,
             n,
@@ -230,6 +234,7 @@ namespace rocsparse
         bsrmm_threads,                                                  \
         0,                                                              \
         stream,                                                         \
+        conj_B,                                                         \
         dir,                                                            \
         mb,                                                             \
         n,                                                              \
@@ -252,9 +257,8 @@ namespace rocsparse
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnt_template_small(rocsparse_handle          handle,
+                                            bool                      conj_B,
                                             rocsparse_direction       dir,
-                                            rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -321,9 +325,8 @@ namespace rocsparse
 #define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)    \
     template rocsparse_status rocsparse::bsrmmnn_template_small( \
         rocsparse_handle          handle,                        \
+        bool                      conj_B,                        \
         rocsparse_direction       dir,                           \
-        rocsparse_operation       trans_A,                       \
-        rocsparse_operation       trans_B,                       \
         JTYPE                     mb,                            \
         JTYPE                     n,                             \
         JTYPE                     kb,                            \
@@ -418,9 +421,8 @@ INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 #define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)    \
     template rocsparse_status rocsparse::bsrmmnt_template_small( \
         rocsparse_handle          handle,                        \
+        bool                      conj_B,                        \
         rocsparse_direction       dir,                           \
-        rocsparse_operation       trans_A,                       \
-        rocsparse_operation       trans_B,                       \
         JTYPE                     mb,                            \
         JTYPE                     n,                             \
         JTYPE                     kb,                            \

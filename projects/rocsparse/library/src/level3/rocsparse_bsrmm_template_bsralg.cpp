@@ -30,9 +30,8 @@ namespace rocsparse
 {
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnn_template_small(rocsparse_handle          handle,
+                                            bool                      conj_B,
                                             rocsparse_direction       dir,
-                                            rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -60,9 +59,8 @@ namespace rocsparse
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnt_template_small(rocsparse_handle          handle,
+                                            bool                      conj_B,
                                             rocsparse_direction       dir,
-                                            rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -91,9 +89,8 @@ namespace rocsparse
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmm_template_large_ext(bool                nn,
                                               rocsparse_handle    handle,
+                                              bool                conj_B,
                                               rocsparse_direction dir,
-                                              rocsparse_operation trans_A,
-                                              rocsparse_operation trans_B,
                                               J                   mb,
                                               J                   n,
                                               J                   kb,
@@ -122,9 +119,8 @@ namespace rocsparse
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmm_template_general(bool                      nn,
                                             rocsparse_handle          handle,
+                                            bool                      conj_B,
                                             rocsparse_direction       dir,
-                                            rocsparse_operation       trans_A,
-                                            rocsparse_operation       trans_B,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -152,11 +148,8 @@ namespace rocsparse
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnn_template_bsralg(rocsparse_handle    handle,
-                                             bool                conj_A,
                                              bool                conj_B,
                                              rocsparse_direction dir,
-                                             rocsparse_operation trans_A,
-                                             rocsparse_operation trans_B,
                                              J                   mb,
                                              J                   n,
                                              J                   kb,
@@ -188,9 +181,8 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::bsrmmnn_template_small(handle,
+                                                  conj_B,
                                                   dir,
-                                                  trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -223,9 +215,8 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::bsrmm_template_large_ext(true,
                                                     handle,
+                                                    conj_B,
                                                     dir,
-                                                    trans_A,
-                                                    trans_B,
                                                     mb,
                                                     n,
                                                     kb,
@@ -257,9 +248,8 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::bsrmm_template_general(true,
                                                   handle,
+                                                  conj_B,
                                                   dir,
-                                                  trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -290,11 +280,8 @@ namespace rocsparse
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnt_template_bsralg(rocsparse_handle    handle,
-                                             bool                conj_A,
                                              bool                conj_B,
                                              rocsparse_direction dir,
-                                             rocsparse_operation trans_A,
-                                             rocsparse_operation trans_B,
                                              J                   mb,
                                              J                   n,
                                              J                   kb,
@@ -326,9 +313,8 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::bsrmmnt_template_small(handle,
+                                                  conj_B,
                                                   dir,
-                                                  trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -361,9 +347,8 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::bsrmm_template_large_ext(false,
                                                     handle,
+                                                    conj_B,
                                                     dir,
-                                                    trans_A,
-                                                    trans_B,
                                                     mb,
                                                     n,
                                                     kb,
@@ -395,9 +380,8 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::bsrmm_template_general(false,
                                                   handle,
+                                                  conj_B,
                                                   dir,
-                                                  trans_A,
-                                                  trans_B,
                                                   mb,
                                                   n,
                                                   kb,
@@ -430,11 +414,8 @@ namespace rocsparse
 
 #define ROCSPARSE_BSRMM_TEMPLATE_BSRALG_IMPL(NAME) \
     NAME(handle,                                   \
-         conj_A,                                   \
          conj_B,                                   \
          dir,                                      \
-         trans_A,                                  \
-         trans_B,                                  \
          mb,                                       \
          n,                                        \
          kb,                                       \
@@ -492,7 +473,6 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        const bool conj_A = (trans_A == rocsparse_operation_conjugate_transpose);
         const bool conj_B = (trans_B == rocsparse_operation_conjugate_transpose);
 
         // Run different bsrmm kernels
