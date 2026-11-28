@@ -248,7 +248,9 @@ def _computeLROffsetLinear(module, kernel, writer, tileInfo):
 def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   """Apply wave-based partition offset to LR offsets.
 
-  loadRatioGR >= 2.0: no partition needed, contiguous subtiles (1x4 for A , 4x1 for B)
+  loadRatioGR >= 2.0: no partition needed when this tensor's axis has one wave, contiguous
+                      subtiles (1x4 for A , 4x1 for B).  With several waves on the axis (4x2 for B,
+                      2x4 for A) every wave still reads its own strip and needs the offset.
   loadRatioGR == 1.0: 2x2 config, each wave loads half of the subtile
   loadRatioGR == 0.5: 4x1 for A , 1x4 for B. Split in 4 subtiles groups
   """
@@ -290,11 +292,15 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     writer.sgprPool.checkIn(tmpSgpr)
     return
 
-  # Non-dual-period kernels keep the original behavior: a GR load ratio >= 2.0
-  # skips the wave-partition LR offset.  The dual-period MXFP8 kernel reuses one
-  # 256-K scale epoch across ScaleReuse data iterations (load ratio >= 2.0) and
-  # DOES need the offset, so it is exempt from the early return.
-  if tileInfo.loadRatioGR >= 2.0 and not kernel.get("_DualPeriodMXFP8"):
+  # A GR load ratio >= 2.0 means several waves cooperate on one load.  When this
+  # tensor's own axis has a single wave they all read the same strip and no
+  # wave-partition LR offset is needed.  With more than one wave on the axis
+  # (MIWaveGroup 4x2: B; 2x4: A) each wave reads a different strip, so the
+  # offset is required; skipping it makes every wave read the first strip.
+  # The dual-period MXFP8 kernel reuses one 256-K scale epoch across ScaleReuse
+  # data iterations (load ratio >= 2.0) and always takes the offset path.
+  wavesThisAxis = kernel["MIWaveGroup"][0 if tc == 'A' else 1]
+  if tileInfo.loadRatioGR >= 2.0 and wavesThisAxis == 1 and not kernel.get("_DualPeriodMXFP8"):
     return
 
   wavesize = kernel["WavefrontSize"]
