@@ -23,6 +23,7 @@ flow applies only to changes that produce asm. Everything else is read only when
 | [`PROFILING.md`](PROFILING.md) | before a perf A/B or a profiling run |
 | [`DATABASE.md`](../../../shared/stinkytofu/harness/DATABASE.md) | `$HARNESS_DB` is set, or you are asked to remember something |
 | [`MAINTAINING.md`](../../../shared/stinkytofu/harness/MAINTAINING.md) | you are asked to change this harness |
+| [`SETUP.md`](../../../shared/stinkytofu/harness/SETUP.md) | you set up a new machine |
 
 ## Rules (every task)
 
