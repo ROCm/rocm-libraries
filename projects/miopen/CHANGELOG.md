@@ -6,6 +6,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [BatchNorm] Fixed `miopenStatusUnknownError` from BatchNorm kernels that failed to compile at
+  runtime when the host C++ standard library could not be parsed by the device compiler.
+  Runtime-compiled kernels no longer include the host STL headers.
 * [Conv] Fixed an out-of-bounds shared-memory read in the CK depthwise forward and backward-data
   solvers (`ConvDepthwiseFwd2D`, `ConvDepthwiseBwdData2D`); LDS grows by up to 640 B for some instances.
 * [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by

@@ -3,10 +3,13 @@
 
 #pragma once
 
-/// Minimal std::initializer_list for runtime compilation without a host
-/// C++ standard library (field order fixed by the clang ABI).
+/// Minimal std::initializer_list for runtime compilation, never using the host
+/// C++ standard library (see miopen_type_traits.hpp; field order fixed by the
+/// clang ABI). An already-included real <initializer_list> is respected.
 
-#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<initializer_list>)
+// libstdc++ guards <initializer_list> with _INITIALIZER_LIST, libc++ with _LIBCPP_INITIALIZER_LIST.
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_INITIALIZER_LIST) && \
+    !defined(_LIBCPP_INITIALIZER_LIST) && !defined(_INITIALIZER_LIST_)
 
 #if !defined(__clang__)
 #error "the initializer_list fallback relies on clang braced-init-list lowering"
