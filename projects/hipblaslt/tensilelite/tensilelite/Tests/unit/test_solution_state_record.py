@@ -445,6 +445,14 @@ def test_custom_kernel_uniform_summation_order_is_recorded(declared):
     assert f"customKernel.uniformSummationOrder={_json(declared)}" in record_lines(record)
 
 
+def test_cluster_aid_mapping_requires_eight_xccs():
+    """No fixture sets ClusterAIDMapping; SolutionState.ClusterAIDMappingRequiresEightXccs checks C++."""
+    derived = derived_state("gfx1250-streamk-cluster-rap-probe")
+    assert list(_predicate_values(predicate_payload(derived)["hardware"], "XCCCount")) == []
+    derived["ClusterAIDMapping"] = -2
+    assert list(_predicate_values(predicate_payload(derived)["hardware"], "XCCCount")) == [8]
+
+
 def write_fixture(name):
     """The golden files of one case. Each C++ comparison reads them back."""
     derived = derived_state(name)

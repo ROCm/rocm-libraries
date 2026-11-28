@@ -901,6 +901,34 @@ TEST(SolutionState, Gfx950DeviceNameSelectsTheChip)
     EXPECT_NE(dynamic_cast<Predicates::GPU::ProcessorEqual const*>(padded.value.get()), nullptr);
 }
 
+TEST(SolutionState, ClusterAIDMappingRequiresEightXccs)
+{
+    StateOptions options;
+    options.extraIntegers = {{"ClusterAIDMapping", -2}};
+    auto        solution  = build(options);
+    auto const& hardware  = dynamic_cast<Predicates::IsSubclass<Hardware, AMDGPU> const&>(
+        *solution->hardwarePredicate);
+    auto const* all = dynamic_cast<Predicates::And<AMDGPU> const*>(hardware.value.get());
+    ASSERT_NE(all, nullptr);
+    int xccCount = 0;
+    for(auto const& child : all->value)
+        if(auto xcc = std::dynamic_pointer_cast<Predicates::GPU::XCCCountEqual>(child))
+            xccCount = xcc->value;
+    EXPECT_EQ(xccCount, 8);
+
+    AMDGPU gpu(AMDGPU::Processor::gfx942, 0, "gpu");
+    for(int count : {0, 3, 6, 8})
+    {
+        gpu.xccCount = count;
+        EXPECT_EQ((*solution->hardwarePredicate)(gpu), count == 8) << count << " XCCs";
+    }
+
+    options.extraIntegers = {{"ClusterAIDMapping", -1}};
+    auto const& disabled  = dynamic_cast<Predicates::IsSubclass<Hardware, AMDGPU> const&>(
+        *build(options)->hardwarePredicate);
+    EXPECT_NE(dynamic_cast<Predicates::GPU::ProcessorEqual const*>(disabled.value.get()), nullptr);
+}
+
 TEST(SolutionState, IsaSteppingIsHexadecimal)
 {
     // ISA {9, 0, 10} is gfx90a, not gfx9010.

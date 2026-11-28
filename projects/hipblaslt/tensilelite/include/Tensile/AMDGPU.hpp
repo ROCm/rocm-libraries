@@ -272,6 +272,7 @@ namespace TensileLite
         int         wavefrontSize            = 64;
         int         simdPerCu                = 4;
         int         computeUnitCount         = 0;
+        int         xccCount                 = 0; // 0: unknown
         int         persistentDynamicGrid    = 6;
         int         persistentDynamicWGM     = 0;
         int         persistentMaxCUs         = 0;
@@ -445,7 +446,8 @@ namespace TensileLite
 
         bool operator==(AMDGPU const& rhs) const
         {
-            return processor == rhs.processor && computeUnitCount == rhs.computeUnitCount && _pciChipId == rhs._pciChipId;
+            return processor == rhs.processor && computeUnitCount == rhs.computeUnitCount
+                   && xccCount == rhs.xccCount && _pciChipId == rhs._pciChipId;
         }
 
     private:
