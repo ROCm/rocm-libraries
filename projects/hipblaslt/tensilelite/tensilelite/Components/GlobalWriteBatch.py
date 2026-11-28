@@ -1280,7 +1280,11 @@ class GlobalWriteBatchWriter:
         tmpInrSgpr = self._epilogScratchSgpr(1)
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
         self._epilogScratchFree(tmpInrSgpr)
-        if dataBeta not in self.loadedDataBeta:
+        packedHalfBeta = (self.kernel["ISA"][0] == 10 and self.gwvw == 1
+                          and self.kernel["ProblemType"]["DestDataType"].isHalf()
+                          and not self.kernel["ProblemType"]["HighPrecisionAccumulate"])
+        betaLoadKey = (dataBeta, elementIdx % 2) if packedHalfBeta else dataBeta
+        if betaLoadKey not in self.loadedDataBeta:
           # In the UseSubtileImpl NonEdge path the workgroup-level edge check is relaxed
           # (subtile-aligned remainder is allowed into NonEdge), so individual waves may
           # own rows/columns beyond the valid output region.  Gate each C load by writing
@@ -1324,9 +1328,9 @@ class GlobalWriteBatchWriter:
           else:
             module.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
                                                   overrideAfterPrimerRows=_emitOverrideRows))
-          self.loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
+          self.loadedDataBeta[betaLoadKey] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
-      self.betaLoadIssued.append(len(self.loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
+      self.betaLoadIssued.append((len(self.loadedDataBeta) + (1 if self.beta and packedHalfBeta and elementIdx % 2 == 0 else 0)) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
 
       if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none') and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         tmpInrSgpr = self._epilogScratchSgpr(1)
@@ -5849,7 +5853,7 @@ class GlobalWriteBatchWriter:
 
         if kernel["ProblemType"]["ComputeDataType"].isHalf() and not kernel["ProblemType"]["HighPrecisionAccumulate"]:
           # (h,h,h,h,h,h), internal alpha is f16 (2-16bits)
-          if sumIdxV%2:
+          if sumIdxV%2 or usePK:
             newSumIdx = sumIdxV // 2 - self.parentWriter.states.c.startVgprValu
             module.add(VMulPKF16(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx)), comment="*= alpha sumIdx=%u vi=%u"%(elementSumIdx[elementIdx], vi)))
 
