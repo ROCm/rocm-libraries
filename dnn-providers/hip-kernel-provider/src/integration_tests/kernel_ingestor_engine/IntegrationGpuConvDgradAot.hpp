@@ -18,6 +18,8 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -517,9 +519,9 @@ enum class PinOutcome
 };
 
 /// RAII: lowers the loaded provider's own batch-chunk byte limit so a small batch
-/// exercises the chunked-launch device path (DeviceTables, views into dY/dX), which no
-/// test otherwise reaches -- the kernels' real 32-bit ABI limit needs a multi-GiB image
-/// per batch element to trigger naturally.
+/// exercises the chunked-launch device path (per-slice record tables, views into dY/dX),
+/// which no test otherwise reaches -- the kernels' real 32-bit ABI limit needs a multi-GiB
+/// image per batch element to trigger naturally.
 ///
 /// Goes through the plugin's exported
 /// hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimitForTesting symbol
@@ -738,10 +740,11 @@ protected:
         }
         if(_workspace != nullptr)
         {
-            // _workspace (ws_t/ws_coa) is reused, never reallocated, across every instance
-            // this harness runs in a test process: an MFMA instance's transpose/reorganize
-            // under-writing it would otherwise read a previous sibling's correct weights
-            // and pass. 0xFF bytes are NaN in both fp16 and bf16.
+            // _workspace (sub_gemm/ws_t/ws_coa) is reused, never reallocated, across every
+            // instance this harness runs in a test process: an MFMA instance's
+            // transpose/reorganize under-writing it (or an implicit-GEMM launch skipping its
+            // table upload) would otherwise read a previous sibling's correct data and pass.
+            // 0xFF bytes are NaN in both fp16 and bf16.
             ASSERT_EQ(hipMemsetAsync(_workspace, 0xFF, _workspaceSize, _stream), hipSuccess);
         }
         // Every dX element the kernel does not write stays NaN and fails the comparison.
@@ -994,8 +997,9 @@ protected:
         ASSERT_NO_FATAL_FAILURE(executeAndVerify(*recreated, variant.dtype, reference));
     }
 
-    /// The batch-chunk device path (DeviceTables, step.views into dY/dX at an n0/n offset)
-    /// never otherwise runs: every other case's images fit the kernels' 32-bit ABI whole.
+    /// The batch-chunk device path (per-slice record tables, step.views into dY/dX at an
+    /// n0/n offset) never otherwise runs: every other case's images fit the kernels' 32-bit
+    /// ABI whole.
     /// With the chunk limit lowered for the test alone, N=3 of a 64x64x64 fp16 image (one
     /// image 524288 bytes; the limit below fits one but not two) splits into three
     /// single-image launches, each checked against the CPU reference. Only the
@@ -1051,6 +1055,55 @@ protected:
         ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
         EXPECT_EQ(detail::providerDgradImplicitLaunchCount(error) - before, 3)
             << "the plan did not run as three slices";
+    }
+
+    /// Building and destroying a plan must not touch device memory outside the caller's
+    /// buffers: a hipMalloc, hipFree or blocking copy there invalidates a global-mode stream
+    /// capture another thread holds open (PyTorch's default mode). The implicit-GEMM plan
+    /// carries record tables, which live in the caller's workspace and are uploaded on the
+    /// launch stream, so while this thread captures, another one builds and destroys that
+    /// plan, and both the build and the capture succeed. A stride-2 problem makes several
+    /// sub-GEMM records. The plan is built once beforehand without a capture, as a control.
+    void buildingAPlanKeepsAnotherThreadsCaptureValid()
+    {
+        const DgradVariant variant{"CrossThreadCapture", DataType::HALF, std::nullopt};
+        const DgradProblem problem{2, 128, 128, 32, 32, 3, 3, 2, 2, 1, 1, 1, 1, 1};
+        const std::vector<KnobSetting> knobs{KnobSetting(KERNEL_FAMILY_KNOB, IMPLICIT_GEMM_FAMILY),
+                                             benchmarkingKnob(false)};
+        auto reference = makeReference(variant, problem, 41);
+        {
+            const auto control = buildGraph(variant.dtype, problem);
+            ASSERT_NO_FATAL_FAILURE(buildAndCompile(*control, knobs));
+            ASSERT_NO_FATAL_FAILURE(executeAndVerify(*control, variant.dtype, reference));
+        }
+
+        hipStream_t captured = nullptr;
+        ASSERT_EQ(hipStreamCreateWithFlags(&captured, hipStreamNonBlocking), hipSuccess);
+        const std::unique_ptr<std::remove_pointer_t<hipStream_t>, hipError_t (*)(hipStream_t)>
+            capturedOwner(captured, hipStreamDestroy);
+        ASSERT_EQ(hipStreamBeginCapture(captured, hipStreamCaptureModeGlobal), hipSuccess);
+        std::string buildError;
+        std::thread builder([&] {
+            // HIP's current device is per thread.
+            if(hipSetDevice(_deviceId) != hipSuccess)
+            {
+                buildError = "hipSetDevice failed on the building thread";
+                return;
+            }
+            const auto graph = buildGraph(variant.dtype, problem);
+            buildError = tryBuild(*graph, knobs);
+        });
+        builder.join();
+        hipGraph_t graph = nullptr;
+        const auto ended = hipStreamEndCapture(captured, &graph);
+        if(graph != nullptr)
+        {
+            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
+        }
+        EXPECT_TRUE(buildError.empty()) << buildError;
+        EXPECT_EQ(ended, hipSuccess) << "building or destroying the plan on another thread "
+                                        "invalidated the capture: "
+                                     << hipGetErrorString(ended);
     }
 
     /// A graph whose tensors declare 32- or 64-byte alignment needs graph schema 1.3.0. The
