@@ -52,6 +52,31 @@ subtrees:
       - file: reference/reorder.rst
       - file: reference/utility.rst
       - file: reference/generic.rst
+        subtrees:
+        - entries:
+          - file: reference/generic/axpby.rst
+          - file: reference/generic/gather.rst
+          - file: reference/generic/scatter.rst
+          - file: reference/generic/rot.rst
+          - file: reference/generic/spvv.rst
+          - file: reference/generic/spmv.rst
+          - file: reference/generic/spsv.rst
+          - file: reference/generic/spilu0.rst
+          - file: reference/generic/spic0.rst
+          - file: reference/generic/spildlt0.rst
+          - file: reference/generic/spsm.rst
+          - file: reference/generic/spmm.rst
+          - file: reference/generic/spgemm.rst
+          - file: reference/generic/spgeam.rst
+          - file: reference/generic/spsort.rst
+          - file: reference/generic/spmat_scale.rst
+          - file: reference/generic/sddmm.rst
+          - file: reference/generic/dense_to_sparse.rst
+          - file: reference/generic/sparse_to_dense.rst
+          - file: reference/generic/sparse_to_sparse.rst
+          - file: reference/generic/extract.rst
+          - file: reference/generic/check_spmat.rst
+          - file: reference/generic/spitsv.rst
       - file: reference/reproducibility.rst
 
 - caption: About
