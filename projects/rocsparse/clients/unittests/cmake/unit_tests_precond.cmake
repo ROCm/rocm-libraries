@@ -33,5 +33,8 @@ list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_precond_itilu0.cpp
   unit_test_device_precond_legacy.cpp
   unit_test_device_precond_trm_info.cpp
+  unit_test_device_precond_triangular_scenarios.cpp
+  unit_test_device_precond_triangular_scenarios_bsr.cpp
+  unit_test_device_precond_triangular_scenarios_generic.cpp
   unit_test_device_precond_auxiliary.cpp
 )
