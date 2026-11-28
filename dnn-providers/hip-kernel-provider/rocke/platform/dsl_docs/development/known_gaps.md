@@ -327,13 +327,19 @@ cross-engine parity test and the representative golden above.
 
 **Sign-off:** rocKE attention maintainer, 2026-10-30.
 
-## 9. Tiling primitives — Python-only authoring layer
+## 9. Tiling primitives — bounded native global I/O, Python MMA authoring
 
 **Subsystem:** `python/rocke/helpers/tiling/` (the fragment verbs, `TileMma`, the MMA catalog
 `traits/data/mma_traits.json` and the backend coverage record `traits/data/backend_coverage.json`)
 
-The tiling package builds kernels in Python only: it has no C++ twin of its verbs, its MMA plan or
-driver, and the C++ engine never reads the catalog or the coverage record.
+The native `helper_rocke.helpers.tiling.h` surface mirrors static rank-1..8 global
+fragment descriptors/windows, complete or whole-word-clipped load/store verbs,
+and atom-owned operand preparation. Native-authored serialized IR is compared
+with Python across storage formats, weak alignment, clipping, runtime origins
+and bounds, and unknown leading extents. This bounded I/O port does not include
+the tiling MMA plan/driver, general LDS authoring, recorder, solver, catalog or
+coverage-record reader. Those remain Python authoring surfaces; both lowerers
+still consume their expanded ordinary IR.
 
 **What is gated:** the kernels it builds are lowered by both engines. Its MMA and fragment tests
 parametrize over `rocke.tests.engines.ENGINES` and lower each form the package emits with
@@ -345,8 +351,10 @@ drives (`tests/helpers/tiling/mma/test_mma_issuable_pairs.py`). The tensor_trans
 with `lower_with_both_engines`, which skips the whole case without the binding. The coverage record
 itself is measured with the Python lowerer at one LLVM flavor.
 
-**What unblocks a C++ twin:** a decision to port the authoring layer; until then, a new form the
-package emits gets a lowering test parametrized over `ENGINES`.
+**What unblocks the remaining C++ twins:** a decision to extend native authoring
+beyond bounded global fragment I/O. New Python-only forms still get a lowering
+test parametrized over `ENGINES`; new mirrored global transport also needs a
+native-builder emission test, not merely native lowering of Python-authored IR.
 
 ---
 

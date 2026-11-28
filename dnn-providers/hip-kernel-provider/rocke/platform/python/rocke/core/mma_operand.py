@@ -35,10 +35,34 @@ from .ir import (
     type_bits,
 )
 
+from .ir_storage import storage_vector_type
+from .storage import is_register_packed
+
+__all__ = [
+    "MmaOperandRole",
+    "mma_operand_ir_type",
+    "mma_operand_value",
+    "mma_operand_needs_reinterpret",
+    "mma_result_needs_reinterpret",
+]
+
 MmaOperandRole = Literal["a", "b", "c"]
 
 # Position of each operand among an MMA op's operands (A, B, C).
 _OPERAND_INDEX = {"a": 0, "b": 1, "c": 2}
+
+
+def mma_operand_ir_type(dtype: str, count: int) -> VectorType:
+    """Logical operand form for ``count`` A/B elements, before instruction-ABI padding.
+
+    A sub-byte format reaches the instruction in densely packed i32 words.
+    Every other format uses its logical vector; lowering may reinterpret it
+    to the instruction's register type without a numerical conversion.
+    """
+    logical = dtype_to_ir_type(dtype)
+    if is_register_packed(dtype):
+        return storage_vector_type(logical, count)
+    return VectorType(logical, count)
 
 
 def mma_operand_value(op: Op, role: MmaOperandRole) -> Value:

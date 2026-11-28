@@ -47,6 +47,7 @@ from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 from rocke.tests.engines import (
     ENGINES,
     assert_engine_rejects,
+    assert_engine_rejects_hip,
     lower_hip_with_engine,
     lower_with_engine,
 )
@@ -153,6 +154,249 @@ def test_a_hip_vector_access_without_align_claims_its_natural_alignment(engine):
     three = lower_hip_with_engine(_copy("f32", 3), _ARCH, engine=engine)
     assert "__builtin_memcpy(&v, __builtin_assume_aligned(p + c0, 4), 12);" in three
     assert "__builtin_memcpy(__builtin_assume_aligned(p + c0, 4), &v, 12);" in three
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("lanes,align", [(4, 16), (4, 1), (3, 4), (1, 1)])
+@pytest.mark.parametrize("rebased", [False, True])
+def test_hip_global_access_indexes_in_storage_units(engine, lanes, align, rebased):
+    b = IRBuilder("word_copy")
+    # The rebased case retains ptr<i32> in IR but the HIP emitter spells
+    # global_ptr_add's result as const char*. Both cases need word addressing.
+    ptr = PtrType(I32 if rebased else I8, "global")
+    src = b.param("src", ptr)
+    dst = b.param("dst", ptr)
+    si = b.param("si", I64)
+    di = b.param("di", I32)
+    if rebased:
+        src = b.global_ptr_add(src, b.const_i64(16))
+        dst = b.global_ptr_add(dst, b.const_i64(16))
+    if lanes == 1:
+        value = b.global_load(src, si, I32, align=align)
+        b.global_store(dst, di, value, align=align)
+    else:
+        value = b.global_load_vN(src, si, I32, lanes, align=align)
+        if lanes != 3:  # The builder admits 96-bit loads, not stores.
+            b.global_store_vN(dst, di, value, lanes, align=align)
+
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    src_addr = f"reinterpret_cast<const unsigned char*>({src.name[1:]}) + (int64_t)si * (int64_t)sizeof(int)"
+    dst_addr = (
+        f"const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>({dst.name[1:]}))"
+        " + (int64_t)di * (int64_t)sizeof(int)"
+    )
+    val = value.name[1:]
+    if lanes == 4 and align == 16:
+        assert f"*reinterpret_cast<const i32x4*>({src_addr})" in hip
+        assert f"*reinterpret_cast<i32x4*>({dst_addr}) = {val};" in hip
+    else:
+        payload = 4 * lanes
+        assert (
+            f"__builtin_memcpy(&{val}, __builtin_assume_aligned({src_addr}, {align}), {payload});"
+            in hip
+        )
+        if lanes != 3:
+            assert (
+                f"__builtin_memcpy(__builtin_assume_aligned({dst_addr}, {align}), &{val}, {payload});"
+                in hip
+            )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "elem,cpp_type,vec_type", [(F16, "fp16", "f16x4"), (BF16, "bf16", "bf16x4")]
+)
+@pytest.mark.parametrize("align", [8, 2])
+def test_hip_rebased_moe_weights_use_halfword_indices(
+    engine, elem, cpp_type, vec_type, align
+):
+    b = IRBuilder("grouped_moe_weights")
+    weights = b.param("weights", PtrType(elem, "global"))
+    tile_offset = b.param("tile_offset", I32)
+    # A nonzero expert slab byte rebase, followed by an element (not byte) index.
+    expert_offset = b.const_i64(256)
+    base = b.global_ptr_add(weights, expert_offset)
+    value = b.global_load_vN(base, tile_offset, elem, 4, align=align)
+
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    ptr = base.name[1:]
+    assert (
+        f"const char* {ptr} = (const char*)weights + (int64_t){expert_offset.name[1:]};"
+        in hip
+    )
+    addr = f"reinterpret_cast<const unsigned char*>({ptr}) + (int64_t)tile_offset * (int64_t)sizeof({cpp_type})"
+    if align == 8:
+        assert f"*reinterpret_cast<const {vec_type}*>({addr})" in hip
+    else:
+        assert (
+            f"__builtin_memcpy(&{value.name[1:]}, __builtin_assume_aligned({addr}, 2), 8);"
+            in hip
+        )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    ("elem", "cpp_t", "size"), [(F16, "fp16", 2), (F32, "float", 4)]
+)
+@pytest.mark.parametrize("weak", [False, True])
+def test_hip_scalar_load_store_match_the_claimed_alignment(
+    engine, elem, cpp_t, size, weak
+):
+    b = IRBuilder("scalar_copy")
+    ptr = b.param("p", PtrType(elem, "global"))
+    idx = b.param("i", I32)
+    align = 1 if weak else size
+    value = b.global_load(ptr, idx, elem, align=align)
+    b.global_store(ptr, idx, value, align=align)
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    val = value.name[1:]
+    if weak:
+        base = "reinterpret_cast<const unsigned char*>(p)"
+        offset = f" + (int64_t)i * (int64_t)sizeof({cpp_t})"
+        assert f"__builtin_assume_aligned({base}{offset}, 1), {size});" in hip
+        assert (
+            f"__builtin_assume_aligned(const_cast<unsigned char*>({base}){offset}, 1), &{val}, {size});"
+            in hip
+        )
+        assert "p[i]" not in hip
+    else:
+        assert f"{cpp_t} {val} = p[i];" in hip
+        assert f"p[i] = {val};" in hip
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_legacy_fp16_load_on_a_rebased_pointer(engine):
+    b = IRBuilder("legacy_half_load")
+    ptr = b.param("p", PtrType(F16, "global"))
+    idx = b.param("i", I32)
+    base = b.global_ptr_add(ptr, b.const_i64(16))
+    value = b.global_load_f16(base, idx)
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    val = value.name[1:]
+    addr = f"reinterpret_cast<const unsigned char*>({base.name[1:]}) + (int64_t)i * (int64_t)sizeof(fp16)"
+    assert f"__builtin_memcpy(&{val}, __builtin_assume_aligned({addr}, 2), 2);" in hip
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("align", [None, 1, 2])
+def test_hip_legacy_fp16_store_on_a_rebased_pointer(engine, align):
+    b = IRBuilder("legacy_half_store")
+    ptr = b.param("p", PtrType(F16, "global"))
+    idx = b.param("i", I32)
+    value = b.param("value", F16)
+    base = b.global_ptr_add(ptr, b.const_i64(16))
+    b.store_f16(base, idx, value)
+    store = b.kernel.body.ops[-1]
+    if align is None:
+        del store.attrs["align"]
+    elif align == 1:
+        store.attrs["align"] = align
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    addr = (
+        f"const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>({base.name[1:]}))"
+        " + (int64_t)i * (int64_t)sizeof(fp16)"
+    )
+    assert (
+        f"__builtin_memcpy(__builtin_assume_aligned({addr}, {align or 2}), &value, 2);"
+        in hip
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_legacy_fp16_store_rejects_non_fp16_value(engine):
+    b = IRBuilder("legacy_half_store_wrong_type")
+    ptr = b.param("p", PtrType(F16, "global"))
+    idx = b.param("i", I32)
+    value = b.param("value", F32)
+    base = b.global_ptr_add(ptr, b.const_i64(16))
+    b.store_f16(base, idx, value)
+    assert_engine_rejects_hip(
+        b.kernel,
+        _ARCH,
+        engine=engine,
+        error_type=ValueError,
+        message="memref.global_store: expected an f16 value",
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("rebased", [False, True])
+@pytest.mark.parametrize(
+    "method,elem,cpp_t,builtin,subscript",
+    [
+        ("global_atomic_add", I32, "int", "atomicAdd", True),
+        ("global_atomic_add", F32, "float", "atomicAdd", True),
+        ("global_atomic_add_f32", F32, "float", "atomicAdd", False),
+        ("global_flag_store", I32, "int", "__hip_atomic_store", True),
+        ("global_flag_wait_eq", I32, "int", "__hip_atomic_load", True),
+        (
+            "global_atomic_add_pk_f16",
+            F16,
+            "fp16",
+            "__builtin_amdgcn_global_atomic_fadd_v2f16",
+            False,
+        ),
+        (
+            "global_atomic_add_pk_bf16",
+            BF16,
+            "bf16",
+            "__builtin_amdgcn_global_atomic_fadd_v2bf16",
+            False,
+        ),
+    ],
+)
+def test_hip_global_atomic_uses_scalar_access_units(
+    engine, rebased, method, elem, cpp_t, builtin, subscript
+):
+    b = IRBuilder("atomic_access")
+    base = b.param("p", PtrType(elem, "global"))
+    packed = method.startswith("global_atomic_add_pk_")
+    idx = b.param("idx", I64 if packed else I32)
+    val = b.param("val", VectorType(elem, 2) if packed else elem)
+    ptr = b.global_ptr_add(base, b.const_i64(16)) if rebased else base
+    getattr(b, method)(ptr, idx, val)
+    b.ret()
+    hip = lower_hip_with_engine(b.kernel, "gfx950", engine=engine)
+    if rebased:
+        match = re.search(r"const char\* (\w+) = \(const char\*\)p \+", hip)
+        assert match is not None
+        byte_base = f"reinterpret_cast<const unsigned char*>({match[1]})"
+        read = method == "global_flag_wait_eq"
+        if not read:
+            byte_base = f"const_cast<unsigned char*>({byte_base})"
+        qualifier = "const " if read else ""
+        address = (
+            f"reinterpret_cast<{qualifier}{cpp_t}*>({byte_base}"
+            f" + (int64_t)idx * (int64_t)sizeof({cpp_t}))"
+        )
+    else:
+        address = "&p[idx]" if subscript else "p + idx"
+    if packed:
+        aligned = re.search(
+            rf"typedef {cpp_t} (\w+) __attribute__\(\(aligned\(4\)\)\);", hip
+        )
+        assert aligned is not None
+        address = f"reinterpret_cast<{aligned[1]}*>({address})"
+    assert f"{builtin}({address}, " in hip
+    assert "__builtin_memcpy" not in hip
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_hip_rebased_scalar_i1_uses_a_byte(engine):
+    b = IRBuilder("bool_copy")
+    ptr = b.param("p", PtrType(I1, "global"))
+    idx = b.param("i", I32)
+    base = b.global_ptr_add(ptr, b.const_i64(3))
+    value = b.global_load(base, idx, I1)
+    b.global_store(base, idx, value)
+    hip = lower_hip_with_engine(b.kernel, _ARCH, engine=engine)
+    addr = f"reinterpret_cast<const unsigned char*>({base.name[1:]})"
+    offset = " + (int64_t)i * (int64_t)sizeof(unsigned char)"
+    val = value.name[1:]
+    assert f"bool {val} = (*({addr}{offset}) & 1u) != 0;" in hip
+    assert (
+        f"*(const_cast<unsigned char*>({addr}){offset}) = (unsigned char){val};" in hip
+    )
 
 
 @pytest.mark.parametrize("engine", ENGINES)

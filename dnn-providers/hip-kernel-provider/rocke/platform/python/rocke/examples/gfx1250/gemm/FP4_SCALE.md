@@ -15,9 +15,9 @@ For byte `j`, bits 0–3 encode element `2*j`; bits 4–7 encode element `2*j+1`
 The E2M1 positive codes 0–7 represent `0, 0.5, 1, 1.5, 2, 3, 4, 6`;
 bit 3 is the sign, including negative zero. Every nibble is a valid code.
 The pointer ABI is `i8`, with 16-byte-aligned matrix buffers. The builder uses
-[`BitPacking`](../../../core/storage.py) for row strides and passes row bases,
-dtypes, and alignment to the shared
-[`load_matrix_fragment`](../../../helpers/mma_io.py) helper.
+logical tensor strides, a window, and the atom's fragment layout with tiling
+[`load_fragment`](../../../helpers/tiling/emit.py). The MMA operand adapter
+adds ABI padding after the live words are loaded.
 
 | Matrix path | K elements per scale | A/B scale operand |
 | --- | --- | --- |

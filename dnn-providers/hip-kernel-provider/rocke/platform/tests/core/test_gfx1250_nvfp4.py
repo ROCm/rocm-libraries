@@ -100,36 +100,45 @@ def test_nvfp4_kernel_contract(dtype, k, flavor):
     kernel = build_nvfp4_gemm(spec)
     llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
     calls = [
-        l
-        for l in llvm.splitlines()
-        if "call <8 x float> @llvm.amdgcn.wmma.scale16" in l
+        line
+        for line in llvm.splitlines()
+        if "call <8 x float> @llvm.amdgcn.wmma.scale16" in line
     ]
     assert len(calls) == k // 128
     assert all(
-        l.count("i32 4, <16 x i32>") == 2 and l.count("i32 0, i32 2, i64") == 2
-        for l in calls
+        line.count("i32 4, <16 x i32>") == 2 and line.count("i32 0, i32 2, i64") == 2
+        for line in calls
     )
     assert "fmul float %A_tensor_scale, %B_tensor_scale" in llvm
     assert llvm.count("fmul float") == 9
     assert "mul nsw float" not in llvm
     # Each final conversion consumes the tensor-scaled scalar, not the raw accumulator.
     scaled_results = {
-        l.strip().split(" = ")[0]
-        for l in llvm.splitlines()
-        if "fmul float" in l and "tensor_scale" not in l
+        line.strip().split(" = ")[0]
+        for line in llvm.splitlines()
+        if "fmul float" in line and "tensor_scale" not in line
     }
     assert len(scaled_results) == 8
-    barriers = [l for l in llvm.splitlines() if 'asm "", "=v,0"' in l]
+    barriers = [line for line in llvm.splitlines() if 'asm "", "=v,0"' in line]
     assert len(barriers) == 8
-    assert all(any(v + ")" in l for l in barriers) for v in scaled_results)
-    scaled_results = {l.strip().split(" = ")[0] for l in barriers}
-    assert all(
-        any(
-            v + " " in l or v + "," in l or v + ")" in l
-            for l in llvm.splitlines()
-            if "fptrunc" in l or "cvt" in l
-        )
-        for v in scaled_results
+    assert all(any(v + ")" in line for line in barriers) for v in scaled_results)
+    # The fragment store may pack/extract these values before narrowing. Follow
+    # each store's SSA chain back to its own barrier rather than matching names
+    # directly on the lowered conversion.
+    producers = {v.name: op for op in kernel.body.ops for v in op.results}
+    converted = []
+    for store in (
+        op for op in kernel.body.ops if op.name == "memref.global_store_typed"
+    ):
+        cast = producers[store.operands[2].name]
+        assert cast.name == "arith.cast_f32_to"
+        extract = producers[cast.operands[0].name]
+        assert extract.name == "vector.extract"
+        pack = producers[extract.operands[0].name]
+        assert pack.name == "vector.pack"
+        converted.append(pack.operands[extract.attrs["index"]].name)
+    assert sorted(converted) == sorted(
+        line.strip().split(" = ")[0] for line in barriers
     )
     hip = lower_kernel_to_hip(kernel, arch="gfx1250")
     assert "A_tensor_scale * B_tensor_scale" in hip

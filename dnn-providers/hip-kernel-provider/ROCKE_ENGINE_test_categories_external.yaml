@@ -68,6 +68,7 @@ test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
+      - "rocke_fragment_io"
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"
@@ -164,6 +165,7 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
+      - "rocke_fragment_io"
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"
@@ -339,6 +341,19 @@ test_categories:
       - "host"
       - "compiler"
       - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  grouped-moe-hip-comprehensive:
+    description: "rocKE grouped MoE HIP compiler and numerical gate on gfx950"
+    test_patterns:
+      - "rocke_gfx950_grouped_moe_hip"
+    labels:
+      - "comprehensive"
+      - "full"
+      - "gpu"
+      - "toolchain"
       - "python"
       - "ckc"
       - "hip-kernel-provider"

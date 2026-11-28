@@ -127,7 +127,9 @@ def ctest_tests(
     return json.loads(listing.stdout)["tests"]
 
 
-_CTEST_READINESS_EXEMPT = frozenset({"rocke_arch_domain_reproducibility"})
+_CTEST_READINESS_EXEMPT = frozenset(
+    {"rocke_arch_domain_reproducibility", "rocke_gfx950_grouped_moe_hip"}
+)
 
 
 def ctest_ready(build_root: Path, config: str) -> bool:
@@ -158,6 +160,7 @@ _ARCH_DOMAIN_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
 
 NATIVE_PARITY_TESTS = (
     ("ROCKE_STORAGE_TEST", "rocke_storage", "native storage parity"),
+    ("ROCKE_FRAGMENT_IO_TEST", "rocke_fragment_io", "native fragment authoring parity"),
     ("ROCKE_IR_TYPES_TEST", "rocke_ir_types", "native IR type rule parity"),
     (
         "ROCKE_NONTEMPORAL_HIP_TEST",

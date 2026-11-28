@@ -535,10 +535,13 @@ if(ROCKE_INSTALL_TESTS)
     # arch-domain reproduction gate. Keep it outside the production package:
     # CTest owns the compiler sweep; pytest checks the policy without one.
     # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
-    # installed pytest runs compile lowered IR with the same tool.
+    # installed pytest runs compile lowered IR with the same tool. The
+    # fragment transport oracle imports the ISA comparison tool from this copy.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_fragment_transport_isa.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_fragment_transport_io.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_corpus.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
@@ -642,6 +645,16 @@ if(ROCKE_INSTALL_TESTS)
            "       \"ROCKE_REQUIRE_COMPILER_TOOLS=1\")\n"
            "endif()\n")
 
+    # Grouped MoE compiles and launches only in this explicit GPU gate.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_gfx950_grouped_moe_hip python -u \"${ROCKE_TEST_CTEST_REL}tests/instances/run_gfx950_grouped_moe_hip.py\")\n"
+           "set_tests_properties(rocke_gfx950_grouped_moe_hip PROPERTIES\n"
+           "  LABELS \"ckc;python;gpu;toolchain;comprehensive;full\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};\${_rocke_compiler_tool_environment}\"\n"
+           "  RUN_SERIAL TRUE\n"
+           "  SKIP_RETURN_CODE 77\n"
+           "  TIMEOUT 300)\n")
+
     # Reproduce the committed host-flavor column from the relocated artifact.
     # This mirrors the build-tree CTest in tests/cmake/CoreTests.cmake, but deliberately
     # uses the installed package data that downstream/provider CI consumes.
@@ -708,6 +721,7 @@ if(ROCKE_INSTALL_TESTS)
           "ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_provenance.txt")
       foreach(_rocke_native_parity
               "ROCKE_STORAGE_TEST=rocke_storage"
+              "ROCKE_FRAGMENT_IO_TEST=rocke_fragment_io"
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"
               "ROCKE_NONTEMPORAL_HIP_TEST=rocke_nontemporal_hip"
               "ROCKE_UNSIGNED_INT_OPS_CLI=rocke_unsigned_int_ops"

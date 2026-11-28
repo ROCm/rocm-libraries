@@ -6,9 +6,20 @@ from dataclasses import dataclass
 
 from ...core.arch import ArchTarget
 from ...core.arch.mfma_scale import MATRIX_FORMATS, matrix_layout
-from ...core.dtypes import dtype_info, normalize_dtype
-from ...core.ir import I8, I32, IRBuilder, PtrType
-from ...helpers.mma_io import load_matrix_fragment, storage_ir_type
+from ...core.dtypes import normalize_dtype
+from ...core.ir import F32, I8, I32, IRBuilder, PtrType, dtype_to_ir_type
+from ...core.ir_storage import storage_ir_type
+from ...helpers.mma_operand import prepare_scaled_mma_operand
+from ...helpers.tiling import (
+    Fragment,
+    load_fragment,
+    make_matrix_fragment_desc,
+    make_mma_accumulator_desc,
+    make_tensor_desc,
+    make_mma_scale_desc,
+    make_window,
+    store_fragment,
+)
 from ...helpers.spec import SignatureBuilder
 
 LOWBIT_DTYPES = frozenset(MATRIX_FORMATS)
@@ -135,55 +146,70 @@ def build_block_scaled_gemm(spec, *, arch="gfx950"):
     for name in ("M", "N", "K"):
         ir.param(name, I32)
     c32 = ir.const_i32(32)
-    cN = ir.const_i32(spec.N)
     lane = ir.mod(ir.thread_id_x(), ir.const_i32(64))
-    row = ir.mod(lane, c32)
-    half = ir.div(lane, c32)
     m0 = ir.mul(ir.block_id_y(), c32)
     n0 = ir.mul(ir.block_id_x(), c32)
-    ar = ir.add(m0, row)
-    br = ir.add(n0, row)
-    abase = ir.mul(
-        ar, ir.const_i32(spec.K * dtype_info(spec.dtype_a).encoded_bits // 8)
+    a_desc = make_matrix_fragment_desc(matrix_layout(spec.dtype_a))
+    b_desc = make_matrix_fragment_desc(matrix_layout(spec.dtype_b))
+    result_desc = make_mma_accumulator_desc(atom, target=arch, result=True)
+    a_tensor = make_tensor_desc(
+        (spec.M, spec.K), (spec.K, 1), dtype_to_ir_type(spec.dtype_a)
     )
-    bbase = ir.mul(
-        br, ir.const_i32(spec.K * dtype_info(spec.dtype_b).encoded_bits // 8)
+    b_tensor = make_tensor_desc(
+        (spec.N, spec.K), (spec.K, 1), dtype_to_ir_type(spec.dtype_b)
+    )
+    groups = spec.K // 32
+    a_scales = make_tensor_desc((spec.M, groups), (groups, 1), dtype_to_ir_type("e8m0"))
+    b_scales = make_tensor_desc((spec.N, groups), (1, spec.N), dtype_to_ir_type("e8m0"))
+    scale_desc = make_mma_scale_desc(atom, target=arch)
+    c_tensor = make_tensor_desc(
+        (spec.M, spec.N), (spec.N, 1), dtype_to_ir_type(spec.dtype_c)
     )
     acc = ir.zero_vec_f32(16)
     for step in range(spec.K // 64):
-        a = load_matrix_fragment(
+        af = load_fragment(
             ir,
             A,
-            abase,
-            half,
-            step * 64,
-            dtype=spec.dtype_a,
-            layout=matrix_layout(spec.dtype_a),
+            make_window(a_tensor, (m0, step * 64)),
+            a_desc,
+            lane,
             alignment_bytes=16,
         )
-        b = load_matrix_fragment(
+        bf = load_fragment(
             ir,
             B,
-            bbase,
-            half,
-            step * 64,
-            dtype=spec.dtype_b,
-            layout=matrix_layout(spec.dtype_b),
+            make_window(b_tensor, (n0, step * 64)),
+            b_desc,
+            lane,
             alignment_bytes=16,
         )
-        group = ir.add(ir.const_i32(step * 2), half)
-        ai = ir.add(ir.mul(ar, ir.const_i32(spec.K // 32)), group)
-        bi = ir.add(ir.mul(group, cN), br)
-        sa = ir.zext(ir.global_load(AS, ai, I8, align=1), I32)
-        sb = ir.zext(ir.global_load(BS, bi, I8, align=1), I32)
-        acc = ir.mma(atom, a, b, acc, sa, sb)
-    for slot in range(16):
-        r, c = atom.dst_layout().coord(ir, lane, slot)
-        index = ir.add(ir.mul(ir.add(m0, r), cN), ir.add(n0, c))
-        ir.global_store(
-            C,
-            index,
-            ir.cast_f32_to(ir.vec_extract(acc, slot), storage_ir_type(spec.dtype_c)),
-            align=2,
+        a = prepare_scaled_mma_operand(ir, atom, "a", af)
+        b = prepare_scaled_mma_operand(ir, atom, "b", bf)
+        sa_fragment = load_fragment(
+            ir,
+            AS,
+            make_window(a_scales, (m0, step * 2)),
+            scale_desc,
+            lane,
+            alignment_bytes=1,
         )
+        sb_fragment = load_fragment(
+            ir,
+            BS,
+            make_window(b_scales, (n0, step * 2)),
+            scale_desc,
+            lane,
+            alignment_bytes=1,
+        )
+        sa = ir.zext(ir.vec_extract(sa_fragment.value, 0), I32)
+        sb = ir.zext(ir.vec_extract(sb_fragment.value, 0), I32)
+        acc = ir.mma(atom, a, b, acc, sa, sb)
+    store_fragment(
+        ir,
+        C,
+        make_window(c_tensor, (m0, n0)),
+        Fragment(result_desc, F32, acc),
+        lane,
+        alignment_bytes=16,
+    )
     return ir.kernel

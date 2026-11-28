@@ -99,6 +99,50 @@ static bool mem_streaming_arch(const char* gfx)
     return gfx && (strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx950") == 0);
 }
 
+/* Match LLVM's GEP in access-element units. In particular global_ptr_add
+ * emits a const char* even if its IR type retains a non-byte pointee. */
+static bool mem_has_typed_access_base(const rocke_value_t* ptr, const rocke_type_t* elem)
+{
+    if(ptr->op && ptr->op->opcode == ROCKE_OP_TILE_GLOBAL_PTR_ADD)
+        return false;
+    return ptr->type->kind != ROCKE_TYPE_PTR || rocke_type_eq(ptr->type->pointee, elem);
+}
+
+static const char* mem_global_byte_address(rocke_h_lowerer_t* lw,
+                                           const rocke_value_t* ptr,
+                                           const rocke_value_t* idx,
+                                           const char* cpp_t,
+                                           bool store)
+{
+    // Store destinations are writable by contract, including byte rebases.
+    const char* address = rocke_arena_printf(
+        &lw->b->arena,
+        store ? "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(%s))"
+                " + (int64_t)%s * (int64_t)sizeof(%s)"
+              : "reinterpret_cast<const unsigned char*>(%s) + (int64_t)%s * (int64_t)sizeof(%s)",
+        rocke_h_name(lw, ptr),
+        rocke_h_name(lw, idx),
+        cpp_t);
+    if(!address)
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global access address: arena allocation failed");
+    return address;
+}
+
+static const char* mem_global_access_address(rocke_h_lowerer_t* lw,
+                                             const rocke_value_t* ptr,
+                                             const rocke_value_t* idx,
+                                             const rocke_type_t* elem,
+                                             bool store = false)
+{
+    if(!mem_has_typed_access_base(ptr, elem))
+        return mem_global_byte_address(lw, ptr, idx, rocke_h_type_to_hip(lw, elem), store);
+    const char* address = rocke_arena_printf(
+        &lw->b->arena, "%s + %s", rocke_h_name(lw, ptr), rocke_h_name(lw, idx));
+    if(!address)
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global access address: arena allocation failed");
+    return address;
+}
+
 /* ================================ LDS alloc =============================== */
 
 /* Python _op_tile_smem_alloc */
@@ -518,52 +562,58 @@ static rocke_status_t _op_tile_lds_atomic_add(rocke_h_lowerer_t* lw, const rocke
 
 /* ============================= global load ============================== */
 
-/* Python _op_memref_global_load */
-static rocke_status_t _op_memref_global_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+/* Python _emit_scalar_global_load */
+static rocke_status_t mem_emit_scalar_global_load(rocke_h_lowerer_t* lw,
+                                                  const rocke_op_t* op,
+                                                  int default_align,
+                                                  const char* count_error)
 {
-    rocke_value_t *ptr, *idx;
     if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 2 || op->num_results < 1)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", count_error);
+    const auto* ptr = op->operands[0];
+    const auto* idx = op->operands[1];
+    const auto* elem = op->results[0]->type;
+    const char* cpp_t = rocke_h_type_to_hip(lw, elem);
+    const char* res = rocke_h_name(lw, op->results[0]);
+    const auto align_attr = rocke_i_align_attr(op);
+    const auto align = align_attr ? align_attr : default_align;
+    if(rocke_type_eq(elem, rocke_i1()))
     {
+        // The one-byte memory representation carries the value in its low bit.
+        const auto* address = mem_global_byte_address(lw, ptr, idx, "unsigned char", false);
+        rocke_h_emitf(lw, "bool %s = (*(%s) & 1u) != 0;", res, address);
         return lw->status;
     }
-    if(op->num_operands < 2 || op->num_results < 1)
+    const int size = rocke_i_type_bytes(elem);
+    if(mem_has_typed_access_base(ptr, elem) && align >= size)
+        rocke_h_emitf(
+            lw, "%s %s = %s[%s];", cpp_t, res, rocke_h_name(lw, ptr), rocke_h_name(lw, idx));
+    else
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_load: bad operand/result count");
+        const auto* address = mem_global_byte_address(lw, ptr, idx, cpp_t, false);
+        rocke_h_emitf(lw,
+                      "%s %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s, %lld), %d);",
+                      cpp_t,
+                      res,
+                      res,
+                      address,
+                      (long long)align,
+                      size);
     }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    rocke_h_emitf(lw,
-                  "fp16 %s = %s[%s];",
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx));
     return lw->status;
 }
 
-/* Python _op_memref_global_load_typed */
+static rocke_status_t _op_memref_global_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return mem_emit_scalar_global_load(lw, op, 2, "memref.global_load: bad operand/result count");
+}
+
 static rocke_status_t _op_memref_global_load_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx;
-    const char* cpp_t;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 2 || op->num_results < 1)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_load_typed: bad operand/result count");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    cpp_t = rocke_h_type_to_hip(lw, op->results[0]->type);
-    rocke_h_emitf(lw,
-                  "%s %s = %s[%s];",
-                  cpp_t,
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx));
-    return lw->status;
+    return mem_emit_scalar_global_load(
+        lw, op, 1, "memref.global_load_typed: bad operand/result count");
 }
 
 /* Python _op_memref_global_load_vN */
@@ -587,7 +637,9 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
     const int64_t byte_count = vec * (rocke_dtype_info(elem_name)->encoded_bits / 8);
-    const int64_t align = rocke_i_claimed_align(op, vec, rocke_i_elem_of(op->results[0]->type));
+    const auto* elem = rocke_i_elem_of(op->results[0]->type);
+    const int64_t align = rocke_i_claimed_align(op, vec, elem);
+    const char* address = mem_global_access_address(lw, ptr, idx, elem);
     const int nontemporal = mem_nontemporal(op);
     if(nontemporal < 0)
         return rocke_h_fail(
@@ -607,73 +659,85 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
                                 "nontemporal on the memcpy path (under-aligned or "
                                 "non-power-of-two payload)");
         /* Copy only the payload, not vector padding, with the IR's alignment. */
-        rocke_h_emitf(
-            lw,
-            "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s + %s, %lld), %lld);",
-            prefix,
-            (long long)vec,
-            res,
-            res,
-            rocke_h_name(lw, ptr),
-            rocke_h_name(lw, idx),
-            (long long)align,
-            (long long)byte_count);
+        rocke_h_emitf(lw,
+                      "%s%lld %s; __builtin_memcpy(&%s, __builtin_assume_aligned(%s, %lld), %lld);",
+                      prefix,
+                      (long long)vec,
+                      res,
+                      res,
+                      address,
+                      (long long)align,
+                      (long long)byte_count);
         return lw->status;
     }
     rocke_h_emitf(lw,
                   nontemporal ? "%s%lld %s = __builtin_nontemporal_load(reinterpret_cast<const "
-                                "%s%lld*>(%s + %s));"
-                              : "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
+                                "%s%lld*>(%s));"
+                              : "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s);",
                   prefix,
                   (long long)vec,
                   res,
                   prefix,
                   (long long)vec,
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx));
+                  address);
     return lw->status;
 }
 
 /* ============================= global store ============================= */
 
-/* Python _op_memref_global_store */
-static rocke_status_t _op_memref_global_store(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+/* Python _emit_scalar_global_store */
+static rocke_status_t mem_emit_scalar_global_store(rocke_h_lowerer_t* lw,
+                                                   const rocke_op_t* op,
+                                                   int default_align,
+                                                   const char* count_error)
 {
-    rocke_value_t *ptr, *idx, *val;
     if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 3)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", count_error);
+    const auto* ptr = op->operands[0];
+    const auto* idx = op->operands[1];
+    const auto* val = op->operands[2];
+    const auto* elem = val->type;
+    if(op->opcode == ROCKE_OP_MEMREF_GLOBAL_STORE && !rocke_type_eq(elem, rocke_f16()))
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_store: expected an f16 value");
+    const auto align_attr = rocke_i_align_attr(op);
+    const auto align = align_attr ? align_attr : default_align;
+    if(rocke_type_eq(elem, rocke_i1()))
     {
+        const auto* address = mem_global_byte_address(lw, ptr, idx, "unsigned char", true);
+        rocke_h_emitf(lw, "*(%s) = (unsigned char)%s;", address, rocke_h_name(lw, val));
         return lw->status;
     }
-    if(op->num_operands < 3)
+    const int size = rocke_i_type_bytes(elem);
+    if(mem_has_typed_access_base(ptr, elem) && align >= size)
+        rocke_h_emitf(lw,
+                      "%s[%s] = %s;",
+                      rocke_h_name(lw, ptr),
+                      rocke_h_name(lw, idx),
+                      rocke_h_name(lw, val));
+    else
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_store: too few operands");
+        const auto* address
+            = mem_global_byte_address(lw, ptr, idx, rocke_h_type_to_hip(lw, elem), true);
+        rocke_h_emitf(lw,
+                      "__builtin_memcpy(__builtin_assume_aligned(%s, %lld), &%s, %d);",
+                      address,
+                      (long long)align,
+                      rocke_h_name(lw, val),
+                      size);
     }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
-    rocke_h_emitf(
-        lw, "%s[%s] = %s;", rocke_h_name(lw, ptr), rocke_h_name(lw, idx), rocke_h_name(lw, val));
     return lw->status;
 }
 
-/* Python _op_memref_global_store_typed */
+static rocke_status_t _op_memref_global_store(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    return mem_emit_scalar_global_store(lw, op, 2, "memref.global_store: too few operands");
+}
+
 static rocke_status_t _op_memref_global_store_typed(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx, *val;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 3)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_store_typed: too few operands");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
-    rocke_h_emitf(
-        lw, "%s[%s] = %s;", rocke_h_name(lw, ptr), rocke_h_name(lw, idx), rocke_h_name(lw, val));
-    return lw->status;
+    return mem_emit_scalar_global_store(lw, op, 1, "memref.global_store_typed: too few operands");
 }
 
 /* Python _op_memref_global_store_vN */
@@ -697,7 +761,9 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     elem_name = mem_attr_str(op, "elem_type", "f16");
     prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
     const int64_t byte_count = n * (rocke_dtype_info(elem_name)->encoded_bits / 8);
-    const int64_t align = rocke_i_claimed_align(op, n, rocke_i_elem_of(val->type));
+    const auto* elem = rocke_i_elem_of(val->type);
+    const int64_t align = rocke_i_claimed_align(op, n, elem);
+    const char* address = mem_global_access_address(lw, ptr, idx, elem, true);
     const int nontemporal = mem_nontemporal(op);
     if(nontemporal < 0)
         return rocke_h_fail(
@@ -717,9 +783,8 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
                                 "nontemporal on the memcpy path (under-aligned or "
                                 "non-power-of-two payload)");
         rocke_h_emitf(lw,
-                      "__builtin_memcpy(__builtin_assume_aligned(%s + %s, %lld), &%s, %lld);",
-                      rocke_h_name(lw, ptr),
-                      rocke_h_name(lw, idx),
+                      "__builtin_memcpy(__builtin_assume_aligned(%s, %lld), &%s, %lld);",
+                      address,
                       (long long)align,
                       rocke_h_name(lw, val),
                       (long long)byte_count);
@@ -728,25 +793,52 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     if(nontemporal)
     {
         rocke_h_emitf(lw,
-                      "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s + %s));",
+                      "__builtin_nontemporal_store(%s, reinterpret_cast<%s%lld*>(%s));",
                       rocke_h_name(lw, val),
                       prefix,
                       (long long)n,
-                      rocke_h_name(lw, ptr),
-                      rocke_h_name(lw, idx));
+                      address);
         return lw->status;
     }
     rocke_h_emitf(lw,
-                  "*reinterpret_cast<%s%lld*>(%s + %s) = %s;",
+                  "*reinterpret_cast<%s%lld*>(%s) = %s;",
                   prefix,
                   (long long)n,
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  address,
                   rocke_h_name(lw, val));
     return lw->status;
 }
 
 /* ================================ atomics =============================== */
+
+static const char* mem_global_atomic_address(rocke_h_lowerer_t* lw,
+                                             const rocke_value_t* ptr,
+                                             const rocke_value_t* idx,
+                                             const rocke_type_t* elem,
+                                             bool store = true,
+                                             bool subscript = false)
+{
+    if(mem_has_typed_access_base(ptr, elem) && subscript)
+    {
+        const char* address = rocke_arena_printf(
+            &lw->b->arena, "&%s[%s]", rocke_h_name(lw, ptr), rocke_h_name(lw, idx));
+        if(!address)
+            rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global atomic address: arena allocation failed");
+        return address;
+    }
+    const char* address = mem_global_access_address(lw, ptr, idx, elem, store);
+    if(!mem_has_typed_access_base(ptr, elem))
+    {
+        address = rocke_arena_printf(&lw->b->arena,
+                                     "reinterpret_cast<%s%s*>(%s)",
+                                     store ? "" : "const ",
+                                     rocke_h_type_to_hip(lw, elem),
+                                     address);
+        if(!address)
+            rocke_h_fail(lw, ROCKE_ERR_OOM, "HIP global atomic address: arena allocation failed");
+    }
+    return address;
+}
 
 /* Python _op_memref_global_atomic_add */
 static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
@@ -767,11 +859,10 @@ static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const 
     val = op->operands[2];
     cpp_t = rocke_h_type_to_hip(lw, val->type);
     rocke_h_emitf(lw,
-                  "%s %s = atomicAdd(&%s[%s], %s);",
+                  "%s %s = atomicAdd(%s, %s);",
                   cpp_t,
                   rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  mem_global_atomic_address(lw, ptr, idx, val->type, true, true),
                   rocke_h_name(lw, val));
     return lw->status;
 }
@@ -867,13 +958,13 @@ static rocke_status_t _op_memref_global_flag_store(rocke_h_lowerer_t* lw, const 
     }
     scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
     ord = hip_sync_attr(lw, op, "ordering", k_hip_flag_store_orderings);
-    rocke_h_emitf(lw,
-                  "__hip_atomic_store(&%s[%s], %s, %s, %s);",
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
-                  rocke_h_name(lw, op->operands[2]),
-                  hip_atomic_order(ord),
-                  hip_memory_scope(scp));
+    rocke_h_emitf(
+        lw,
+        "__hip_atomic_store(%s, %s, %s, %s);",
+        mem_global_atomic_address(lw, op->operands[0], op->operands[1], rocke_i32(), true, true),
+        rocke_h_name(lw, op->operands[2]),
+        hip_atomic_order(ord),
+        hip_memory_scope(scp));
     return lw->status;
 }
 
@@ -890,12 +981,12 @@ static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, cons
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_eq: too few operands");
     }
     scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
-    rocke_h_emitf(lw,
-                  "while (__hip_atomic_load(&%s[%s], __ATOMIC_ACQUIRE, %s) != %s) {}",
-                  rocke_h_name(lw, op->operands[0]),
-                  rocke_h_name(lw, op->operands[1]),
-                  hip_memory_scope(scp),
-                  rocke_h_name(lw, op->operands[2]));
+    rocke_h_emitf(
+        lw,
+        "while (__hip_atomic_load(%s, __ATOMIC_ACQUIRE, %s) != %s) {}",
+        mem_global_atomic_address(lw, op->operands[0], op->operands[1], rocke_i32(), false, true),
+        hip_memory_scope(scp),
+        rocke_h_name(lw, op->operands[2]));
     return lw->status;
 }
 
@@ -915,65 +1006,51 @@ static rocke_status_t _op_memref_global_atomic_add_f32(rocke_h_lowerer_t* lw, co
     idx = op->operands[1];
     val = op->operands[2];
     rocke_h_emitf(lw,
-                  "atomicAdd(%s + %s, %s);",
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
+                  "atomicAdd(%s, %s);",
+                  mem_global_atomic_address(lw, ptr, idx, rocke_f32()),
                   rocke_h_name(lw, val));
     return lw->status;
 }
 
-/* Python _op_memref_global_atomic_add_pk_bf16 */
+static rocke_status_t mem_emit_packed_global_atomic_add(rocke_h_lowerer_t* lw,
+                                                        const rocke_op_t* op,
+                                                        const rocke_type_t* elem,
+                                                        const char* vector,
+                                                        const char* builtin_suffix)
+{
+    if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 3 || op->num_results < 1)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s: bad operand/result count", op->name);
+    const auto* name = rocke_h_name(lw, op->results[0]);
+    // Keep scalar index units but give Clang's packed builtin the required
+    // four-byte pointee alignment. The IR already requires an aligned pair.
+    rocke_h_emitf(lw,
+                  "typedef %s %s_aligned __attribute__((aligned(4)));",
+                  rocke_h_type_to_hip(lw, elem),
+                  name);
+    rocke_h_emitf(lw,
+                  "%s %s = __builtin_amdgcn_global_atomic_fadd_%s("
+                  "reinterpret_cast<%s_aligned*>(%s), %s);",
+                  vector,
+                  name,
+                  builtin_suffix,
+                  name,
+                  mem_global_atomic_address(lw, op->operands[0], op->operands[1], elem),
+                  rocke_h_name(lw, op->operands[2]));
+    return lw->status;
+}
+
 static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw,
                                                            const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx, *val;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 3 || op->num_results < 1)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_bf16: bad operand/result count");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
-    rocke_h_emitf(lw,
-                  "bf16x2 %s = __builtin_amdgcn_global_atomic_fadd_v2bf16("
-                  "%s + %s, %s);",
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
-                  rocke_h_name(lw, val));
-    return lw->status;
+    return mem_emit_packed_global_atomic_add(lw, op, rocke_bf16(), "bf16x2", "v2bf16");
 }
 
-/* Python _op_memref_global_atomic_add_pk_f16 */
 static rocke_status_t _op_memref_global_atomic_add_pk_f16(rocke_h_lowerer_t* lw,
                                                           const rocke_op_t* op)
 {
-    rocke_value_t *ptr, *idx, *val;
-    if(!rocke_h_live(lw))
-    {
-        return lw->status;
-    }
-    if(op->num_operands < 3 || op->num_results < 1)
-    {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_f16: bad operand/result count");
-    }
-    ptr = op->operands[0];
-    idx = op->operands[1];
-    val = op->operands[2];
-    rocke_h_emitf(lw,
-                  "half2 %s = __builtin_amdgcn_global_atomic_fadd_v2f16("
-                  "%s + %s, %s);",
-                  rocke_h_name(lw, op->results[0]),
-                  rocke_h_name(lw, ptr),
-                  rocke_h_name(lw, idx),
-                  rocke_h_name(lw, val));
-    return lw->status;
+    return mem_emit_packed_global_atomic_add(lw, op, rocke_f16(), "half2", "v2f16");
 }
 
 /* Python _op_memref_cooperative_global_store (P14 debug shim) */

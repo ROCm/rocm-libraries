@@ -87,12 +87,39 @@ independent integer arithmetic; numerical tests remain separate.
 
 ## Fragment loads
 
-[`storage_ir_type`](../../python/rocke/helpers/mma_io.py) chooses an addressable
+[`storage_ir_type`](../../python/rocke/core/ir_storage.py) chooses an addressable
 unit from the logical dtype. FP4/FP6 use I8; FP8/BF8 retain their nominal pointer
 types despite occupying one byte per value. This function is separate from
 `dtype_to_ir_type`.
 
-`load_matrix_fragment` takes a dtype, fragment layout, caller-selected row base,
+The client-facing transport is `rocke.helpers.tiling.load_fragment` /
+`store_fragment`. A `TensorDesc` supplies logical lengths, strides and dtype;
+a `TensorWindow` positions the view, and a dtype-free `TileDesc` supplies the
+lane/register coordinates. `make_matrix_fragment_desc` composes an atom-owned
+contiguous-chunk layout with that surface. A fragment contains only live
+storage words. The temporary `prepare_scaled_mma_operand` bridge validates
+logical format and count, and bitcasts storage and adds the selected atom's ABI
+zero tail as needed. Shared lowering operand forms are the long-term owner of
+these steps; see the [migration plan](../development/fragment_transport_migration.md#temporary-scaled-mma-abi-bridge).
+Padding is not a numerical conversion or a tensor-allocation extension.
+
+A stated `alignment_bytes` caps the layout-derived guarantee at the passed
+global pointer. Complete bounded views can separate runtime byte bases from
+constant offsets; default, clipped, negative-stride and unbounded views keep
+the general path. Three-word groups may be paired into complete 24-byte runs
+and emitted as 16+8-byte loads where the descriptor justifies that grouping.
+Whole-word clipping is supported; partial-word and packed-swizzle cases remain
+explicitly unsupported. Instruction and resource effects require ISA review,
+not an assumption that vector construction or padding is free.
+
+### Raw-layout compatibility
+
+The former `helpers.mma_io` import and matching native header are removed.
+Use `core.ir_storage` for storage types, `core.mma_operand` for logical operand
+vectors, and `helpers.packing` for encoded-pattern packing. The raw-layout
+`load_matrix_fragment` adapter lives in `helpers/tiling/compat.py` (native:
+`rocke/tiling_compat.h`) and delegates actual loads to the same internal storage
+policy used by the fragment verb. It takes a dtype, raw fragment layout, caller-selected row base,
 lane group, and K origin. `row_base` counts pointer storage units. The optional
 `alignment_bytes` (default 1) guarantees alignment at that row address, before
 the loader adds K and lane/chunk offsets. For a buffer aligned to 16 bytes with
@@ -117,14 +144,14 @@ The existing `global_load_vN` and `smem_load_vN` builders also accept contiguous
 elements of their supported types. These loads default to element alignment;
 HIP copies exactly twelve bytes, excluding vector-object padding. A single
 96-bit machine instruction depends on target and alignment. This does not
-change the fragment loader's chunk selection. FP6 transpose loads are deferred
-until tensor-descriptor integration defines their lane/layout contract.
+change the raw compatibility adapter's chunk selection. Unsupported packed
+transpose/repacking cases are refused by the descriptor-driven path.
 
 Tensor shape, strides, row selection, and allocation bounds belong to the
 caller. This helper always loads a complete fragment: the caller must guard
 empty or partial rows and provide a valid lane group. It is not a bounds-checked
-tensor view. Existing `TensorDescriptor`/`TensorView` integration is deferred;
-no separate tensor descriptor is introduced here.
+tensor view. New consumers do not use this caller-addressed adapter: they
+compose existing tiling descriptors/windows with the public fragment verbs.
 
 `BitPacking(6)` describes dense FP6; `BitPacking(6, 8)` describes one six-bit
 pattern per byte. Bit offsets and stream sizes are checked against uint64.
@@ -166,14 +193,18 @@ remain compatible. HIP emits declarations for any encountered vector widths
 absent from its fixed compatibility prologue.
 
 The [FP6 GEMM builder](../../python/rocke/instances/gfx1250/block_scaled_gemm.py)
-consumes the shared bit packing, matrix-fragment loader, and scale bit packer.
-It owns row strides, bounds, and row alignment. Its E2M3/E3M2 numerical support
+uses descriptor-driven fragment transport and atom-owned operand preparation.
+Encoded scale fragments are bitcast into their word carriers; generic pattern
+packing remains a separate helper. The kernel states tensor strides and pointer
+alignment, while the transport layer owns the resulting addresses and bounds. Its E2M3/E3M2 numerical support
 is specific to the selected gfx1250 atoms. FP4 is an independent consumer of
 the same foundation; it is not a prerequisite for FP6. Target-independent
 packing does not establish gfx950 numerical support.
 
 
-First-class tensor-view/fragment IR nodes, arbitrary packed axes, masked partial
+First-class tensor-view/fragment IR nodes, arbitrary packed axes, partial-word
 tiles, concurrent packed stores, and scalar low-bit conversions are separate
-extensions. Any descriptor retained in future IR nodes must serialize, validate,
+extensions. Existing whole-word clipped fragment loads/stores expand into the
+ordinary IR. The bounded native global authoring surface mirrors these paths;
+the tiling MMA driver, solver and general LDS authoring remain separate work. Any descriptor retained in future IR nodes must serialize, validate,
 participate in cache keys, and have a native implementation.

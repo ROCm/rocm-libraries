@@ -13,7 +13,8 @@ never instance state -- so the same driver drives every wave-tile call. The fron
 from __future__ import annotations
 
 from ....core.ir import F32, TF32
-from ...mma_io import mma_operand_ir_type, storage_vector_type
+from ....core.ir_storage import storage_vector_type
+from ....core.mma_operand import mma_operand_ir_type
 from ..fragments import Fragment, TileDesc, fragment_length, storage_slots
 from ..register_mapper import RegisterMapper
 from ..register_moves import move_registers, move_registers_into
@@ -198,7 +199,7 @@ class TileMmaDriver:
     @staticmethod
     def _as_operand(b, value, math_dtype, count: int):
         """Return ``value`` (``count`` logical elements' registers) as the vector type ``b.mma``
-        takes for an operand of ``math_dtype`` (:func:`~rocke.helpers.mma_io.mma_operand_ir_type`),
+        takes for an operand of ``math_dtype`` (:func:`~rocke.core.mma_operand.mma_operand_ir_type`),
         bitcasting only when the types differ: TF32 storage ``i32`` and truncated F32 registers
         become ``vec<tf32>``; every other operand, packed words included, is already that type.
         """

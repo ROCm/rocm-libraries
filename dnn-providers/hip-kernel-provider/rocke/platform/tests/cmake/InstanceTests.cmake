@@ -4,6 +4,17 @@
 # Instance-layer C++ test registration. Included from the parent
 # tests/CMakeLists.txt to preserve its CMake directory scope.
 
+# The source runner reaches this GPU gate through its final CTest phase.
+add_test(NAME rocke_gfx950_grouped_moe_hip
+         COMMAND "${Python3_EXECUTABLE}" -u
+                 "${CMAKE_CURRENT_SOURCE_DIR}/instances/run_gfx950_grouped_moe_hip.py")
+set_tests_properties(rocke_gfx950_grouped_moe_hip
+                     PROPERTIES LABELS "ckc;python;gpu;toolchain;comprehensive;full"
+                                ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python"
+                                RUN_SERIAL TRUE
+                                SKIP_RETURN_CODE 77
+                                TIMEOUT 300)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_2d_reentrancy.cpp")
   add_executable(rocke_tiled_attention_2d_reentrancy
                  instances/tiled_attention_2d_reentrancy.cpp)
