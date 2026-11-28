@@ -366,8 +366,17 @@ namespace
         hipblasOperation_t transA = HIPBLAS_OP_N;
         // The type of C and D. The skinny bf16 and f16 custom kernels write D
         // in A's type. HIP_R_8F_E4M3 for abType runs an MXFP8 GEMM with
-        // pre-swizzled E8M0 block scales and takes a 16-bit dType.
+        // pre-swizzled E8M0 block scales, or with scaleAB one with scalar A and
+        // B scales, and takes a 16-bit dType.
         hipDataType dType = HIP_R_32F;
+        // The bias vector's type with useBias. The skinny custom kernels add a
+        // bias of D's type.
+        hipDataType biasType = HIP_R_32F;
+        // Neither 1 nor a power of two, alpha times the dot product rounds, so
+        // an epilogue that fuses it with the bias in some rows only shows.
+        float alpha = 1.0f;
+        // Scalar A and B scales for FP8 A and B, in place of MX block scales.
+        bool scaleAB = false;
     };
 
     size_t elementSizeOf(hipDataType type)
@@ -449,6 +458,7 @@ namespace
             if(m_layoutA)
                 hipblasLtMatrixLayoutDestroy(m_layoutA);
             static_cast<void>(hipFree(m_deviceWorkspace));
+            static_cast<void>(hipFree(m_deviceScales));
             static_cast<void>(hipFree(m_deviceScaleB));
             static_cast<void>(hipFree(m_deviceScaleA));
             static_cast<void>(hipFree(m_deviceBias));
@@ -494,7 +504,9 @@ namespace
             }
 
             if(m_problem.useBias
-               && hipMalloc(&m_deviceBias, static_cast<size_t>(m) * sizeof(float)) != hipSuccess)
+               && hipMalloc(&m_deviceBias,
+                            static_cast<size_t>(m) * elementSizeOf(m_problem.biasType))
+                      != hipSuccess)
             {
                 skipReason = "hipMalloc failed for bias vector of length " + std::to_string(m);
                 return false;
@@ -542,18 +554,18 @@ namespace
                 return false;
             }
 
-            if(m_problem.abType == HIP_R_8F_E4M3 && !setUpMxScales(skipReason))
+            if(m_problem.abType == HIP_R_8F_E4M3 && !m_problem.scaleAB
+               && !setUpMxScales(skipReason))
                 return false;
 
             if(m_problem.useBias)
             {
                 // Constant bias across rows: identical A rows + identical bias
                 // keeps the row-uniformity assertion meaningful.
-                std::vector<float> bias(static_cast<size_t>(m), 0.125f);
-                if(hipMemcpy(m_deviceBias,
-                             bias.data(),
-                             bias.size() * sizeof(float),
-                             hipMemcpyHostToDevice)
+                std::vector<float>         bias(static_cast<size_t>(m), 0.125f);
+                const std::vector<uint8_t> biasBytes = encodeOperand(bias, m_problem.biasType);
+                if(hipMemcpy(
+                       m_deviceBias, biasBytes.data(), biasBytes.size(), hipMemcpyHostToDevice)
                    != hipSuccess)
                 {
                     skipReason = "hipMemcpy of bias failed";
@@ -561,7 +573,7 @@ namespace
                 }
 
                 const hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_BIAS;
-                const hipDataType         biasType = HIP_R_32F;
+                const hipDataType         biasType = m_problem.biasType;
                 if(hipblasLtMatmulDescSetAttribute(m_desc,
                                                    HIPBLASLT_MATMUL_DESC_EPILOGUE,
                                                    &epilogue,
@@ -579,6 +591,30 @@ namespace
                           != HIPBLAS_STATUS_SUCCESS)
                 {
                     ADD_FAILURE() << "Setting bias epilogue attributes must succeed";
+                    return false;
+                }
+            }
+
+            if(m_problem.scaleAB)
+            {
+                const float scales[2] = {1.5f, 0.625f};
+                if(hipMalloc(&m_deviceScales, sizeof(scales)) != hipSuccess
+                   || hipMemcpy(m_deviceScales, scales, sizeof(scales), hipMemcpyHostToDevice)
+                          != hipSuccess)
+                {
+                    skipReason = "hipMalloc or hipMemcpy of the A and B scales failed";
+                    return false;
+                }
+                float* scaleA = static_cast<float*>(m_deviceScales);
+                float* scaleB = scaleA + 1;
+                if(hipblasLtMatmulDescSetAttribute(
+                       m_desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                       != HIPBLAS_STATUS_SUCCESS
+                   || hipblasLtMatmulDescSetAttribute(
+                          m_desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                          != HIPBLAS_STATUS_SUCCESS)
+                {
+                    ADD_FAILURE() << "Setting the A and B scale pointers must succeed";
                     return false;
                 }
             }
@@ -687,6 +723,33 @@ namespace
             return hipblaslt_ext::getSolutionNameFromAlgo(m_handle, algo);
         }
 
+        // The first runnable algorithm whose solution name starts with prefix,
+        // whether or not the library logic picks it for this problem.
+        bool namedAlgo(const std::string& prefix, hipblasLtMatmulHeuristicResult_t& found)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> enumerated;
+            hipblaslt_ext::getAllAlgos(m_handle,
+                                       hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                       m_problem.transA,
+                                       HIPBLAS_OP_N,
+                                       m_problem.abType,
+                                       m_problem.abType,
+                                       m_problem.dType,
+                                       m_problem.dType,
+                                       HIPBLAS_COMPUTE_32F,
+                                       enumerated);
+            std::string unused;
+            for(auto& candidate : enumerated)
+            {
+                if(solutionName(candidate).rfind(prefix, 0) == 0 && runnable(candidate, unused))
+                {
+                    found = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // Runs the GEMM with the mode either off or on and, on success, leaves
         // the result in the host copy inspected by firstNonUniformRowOfLastRun.
         hipblasStatus_t run(const hipblasLtMatmulHeuristicResult_t& candidate, bool uniformMode)
@@ -703,7 +766,7 @@ namespace
 
             static_cast<void>(hipMemsetAsync(m_deviceD, 0, m_hostD.size(), m_stream));
 
-            const float           alpha = 1.0f;
+            const float           alpha = m_problem.alpha;
             const float           beta  = 0.0f;
             hipblasLtMatmulAlgo_t algo  = candidate.algo;
 
@@ -764,7 +827,7 @@ namespace
         // cannot run it on this problem.
         bool runnable(hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
         {
-            const float alpha    = 1.0f;
+            const float alpha    = m_problem.alpha;
             const float beta     = 0.0f;
             size_t      required = 0;
             if(hipblaslt_ext::matmulIsAlgoSupported(m_handle,
@@ -963,6 +1026,7 @@ namespace
         void*                   m_deviceB         = nullptr;
         void*                   m_deviceD         = nullptr;
         void*                   m_deviceBias      = nullptr;
+        void*                   m_deviceScales    = nullptr;
         void*                   m_deviceScaleA    = nullptr;
         void*                   m_deviceScaleB    = nullptr;
         void*                   m_deviceWorkspace = nullptr;
@@ -1208,6 +1272,7 @@ namespace
             // partitions) keep the Tensile picks. Rows for another CU count in
             //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml
             //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml
+            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_F8[BH]S_BH_*SAB_UserArgs.yaml
             // that route here need expectPick to cover that count too.
             const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
             if(gfx950Pick != nullptr && gfx950)
@@ -1237,6 +1302,28 @@ namespace
                     << harness.solutionName(candidate) << " with uniform summation order enabled"
                     << " and smCountTarget=" << problem.smCountTarget;
             }
+        }
+
+        // Runs the gfx950 kernel whose name starts with gfx950Kernel with the mode
+        // on, for a problem the library logic leaves to another kernel, and checks
+        // that its rows are uniform. Skipped where the kernel does not exist.
+        void checkNamedAlgoUniform(const Problem& problem, const char* gfx950Kernel)
+        {
+            if(gpuArchName().rfind("gfx950", 0) != 0)
+                GTEST_SKIP() << gfx950Kernel << " is a gfx950 kernel";
+            RowUniformityHarness harness(problem);
+            prepare(harness);
+            if(IsSkipped() || HasFailure())
+                return;
+
+            hipblasLtMatmulHeuristicResult_t candidate{};
+            ASSERT_TRUE(harness.namedAlgo(gfx950Kernel, candidate))
+                << "No runnable " << gfx950Kernel << " algorithm for this problem";
+            ASSERT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS);
+            const int64_t badRow = harness.firstNonUniformRowOfLastRun();
+            EXPECT_EQ(badRow, -1) << "Row " << badRow << " of D differs bitwise from row 0 for "
+                                  << harness.solutionName(candidate)
+                                  << " with uniform summation order enabled";
         }
     };
 
@@ -1284,6 +1371,43 @@ namespace
     {
         checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
                                  "wvSpltK_bf16_tn_m4");
+    }
+
+    // FP8 A and B with scalar scales: the wvSplitKQ kernels.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnF8Bf16_4096x1x4096)
+    {
+        checkDefaultPicksUniform({4096,
+                                  1,
+                                  4096,
+                                  HIP_R_8F_E4M3,
+                                  0,
+                                  false,
+                                  HIPBLAS_OP_T,
+                                  HIP_R_16BF,
+                                  HIP_R_32F,
+                                  1.0f,
+                                  true},
+                                 "wvSplitKQ_vllm_f8_bf16_tn_n1_");
+    }
+
+    // m odd: the last YTILE = 2 row tile is partial. n * K is past the 160 KB
+    // LDS stage, so the last token's tail comes from global memory. A bias of
+    // D's type with alpha 0.7: alpha * dot rounds before the bias is added.
+    // The library logic leaves this shape to Tensile, so the test names the kernel.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnF8F16BiasTail_1031x4x41984)
+    {
+        checkNamedAlgoUniform({1031,
+                               4,
+                               41984,
+                               HIP_R_8F_E4M3,
+                               0,
+                               true,
+                               HIPBLAS_OP_T,
+                               HIP_R_16F,
+                               HIP_R_16F,
+                               0.7f,
+                               true},
+                              "wvSplitKQ_vllm_f8_f16_tn_n4_");
     }
 
     // OCP FP6 code of halves / 2. Every |halves| <= 8 is exact in both E2M3 and E3M2.
