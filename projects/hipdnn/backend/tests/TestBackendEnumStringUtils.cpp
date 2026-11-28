@@ -706,6 +706,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT),
+                 "HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT");
 
     // Reduction operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_REDUCTION_XDESC),

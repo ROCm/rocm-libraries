@@ -80,7 +80,9 @@ inline const Tensor* tensor(const Graph& graph, int64_t uid)
     return nullptr;
 }
 
-inline bool floatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType type)
+/// An element type that holds a number: every floating-point and integer type. A boolean or
+/// an unset type has no multiply-add to count; a type this build predates is not assumed to.
+inline bool numeric(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     switch(type)
@@ -97,6 +99,11 @@ inline bool floatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType type)
     case DataType::FP6_E3M2:
     case DataType::FP8_E4M3_FNUZ:
     case DataType::FP8_E5M2_FNUZ:
+    case DataType::UINT8:
+    case DataType::INT32:
+    case DataType::INT8:
+    case DataType::INT4:
+    case DataType::INT64:
         return true;
     default:
         return false;
@@ -112,11 +119,12 @@ inline bool shaped(const Tensor* value, size_t minimumRank)
               });
 }
 
-/// A shaped floating-point operand: the matrix-product families (Matmul, convolutions,
-/// attention, the MoE grouped matmuls, GDN and KDA) count floating-point multiply-adds only.
+/// A shaped numeric operand: the matrix-product families (Matmul, convolutions, attention, the
+/// MoE grouped matmuls, GDN and KDA) count multiply-adds of numeric elements, floating-point or
+/// integer alike (RFC 0019 section 6.8 rule 2), so an int8 GEMM's `tflops` is its tera-ops.
 inline bool dimensions(const Tensor* value, size_t minimumRank)
 {
-    return value != nullptr && floatingPoint(value->data_type()) && shaped(value, minimumRank);
+    return value != nullptr && numeric(value->data_type()) && shaped(value, minimumRank);
 }
 
 inline double elements(const Tensor& value)
@@ -355,9 +363,11 @@ std::optional<double>
     const auto unpagedMatches = [batch, sk](const Tensor& side) {
         return side.dims()->Get(0) == batch && side.dims()->Get(2) == sk;
     };
+    // K and V may each have their own head count, as long as each divides the query heads
+    // (grouped-query attention per side): the work per query head does not depend on either.
     if(sk <= 0 || (!extent->pagedK && !unpagedMatches(*k))
-       || (!extent->pagedV && !unpagedMatches(*v)) || k->dims()->Get(1) != v->dims()->Get(1)
-       || heads % k->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
+       || (!extent->pagedV && !unpagedMatches(*v)) || heads % k->dims()->Get(1) != 0
+       || heads % v->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
        || o->dims()->Get(2) != sq || k->dims()->Get(3) != dq || o->dims()->Get(3) != dv)
     {
         return std::nullopt;
@@ -663,6 +673,21 @@ inline std::optional<double>
     return deltaRuleFlops(graph, op);
 }
 
+/// The work the graph declares for an opaque op: hipDNN cannot read it off the payload, so
+/// the plugin providing the op states it in `declared_flops`. Unknown when it is absent or not
+/// positive (the frontend and backend refuse the latter).
+inline std::optional<double>
+    nodeFlops(const Graph& /*graph*/,
+              const hipdnn_flatbuffers_sdk::data_objects::CustomOpAttributes& op)
+{
+    const auto declared = op.declared_flops();
+    if(!declared || *declared <= 0)
+    {
+        return std::nullopt;
+    }
+    return static_cast<double>(*declared);
+}
+
 template <typename TAttributes>
 std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 {
@@ -677,8 +702,6 @@ std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 inline constexpr std::array NO_COUNTING_CONVENTION{
     // Not an operation: the node has no attributes.
     NodeAttributes::NONE,
-    // Opaque: the graph does not say what the op computes.
-    NodeAttributes::CustomOpAttributes,
 };
 
 constexpr bool hasCountingConvention(NodeAttributes type)
@@ -755,6 +778,8 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node)
         return flopsOf(graph, node.attributes_as_GdnAttributes());
     case NodeAttributes::KdaAttributes:
         return flopsOf(graph, node.attributes_as_KdaAttributes());
+    case NodeAttributes::CustomOpAttributes:
+        return flopsOf(graph, node.attributes_as_CustomOpAttributes());
     // A type this build predates. A member of this build's NodeAttributes reaching here has
     // neither a case nor a NO_COUNTING_CONVENTION entry, which TestEngineFeatures rejects.
     default:

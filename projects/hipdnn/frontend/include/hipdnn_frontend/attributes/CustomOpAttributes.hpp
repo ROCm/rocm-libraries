@@ -14,9 +14,11 @@
 
 #include "GraphAttributes.hpp"
 #include "TensorAttributes.hpp"
+#include <cstdint>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,6 +58,9 @@ public:
     std::vector<std::shared_ptr<TensorAttributes>> inputs;
     std::vector<std::shared_ptr<TensorAttributes>> outputs;
     std::vector<uint8_t> data;
+    /// Logical FLOPs the operation does, as its plugin counts them (RFC 0019 section 6.8);
+    /// unset means hipDNN cannot count the node's work.
+    std::optional<int64_t> declared_flops;
     // NOLINTEND(readability-identifier-naming)
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -136,6 +141,32 @@ public:
         return data;
     }
 
+    /**
+     * @brief Declares the operation's logical work for heuristics.
+     *
+     * hipDNN cannot read the work of an opaque payload. A graph whose custom op declares its
+     * FLOPs publishes `graph.flops`, the numerator of the `tflops` ranking metric, so engines
+     * serving it can be compared by predicted throughput (RFC 0019 section 6.8). Count it as
+     * the work model does: a multiply-add is 2, elementwise work 1 per output element, and the
+     * same value for every plugin that serves the op. Must be positive.
+     *
+     * @param value Logical FLOPs of one execution of the operation
+     * @return Reference to this for method chaining
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    CustomOpAttributes& set_declared_flops(int64_t value)
+    {
+        declared_flops = value;
+        return *this;
+    }
+
+    /// @brief The declared logical FLOPs, or nullopt when the work is undeclared.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    const std::optional<int64_t>& get_declared_flops() const
+    {
+        return declared_flops;
+    }
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error fill_from_context(const GraphAttributes& graphAttributes)
     {
@@ -168,14 +199,14 @@ public:
      * tensor names and UIDs.
      *
      * Compares compute_data_type, custom_op_id and the opaque data payload (both define
-     * what the plugin computes), and the positional input and output tensors with
-     * TensorAttributes::logicallyEquals. Tensor order matters; a null entry equals only
-     * a null entry at the same position.
+     * what the plugin computes), declared_flops (part of the problem the graph declares),
+     * and the positional input and output tensors with TensorAttributes::logicallyEquals.
+     * Tensor order matters; a null entry equals only a null entry at the same position.
      */
     bool logicallyEquals(const CustomOpAttributes& other) const
     {
         if(compute_data_type != other.compute_data_type || custom_op_id != other.custom_op_id
-           || data != other.data)
+           || data != other.data || declared_flops != other.declared_flops)
         {
             return false;
         }
@@ -194,7 +225,8 @@ public:
     bool operator==(const CustomOpAttributes& other) const
     {
         if(name != other.name || compute_data_type != other.compute_data_type
-           || custom_op_id != other.custom_op_id || data != other.data)
+           || custom_op_id != other.custom_op_id || data != other.data
+           || declared_flops != other.declared_flops)
         {
             return false;
         }

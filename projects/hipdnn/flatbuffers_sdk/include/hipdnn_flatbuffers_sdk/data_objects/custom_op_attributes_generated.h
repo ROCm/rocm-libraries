@@ -29,6 +29,7 @@ struct CustomOpAttributesT : public ::flatbuffers::NativeTable {
   std::vector<int64_t> input_tensor_uids{};
   std::vector<int64_t> output_tensor_uids{};
   std::vector<uint8_t> data{};
+  ::flatbuffers::Optional<int64_t> declared_flops = ::flatbuffers::nullopt;
 };
 
 /// Attributes for a custom (plugin-provided) operation.
@@ -39,7 +40,8 @@ struct CustomOpAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
     VT_CUSTOM_OP_ID = 4,
     VT_INPUT_TENSOR_UIDS = 6,
     VT_OUTPUT_TENSOR_UIDS = 8,
-    VT_DATA = 10
+    VT_DATA = 10,
+    VT_DECLARED_FLOPS = 12
   };
   /// Unique identifier for the plugin operation, using dotted namespace
   /// notation: "<plugin>.<operation>" (e.g. "example.rope", "mylib.fused_add").
@@ -67,6 +69,18 @@ struct CustomOpAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
   ::flatbuffers::Vector<uint8_t> *mutable_data() {
     return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_DATA);
   }
+  /// The operation's logical FLOPs, as the plugin that provides it counts them under RFC 0019
+  /// section 6.8's conventions (a multiply-add is 2, elementwise work 1 per output element).
+  /// hipDNN cannot read the work off an opaque payload, so the graph declares it; absent,
+  /// the node's work is unknown and a graph holding it publishes no `graph.flops`. Positive
+  /// when present. Part of the cache key: two graphs declaring different work are different
+  /// problems.
+  ::flatbuffers::Optional<int64_t> declared_flops() const {
+    return GetOptional<int64_t, int64_t>(VT_DECLARED_FLOPS);
+  }
+  bool mutate_declared_flops(int64_t _declared_flops) {
+    return SetField<int64_t>(VT_DECLARED_FLOPS, _declared_flops);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_CUSTOM_OP_ID) &&
@@ -77,6 +91,7 @@ struct CustomOpAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
            verifier.VerifyVector(output_tensor_uids()) &&
            VerifyOffset(verifier, VT_DATA) &&
            verifier.VerifyVector(data()) &&
+           VerifyField<int64_t>(verifier, VT_DECLARED_FLOPS, 8) &&
            verifier.EndTable();
   }
   CustomOpAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -100,6 +115,9 @@ struct CustomOpAttributesBuilder {
   void add_data(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> data) {
     fbb_.AddOffset(CustomOpAttributes::VT_DATA, data);
   }
+  void add_declared_flops(int64_t declared_flops) {
+    fbb_.AddElement<int64_t>(CustomOpAttributes::VT_DECLARED_FLOPS, declared_flops);
+  }
   explicit CustomOpAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -116,8 +134,10 @@ inline ::flatbuffers::Offset<CustomOpAttributes> CreateCustomOpAttributes(
     ::flatbuffers::Offset<::flatbuffers::String> custom_op_id = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> input_tensor_uids = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> output_tensor_uids = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> data = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> data = 0,
+    ::flatbuffers::Optional<int64_t> declared_flops = ::flatbuffers::nullopt) {
   CustomOpAttributesBuilder builder_(_fbb);
+  if(declared_flops) { builder_.add_declared_flops(*declared_flops); }
   builder_.add_data(data);
   builder_.add_output_tensor_uids(output_tensor_uids);
   builder_.add_input_tensor_uids(input_tensor_uids);
@@ -130,7 +150,8 @@ inline ::flatbuffers::Offset<CustomOpAttributes> CreateCustomOpAttributesDirect(
     const char *custom_op_id = nullptr,
     const std::vector<int64_t> *input_tensor_uids = nullptr,
     const std::vector<int64_t> *output_tensor_uids = nullptr,
-    const std::vector<uint8_t> *data = nullptr) {
+    const std::vector<uint8_t> *data = nullptr,
+    ::flatbuffers::Optional<int64_t> declared_flops = ::flatbuffers::nullopt) {
   auto custom_op_id__ = custom_op_id ? _fbb.CreateString(custom_op_id) : 0;
   auto input_tensor_uids__ = input_tensor_uids ? _fbb.CreateVector<int64_t>(*input_tensor_uids) : 0;
   auto output_tensor_uids__ = output_tensor_uids ? _fbb.CreateVector<int64_t>(*output_tensor_uids) : 0;
@@ -140,7 +161,8 @@ inline ::flatbuffers::Offset<CustomOpAttributes> CreateCustomOpAttributesDirect(
       custom_op_id__,
       input_tensor_uids__,
       output_tensor_uids__,
-      data__);
+      data__,
+      declared_flops);
 }
 
 ::flatbuffers::Offset<CustomOpAttributes> CreateCustomOpAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const CustomOpAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -151,7 +173,8 @@ inline bool operator==(const CustomOpAttributesT &lhs, const CustomOpAttributesT
       (lhs.custom_op_id == rhs.custom_op_id) &&
       (lhs.input_tensor_uids == rhs.input_tensor_uids) &&
       (lhs.output_tensor_uids == rhs.output_tensor_uids) &&
-      (lhs.data == rhs.data);
+      (lhs.data == rhs.data) &&
+      (lhs.declared_flops == rhs.declared_flops);
 }
 
 inline bool operator!=(const CustomOpAttributesT &lhs, const CustomOpAttributesT &rhs) {
@@ -172,6 +195,7 @@ inline void CustomOpAttributes::UnPackTo(CustomOpAttributesT *_o, const ::flatbu
   { auto _e = input_tensor_uids(); if (_e) { _o->input_tensor_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->input_tensor_uids[_i] = _e->Get(_i); } } else { _o->input_tensor_uids.resize(0); } }
   { auto _e = output_tensor_uids(); if (_e) { _o->output_tensor_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->output_tensor_uids[_i] = _e->Get(_i); } } else { _o->output_tensor_uids.resize(0); } }
   { auto _e = data(); if (_e) { _o->data.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->data.begin()); } }
+  { auto _e = declared_flops(); _o->declared_flops = _e; }
 }
 
 inline ::flatbuffers::Offset<CustomOpAttributes> CustomOpAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const CustomOpAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -186,12 +210,14 @@ inline ::flatbuffers::Offset<CustomOpAttributes> CreateCustomOpAttributes(::flat
   auto _input_tensor_uids = _o->input_tensor_uids.size() ? _fbb.CreateVector(_o->input_tensor_uids) : 0;
   auto _output_tensor_uids = _o->output_tensor_uids.size() ? _fbb.CreateVector(_o->output_tensor_uids) : 0;
   auto _data = _o->data.size() ? _fbb.CreateVector(_o->data) : 0;
+  auto _declared_flops = _o->declared_flops;
   return hipdnn_flatbuffers_sdk::data_objects::CreateCustomOpAttributes(
       _fbb,
       _custom_op_id,
       _input_tensor_uids,
       _output_tensor_uids,
-      _data);
+      _data,
+      _declared_flops);
 }
 
 }  // namespace data_objects

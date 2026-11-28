@@ -14,7 +14,7 @@ namespace hipdnn_frontend::detail
 
 /// Unpacks a custom op operation from a backend operation descriptor.
 /// Populates the CustomOpAttributes with tensor arrays (using tensorMap for sharing),
-/// custom_op_id, opaque data payload, compute data type, and operation name.
+/// custom_op_id, opaque data payload, declared FLOPs, compute data type, and operation name.
 [[nodiscard]] inline Error unpackCustomOpOperation(
     hipdnnBackendDescriptor_t opDesc,
     std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
@@ -49,6 +49,14 @@ namespace hipdnn_frontend::detail
     HIPDNN_CHECK_ERROR(getDescriptorAttrByteArray(
         opDesc, HIPDNN_ATTR_OPERATION_CUSTOM_OP_DATA_EXT, opaqueData, "custom op data"));
     attributes.set_data(std::move(opaqueData));
+
+    // Unpack declared logical FLOPs (unset when undeclared or the backend predates them)
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrOptionalScalar(opDesc,
+                                        HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        attributes.declared_flops,
+                                        "custom op declared FLOPs"));
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(

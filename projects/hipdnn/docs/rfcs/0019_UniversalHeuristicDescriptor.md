@@ -920,7 +920,7 @@ lives beside the policy names in the data SDK, and each entry fixes three things
 
 | Metric | Units | Better | Status |
 |---|---|---|---|
-| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown (an opaque custom op, inconsistent operands) has no `tflops` label. |
+| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown (a custom op that declares no work, inconsistent operands) has no `tflops` label. |
 | `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput, so it never depends on a FLOP count. |
 | `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
 
@@ -1679,7 +1679,8 @@ the trainer, and the runtime compute the same number.
    be consistent rather than exact: a model absorbs a fixed scale, but not a count that moves between
    engines.
 2. **Counting.** A multiply-add is 2 FLOPs, elementwise work is 1 per output element, and a
-   transcendental is 1.
+   transcendental is 1. The element type does not change the count: an integer multiply-add is 2 as
+   well, so the `tflops` of an int8 GEMM is its tera-operations per second.
 3. **A graph's work is the sum of its nodes', all or nothing.** `$graph.flops` sums every node, virtual
    intermediates included, so a fused convolution + bias + ReLU is the convolution plus two pointwise
    nodes. If any node's work is unknown, `$graph.flops` is **absent**, never a partial sum: divided by
@@ -1733,14 +1734,15 @@ the trainer, and the runtime compute the same number.
    | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
    | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
    | `GdnAttributes`, `KdaAttributes` | `6·T·HO·V·K` | Three `V × K` products per token and output head: `S k`, the rank-one update `β (v − S k) kᵀ` (`S (I − β k kᵀ) + β v kᵀ` is `S` plus that one product), and `S q`; decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
-   | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
+   | `CustomOpAttributes` | `declared_flops` | Opaque to hipDNN, so the graph declares the count: the plugin providing the op states it, under these conventions and the same for every plugin that serves the op. Undeclared, the work is unknown; the frontend and backend refuse a declaration that is not positive. |
 
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
    shapes that do not compose. The convolutions, Matmul, SDPA forward and backward, the MoE grouped
-   matmuls, GDN and KDA also require floating-point operands. So 24 of the 25 node types have a static
-   count; whether a given graph has one is still rule 3's to decide.
+   matmuls, GDN and KDA also require numeric operands: floating-point or integer, not boolean or
+   unset. So 24 of the 25 node types have a static count and the custom op a declared one; whether a
+   given graph has one is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
      tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
@@ -1760,7 +1762,8 @@ the trainer, and the runtime compute the same number.
    (`$graph.flops_by_type.ConvolutionFwdAttributes`), sums the work of that type's nodes. It is **0**
    when the graph has no node of that type and **absent** when any node of that type has unknown work;
    an unknown node of one type does not suppress another type's entry. A mixed-op model can therefore
-   read how much of a graph is convolution even when a custom op elsewhere leaves `$graph.flops` absent.
+   read how much of a graph is convolution even when an undeclared custom op elsewhere leaves
+   `$graph.flops` absent.
 9. **Absent, zero, and unknown are different values.** "No node of this type" aggregates to 0; "this
    work is unknown" is absent and never silently becomes 0. A signature that must tolerate absence says
    so with `present` or `value_or_default` ([Section 6.2](#62-the-features_signature)): the default is the
@@ -1780,7 +1783,7 @@ feature-semantics revision they were computed under ([Section 6.9](#69-feature-s
 
 **A new node type declares its work.** Each `NodeAttributes` member either has a formula (a
 `nodeFlops` overload and a `logicalFlops` case) or is listed in `NO_COUNTING_CONVENTION` with its
-reason, as `NONE` and `CustomOpAttributes` are. A test over every member
+reason, as `NONE` is. A test over every member
 fails for one with neither, so a new op cannot silently leave its graphs without `$graph.flops`.
 [Adding a New Operation: Work Model (FLOPs)](../AddingNewOperations.md#work-model-flops) gives the
 contributor steps.

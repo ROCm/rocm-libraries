@@ -1545,6 +1545,14 @@ inline void hashAppend(Hasher& hasher, const CustomOpAttributes* value, const Ui
             hasher.raw(items->Get(index));
         }
     }
+    {
+        const auto optional = value->declared_flops();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hasher.raw(*optional);
+        }
+    }
 }
 
 inline bool logicallyEqual(const CustomOpAttributes* a, const CustomOpAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -1619,6 +1627,10 @@ inline bool logicallyEqual(const CustomOpAttributes* a, const CustomOpAttributes
                 return false;
             }
         }
+    }
+    if(a->declared_flops() != b->declared_flops())
+    {
+        return false;
     }
     return true;
 }

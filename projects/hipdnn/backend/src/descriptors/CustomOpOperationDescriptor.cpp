@@ -20,6 +20,10 @@ void CustomOpOperationDescriptor::finalize()
     THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "CustomOpOperationDescriptor::finalize() failed: compute data type not set");
+    THROW_IF_TRUE(_data.declared_flops.has_value() && *_data.declared_flops <= 0,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "CustomOpOperationDescriptor::finalize() failed: declared_flops must be "
+                  "positive when set");
 
     HipdnnBackendDescriptorImpl<CustomOpOperationDescriptor>::finalize();
 }
@@ -75,6 +79,13 @@ void CustomOpOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attr
                     elementCount,
                     arrayOfElements,
                     "CustomOpOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT:
+        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.declared_flops,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "CustomOpOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
         setString(_name,
@@ -145,6 +156,14 @@ void CustomOpOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attr
                     elementCount,
                     arrayOfElements,
                     "CustomOpOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT:
+        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.declared_flops,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "CustomOpOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_NAME_EXT:
         getString(_name,
@@ -241,6 +260,7 @@ std::string CustomOpOperationDescriptor::toString() const
     str += ", inputs=" + vecToString(_data.input_tensor_uids);
     str += ", outputs=" + vecToString(_data.output_tensor_uids);
     str += ", data_size=" + std::to_string(_data.data.size());
+    str += ", declared_flops=" + optionalToString(_data.declared_flops);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += '}';
