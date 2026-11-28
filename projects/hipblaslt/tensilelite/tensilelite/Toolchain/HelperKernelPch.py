@@ -23,13 +23,13 @@ import stat
 import tempfile
 import threading
 from pathlib import Path
-from shlex import split
 from subprocess import DEVNULL, PIPE, STDOUT, CalledProcessError, run
 from typing import List, Optional, Union
 
 from filelock import FileLock, Timeout
 
 from ..Common import print1
+from .Component import driverJobs
 from .HelperKernelCache import _evictStale
 
 _PCH_HEADERS = ("hip/hip_runtime.h", "hip/hip_ext.h", "hip/hip_fp8.h")
@@ -94,14 +94,9 @@ def _headerSearchPaths(pchArgs: List[str]) -> List[str]:
     """The header search directories and forced includes of the driver's compile job for pchArgs,
     with absolute paths resolved. This is where the HIP headers really come from: the driver
     finds them from its own location, ROCM_PATH/HIP_PATH or --rocm-path/--hip-path."""
-    out = run(
-        [*pchArgs, "-###"], stdin=DEVNULL, stdout=PIPE, stderr=STDOUT, check=True
-    ).stdout.decode()
     paths = []
-    for line in out.splitlines():
-        if not line.startswith(' "'):
-            continue
-        args = iter(split(line))
+    for jobArgs in driverJobs(pchArgs):
+        args = iter(jobArgs)
         for arg in args:
             if arg in _HEADER_SEARCH_OPTIONS:
                 option = arg
