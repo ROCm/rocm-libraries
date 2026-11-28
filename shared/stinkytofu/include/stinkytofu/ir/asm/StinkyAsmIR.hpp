@@ -532,7 +532,7 @@ inline bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& i
     RegType t = reg.reg.type;
 
     if (t == RegType::SCC) {
-        assert(inst.is(InstFlag::IF_ImplicitWriteSCC) &&
+        assert((inst.is(InstFlag::IF_ImplicitWriteSCC) || isExecMaskGroup(inst)) &&
                "SCC should always be an implicit dest or src");
         return true;
     }

@@ -754,6 +754,29 @@ DEF_FORMAT(VGLOBAL,
     .encoding = {96},
 )
 
+// VGLOBAL_LOAD - global_load_* vdst, vaddr, saddr: either a 64-bit vaddr with saddr "off",
+// or a 32-bit vaddr offset with a 64-bit saddr (the form the vaddr field declares).
+DEF_FORMAT(VGLOBAL_LOAD,
+    .parent = VGLOBAL,
+    .flags = {GLOBALLoad},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, vaddr, vgpr, 32},
+        {S1, saddr, sreg, 64},
+    },
+)
+
+// VGLOBAL_STORE - global_store_* vaddr, vsrc, saddr; addressing as VGLOBAL_LOAD.
+DEF_FORMAT(VGLOBAL_STORE,
+    .parent = VGLOBAL,
+    .flags = {GLOBALStore},
+    .fields = {
+        {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
 // VGLOBAL_ATOMIC_SADDR - returning global-segment atomic (SADDR form):
 //   global_atomic_* vdst, vaddr, vsrc, saddr
 // vdst is a pure destination (returned old value), vsrc supplies the data, vaddr is

@@ -300,6 +300,9 @@ inline std::ostream& operator<<(std::ostream& os, const SMEMModifiers& smemMod) 
     if (!smemMod.hasSCOPEModifier && smemMod.glc) {
         os << " glc";
     }
+    if (smemMod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(smemMod.scope);
+    }
     if (smemMod.nv) {
         os << " nv";
     }
