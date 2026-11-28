@@ -849,6 +849,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
 | `configs/hip_conv_fwd_fma_igemm_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_fma_igemm_rdna` catalog: HIP-source kernels (`kind: hip`, one per dtype x layout x tile, built with `defines`) under `hip/conv_rdna` |
 | `configs/hip_conv_fwd_bias_fma_igemm_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_bias_fma_igemm_rdna` catalog: the same HIP-source kernel with its bias epilogue (`CONV_HAS_BIAS`), named from `hip/conv_bias_rdna` as `../conv_rdna/kernels/ConvFwdFmaIgemm.cpp` |
+| `configs/hip_conv_fwd_bias_act_fma_igemm_rdna.yaml` | The shipped `hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna` catalog: the same HIP-source kernel with its bias and activation epilogues (`CONV_HAS_BIAS`, `CONV_HAS_ACT`), named from `hip/conv_bias_act_rdna` as `../conv_rdna/kernels/ConvFwdFmaIgemm.cpp` |
 
 ## Generated variant sets: `variants`
 

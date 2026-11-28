@@ -19,6 +19,61 @@
           ]
         }
       }
+    ],
+    "hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna": [
+      {
+        "cases": [
+          "s10_1d_i16_n2c16k32_f5_fp16_cl_gelu",
+          "s10_1d_i16_n2c16k32_f5_fp32_cf_gelu",
+          "s10_2d_i16x16_n2c16k32_f5x5_fp16_cl_gelu_tanh",
+          "s10_2d_i16x16_n2c16k32_f5x5_fp32_cf_gelu_tanh",
+          "s10_3d_i16x8x4_n2c16k32_f5x5x5_fp16_cf_gelu_tanh",
+          "s11_1d_i16_n2c3k16_f7_bf16_cf_gelu_tanh",
+          "s11_1d_i16_n2c3k16_f7_fp32_cl_gelu_tanh",
+          "s11_2d_i16x16_n2c3k16_f7x7_bf16_cf_swish",
+          "s11_2d_i16x16_n2c3k16_f7x7_fp32_cl_swish",
+          "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl_swish",
+          "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cf_swish",
+          "s12a_2d_i16x16_n2c16k32_f1x3_bf16_cl_softplus",
+          "s12a_2d_i16x16_n2c16k32_f1x3_fp16_cf_softplus",
+          "s12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cf_softplus",
+          "s12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cl_softplus",
+          "s12b_2d_i16x16_n2c16k32_f3x1_fp16_cl_identity",
+          "s14_1d_i15_n2c13k17_f3_bf16_cf_identity",
+          "s14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cf_relu_lo",
+          "s15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu6",
+          "s16_1d_i32_n2c16k32_f3_bf16_cl_relu",
+          "s2_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clip0",
+          "s2_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_slope0",
+          "s2_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_clip0",
+          "s2_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_slope0",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_elu",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu_tanh",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_identity",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_clamp",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_leaky",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_sigmoid",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_softplus",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_swish",
+          "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_tanh",
+          "s3_f31_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu",
+          "s7_1d_i16_n2c16k32g2_f3_fp32_cf_sigmoid",
+          "s7_2d_i16x16_n2c16k32g2_f3x3_fp32_cf_tanh",
+          "s8_1d_i16_n2c32k64g4_f3_fp32_cl_tanh",
+          "s8_2d_i16x16_n2c32k64g4_f3x3_fp32_cl_elu",
+          "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf_elu",
+          "s9_1d_i16_n8c16k32_f1_fp16_cf_elu",
+          "s9_2d_i16x16_n8c16k32_f1x1_fp16_cf_gelu",
+          "s9_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl_gelu"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1
