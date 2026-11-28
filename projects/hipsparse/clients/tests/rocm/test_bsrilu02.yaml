@@ -65,3 +65,42 @@ Tests:
              nos5, 
              nos6, 
              nos7]
+
+# Every diagonal of nos4 is stored, with magnitudes between 0.1 and 0.44. A boost value of 0
+# turns the first pivot whose magnitude is at most the tolerance into a zero pivot. Tolerance 1
+# hits block row 0, read before any elimination; 0.07 and 0.15 hit later pivots that elimination
+# has reduced. Avoid 0.1: the pivot of row 90 is exactly 0.1 in double but not in float.
+- name: bsrilu02
+  category: pre_checkin
+  function: bsrilu02
+  precision: *single_double_precisions_complex_real
+  M: 1
+  block_dim: [1, 3]
+  numericboost: [1]
+  boosttol: [0.07, 0.15, 1.0]
+  boostval: [0.0]
+  boostvali: [0.0]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4]
+
+# These entries rely on the padding: at block dimension 3, csr2bsr pads the 100 rows of nos4
+# with two zero rows, leaving exact zeros on the diagonal of block row 33. A negative tolerance
+# replaces nothing, so they are reported as a zero pivot. Tolerance 0 replaces them with 0.3, so
+# no pivot is reported and every factor value is compared. The imaginary boost stays 0 because
+# the ROCm backend stores |boost_val| on an exact zero, while the host reference stores boost_val.
+- name: bsrilu02
+  category: pre_checkin
+  function: bsrilu02
+  precision: *single_double_precisions_complex_real
+  M: 1
+  block_dim: [3]
+  numericboost: [1]
+  boosttol: [-1.0, 0.0]
+  boostval: [0.3]
+  boostvali: [0.0]
+  dirA: [HIPSPARSE_DIRECTION_ROW, HIPSPARSE_DIRECTION_COLUMN]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4]

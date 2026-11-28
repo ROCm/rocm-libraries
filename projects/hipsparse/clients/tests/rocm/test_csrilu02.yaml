@@ -69,6 +69,23 @@ Tests:
              nos6,
              nos7]
 
+# Every diagonal of nos4 is stored, with magnitudes between 0.1 and 0.44. A boost value of 0
+# turns the first pivot whose magnitude is at most the tolerance into a zero pivot. Tolerance 1
+# hits row 0, read before any elimination; 0.07 and 0.15 hit later pivots that elimination has
+# reduced. Avoid 0.1: the pivot of row 90 is exactly 0.1 in double but not in float.
+- name: csrilu02
+  category: pre_checkin
+  function: csrilu02
+  precision: *single_double_precisions_complex_real
+  M: 1
+  numericboost: [1]
+  boosttol: [0.07, 0.15, 1.0]
+  boostval: [0.0]
+  boostvali: [0.0]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4]
+
 - name: csrilu02
   category: nightly
   function: csrilu02
