@@ -38,6 +38,11 @@ For the specific shape you are optimizing:
    against an fp32 reference, then time the survivors against the baseline you
    must beat. The autotuner funnel ([§12 Autotune](#12-autotuning-strategy)) is built for
    exactly this.
+   When the legal product is far larger than a practical sweep (millions of
+   configs), do not enumerate it: search it with the engine, warm-started from
+   the dispatcher pick (see [Search with lookback](#search-with-lookback-when-single-moves-stall)).
+   Exhaustive stays the right choice when the space is no larger than the
+   evaluation budget.
 3. **Only THEN enter the optimization loops below.** If the swept ceiling
    already meets the target you are done — and you have probably found that the
    production heuristic was mis-routing (turn the swept winner into a tuned
@@ -97,12 +102,57 @@ If you take only one thing from this runbook, take this loop:
 6. Re-verify correctness.
 7. Re-measure with the same harness.
 8. Explain why it moved (per-iter ISA diff).
-9. Keep or revert.
+9. Keep, revert, or keep it as a registered default-off knob.
 10. Record the result.
 ```
 
 Do not batch several levers unless you are explicitly doing a coarse
 search and plan to isolate the winner afterward. If stuck and no clear winning change with simple levers is evident, extend to multiple levers in smart combinations and use judgement. Whenever possible, turn a lever into a knob to be tuned with heuristics, because several failures might combine to a big win. **If correctness fails, do not report speed as a win, make sure it is fixed.**
+
+### Search with lookback (when single moves stall)
+
+One lever at a time stops at the first local optimum: from there every single
+move is slower, and many real gains need two or more levers together, or a lever
+that lost earlier but wins on the new base. When Step 0 leaves a gap, or the
+space is too large to enumerate, search it with memory instead of looping:
+
+1. **Levers are knobs.** Every idea is a default-off spec field (byte-identical
+   when off). A lever that loses alone stays registered; it may win in
+   combination or after the base changes.
+2. **Stage the moves.** Single moves from the base; then every subset of the
+   moves that came within noise of the base or beat it; then two-step moves on
+   ordinal knobs. Accept the first improvement beyond noise and push the old base
+   on a lookback stack. When a base is exhausted, revisit the stack before
+   restarting.
+3. **Re-sweep after a structural change.** When a lever changes the base, test the
+   retained and the lost levers again on the new base. A "rejected" verdict
+   measured on an old base is not a verdict on the new one.
+4. **Gate every number.** The numeric check runs before the first timing of each
+   artifact; a config that fails is never timed. Timing is interleaved, compared
+   against a noise estimate, and the finalists are re-timed against the baseline
+   in paired rounds. Include an A/A control (the same spec compiled twice) so the
+   noise floor is known, and never report the best of N screened values as the
+   result.
+5. **Warm start from what already works.** Seed the search with the dispatcher's
+   pick and with winners from nearby shapes; a warm start usually matters more
+   than the choice of strategy. Use `exhaustive` when the space is no larger than
+   the budget.
+6. **Search per shape class, not per shape.** Decode, short and long prefill,
+   causal and windowed, and GQA ratios are different problems; judge a candidate
+   on the whole class before it becomes a default.
+
+The engine is `rocke.dispatch.tuning.search` (strategies, measurement rules,
+tuning DB, replay); see [Autotuner Overview](../autotune/overview.md#search-engine-rockedispatchtuningsearch)
+for the API and for choosing a strategy, and
+[`search-optimize-rocke.md`](utilities/skills/search-optimize-rocke.md) for the
+step-by-step procedure.
+
+A searched winner is a measured result, not a shipped kernel. Shipping a tuned
+configuration means changing a default, or adding a variant or a selection rule
+where the consumer picks kernels (for hipDNN, the packaged descriptors), and
+every shipped variant is a code object the consumer carries. Search wide, then
+prune to the smallest set of variants that keeps the gain; prefer a winner that
+can become the default over one that needs its own variant.
 
 ## How to read this document
 

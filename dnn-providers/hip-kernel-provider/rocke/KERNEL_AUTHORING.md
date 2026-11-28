@@ -210,6 +210,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 ### D. Perf optimization (no new feature)
 
 - [ ] **Step 0 exhaustive lever sweep** before concluding a gap is structural.
+- [ ] **Search with lookback** when single-lever moves stall: lost levers
+      re-tested on the new base, a paired confirmation against the baseline, and
+      an A/A control (runbook "Search with lookback").
 - [ ] Same-session A/B ratios (median of ≥3) at production-representative scale;
       store every absolute software measurement in the approved access-controlled
       record.
