@@ -58,6 +58,7 @@ from ..numeric.fp8 import (
     fp8e4m3fnuz_decode_table,
     fp8e4m3fnuz_round,
 )
+from ..numeric.tolerance import EPSILON
 
 __all__ = [
     "EXACT_OPERAND_VALUES",
@@ -80,9 +81,6 @@ EXACT_OPERAND_VALUES = np.array([0.0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0
 
 _OCP_ENCODERS = {"fp8e4m3": fp8e4m3_encode, "bf8e5m2": bf8e5m2_encode}
 
-# The unit roundoff of f32.
-_F32_UNIT_ROUNDOFF = 2.0**-24
-
 
 def exact_operand_tolerance(term_magnitude: npt.ArrayLike, groups: int) -> Tolerance:
     """The element-wise bound of a scaled fp8 / bf8 GEMM output whose operands
@@ -102,7 +100,9 @@ def exact_operand_tolerance(term_magnitude: npt.ArrayLike, groups: int) -> Toler
             f"exact_operand_tolerance failed - groups={groups!r}, expected an "
             "int >= 1"
         )
-    rounding = 2 * (groups + 2) * _F32_UNIT_ROUNDOFF
+    # groups + 2 roundings in the kernel and as many in the reference, each at
+    # most one unit roundoff, half an f32 epsilon.
+    rounding = (groups + 2) * EPSILON["fp32"]
     return Tolerance(atol=rounding * np.asarray(term_magnitude, dtype=np.float64))
 
 
