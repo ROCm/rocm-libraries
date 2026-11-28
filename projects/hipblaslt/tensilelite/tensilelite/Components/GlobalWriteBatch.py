@@ -1974,6 +1974,13 @@ class GlobalWriteBatchWriter:
     # is16bitSubtile uses (partner-lane address setup, store dispatch) are shared
     # and stay unscoped.
     is16bitSubtileMxf4 = is16bitSubtile and isMxf4SubtilePath(self.kernel)
+    # MX-fp8 takes the MXF4 grouped layout: the OOB guards and D stores go after
+    # all of the beta math, so no store-skip branch is taken with C loads in flight.
+    _pt = self.kernel["ProblemType"]
+    is16bitSubtileMxf8 = is16bitSubtile \
+        and (_pt["DataTypeA"].is8bitFloat() or _pt["DataTypeB"].is8bitFloat()) \
+        and bool(_pt["MXBlockA"] or _pt["MXBlockB"])
+    groupSubtileStores = is16bitSubtileMxf4 or is16bitSubtileMxf8
     # fused-A2A PUSH pass: the A2A tiles go to the LOCAL D output and the cross-card
     # move is an SDMA copy issued afterwards, not a CU store.  Those stores must bypass
     # L2 (sc1) because gfx950's L2 is coherent only within one XCD while the SDMA engine
@@ -2151,7 +2158,7 @@ class GlobalWriteBatchWriter:
         # SrdD increment into `module` here would place them before all of storeCode,
         # so a ragged-M guard branch jumps backwards past the stores -> hang. Co-locate
         # the label + increment with the stores (Stage-14 peel ragged-M hang fix).
-        _ngTarget = storeCode if is16bitSubtileMxf4 else module
+        _ngTarget = storeCode if groupSubtileStores else module
         if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
           _ngTarget.add(self._subtileNGroupSkipLabel)
           self._subtileNGroupSkipLabel = None
@@ -2613,7 +2620,7 @@ class GlobalWriteBatchWriter:
         inlineFusedWeave = (is16bitSubtile and self._weaveMode
                             and self._fusedFullTileNoGuards())
         storeCodeModule = module if inlineFusedWeave else \
-                          (storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtileMxf4) else module)
+                          (storeCode if (self.kernel["GroupLoadStore"] or groupSubtileStores) else module)
         if is16bitSubtile:
           tt0 = element[1]  # d0: thread-tile index along M
           # Epilogue (bias/activation) is applied per-element in iteration order.
@@ -2828,7 +2835,7 @@ class GlobalWriteBatchWriter:
             self.storesIssued += 1
 
     # Close the last N-group OOB skip label (if any) opened by _emitSubtileOobGuard.
-    self._finalizeSubtileOobGuards(storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtileMxf4) else module)
+    self._finalizeSubtileOobGuards(storeCode if (self.kernel["GroupLoadStore"] or groupSubtileStores) else module)
     if self.kernel["ProblemType"]["StochasticRounding"]:
       self.parentWriter.vgprPool.checkIn(vgprRND)
 
