@@ -362,8 +362,12 @@ namespace TensileLite
             d.tiles = static_cast<uint32_t>(skTiles);
             d.totalItems
                 = static_cast<uint32_t>((in.totalTiles - skTiles) + skTiles * size_t{d.split});
-            d.grid = static_cast<uint32_t>(
-                in.maxGrid > 0 ? std::min(size_t{d.totalItems}, in.maxGrid) : size_t{d.totalItems});
+            // Whole tiles never touch the flag region, so only split launches
+            // need the flag-bounded grid.
+            const size_t gridBound
+                = (skTiles == 0 && in.wholeTileMaxGrid > 0) ? in.wholeTileMaxGrid : in.maxGrid;
+            d.grid = static_cast<uint32_t>(gridBound > 0 ? std::min(size_t{d.totalItems}, gridBound)
+                                                         : size_t{d.totalItems});
             return d;
         }
 
@@ -493,15 +497,19 @@ namespace TensileLite
 
     size_t StreamK::Dynamic::maxGrid(AMDGPU const& gpu, int cuOccupancy, size_t flagSlots)
     {
+        const size_t grid = residentGrid(gpu, cuOccupancy);
+        return flagSlots > 0 ? std::min(grid, flagSlots) : grid;
+    }
+
+    size_t StreamK::Dynamic::residentGrid(AMDGPU const& gpu, int cuOccupancy)
+    {
         const size_t occupancy = std::max(cuOccupancy, 1);
-        size_t       maxGrid   = gpu.computeUnitCount * occupancy;
-        if(flagSlots > 0)
-            maxGrid = std::min(maxGrid, flagSlots);
+        size_t       grid      = gpu.computeUnitCount * occupancy;
         if(gpu.persistentMaxCUs > 0)
-            maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentMaxCUs));
+            grid = std::min(grid, static_cast<size_t>(gpu.persistentMaxCUs));
         if(gpu.persistentFixedGrid > 0)
-            maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentFixedGrid));
-        return maxGrid;
+            grid = std::min(grid, static_cast<size_t>(gpu.persistentFixedGrid));
+        return grid;
     }
 
     bool StreamK::Dynamic::keepsSummationOrder(ContractionSolution const& solution)

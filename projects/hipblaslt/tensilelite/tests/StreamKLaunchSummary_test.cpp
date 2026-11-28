@@ -2390,11 +2390,65 @@ TEST(StreamKDynamicSplitTest, MaxGridFollowsTheOccupancy)
     }
     EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, 0), 2048u) << "0 flag slots leaves it unbounded";
     EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, 100), 100u);
+    EXPECT_EQ(StreamK::Dynamic::residentGrid(gpu, 16), 4096u) << "no flag-slot bound";
+    EXPECT_EQ(StreamK::Dynamic::residentGrid(gpu, 0), 256u);
 
     gpu.persistentMaxCUs = 300;
     EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, flagSlots), 300u);
+    EXPECT_EQ(StreamK::Dynamic::residentGrid(gpu, 16), 300u);
     gpu.persistentFixedGrid = 200;
     EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, flagSlots), 200u);
+    EXPECT_EQ(StreamK::Dynamic::residentGrid(gpu, 16), 200u);
+}
+
+// Whole tiles use no flags, so only a launch that splits tiles keeps the
+// flag-bounded grid; debug overrides that split some tiles included.
+TEST(StreamKDynamicSplitTest, OnlyWholeTilesUseTheWholeTileGrid)
+{
+    // gfx950 at occupancy 16: 4096 resident slots, 1792 flag slots.
+    auto whole             = dynamicSplitInputs(4225, 128);
+    whole.maxGrid          = 1792;
+    whole.wholeTileMaxGrid = 4096;
+    const auto w           = StreamK::Dynamic::computeSplit(whole);
+    EXPECT_EQ(w.tiles, 0u);
+    EXPECT_EQ(w.totalItems, 4225u);
+    EXPECT_EQ(w.grid, 4096u);
+    whole.wholeTileMaxGrid = 0;
+    EXPECT_EQ(StreamK::Dynamic::computeSplit(whole).grid, 1792u) << "0 falls back to maxGrid";
+
+    // Every tile split for the parallel reduction: 200 x 16 parts.
+    auto parallel             = dynamicSplitInputs(200, 262144);
+    parallel.allowParallel    = true;
+    parallel.maxGrid          = 1792;
+    parallel.wholeTileMaxGrid = 4096;
+    parallel.overrideTiles    = 200;
+    parallel.overrideSplit    = 16;
+    const auto p              = StreamK::Dynamic::computeSplit(parallel);
+    EXPECT_TRUE(p.parallel);
+    EXPECT_EQ(p.totalItems, 3200u);
+    EXPECT_EQ(p.grid, 1792u);
+
+    // Every tile split for the arrival fixup, at occupancy 4: 100 x 16 parts.
+    auto arrival             = dynamicSplitInputs(100, 262144);
+    arrival.maxGrid          = 1024;
+    arrival.wholeTileMaxGrid = 4096;
+    arrival.overrideTiles    = 100;
+    arrival.overrideSplit    = 16;
+    const auto a             = StreamK::Dynamic::computeSplit(arrival);
+    EXPECT_EQ(a.tiles, 100u);
+    EXPECT_EQ(a.totalItems, 1600u);
+    EXPECT_EQ(a.grid, 1024u);
+
+    // 100 of 4225 tiles in 4 parts: 4125 whole tiles and 400 parts.
+    auto mixed             = dynamicSplitInputs(4225, 262144);
+    mixed.maxGrid          = 1792;
+    mixed.overrideTiles    = 100;
+    mixed.overrideSplit    = 4;
+    mixed.wholeTileMaxGrid = 4096;
+    const auto m           = StreamK::Dynamic::computeSplit(mixed);
+    EXPECT_EQ(m.tiles, 100u);
+    EXPECT_EQ(m.totalItems, 4525u);
+    EXPECT_EQ(m.grid, 1792u);
 }
 
 // Fewer tiles than CUs: the static grid's split (see StreamK::Dynamic::computeSplit).
@@ -3092,14 +3146,14 @@ TEST_F(StreamKDynamicSplitSolveTest, GridFollowsTheOccupancy)
     ASSERT_GT(splitAtOne.tiles, 0u);
 
     for(auto [occupancy, expected] :
-        std::vector<std::pair<int, size_t>>{{1, 256}, {3, 768}, {4, 1024}, {8, 1792}})
+        std::vector<std::pair<int, size_t>>{{1, 256}, {3, 768}, {4, 1024}, {8, 2048}})
     {
         SCOPED_TRACE("occupancy " + std::to_string(occupancy));
         solution->sizeMapping.CUOccupancy = occupancy;
         const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
         EXPECT_EQ(d.tiles, 0u);
         EXPECT_EQ(d.grid, expected);
-        ASSERT_NE(tiles % expected, 0u) << "getSKGrid's flag clamp applies to this grid";
+        ASSERT_NE(tiles % expected, 0u) << "getSKGrid's flag clamp would apply to a split launch";
         EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
                   expected);
         EXPECT_EQ(solution->computeStreamKDecisions(problem, device).grid(), expected);
@@ -3108,6 +3162,54 @@ TEST_F(StreamKDynamicSplitSolveTest, GridFollowsTheOccupancy)
         expectSameSplit(solution->streamKDynamicDecomposition(split, device, splitTiles),
                         splitAtOne);
     }
+}
+
+// Whole tiles use no flags, so the grid fills every resident slot past the
+// 1792 flag slots, and the grid, the decisions and the launch agree on it.
+TEST_F(StreamKDynamicSplitSolveTest, WholeTileGridFillsEveryResidentSlot)
+{
+    const Shape  manyTiles{8320, 8320, 1024, 1}; // 65 x 65 tiles
+    auto         problem = dynamicSplitGemm(manyTiles);
+    const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+    ASSERT_EQ(tiles, 4225u);
+    solution->sizeMapping.CUOccupancy = 16;
+
+    const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+    EXPECT_EQ(d.tiles, 0u);
+    EXPECT_EQ(d.grid, 4096u) << "256 CUs x occupancy 16";
+    ASSERT_NE(tiles % d.grid, 0u) << "getSKGrid's flag clamp would apply to a split launch";
+    EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 4096u);
+
+    const auto decisions = solution->computeStreamKDecisions(problem, device);
+    EXPECT_EQ(decisions.selectedGrid, 4096u);
+    EXPECT_EQ(decisions.skGridPreFallback, 4096u);
+    EXPECT_EQ(decisions.grid(), 4096u);
+    EXPECT_EQ(decisions.skTiles(), 0u);
+    EXPECT_EQ(decisions.totalItems(), 4225u);
+    EXPECT_EQ(decisions.requiredWorkspaceBytes, 0u);
+
+    expectWorkspaceAndLaunchCarry(*solution, problem, d);
+}
+
+// A debug override that splits only some tiles still uses the flags, so its
+// grid stays within the flag slots.
+TEST_F(StreamKDynamicSplitSolveTest, MixedOverrideKeepsTheFlagBoundedGrid)
+{
+    const Shape  manyTiles{8320, 8320, 1024, 1}; // 65 x 65 tiles
+    auto         problem              = dynamicSplitGemm(manyTiles);
+    const size_t tiles                = problem.getNumTiles(solution->sizeMapping, 1);
+    solution->sizeMapping.CUOccupancy = 16;
+    device.skTiles                    = 100;
+    device.skSplit                    = 4;
+
+    const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+    EXPECT_EQ(d.tiles, 100u);
+    EXPECT_EQ(d.totalItems, 4525u) << "4125 whole tiles and 100 x 4 parts";
+    EXPECT_EQ(d.grid, 1792u) << "2048 flag entries less 256 for the queue counters";
+    EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree), 1792u);
+    EXPECT_EQ(solution->computeStreamKDecisions(problem, device).grid(), 1792u);
+
+    expectWorkspaceAndLaunchCarry(*solution, problem, d);
 }
 
 // Uniform summation order: the dynamic split gives every tile the same parts
