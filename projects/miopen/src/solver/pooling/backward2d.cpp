@@ -128,6 +128,12 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
 {
     static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
 
+    // the launch puts n * c on grid z (see GetSolution), which wraps
+    // silently past the 16-bit workgroup id on gfx12: see the matching
+    // comment in PoolingForward2d::IsApplicable
+    if(problem.GetXDesc().GetLengths()[0] * problem.GetXDesc().GetLengths()[1] > 65535)
+        return false;
+
     return problem.GetDirection() == miopen::pooling::Direction::Backward &&
            problem.GetXDesc().GetType() == problem.GetYDesc().GetType() &&
            (problem.GetXDesc().GetType() == miopenFloat ||

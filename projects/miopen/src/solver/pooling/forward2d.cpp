@@ -126,6 +126,16 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
 {
     static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
 
+    // the launch puts n * c on grid z (see GetSolution). workgroup ids y/z
+    // are 16-bit, and a module launch with more than 65535 workgroups in y
+    // or z either wraps silently (gfx12, wrong results with a success
+    // status) or fails the launch on older targets, so a problem this size
+    // has to be left to another solver. 65535, not 65536: multi-XCD gfx12
+    // parts (e.g. gfx1250) page-fault at 65536 even though gfx1201 tolerates
+    // it, matching the bound the cat and tensorOp solvers already use
+    if(problem.GetYDesc().GetLengths()[0] * problem.GetYDesc().GetLengths()[1] > 65535)
+        return false;
+
     return problem.GetDirection() == miopen::pooling::Direction::Forward &&
            problem.GetXDesc().GetNumDims() == 4 &&
            problem.GetXDesc().GetType() == problem.GetYDesc().GetType() &&
