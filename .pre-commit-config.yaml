@@ -713,7 +713,7 @@ repos:
               tools/(precommit_hooks|run_hook_on_deletion)\.py|
               platform/python/rocke/tests/(__init__|cmake_file_api|cmake_generator|
                 ctest_listing|host_cpus|import_closure|lanes|platform_build|
-                source_modules)\.py|
+                provider_categories|source_modules)\.py|
               platform/tests/support/test_(cmake_file_api|import_closure)\.py|
               platform/tests/tools/test_(emitter_pair_hook_files|precommit_hooks|
                 run_hook_on_deletion)\.py

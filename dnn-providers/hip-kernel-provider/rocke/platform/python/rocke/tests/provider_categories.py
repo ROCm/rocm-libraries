@@ -33,7 +33,11 @@ import pytest
 
 from ..assets import platform_root
 
-__all__ = ["provider_category_labels", "shared_category_parser"]
+__all__ = [
+    "provider_categories_file",
+    "provider_category_labels",
+    "shared_category_parser",
+]
 
 _LABELS_LINE = re.compile(
     r'set_tests_properties\("([^"]+)" PROPERTIES LABELS "([^"]*)"\)'
@@ -80,6 +84,12 @@ def shared_category_parser(monorepo: Path, scratch: Path) -> Path | None:
     return copy
 
 
+def provider_categories_file() -> Path:
+    """The provider's ``ROCKE_ENGINE_test_categories_external.yaml``, beside
+    this rocke tree in a monorepo checkout (absent elsewhere)."""
+    return platform_root().parent.parent / "ROCKE_ENGINE_test_categories_external.yaml"
+
+
 def provider_category_labels(
     names: Iterable[str], scratch: Path
 ) -> dict[str, set[str]]:
@@ -87,8 +97,8 @@ def provider_category_labels(
     gets no label is absent. ``scratch`` is a directory for the stand-in CTest
     file the parser reads. Skips the test when this tree has no provider
     categories or no shared parser, or when PyYAML is missing."""
-    provider = platform_root().parent.parent
-    categories = provider / "ROCKE_ENGINE_test_categories_external.yaml"
+    categories = provider_categories_file()
+    provider = categories.parent
     if not categories.is_file():
         pytest.skip(
             f"no provider CTest categories to check: {categories} does not exist"

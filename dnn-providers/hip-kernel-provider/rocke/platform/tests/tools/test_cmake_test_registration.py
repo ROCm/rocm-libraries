@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.provider_categories import provider_categories_file
 
 _INCLUDE_RE = re.compile(r"(?im)^[ \t]*include\s*\(\s*([^\s)]+)\s*\)")
 _REGISTRATION_RE = re.compile(r"\badd_(?:test|executable)\s*\(", re.IGNORECASE)
@@ -68,7 +69,7 @@ def test_every_registered_cpp_test_is_in_a_provider_tier():
     """TheRock CI selects provider tests by tier label, so a C++ test that no
     tier of the provider's categories lists never runs there."""
     platform = Path(__file__).resolve().parents[2]
-    categories = platform.parents[1] / "ROCKE_ENGINE_test_categories_external.yaml"
+    categories = provider_categories_file()
     fragments = platform / "tests" / "cmake"
     if not (categories.is_file() and fragments.is_dir()):
         skip_until(

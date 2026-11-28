@@ -22,6 +22,7 @@ import pytest
 from rocke.assets import platform_root
 from rocke.tests.import_closure import script_import_closure
 from rocke.tests.lanes import SOURCE_TREE, skip_until
+from rocke.tests.provider_categories import provider_categories_file
 from rocke.tests.source_modules import load_module_from_path
 
 pytest.importorskip("yaml", reason="reading a pre-commit config needs PyYAML")
@@ -37,7 +38,9 @@ PLATFORM = platform_root().resolve()
 # rocke/platform -> rocke -> hip-kernel-provider -> dnn-providers -> monorepo.
 MONOREPO = PLATFORM.parents[3]
 MONOREPO_CONFIG = MONOREPO / ".pre-commit-config.yaml"
-ROCKE_DIR = "dnn-providers/hip-kernel-provider/rocke/"
+# rocKE's directory as the monorepo config spells it, derived from the tree so no
+# repo path is written here (run_all's relative-path guard).
+ROCKE_DIR = PLATFORM.parent.relative_to(MONOREPO).as_posix() + "/"
 # The rocKE hooks of the monorepo's config. The config is outside rocke/, so a
 # change there that drops or renames a rocKE gate gets no rocKE review; this
 # list is under rocke/, so changing it does.
@@ -286,7 +289,8 @@ def test_a_wrapped_hook_says_skip_and_passes_where_rocke_is_not_checked_out(
         "shared/ctest/parse_ctest_categories.py",
         # The teams each registry record must name.
         ".github/CODEOWNERS",
-        "dnn-providers/hip-kernel-provider/ROCKE_ENGINE_test_categories_external.yaml",
+        # The provider's category lists, which hold rocKE's tier lists.
+        provider_categories_file().resolve().relative_to(MONOREPO).as_posix(),
     ],
 )
 def test_the_registry_hook_takes_the_files_it_reads_outside_rocke(rocke_hooks, path):
