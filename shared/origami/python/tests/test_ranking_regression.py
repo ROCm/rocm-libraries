@@ -46,7 +46,7 @@ def is_dtype_supported(arch_name: str, dtype: str) -> bool:
 
 def load_problem_sizes() -> list[tuple[int, int, int, int]]:
     """Load problem sizes from CSV file.
-    
+
     Returns:
         List of (m, n, k, batch) tuples.
     """
@@ -116,7 +116,7 @@ def generate_rankings(
     transB: origami.transpose_t = origami.transpose_t.N,
 ) -> dict[str, list[list[int]]]:
     """Generate rankings for all test problem sizes.
-    
+
     Returns a dict mapping problem_key -> list of config tuples.
     Each config tuple is [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm].
     """
@@ -160,13 +160,13 @@ def get_baseline_path(arch_name: str) -> Path:
 @lru_cache(maxsize=None)
 def load_arch_baseline(arch_name: str) -> dict | None:
     """Load and cache the full baseline for an architecture.
-    
+
     Returns the parsed YAML dict, or None if file doesn't exist.
     """
     path = get_baseline_path(arch_name)
     if not path.exists():
         return None
-    
+
     with open(path, "r") as f:
         return yaml.load(f, Loader=SafeLoader)
 
@@ -185,7 +185,7 @@ def load_baseline(
     baseline = load_arch_baseline(arch_name)
     if baseline is None:
         return None
-    
+
     try:
         return baseline[dtype][transpose_key(transA, transB)]
     except KeyError:
@@ -202,32 +202,32 @@ def save_baseline(
     """Save rankings to the architecture's YAML baseline file."""
     BASELINE_DIR.mkdir(parents=True, exist_ok=True)
     path = get_baseline_path(arch_name)
-    
+
     if path.exists():
         with open(path, "r") as f:
             baseline = yaml.load(f, Loader=SafeLoader) or {}
     else:
         baseline = {}
-    
+
     if dtype not in baseline:
         baseline[dtype] = {}
     baseline[dtype][transpose_key(transA, transB)] = rankings
-    
+
     # Write with compact format: flow style for problem entries, sorted keys
     # Custom representer to use flow style for the innermost lists (config lists per problem)
     class CompactDumper(SafeDumper):
         pass
-    
+
     def represent_problem_configs(dumper, data):
         # Use flow style for list of config lists (the value under each problem key)
         return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
-    
+
     # Apply flow style to lists that contain lists (problem -> [[config], [config], ...])
     CompactDumper.add_representer(list, represent_problem_configs)
-    
+
     with open(path, "w") as f:
         yaml.dump(baseline, f, Dumper=CompactDumper, default_flow_style=False, sort_keys=True, width=1000)
-    
+
     # Clear cache so subsequent loads see the updated file
     load_arch_baseline.cache_clear()
 
@@ -248,7 +248,7 @@ def compare_rankings(
             continue
 
         curr_configs = current[problem_key]
-        
+
         if len(curr_configs) != len(base_configs):
             differences.append(
                 f"{problem_key}: Different rank count (curr={len(curr_configs)}, base={len(base_configs)})"

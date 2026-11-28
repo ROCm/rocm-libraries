@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
-#include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
@@ -36,6 +36,33 @@ NB_MODULE(origami, m) {
       .value("gfx1153", hardware_t::architecture_t::gfx1153)
       .value("gfx1250", hardware_t::architecture_t::gfx1250)
       .export_values();
+
+  nanobind::enum_<origami::family_t>(m, "family_t")
+      .value("cdna2", origami::family_t::cdna2)
+      .value("cdna3", origami::family_t::cdna3)
+      .value("cdna4", origami::family_t::cdna4)
+      .value("cdna5", origami::family_t::cdna5)
+      .value("rdna3", origami::family_t::rdna3)
+      .value("rdna4", origami::family_t::rdna4)
+      .value("unknown", origami::family_t::unknown);
+
+  nanobind::enum_<origami::rejection_t>(m, "rejection_t")
+      .value("none", origami::rejection_t::none)
+      .value("lds_capacity", origami::rejection_t::lds_capacity)
+      .value("rf_capacity", origami::rejection_t::rf_capacity)
+      .value("invalid_config", origami::rejection_t::invalid_config)
+      .value("heuristic", origami::rejection_t::heuristic)
+      .value("forced_pick", origami::rejection_t::forced_pick)
+      .value("dot2_large_m", origami::rejection_t::dot2_large_m)
+      .value("non_temporal_b_required", origami::rejection_t::non_temporal_b_required)
+      .value("non_temporal_a_required", origami::rejection_t::non_temporal_a_required)
+      .value("non_temporal_not_allowed", origami::rejection_t::non_temporal_not_allowed)
+      .value("non_temporal_misaligned", origami::rejection_t::non_temporal_misaligned);
+
+  nanobind::enum_<origami::variant_t>(m, "variant_t")
+      .value("standard", origami::variant_t::standard)
+      .value("gfx950_id75a8", origami::variant_t::gfx950_id75a8)
+      .value("gfx1250_6xcd", origami::variant_t::gfx1250_6xcd);
 
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
       .value("Float", origami::data_type_t::Float)
@@ -97,9 +124,8 @@ NB_MODULE(origami, m) {
       .value("none", origami::hybrid_mode_t::none)
       .export_values();
 
-  m.def("hybrid_mode_to_string",
-        &origami::hybrid_mode_to_string,
-        "Convert hybrid_mode_t to string.");
+  m.def(
+      "hybrid_mode_to_string", &origami::hybrid_mode_to_string, "Convert hybrid_mode_t to string.");
 
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
@@ -170,7 +196,11 @@ NB_MODULE(origami, m) {
       .def_rw("prefetch_local_read", &origami::tensile_params_t::prefetch_local_read)
       .def_rw("half_plr", &origami::tensile_params_t::half_plr)
       .def_rw("multicast", &origami::tensile_params_t::multicast)
-      .def_rw("adaptive_gemm", &origami::tensile_params_t::adaptive_gemm);
+      .def_rw("adaptive_gemm", &origami::tensile_params_t::adaptive_gemm)
+      .def_rw("temporal_hint_a", &origami::tensile_params_t::temporal_hint_a)
+      .def_rw("temporal_hint_b", &origami::tensile_params_t::temporal_hint_b)
+      .def_rw("temporal_hint_d", &origami::tensile_params_t::temporal_hint_d)
+      .def_rw("tdm_fuse", &origami::tensile_params_t::tdm_fuse);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -318,6 +348,8 @@ NB_MODULE(origami, m) {
       .def_rw("mem_bw_per_wg_coefficients", &hardware_t::mem_bw_per_wg_coefficients)
       .def_rw("NUM_XCD", &hardware_t::NUM_XCD)
       .def_rw("pci_chip_id", &hardware_t::pci_chip_id)
+      .def_prop_ro("variant", &hardware_t::variant)
+      .def("family", &hardware_t::family, "Architecture family of this hardware")
       .def("xcd_per_l2_domain", &hardware_t::xcd_per_l2_domain)
       .def("num_l2_domains", &hardware_t::num_l2_domains)
       .def("l2_domain_capacity", &hardware_t::l2_domain_capacity);
@@ -328,19 +360,26 @@ NB_MODULE(origami, m) {
         "This gets a hardware object for a device.");
 
   // Needs named arguments; optional pci_chip_id for gfx950 memory model row (e.g. 0x75a8)
-  m.def(
-      "get_hardware_for_arch",
-      &hardware_t::get_hardware_for_arch,
-      nanobind::arg("arch"),
-      nanobind::arg("N_CU"),
-      nanobind::arg("lds_capacity"),
-      nanobind::arg("rf_capacity"),
-      nanobind::arg("L2_capacity"),
-      nanobind::arg("compute_clock_khz"),
-      nanobind::arg("pci_chip_id") = nanobind::none(),
-      "Create hardware object for a specific architecture with specified parameters."
-      "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
-      "(0x75a8 -> id75a8; absent or other values -> id75a0).");
+  m.def("get_hardware_for_arch",
+        &hardware_t::get_hardware_for_arch,
+        nanobind::arg("arch"),
+        nanobind::arg("N_CU"),
+        nanobind::arg("lds_capacity"),
+        nanobind::arg("rf_capacity"),
+        nanobind::arg("L2_capacity"),
+        nanobind::arg("compute_clock_khz"),
+        nanobind::arg("pci_chip_id") = nanobind::none(),
+        "Create hardware object for a specific architecture with specified parameters."
+        "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
+        "(0x75a8 -> id75a8; absent or other values -> id75a0).");
+
+  m.def("resolve_variant",
+        &origami::resolve_variant,
+        nanobind::arg("arch"),
+        nanobind::arg("pci_chip_id") = nanobind::none(),
+        nanobind::arg("n_cu")        = 0,
+        "Chip variant of a device, from its architecture, PCI chip id (gfx950) and WGP count "
+        "(gfx1250).");
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
         &origami::string_to_datatype,
@@ -349,7 +388,7 @@ NB_MODULE(origami, m) {
         &origami::datatype_to_string,
         "Convert data_type_t enum to string representation");
 
-  // Origami functions [origami.cpp]
+  // Selection functions [selection/]
   m.def("select_config",
         &origami::select_config,
         "Select best configuration based on problem and hardware");
@@ -375,7 +414,25 @@ NB_MODULE(origami, m) {
         &origami::streamk::select_grid_size,
         "Select best grid size for the given configuration");
 
-  // GEMM functions [gemm.cpp] — ordered to match gemm.cpp implementation
+  // GEMM functions [cost_models/gemm/]
+  nanobind::class_<origami::gemm::memory_terms_t>(m, "memory_terms_t")
+      .def_ro("L_mem", &origami::gemm::memory_terms_t::L_mem)
+      .def_ro("l2_cycles", &origami::gemm::memory_terms_t::l2_cycles)
+      .def_ro("dram_cycles", &origami::gemm::memory_terms_t::dram_cycles)
+      .def_ro("delivery_floor", &origami::gemm::memory_terms_t::delivery_floor);
+
+  nanobind::class_<origami::gemm::tile_terms_t>(m, "tile_terms_t")
+      .def_ro("memory", &origami::gemm::tile_terms_t::memory)
+#define ORIGAMI_FIELD(type, name, description) \
+  .def_ro(#name, &origami::gemm::tile_terms_t::name, description)
+#define ORIGAMI_FIELD_AS(type, name, log_name, description) ORIGAMI_FIELD(type, name, description)
+#define ORIGAMI_LOGGED(log_name, expression)
+          ORIGAMI_GEMM_TILE_TERMS(ORIGAMI_FIELD, ORIGAMI_FIELD_AS, ORIGAMI_LOGGED)
+#undef ORIGAMI_FIELD
+#undef ORIGAMI_FIELD_AS
+#undef ORIGAMI_LOGGED
+      ;
+
   m.def("calculate_work_utilization",
         &origami::gemm::calculate_work_utilization,
         "Calculate the work utilization ratio");
@@ -412,7 +469,8 @@ NB_MODULE(origami, m) {
   m.def("compute_number_matrix_instructions",
         &origami::gemm::compute_number_matrix_instructions,
         "Compute the number of matrix instructions required");
-  m.def("arithmetic_intensity", &origami::gemm::arithmetic_intensity, "Compute arithmetic intensity");
+  m.def(
+      "arithmetic_intensity", &origami::gemm::arithmetic_intensity, "Compute arithmetic intensity");
   m.def("emulated_tf32_arithmetic_intensity",
         &origami::gemm::emulated_tf32_arithmetic_intensity,
         "Compute emulated TF32 arithmetic intensity");
@@ -443,9 +501,19 @@ NB_MODULE(origami, m) {
   m.def("compute_tile_latency",
         &origami::gemm::compute_tile_latency,
         "Compute latency to compute a K-complete tile");
-  m.def("compute_timestep_latency",
-        &origami::gemm::compute_timestep_latency,
-        "Compute latency per K-complete MT wave");
+  m.def("admit",
+        &origami::gemm::admit,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("config"),
+        "Decide whether the GEMM model scores a config; returns the first rule it fails");
+  m.def(
+      "rejection_to_string",
+      [](origami::rejection_t rejection) { return std::string(origami::to_string(rejection)); },
+      "Convert rejection_t to the text used in logs");
+  m.def("compute_tile_terms",
+        &origami::gemm::compute_tile_terms,
+        "Evaluate the tile model and return every term");
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
         nanobind::arg("problem"),
@@ -554,13 +622,4 @@ NB_MODULE(origami, m) {
         return origami::gemm::compute_tile_latency(problem, hardware, config, context);
       },
       "Compute latency to compute a K-complete tile (auto-creates context)");
-  m.def(
-      "compute_timestep_latency",
-      [](const origami::problem_t& problem,
-         const origami::hardware_t& hardware,
-         const origami::config_t& config) {
-        origami::gemm::context_t context(problem, hardware, config);
-        return origami::gemm::compute_timestep_latency(problem, hardware, config, context);
-      },
-      "Compute latency per K-complete MT wave (auto-creates context)");
 }

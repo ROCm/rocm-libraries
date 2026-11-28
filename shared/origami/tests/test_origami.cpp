@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -96,12 +73,12 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1,
                                             std::make_tuple(0, 0.008, 0));
       } else if (gpu_arch == 1250) {
-        hardware_slow                    = make_hardware(950);
-        hardware_slow.arch               = origami::hardware_t::architecture_t::gfx1250;
-        hardware_slow.compute_clock_ghz  = 1.4;
-        hardware_fast                    = make_hardware(950);
-        hardware_fast.arch               = origami::hardware_t::architecture_t::gfx1250;
-        hardware_fast.compute_clock_ghz  = 1.8;
+        hardware_slow                   = make_hardware(950);
+        hardware_slow.arch              = origami::hardware_t::architecture_t::gfx1250;
+        hardware_slow.compute_clock_ghz = 1.4;
+        hardware_fast                   = make_hardware(950);
+        hardware_fast.arch              = origami::hardware_t::architecture_t::gfx1250;
+        hardware_fast.compute_clock_ghz = 1.8;
       }
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
@@ -213,12 +190,9 @@ TEST_CASE("Origami: gfx1250 complex matrix instructions", "[origami]") {
     const char* string_dtype;
   };
 
-  const ComplexMiCase cases[] = {{origami::data_type_t::ComplexFloat,
-                                  origami::data_type_t::Float,
-                                  "c32"},
-                                 {origami::data_type_t::ComplexDouble,
-                                  origami::data_type_t::Double,
-                                  "c64"}};
+  const ComplexMiCase cases[] = {
+      {origami::data_type_t::ComplexFloat, origami::data_type_t::Float, "c32"},
+      {origami::data_type_t::ComplexDouble, origami::data_type_t::Double, "c64"}};
 
   for (const auto& tc : cases) {
     DYNAMIC_SECTION(tc.string_dtype) {
@@ -298,9 +272,9 @@ TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
   for (int gpu_arch : test_architectures) {
     if (gpu_arch != 950) continue;  // mxfp4 only supported on gfx950 for now
     DYNAMIC_SECTION("gfx" << gpu_arch << " - rank configs by latency") {
-      auto hardware = make_hardware(gpu_arch);
+      auto hardware         = make_hardware(gpu_arch);
       hardware.lds_capacity = 400000;
-      auto problem  = make_problem(4096, 4096, 32768);
+      auto problem          = make_problem(4096, 4096, 32768);
 
       // List 1: config A first, then config B
       std::vector<origami::config_t> configs;
@@ -312,8 +286,8 @@ TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
       // config A[2]
       configs.push_back(make_config(64, 64, 128, 32, 32, 64));
 
-      problem.a_dtype = origami::data_type_t::Float4;
-      problem.b_dtype = origami::data_type_t::Float4;
+      problem.a_dtype         = origami::data_type_t::Float4;
+      problem.b_dtype         = origami::data_type_t::Float4;
       problem.a_mx_block_size = 32;
       problem.b_mx_block_size = 32;
 
@@ -323,7 +297,6 @@ TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
       REQUIRE(results[0].config.mt.m == 256);
       REQUIRE(results[1].config.mt.m == 128);
       REQUIRE(results[2].config.mt.m == 64);
-
     }
   }
 }
@@ -332,17 +305,17 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - workgroup mapping selection") {
       auto hardware = make_hardware(gpu_arch);
-      
+
       // Large problem size
-      auto problem_large  = make_problem(4096, 4096, 8192);
-      auto config_large = make_config(256, 256, 32, 32, 32, 8, false, 1);
-      auto skGrid_large = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
+      auto problem_large = make_problem(4096, 4096, 8192);
+      auto config_large  = make_config(256, 256, 32, 32, 32, 8, false, 1);
+      auto skGrid_large  = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
       auto mapping_large =
           origami::select_workgroup_mapping(problem_large, hardware, config_large, skGrid_large);
 
       // Small problem size
-      auto problem_small  = make_problem(2048, 2048, 2048);
-      auto skGrid_small = ((2048 + 256 - 1) / 256) * ((2048 + 256 - 1) / 256);
+      auto problem_small = make_problem(2048, 2048, 2048);
+      auto skGrid_small  = ((2048 + 256 - 1) / 256) * ((2048 + 256 - 1) / 256);
       auto mapping_small =
           origami::select_workgroup_mapping(problem_small, hardware, config_large, skGrid_small);
 
@@ -378,9 +351,12 @@ TEST_CASE("Origami: gfx1250 select_workgroup_mapping maps WGM only", "[origami]"
   };
 
   SECTION("every remap but a positive WGM stays off") {
-    for (auto [m, n, k] : {std::tuple{4096, 4096, 8192}, std::tuple{2048, 2048, 2048},
-                           std::tuple{5120, 512, 5120}, std::tuple{1024, 1024, 65536},
-                           std::tuple{16, 64, 231696}, std::tuple{3024, 452352, 3504}}) {
+    for (auto [m, n, k] : {std::tuple{4096, 4096, 8192},
+                           std::tuple{2048, 2048, 2048},
+                           std::tuple{5120, 512, 5120},
+                           std::tuple{1024, 1024, 65536},
+                           std::tuple{16, 64, 231696},
+                           std::tuple{3024, 452352, 3504}}) {
       select(make_problem(m, n, k), config);
       select(make_problem(m, n, k, origami::transpose_t::T, origami::transpose_t::N, 4), config);
     }
@@ -419,8 +395,11 @@ TEST_CASE("Origami: select_workgroup_mapping keeps the XCC remap off gfx1250", "
   for (int gpu_arch : {942, 950}) {
     DYNAMIC_SECTION("gfx" << gpu_arch) {
       auto hardware = make_hardware(gpu_arch);
-      const auto mapping = origami::select_workgroup_mapping(
-          make_problem(4096, 4096, 8192), hardware, make_config(256, 256, 32, 32, 32, 8, false, 1), 256);
+      const auto mapping =
+          origami::select_workgroup_mapping(make_problem(4096, 4096, 8192),
+                                            hardware,
+                                            make_config(256, 256, 32, 32, 32, 8, false, 1),
+                                            256);
       REQUIRE(mapping.wgmxcc == hardware.NUM_XCD);
     }
   }
@@ -429,7 +408,17 @@ TEST_CASE("Origami: select_workgroup_mapping keeps the XCC remap off gfx1250", "
 TEST_CASE("origami: negative_occupancy", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - test negative occupancy") {
-      auto hardware              = make_hardware(gpu_arch);
+      // gfx1250 with its architecture constants: make_hardware(1250) reuses the gfx950
+      // placeholders, whose bandwidths make the gfx1250 model charge both tiles alike whatever
+      // their M.
+      auto hardware              = gpu_arch == 1250 ? origami::hardware_t::get_hardware_for_arch(
+                                             origami::hardware_t::architecture_t::gfx1250,
+                                             256,
+                                             327680,
+                                             512 * 1024,
+                                             4 << 20,
+                                             2400000)
+                                                    : make_hardware(gpu_arch);
       origami::problem_t problem = {
           .size            = {32, 800000, 16},
           .batch           = 1,
@@ -635,8 +624,7 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       if (gpu_arch == 950) {
         auto small_k_problem = make_problem(1024, 1024, 256);
         std::vector<origami::config_t> all_rejected_configs;
-        all_rejected_configs.push_back(
-            make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
+        all_rejected_configs.push_back(make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
         all_rejected_configs.push_back(make_heuristic_rejected());
 
         auto fallback_results =
@@ -692,26 +680,26 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       require_tie_prefers(results_m_equals_n, identical_ai_configs[0].mt.m);
 
       // Test 5: Test with different heuristics_variance values
-      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
+      portable_setenv("ORIGAMI_HEURISTICS_VARIANCE", "0.0", 1);
       // Read back and parse
       double env_val = origami::runtime_options::read_heuristics_variance_from_env();
-      REQUIRE(env_val == 0.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 0.0
+      REQUIRE(env_val == 0.0);  // Return ORIGAMI_HEURISTICS_VARIANCE is set to 0.0
 
-      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
+      portable_setenv("ORIGAMI_HEURISTICS_VARIANCE", "-1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 0.0);  // Return default value (tie-break disabled) when
-                                // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
+                                // ORIGAMI_HEURISTICS_VARIANCE is set to -1.0
 
-      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
+      portable_setenv("ORIGAMI_HEURISTICS_VARIANCE", "1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
-      REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0
+      REQUIRE(env_val == 1.0);  // Return ORIGAMI_HEURISTICS_VARIANCE is set to 1.0
 
       // Restore a clean environment: this variable injects random latency
       // variance, and leaving it set would make every subsequently-run test
       // (e.g. select_topk_configs, select_config_mnk) nondeterministic.
-      portable_unsetenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
+      portable_unsetenv("ORIGAMI_HEURISTICS_VARIANCE");
     }
   }
 }
@@ -1075,25 +1063,25 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
     if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast returns positive latency") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem = make_problem(2048, 2048, 2048);
-      
+      auto problem  = make_problem(2048, 2048, 2048);
+
       // Create config with simulation mode
-      auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+      auto config            = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
       config.prediction_mode = origami::prediction_modes_t::simulation;
-      
+
       // Set Formocast-specific parameters (via tensile nested struct)
-      config.tensile().depth_u = 32;
-      config.tensile().global_split_u = 1;
-      config.grvw_a = 4;
-      config.grvw_b = 4;
-      config.gwvw_d = 4;
-      config.tensile().wave_num = 4;
-      config.tensile().wave_group_m = 2;
-      config.tensile().wave_group_n = 2;
+      config.tensile().depth_u              = 32;
+      config.tensile().global_split_u       = 1;
+      config.grvw_a                         = 4;
+      config.grvw_b                         = 4;
+      config.gwvw_d                         = 4;
+      config.tensile().wave_num             = 4;
+      config.tensile().wave_group_m         = 2;
+      config.tensile().wave_group_n         = 2;
       config.tensile().prefetch_global_read = 2;
-      
+
       double latency = origami::gemm::compute_total_latency(problem, hardware, config);
-      
+
       REQUIRE(latency > 0);
     }
   }
@@ -1102,36 +1090,37 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
 TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
     if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_total_latency uses Formocast in simulation mode") {
+    DYNAMIC_SECTION("gfx" << gpu_arch
+                          << " - compute_total_latency uses Formocast in simulation mode") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem = make_problem(2048, 2048, 2048);
-      
+      auto problem  = make_problem(2048, 2048, 2048);
+
       // Create config with estimation mode
-      auto config_estimation = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+      auto config_estimation            = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
       config_estimation.prediction_mode = origami::prediction_modes_t::estimation;
-      
+
       // Create config with simulation mode
-      auto config_simulation = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
-      config_simulation.prediction_mode = origami::prediction_modes_t::simulation;
+      auto config_simulation              = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+      config_simulation.prediction_mode   = origami::prediction_modes_t::simulation;
       config_simulation.tensile().depth_u = 32;
-      config_simulation.tensile().global_split_u = 1;
-      config_simulation.grvw_a = 4;
-      config_simulation.grvw_b = 4;
-      config_simulation.gwvw_d = 4;
-      config_simulation.tensile().wave_num = 4;
-      config_simulation.tensile().wave_group_m = 2;
-      config_simulation.tensile().wave_group_n = 2;
+      config_simulation.tensile().global_split_u       = 1;
+      config_simulation.grvw_a                         = 4;
+      config_simulation.grvw_b                         = 4;
+      config_simulation.gwvw_d                         = 4;
+      config_simulation.tensile().wave_num             = 4;
+      config_simulation.tensile().wave_group_m         = 2;
+      config_simulation.tensile().wave_group_n         = 2;
       config_simulation.tensile().prefetch_global_read = 2;
-      
-      double latency_estimation = origami::gemm::compute_total_latency(
-          problem, hardware, config_estimation);
-      double latency_simulation = origami::gemm::compute_total_latency(
-          problem, hardware, config_simulation);
-      
+
+      double latency_estimation =
+          origami::gemm::compute_total_latency(problem, hardware, config_estimation);
+      double latency_simulation =
+          origami::gemm::compute_total_latency(problem, hardware, config_simulation);
+
       // Both should be positive
       REQUIRE(latency_estimation > 0);
       REQUIRE(latency_simulation > 0);
-      
+
       // They should produce different results (different models, different units)
       REQUIRE(latency_estimation != latency_simulation);
     }
@@ -1143,7 +1132,7 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
     if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles various problem sizes") {
       auto hardware = make_hardware(gpu_arch);
-      
+
       std::vector<std::tuple<size_t, size_t, size_t>> problem_sizes = {
           {1024, 1024, 1024},
           {2048, 2048, 2048},
@@ -1151,23 +1140,23 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
           {512, 4096, 4096},
           {8192, 8192, 1024},
       };
-      
+
       for (const auto& [m, n, k] : problem_sizes) {
         auto problem = make_problem(m, n, k);
-        
-        auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
-        config.prediction_mode = origami::prediction_modes_t::simulation;
-        config.tensile().depth_u = 32;
+
+        auto config                     = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+        config.prediction_mode          = origami::prediction_modes_t::simulation;
+        config.tensile().depth_u        = 32;
         config.tensile().global_split_u = 1;
-        config.grvw_a = 4;
-        config.grvw_b = 4;
-        config.gwvw_d = 4;
-        config.tensile().wave_num = 4;
-        config.tensile().wave_group_m = 2;
-        config.tensile().wave_group_n = 2;
-        
+        config.grvw_a                   = 4;
+        config.grvw_b                   = 4;
+        config.gwvw_d                   = 4;
+        config.tensile().wave_num       = 4;
+        config.tensile().wave_group_m   = 2;
+        config.tensile().wave_group_n   = 2;
+
         double latency = origami::gemm::compute_total_latency(problem, hardware, config);
-        
+
         INFO("Problem size: " << m << "x" << n << "x" << k);
         REQUIRE(latency > 0);
       }
@@ -1180,8 +1169,8 @@ TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]"
     if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
     DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles different tile sizes") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem = make_problem(4096, 4096, 4096);
-      
+      auto problem  = make_problem(4096, 4096, 4096);
+
       std::vector<std::tuple<size_t, size_t, size_t>> tile_sizes = {
           {64, 64, 32},
           {128, 128, 32},
@@ -1189,21 +1178,21 @@ TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]"
           {128, 256, 64},
           {256, 128, 64},
       };
-      
+
       for (const auto& [mt_m, mt_n, mt_k] : tile_sizes) {
-        auto config = make_config(mt_m, mt_n, mt_k, 16, 16, 16, false, 8, 2);
-        config.prediction_mode = origami::prediction_modes_t::simulation;
-        config.tensile().depth_u = mt_k;
+        auto config                     = make_config(mt_m, mt_n, mt_k, 16, 16, 16, false, 8, 2);
+        config.prediction_mode          = origami::prediction_modes_t::simulation;
+        config.tensile().depth_u        = mt_k;
         config.tensile().global_split_u = 1;
-        config.grvw_a = 4;
-        config.grvw_b = 4;
-        config.gwvw_d = 4;
-        config.tensile().wave_num = 4;
-        config.tensile().wave_group_m = 2;
-        config.tensile().wave_group_n = 2;
-        
+        config.grvw_a                   = 4;
+        config.grvw_b                   = 4;
+        config.gwvw_d                   = 4;
+        config.tensile().wave_num       = 4;
+        config.tensile().wave_group_m   = 2;
+        config.tensile().wave_group_n   = 2;
+
         double latency = origami::gemm::compute_total_latency(problem, hardware, config);
-        
+
         INFO("Tile size: " << mt_m << "x" << mt_n << "x" << mt_k);
         REQUIRE(latency > 0);
       }
@@ -1213,7 +1202,7 @@ TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]"
 
 TEST_CASE("Origami: Formocast config fields have correct defaults", "[origami][formocast]") {
   origami::config_t config;
-  
+
   // Check default values for Tensile-specific fields (via nested struct)
   REQUIRE(config.tensile().depth_u == 0);
   REQUIRE(config.tensile().global_split_u == 1);
@@ -1255,29 +1244,31 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
 
       // Test 2: Batch > 1 should disable stagger
       {
-        auto problem = make_problem(4096, 4096, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
-        auto config  = make_config(128, 128, 64, 16, 16, 32);
-        auto skGrid  = compute_skGrid(4096, 4096, 128, 128);
-        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        auto problem =
+            make_problem(4096, 4096, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
+        auto config = make_config(128, 128, 64, 16, 16, 32);
+        auto skGrid = compute_skGrid(4096, 4096, 128, 128);
+        auto result = origami::select_staggerU(problem, hardware, config, skGrid, 4);
         REQUIRE(result.staggerU == 0);
       }
 
       // Test 3: Split-K should disable stagger
       {
-        auto problem = make_problem(1024, 1024, 1024);
-        auto config  = make_config(128, 128, 64, 16, 16, 32);
+        auto problem  = make_problem(1024, 1024, 1024);
+        auto config   = make_config(128, 128, 64, 16, 16, 32);
         size_t numMTs = ((1024 + 127) / 128) * ((1024 + 127) / 128);  // 64
-        size_t skGrid = numMTs * 2;  // split_factor = 2
+        size_t skGrid = numMTs * 2;                                   // split_factor = 2
         auto result   = origami::select_staggerU(problem, hardware, config, skGrid, 4);
         REQUIRE(result.staggerU == 0);
       }
 
       // Test 4: Basic TN case — stagger should be enabled
       {
-        auto problem = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
-        auto config  = make_config(128, 128, 64, 16, 16, 32);
-        auto skGrid  = compute_skGrid(2048, 2048, 128, 128);
-        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        auto problem =
+            make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
+        auto config = make_config(128, 128, 64, 16, 16, 32);
+        auto skGrid = compute_skGrid(2048, 2048, 128, 128);
+        auto result = origami::select_staggerU(problem, hardware, config, skGrid, 4);
         REQUIRE(result.staggerU > 0);
         // StaggerU should be power of 2
         REQUIRE((result.staggerU & (result.staggerU - 1)) == 0);
@@ -1286,12 +1277,13 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
       // Test 5: StaggerU mapping should be SUM1 for positive WGM when A contention dominates
       // [1320, 256, 2048] MT=64x32x256 WGM=8: L2Tile_N=8 > L2Tile_M=4, row-mates share A
       {
-        auto problem = make_problem(1320, 256, 2048, origami::transpose_t::T, origami::transpose_t::N);
+        auto problem =
+            make_problem(1320, 256, 2048, origami::transpose_t::T, origami::transpose_t::N);
         problem.a_dtype = origami::data_type_t::BFloat16;
         problem.b_dtype = origami::data_type_t::BFloat16;
-        auto config  = make_config(64, 32, 256, 16, 16, 32);
-        auto skGrid  = compute_skGrid(1320, 256, 64, 32);
-        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 8);
+        auto config     = make_config(64, 32, 256, 16, 16, 32);
+        auto skGrid     = compute_skGrid(1320, 256, 64, 32);
+        auto result     = origami::select_staggerU(problem, hardware, config, skGrid, 8);
         REQUIRE(result.staggerU > 0);
         REQUIRE(result.staggerUMapping == 1);  // SUM1: distribute A reads
       }
@@ -1299,22 +1291,24 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
       // Test 6: StaggerU mapping should be SUM0 when B contention dominates
       // [128, 1024, 144] MT=32x64x16 WGM=1 FP32: L2Tile_M > L2Tile_N, B is the bottleneck
       {
-        auto problem = make_problem(128, 1024, 144, origami::transpose_t::T, origami::transpose_t::N);
+        auto problem =
+            make_problem(128, 1024, 144, origami::transpose_t::T, origami::transpose_t::N);
         problem.a_dtype = origami::data_type_t::Float;
         problem.b_dtype = origami::data_type_t::Float;
-        auto config  = make_config(32, 64, 16, 16, 16, 4);
-        auto skGrid  = compute_skGrid(128, 1024, 32, 64);
-        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 1);
+        auto config     = make_config(32, 64, 16, 16, 16, 4);
+        auto skGrid     = compute_skGrid(128, 1024, 32, 64);
+        auto result     = origami::select_staggerU(problem, hardware, config, skGrid, 1);
         REQUIRE(result.staggerU > 0);
         REQUIRE(result.staggerUMapping == 0);  // SUM0: distribute B reads
       }
 
       // Test 7: StaggerU value should be power of 2 and <= 32
       {
-        auto problem = make_problem(4096, 4096, 4096, origami::transpose_t::T, origami::transpose_t::N);
-        auto config  = make_config(128, 128, 64, 16, 16, 32);
-        auto skGrid  = compute_skGrid(4096, 4096, 128, 128);
-        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        auto problem =
+            make_problem(4096, 4096, 4096, origami::transpose_t::T, origami::transpose_t::N);
+        auto config = make_config(128, 128, 64, 16, 16, 32);
+        auto skGrid = compute_skGrid(4096, 4096, 128, 128);
+        auto result = origami::select_staggerU(problem, hardware, config, skGrid, 4);
         if (result.staggerU > 0) {
           REQUIRE(result.staggerU <= 32);
           REQUIRE((result.staggerU & (result.staggerU - 1)) == 0);
@@ -1324,10 +1318,11 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
 
       // Test 8: Stride shift ensures each stagger step crosses a cache line
       {
-        auto problem = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
-        auto config  = make_config(64, 64, 16, 16, 16, 16);  // Small MT_K=16
-        auto skGrid  = compute_skGrid(2048, 2048, 64, 64);
-        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        auto problem =
+            make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
+        auto config = make_config(64, 64, 16, 16, 16, 16);  // Small MT_K=16
+        auto skGrid = compute_skGrid(2048, 2048, 64, 64);
+        auto result = origami::select_staggerU(problem, hardware, config, skGrid, 4);
         if (result.staggerU > 0) {
           // With MT_K=16, bpe=2: bytes_per_k_iter=32 < 128, so shift should be > 0
           size_t bytes_per_k = 16 * 2;  // MT_K * bpe
@@ -1340,21 +1335,23 @@ TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
 
 TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
   for (int gpu_arch : test_architectures) {
-    if (gpu_arch == 1250) continue;  // maps WGM only, see "gfx1250 select_workgroup_mapping maps WGM only"
+    if (gpu_arch == 1250)
+      continue;  // maps WGM only, see "gfx1250 select_workgroup_mapping maps WGM only"
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_workgroup_mapping unit test") {
-      auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(4096, 4096, 8192);
-      auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0);
-      auto skGrid   = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
+      auto hardware  = make_hardware(gpu_arch);
+      auto problem   = make_problem(4096, 4096, 8192);
+      auto config    = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0);
+      auto skGrid    = ((4096 + 256 - 1) / 256) * ((4096 + 256 - 1) / 256);
       size_t numMT_M = (problem.size.m + config.mt.m - 1) / config.mt.m;
       size_t numMT_N = (problem.size.n + config.mt.n - 1) / config.mt.n;
 
       // Default values
       size_t default_wgmxccchunk = 0;
       size_t default_wgmxcc      = hardware.NUM_XCD;
-      int32_t default_wgm        = static_cast<int32_t>(std::ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
-      size_t chunk_size          = std::min((numMT_M * numMT_N + hardware.NUM_XCD - 1) / hardware.NUM_XCD, 
-                                            (hardware.N_CU + hardware.NUM_XCD - 1) / hardware.NUM_XCD);
+      int32_t default_wgm =
+          static_cast<int32_t>(std::ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
+      size_t chunk_size = std::min((numMT_M * numMT_N + hardware.NUM_XCD - 1) / hardware.NUM_XCD,
+                                   (hardware.N_CU + hardware.NUM_XCD - 1) / hardware.NUM_XCD);
 
       // Test 1: Test non-temporal cache hints (nta > 3, ntb < 4; nta < 4, ntb > 3; both > 3)
       config.cache_hints_a = 4;
@@ -1464,8 +1461,8 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       // Non-multiple skGrid is allowed: the first K*MN workgroups are remapped and
       // tail workgroups are identity-mapped by codegen.
       {
-        auto split_config = config;
-        split_config.mt.k = 64;
+        auto split_config     = config;
+        split_config.mt.k     = 64;
         auto skGrid_with_tail = skGrid_one_wave - 1;
 
         auto out_wgm_splitk_tail = origami::select_workgroup_mapping(
@@ -1482,8 +1479,7 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
         auto split_config = config;
         split_config.mt.k = 64;
 
-        for (size_t skGrid_multi_wave :
-             {hardware.N_CU + 1, 2 * hardware.N_CU, 3 * hardware.N_CU}) {
+        for (size_t skGrid_multi_wave : {hardware.N_CU + 1, 2 * hardware.N_CU, 3 * hardware.N_CU}) {
           INFO("skGrid=" << skGrid_multi_wave << " N_CU=" << hardware.N_CU);
           auto out_wgm_multi_wave = origami::select_workgroup_mapping(
               split_problem, hardware, split_config, skGrid_multi_wave);
@@ -1507,8 +1503,8 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       // If the split factor is already XCD-aligned, hardware round-robin dispatch
       // distributes k-splits evenly and K-coherent remapping should stay disabled.
       {
-        auto split_config = config;
-        split_config.mt.k = 64;
+        auto split_config       = config;
+        split_config.mt.k       = 64;
         auto skGrid_xcd_aligned = hardware.NUM_XCD * numMT_M * numMT_N;
 
         auto out_wgm_splitk_xcd_aligned =
@@ -1523,11 +1519,11 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
 
 TEST_CASE("Origami: config_t cluster_dim defaults to 1x1x1", "[origami][config][cluster_dim]") {
   origami::config_t config;
-  config.mt.m        = 256;
-  config.mt.n        = 256;
-  config.mt.k        = 64;
-  config.mi          = {16, 16, 16};
-  config.occupancy   = 4;
+  config.mt.m      = 256;
+  config.mt.n      = 256;
+  config.mt.k      = 64;
+  config.mi        = {16, 16, 16};
+  config.occupancy = 4;
 
   REQUIRE(config.cluster_dim.m == 1);
   REQUIRE(config.cluster_dim.n == 1);
@@ -1546,22 +1542,22 @@ TEST_CASE("Origami: config_t operator== distinguishes cluster_dim",
   base.mi        = {16, 16, 16};
   base.occupancy = 4;
 
-  auto other = base;
+  auto other        = base;
   other.cluster_dim = {2, 1, 1};
 
   REQUIRE(base == base);
   REQUIRE(!(base == other));
 
-  other = base;
+  other             = base;
   other.cluster_dim = {1, 2, 1};
   REQUIRE(!(base == other));
 
-  other = base;
+  other             = base;
   other.cluster_dim = {1, 1, 2};
   REQUIRE(!(base == other));
 
   other.cluster_dim = {2, 1, 1};
-  const auto same = other;
+  const auto same   = other;
   REQUIRE(other == same);
 }
 
@@ -1586,17 +1582,17 @@ TEST_CASE("Origami: config_t hash function", "[origami]") {
 
   SECTION("hash works with tensile backend") {
     origami::config_t config1;
-    config1.mt                    = {256, 256, 32};
-    config1.mi                    = {16, 16, 16};
-    config1.occupancy             = 4;
+    config1.mt                       = {256, 256, 32};
+    config1.mi                       = {16, 16, 16};
+    config1.occupancy                = 4;
     config1.tensile().depth_u        = 16;
     config1.tensile().global_split_u = 2;
     config1.tensile().wave_num       = 4;
 
     origami::config_t config2;
-    config2.mt                    = {256, 256, 32};
-    config2.mi                    = {16, 16, 16};
-    config2.occupancy             = 4;
+    config2.mt                       = {256, 256, 32};
+    config2.mi                       = {16, 16, 16};
+    config2.occupancy                = 4;
     config2.tensile().depth_u        = 16;
     config2.tensile().global_split_u = 2;
     config2.tensile().wave_num       = 4;
@@ -1626,9 +1622,9 @@ TEST_CASE("Origami: config_t hash function", "[origami]") {
     config_no_backend.occupancy = 4;
 
     origami::config_t config_with_backend;
-    config_with_backend.mt               = {256, 256, 32};
-    config_with_backend.mi               = {16, 16, 16};
-    config_with_backend.occupancy        = 4;
+    config_with_backend.mt                = {256, 256, 32};
+    config_with_backend.mi                = {16, 16, 16};
+    config_with_backend.occupancy         = 4;
     config_with_backend.tensile().depth_u = 16;
 
     REQUIRE(config_no_backend.hash() != config_with_backend.hash());
@@ -1652,10 +1648,10 @@ TEST_CASE("Origami: config_t hash function", "[origami]") {
 
   SECTION("different cluster_dim produces different hashes") {
     origami::config_t config1;
-    config1.mt           = {256, 256, 32};
-    config1.mi           = {16, 16, 16};
-    config1.occupancy    = 4;
-    config1.cluster_dim  = {1, 1, 1};
+    config1.mt          = {256, 256, 32};
+    config1.mi          = {16, 16, 16};
+    config1.occupancy   = 4;
+    config1.cluster_dim = {1, 1, 1};
 
     origami::config_t config2 = config1;
     config2.cluster_dim       = {2, 1, 1};
@@ -1673,10 +1669,10 @@ TEST_CASE("Origami: config_t hash function", "[origami]") {
 
   SECTION("identical cluster_dim preserves hash") {
     origami::config_t config1;
-    config1.mt           = {256, 256, 32};
-    config1.mi           = {16, 16, 16};
-    config1.occupancy    = 4;
-    config1.cluster_dim  = {2, 2, 1};
+    config1.mt          = {256, 256, 32};
+    config1.mi          = {16, 16, 16};
+    config1.occupancy   = 4;
+    config1.cluster_dim = {2, 2, 1};
 
     origami::config_t config2 = config1;
     REQUIRE(config1.hash() == config2.hash());
@@ -1754,7 +1750,7 @@ TEST_CASE("Origami: resolve_num_cus", "[origami]") {
 TEST_CASE("Origami: num_cus adjusts solution selection", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - CU budget affects ranked latency") {
-      auto       hardware = make_hardware(gpu_arch);
+      auto hardware = make_hardware(gpu_arch);
       const auto mi = hardware.get_recommended_matrix_instruction(origami::data_type_t::BFloat16);
 
       // CU-bound problem: far more output tiles than CUs, so the usable CU
@@ -1785,25 +1781,29 @@ TEST_CASE("Origami: num_cus adjusts solution selection", "[origami]") {
 TEST_CASE("Origami: num_cus in mapping selectors", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - mapping honors CU budget") {
-      auto         hardware = make_hardware(gpu_arch);
-      auto         config   = make_config(256, 256, 64);
-      const size_t skGrid   = 2048;
+      auto hardware       = make_hardware(gpu_arch);
+      auto config         = make_config(256, 256, 64);
+      const size_t skGrid = 2048;
 
-      auto problem_full    = make_problem(8192, 8192, 8192);
-      problem_full.num_cus = 0;
+      auto problem_full     = make_problem(8192, 8192, 8192);
+      problem_full.num_cus  = 0;
       auto problem_equal    = problem_full;
       problem_equal.num_cus = hardware.N_CU;  // equivalent to "use all CUs"
 
-      const auto wgm_full  = origami::select_workgroup_mapping(problem_full, hardware, config, skGrid);
-      const auto wgm_equal = origami::select_workgroup_mapping(problem_equal, hardware, config, skGrid);
+      const auto wgm_full =
+          origami::select_workgroup_mapping(problem_full, hardware, config, skGrid);
+      const auto wgm_equal =
+          origami::select_workgroup_mapping(problem_equal, hardware, config, skGrid);
 
       // num_cus == N_CU must behave exactly like num_cus == 0.
       REQUIRE(wgm_full.wgm == wgm_equal.wgm);
       REQUIRE(wgm_full.wgmxcc == wgm_equal.wgmxcc);
       REQUIRE(wgm_full.wgmxccchunk == wgm_equal.wgmxccchunk);
 
-      const auto su_full  = origami::select_staggerU(problem_full, hardware, config, skGrid, wgm_full.wgm);
-      const auto su_equal = origami::select_staggerU(problem_equal, hardware, config, skGrid, wgm_equal.wgm);
+      const auto su_full =
+          origami::select_staggerU(problem_full, hardware, config, skGrid, wgm_full.wgm);
+      const auto su_equal =
+          origami::select_staggerU(problem_equal, hardware, config, skGrid, wgm_equal.wgm);
       REQUIRE(su_full.staggerU == su_equal.staggerU);
       REQUIRE(su_full.staggerUMapping == su_equal.staggerUMapping);
       REQUIRE(su_full.staggerUStrideShift == su_equal.staggerUStrideShift);
@@ -1812,12 +1812,12 @@ TEST_CASE("Origami: num_cus in mapping selectors", "[origami]") {
       // many square tiles (numMTs >> CUs) so the per-XCD WGM search space
       // (numWGsPerXCD / wgm_cap_size) shrinks with the usable CU count.
       const size_t MT       = 128;
-      auto         cuConfig = make_config(MT, MT, 64);
+      auto cuConfig         = make_config(MT, MT, 64);
       const size_t numMTs   = (8192 / MT) * (8192 / MT);
       const size_t skGridDP = numMTs;  // data-parallel: split_factor == 1
 
-      auto problem_cu_full    = make_problem(8192, 8192, 8192);
-      problem_cu_full.num_cus = 0;
+      auto problem_cu_full      = make_problem(8192, 8192, 8192);
+      problem_cu_full.num_cus   = 0;
       auto problem_cu_capped    = problem_cu_full;
       problem_cu_capped.num_cus = hardware.N_CU / 4;  // genuine cap
 
@@ -1826,9 +1826,9 @@ TEST_CASE("Origami: num_cus in mapping selectors", "[origami]") {
       const auto wgm_cu_capped =
           origami::select_workgroup_mapping(problem_cu_capped, hardware, cuConfig, skGridDP);
 
-      const bool mapping_changed = wgm_cu_full.wgm != wgm_cu_capped.wgm
-                                   || wgm_cu_full.wgmxcc != wgm_cu_capped.wgmxcc
-                                   || wgm_cu_full.wgmxccchunk != wgm_cu_capped.wgmxccchunk;
+      const bool mapping_changed = wgm_cu_full.wgm != wgm_cu_capped.wgm ||
+                                   wgm_cu_full.wgmxcc != wgm_cu_capped.wgmxcc ||
+                                   wgm_cu_full.wgmxccchunk != wgm_cu_capped.wgmxccchunk;
       INFO("full wgm=" << wgm_cu_full.wgm << " capped wgm=" << wgm_cu_capped.wgm);
       REQUIRE(mapping_changed);
     }
@@ -1852,7 +1852,7 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
   // Verified to hold on every architecture in test_architectures.
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - CU budget flips ranked winner") {
-      auto       hardware = make_hardware(gpu_arch);
+      auto hardware = make_hardware(gpu_arch);
       const auto mi = hardware.get_recommended_matrix_instruction(origami::data_type_t::BFloat16);
 
       std::vector<origami::config_t> configs;
@@ -1897,9 +1897,8 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
 }
 
 // Helper: a config with a Tensile backend carrying MIWaveGroup + LocalSplitU.
-static origami::config_t lsu_config(size_t mtm, size_t mtn, size_t mtk,
-                                    int wgm, int wgn, int lsu) {
-  auto c = make_config(mtm, mtn, mtk, 16, 16, 16, false, 1, 1);
+static origami::config_t lsu_config(size_t mtm, size_t mtn, size_t mtk, int wgm, int wgn, int lsu) {
+  auto c                    = make_config(mtm, mtn, mtk, 16, 16, 16, false, 1, 1);
   c.tensile().wave_group_m  = wgm;
   c.tensile().wave_group_n  = wgn;
   c.tensile().local_split_u = lsu;
@@ -1914,17 +1913,20 @@ TEST_CASE("Origami: K-split LSU ranking respects MT_K cap", "[origami][lsu]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - shallow K-split LSU out-ranks deep phantom") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem  = make_problem(28, 256, 4096, origami::transpose_t::N,
-                                   origami::transpose_t::T);  // skinny-M NT, min=28<=32
+      auto problem  = make_problem(28,
+                                  256,
+                                  4096,
+                                  origami::transpose_t::N,
+                                  origami::transpose_t::T);  // skinny-M NT, min=28<=32
 
       std::vector<origami::config_t> configs;
       configs.push_back(lsu_config(16, 16, 512, 1, 1, 4));  // deep phantom
       configs.push_back(lsu_config(32, 16, 32, 1, 1, 4));   // real K-split kernel
 
       auto results = origami::rank_configs(problem, hardware, configs);
-      INFO("winner=" << results[0].config.mt.m << "x" << results[0].config.mt.n
-                     << "x" << results[0].config.mt.k);
-      REQUIRE(results[0].config.mt.k == 32);   // shallow DepthU wins
+      INFO("winner=" << results[0].config.mt.m << "x" << results[0].config.mt.n << "x"
+                     << results[0].config.mt.k);
+      REQUIRE(results[0].config.mt.k == 32);  // shallow DepthU wins
       REQUIRE(results[0].config.mt.m == 32);
     }
   }
@@ -1933,27 +1935,26 @@ TEST_CASE("Origami: K-split LSU ranking respects MT_K cap", "[origami][lsu]") {
 TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   using origami::hardware_t;
   const auto c_def = hardware_t::get_gfx950_arch_constants(std::nullopt);
-  const auto c_v2 = hardware_t::get_gfx950_arch_constants(std::make_optional(0x75a8));
+  const auto c_v2  = hardware_t::get_gfx950_arch_constants(std::make_optional(0x75a8));
   REQUIRE(c_def.mem1_perf_ratio != c_v2.mem1_perf_ratio);
   REQUIRE(c_def.mem2_perf_ratio != c_v2.mem2_perf_ratio);
   REQUIRE(c_def.mem3_perf_ratio != c_v2.mem3_perf_ratio);
   REQUIRE(c_def.mem_bw_per_wg_coefficients != c_v2.mem_bw_per_wg_coefficients);
   REQUIRE(c_def.parallel_mi_cu == c_v2.parallel_mi_cu);
 
-  const auto g942_v2 = hardware_t::get_arch_constants(
-      hardware_t::architecture_t::gfx942, std::make_optional(0x75a8));
-  const auto g942_def =
-      hardware_t::get_arch_constants(hardware_t::architecture_t::gfx942);
+  const auto g942_v2  = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx942,
+                                                      std::make_optional(0x75a8));
+  const auto g942_def = hardware_t::get_arch_constants(hardware_t::architecture_t::gfx942);
   REQUIRE(g942_v2.mem1_perf_ratio == g942_def.mem1_perf_ratio);
 
   const auto hw_def = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
-                                                        256,               // N_CU
-                                                        65536,             // lds_capacity
-                                                        512 * 1024,        // rf_capacity
-                                                        4 * 1024 * 1024,   // L2_capacity
-                                                        2'100'000,         // compute_clock_khz
-                                                        std::nullopt);     // pci_chip_id
-  const auto hw_v2 = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
+                                                        256,              // N_CU
+                                                        65536,            // lds_capacity
+                                                        512 * 1024,       // rf_capacity
+                                                        4 * 1024 * 1024,  // L2_capacity
+                                                        2'100'000,        // compute_clock_khz
+                                                        std::nullopt);    // pci_chip_id
+  const auto hw_v2  = hardware_t::get_hardware_for_arch(hardware_t::architecture_t::gfx950,
                                                        128,
                                                        65536,
                                                        512 * 1024,
@@ -1982,19 +1983,24 @@ TEST_CASE("gfx1250 WGP count selects the 6-XCD part", "[hardware]") {
 
   // A 96-WGP DPX partition of the 6-XCD part: 3 XCDs in one L2 domain, measured peaks
   // (L2 14.75 TB/s, DRAM 8.64 TB/s at a 2.4 GHz engine clock), scaled by the refit's peak ratios.
-  const auto dpx = hardware_t::get_hardware_for_arch(arch, 96, 327680, 512 * 1024, 4 << 20, 2'400'000);
+  const auto dpx =
+      hardware_t::get_hardware_for_arch(arch, 96, 327680, 512 * 1024, 4 << 20, 2'400'000);
   REQUIRE(dpx.NUM_XCD == 3);
   REQUIRE(dpx.num_l2_domains() == 1);
   REQUIRE(dpx.l2_domain_capacity() == (96ull << 20));
-  REQUIRE(dpx.mem1_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(14750.0 * (41301.81761089743 / 41930.0)));
-  REQUIRE(dpx.mem3_perf_ratio * dpx.compute_clock_ghz == Catch::Approx(8637.0 * (18382.976995668938 / 19725.454545454544)));
+  REQUIRE(dpx.mem1_perf_ratio * dpx.compute_clock_ghz ==
+          Catch::Approx(14750.0 * (41301.81761089743 / 41930.0)));
+  REQUIRE(dpx.mem3_perf_ratio * dpx.compute_clock_ghz ==
+          Catch::Approx(8637.0 * (18382.976995668938 / 19725.454545454544)));
 
   // The whole 6-XCD part has twice the partition's peaks; the 8-XCD part keeps its own.
-  const auto spx = hardware_t::get_hardware_for_arch(arch, 192, 327680, 512 * 1024, 4 << 20, 2'400'000);
+  const auto spx =
+      hardware_t::get_hardware_for_arch(arch, 192, 327680, 512 * 1024, 4 << 20, 2'400'000);
   REQUIRE(spx.NUM_XCD == 6);
   REQUIRE(spx.num_l2_domains() == 2);
   REQUIRE(spx.mem3_perf_ratio == Catch::Approx(2.0 * dpx.mem3_perf_ratio));
-  const auto p8 = hardware_t::get_hardware_for_arch(arch, 256, 327680, 512 * 1024, 4 << 20, 2'400'000);
+  const auto p8 =
+      hardware_t::get_hardware_for_arch(arch, 256, 327680, 512 * 1024, 4 << 20, 2'400'000);
   REQUIRE(p8.NUM_XCD == 8);
   REQUIRE(p8.mem1_perf_ratio * p8.compute_clock_ghz == Catch::Approx(41930.0));
   REQUIRE(p8.mem3_perf_ratio * p8.compute_clock_ghz == Catch::Approx(17130.0));

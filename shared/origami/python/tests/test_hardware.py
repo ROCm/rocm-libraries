@@ -96,20 +96,20 @@ def test_hardware_for_arch_gfx950():
         L2_capacity=32 * 1024 * 1024,
         compute_clock_khz=2100000
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 304
     assert hardware.lds_capacity == 64 * 1024
     assert hardware.rf_capacity == 512 * 1024
     assert hardware.L2_capacity == 32 * 1024 * 1024
     assert hardware.compute_clock_ghz == pytest.approx(2.1, rel=1e-6)
-    
+
     # Verify architecture-specific constants were applied
     assert hardware.NUM_XCD == 8
     assert hardware.parallel_mi_cu == 4
     # mem1_perf_ratio is calculated based on clock speeds, not a direct constant
     assert hardware.mem1_perf_ratio > 0
-    
+
 
 
 @pytest.mark.integration
@@ -145,13 +145,13 @@ def test_hardware_for_arch_gfx942():
         L2_capacity=24 * 1024 * 1024,
         compute_clock_khz=1700000
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 228
     assert hardware.lds_capacity == 64 * 1024
     assert hardware.L2_capacity == 24 * 1024 * 1024
     assert hardware.compute_clock_ghz == pytest.approx(1.7, rel=1e-6)
-    
+
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 8
     assert hardware.parallel_mi_cu == 4
@@ -168,11 +168,11 @@ def test_hardware_for_arch_gfx90a():
         L2_capacity=8 * 1024 * 1024,
         compute_clock_khz=1700000
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 110
     assert hardware.lds_capacity == 64 * 1024
-    
+
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 1
     assert hardware.parallel_mi_cu == 4
@@ -210,11 +210,11 @@ def test_hardware_for_arch_gfx1201():
         L2_capacity=6 * 1024 * 1024,
         compute_clock_khz=2500000
     )
-    
+
     # Verify basic properties
     assert hardware.N_CU == 60
     assert hardware.lds_capacity == 128 * 1024
-    
+
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 1
     assert hardware.parallel_mi_cu == 2
@@ -232,7 +232,7 @@ def test_enumerate_tiles_with_hardware():
         L2_capacity=32 * 1024 * 1024,
         compute_clock_khz=2100000
     )
-    
+
     # MI350 typical bf16/fp16 inst
     mi = MI(m=16, n=16, k=32)
     tiles = enumerate_tiles_half_lds(
@@ -240,10 +240,10 @@ def test_enumerate_tiles_with_hardware():
         datatype_size=2,
         lds_bytes=hardware.lds_capacity
     )
-    
+
     # Verify we got some tiles
     assert len(tiles) > 0
-    
+
     # All tiles should fit in half LDS
     for tile in tiles:
         assert tile.bytes_ab <= hardware.lds_capacity
@@ -259,20 +259,20 @@ def test_enumerate_tiles_mi350_example():
     # MI350 typical bf16/fp16 inst
     mi = MI(m=16, n=16, k=32)
     tiles = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=64 * 1024)
-    
+
     # Verify results
     assert len(tiles) > 0
     print(f"{len(tiles)} tiles under half LDS ({(64*1024)//2} bytes)")
-    
+
     # Check some properties of the generated tiles
     for tile in tiles:
         # Verify bytes_ab calculation
         expected_bytes = 2 * tile.MT_K * (tile.MT_M + tile.MT_N)
         assert tile.bytes_ab == expected_bytes
-        
+
         # Verify it fits in budget
         assert tile.bytes_ab <= 64 * 1024
-        
+
         # Verify dimensions are multiples of MI
         assert tile.MT_M % 16 == 0
         assert tile.MT_N % 16 == 0
@@ -283,20 +283,20 @@ def test_enumerate_tiles_mi350_example():
 def test_tile_enumeration_empty_cases():
     """Test edge cases for tile enumeration."""
     mi = MI(m=16, n=16, k=32)
-    
+
     # Very small LDS should produce few or no tiles
     tiles = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=1024)
     # With 1024 bytes budget and smallest tile = 2 * 32 * (16 + 16) = 2048 bytes
     # We expect 0 tiles
     assert len(tiles) == 0
-    
+
     # Invalid inputs should raise errors
     with pytest.raises(ValueError):
         enumerate_tiles_half_lds(MI(m=0, n=16, k=32), datatype_size=2, lds_bytes=64*1024)
-    
+
     with pytest.raises(ValueError):
         enumerate_tiles_half_lds(mi, datatype_size=0, lds_bytes=64*1024)
-    
+
     with pytest.raises(ValueError):
         enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=0)
 
@@ -306,15 +306,109 @@ def test_different_datatypes():
     """Test tile enumeration with different datatype sizes."""
     mi = MI(m=16, n=16, k=32)
     lds_bytes = 64 * 1024
-    
+
     # FP32 (4 bytes)
     tiles_fp32 = enumerate_tiles_half_lds(mi, datatype_size=4, lds_bytes=lds_bytes)
-    
+
     # FP16/BF16 (2 bytes)
     tiles_fp16 = enumerate_tiles_half_lds(mi, datatype_size=2, lds_bytes=lds_bytes)
-    
+
     # FP8 (1 byte)
     tiles_fp8 = enumerate_tiles_half_lds(mi, datatype_size=1, lds_bytes=lds_bytes)
-    
+
     # More tiles should fit with smaller datatypes
     assert len(tiles_fp8) > len(tiles_fp16) > len(tiles_fp32)
+
+
+def _hardware_for_arch(arch, n_cu, pci_chip_id=None):
+    """Create a hardware object of the given architecture, WGP count and PCI chip id."""
+    return origami.get_hardware_for_arch(
+        arch=arch,
+        N_CU=n_cu,
+        lds_capacity=64 * 1024,
+        rf_capacity=512 * 1024,
+        L2_capacity=32 * 1024 * 1024,
+        compute_clock_khz=2_100_000,
+        pci_chip_id=pci_chip_id,
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "arch_name, family_name",
+    [
+        ("gfx90a", "cdna2"),
+        ("gfx942", "cdna3"),
+        ("gfx950", "cdna4"),
+        ("gfx1250", "cdna5"),
+        ("gfx1100", "rdna3"),
+        ("gfx1101", "rdna3"),
+        ("gfx1150", "rdna3"),
+        ("gfx1151", "rdna3"),
+        ("gfx1152", "rdna3"),
+        ("gfx1153", "rdna3"),
+        ("gfx1170", "rdna4"),
+        ("gfx1171", "rdna4"),
+        ("gfx1200", "rdna4"),
+        ("gfx1201", "rdna4"),
+    ],
+)
+def test_hardware_family(arch_name, family_name):
+    """Every architecture reports its family."""
+    hardware = _hardware_for_arch(getattr(origami.architecture_t, arch_name), 64)
+    assert hardware.family().name == family_name
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "pci_chip_id, variant_name",
+    [
+        (None, "standard"),
+        (0x75A0, "standard"),
+        (0x75A8, "gfx950_id75a8"),
+        (0x175A8, "gfx950_id75a8"),
+    ],
+)
+def test_gfx950_variant_from_pci_chip_id(pci_chip_id, variant_name):
+    """gfx950 resolves its variant from the low 16 bits of the PCI chip id."""
+    hardware = _hardware_for_arch(origami.architecture_t.gfx950, 256, pci_chip_id)
+    assert hardware.variant.name == variant_name
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "n_cu, variant_name, num_xcd",
+    [
+        (256, "standard", 8),
+        (192, "gfx1250_6xcd", 6),
+        (96, "gfx1250_6xcd", 3),
+        (128, "standard", 8),
+    ],
+)
+def test_gfx1250_variant_from_wgp_count(n_cu, variant_name, num_xcd):
+    """gfx1250 resolves its variant, and with it the XCD count, from the WGP count."""
+    hardware = _hardware_for_arch(origami.architecture_t.gfx1250, n_cu)
+    assert hardware.variant.name == variant_name
+    assert hardware.NUM_XCD == num_xcd
+
+
+@pytest.mark.integration
+def test_other_architectures_have_only_the_standard_variant():
+    """Neither the PCI chip id nor the WGP count selects a variant outside gfx950/gfx1250."""
+    hardware = _hardware_for_arch(origami.architecture_t.gfx942, 96, 0x75A8)
+    assert hardware.variant.name == "standard"
+
+
+@pytest.mark.integration
+def test_resolve_variant_matches_hardware_variant():
+    """resolve_variant is the function every construction path resolves the variant with."""
+    from origami.origami import resolve_variant, variant_t
+
+    arch = origami.architecture_t
+    assert resolve_variant(arch.gfx950) == variant_t.standard
+    assert resolve_variant(arch.gfx950, pci_chip_id=0x75A8) == variant_t.gfx950_id75a8
+    assert resolve_variant(arch.gfx1250, n_cu=0) == variant_t.standard
+    assert resolve_variant(arch.gfx1250, n_cu=192) == variant_t.gfx1250_6xcd
+    for n_cu in (256, 192, 96, 128):
+        hardware = _hardware_for_arch(arch.gfx1250, n_cu)
+        assert hardware.variant == resolve_variant(arch.gfx1250, None, n_cu)

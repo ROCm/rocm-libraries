@@ -95,7 +95,7 @@ endif()
 install(TARGETS _pyorigami LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}")
 
 # Install Python package files
-install(FILES 
+install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/__init__.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/selector.py"
     DESTINATION "${PYTHON_INSTALL_DIR}"
@@ -191,6 +191,21 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 
     set_tests_properties(
         "Python: test_ranking_regression"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run GEMM admission and tile-term tests
+    add_test(
+        NAME "Python: test_gemm_terms"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_gemm_terms.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_gemm_terms"
         PROPERTIES
             ENVIRONMENT
             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
