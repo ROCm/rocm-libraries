@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -184,15 +185,27 @@ int64_t ceilDiv(int64_t a, int64_t b)
     return (a + b - 1) / b;
 }
 
-int64_t gridXBlocks(const ConvProblem& problem, const Geometry& geometry)
+/// The product of @p factors (each at least 1), or @p cap + 1 once it would pass @p cap, so
+/// values near INT_MAX (reachable through a saved plan) cannot wrap it.
+int64_t cappedProduct(std::initializer_list<int64_t> factors, int64_t cap)
 {
-    const int64_t nc = int64_t{problem.n} * problem.k;
-    if(geometry.generic)
+    int64_t product = 1;
+    for(const int64_t factor : factors)
     {
-        return ceilDiv(nc * problem.out[1] * ceilDiv(problem.out[2], GENERIC_TILE_W), BLOCK_SIZE);
+        if(factor > cap / product)
+        {
+            return cap + 1;
+        }
+        product *= factor;
     }
-    // The tile count of the kernel: lanes over row chunks and column groups. On the dilation
-    // grid a lane's outputs are a lane step apart, so the tiles come in step-sized groups.
+    return product;
+}
+
+/// The tiles of one output image in the specialized kernel's walk: lanes over row chunks and
+/// column groups. On the dilation grid a lane's outputs are a lane step apart, so the tiles come
+/// in step-sized groups. Saturates past INT_MAX, the kernel's counter width.
+int64_t tilesPerImage(const ConvProblem& problem, const Geometry& geometry)
+{
     int64_t rowStep = 1;
     int64_t colStep = 1;
     if(geometry.laneOnDilationGrid)
@@ -202,11 +215,35 @@ int64_t gridXBlocks(const ConvProblem& problem, const Geometry& geometry)
     }
     const int64_t tilesW = ceilDiv(problem.out[2], geometry.outPerLane * colStep) * colStep;
     const int64_t rowTiles = ceilDiv(problem.out[1], ROW_CHUNK * rowStep) * rowStep;
-    return std::min(ceilDiv(tilesW * rowTiles * nc, BLOCK_SIZE), MAX_SPECIALIZED_BLOCKS);
+    return cappedProduct({tilesW, rowTiles}, std::numeric_limits<int>::max());
+}
+
+int64_t gridXBlocks(const ConvProblem& problem, const Geometry& geometry)
+{
+    // The products saturate, so launchFits refuses rather than wraps.
+    if(geometry.generic)
+    {
+        return ceilDiv(
+            cappedProduct(
+                {problem.n, problem.k, problem.out[1], ceilDiv(problem.out[2], GENERIC_TILE_W)},
+                MAX_GRID_X_ITEMS),
+            BLOCK_SIZE);
+    }
+    const int64_t tiles = cappedProduct({tilesPerImage(problem, geometry), problem.n, problem.k},
+                                        MAX_SPECIALIZED_BLOCKS * BLOCK_SIZE);
+    return std::min(ceilDiv(tiles, BLOCK_SIZE), MAX_SPECIALIZED_BLOCKS);
 }
 
 bool launchFits(const ConvProblem& problem, const Geometry& geometry)
 {
+    if(!geometry.generic)
+    {
+        // The grid is capped; the kernel counts the tiles of one image and the (n, c) pairs in
+        // int.
+        constexpr int64_t INT_LIMIT = std::numeric_limits<int>::max();
+        return tilesPerImage(problem, geometry) <= INT_LIMIT
+               && cappedProduct({problem.n, problem.k}, INT_LIMIT) <= INT_LIMIT;
+    }
     return gridXBlocks(problem, geometry) * BLOCK_SIZE <= MAX_GRID_X_ITEMS;
 }
 

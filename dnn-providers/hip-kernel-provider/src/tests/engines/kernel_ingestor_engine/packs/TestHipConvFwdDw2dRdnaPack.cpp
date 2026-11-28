@@ -536,6 +536,27 @@ TEST(TestHipConvFwdDw2dRdnaLaunchValues, RefusesMalformedValues)
     auto hugeGrid = savedValid({true, false, 4});
     hugeGrid.values["n"] = int64_t{std::numeric_limits<int>::max()};
     refused(hugeGrid, "a grid beyond the launch limits");
+
+    // N x K x Ho x ceil(Wo / 4) is 2^64, which wraps to 0 in int64.
+    auto wrappingGrid = savedValid({true, false, 4});
+    for(const auto* name : {"n", "c", "k", "out_h"})
+    {
+        wrappingGrid.values[name] = int64_t{1} << 16;
+    }
+    wrappingGrid.values["out_w"] = int64_t{1} << 18;
+    refused(wrappingGrid, "a grid whose item count wraps");
+
+    // The specialized kernel counts the (n, c) pairs and the tiles of one image in int.
+    auto manyImages = savedValid();
+    for(const auto* name : {"n", "c", "k"})
+    {
+        manyImages.values[name] = int64_t{1} << 16;
+    }
+    refused(manyImages, "N x K beyond int");
+    auto hugeImage = savedValid();
+    hugeImage.values["out_h"] = int64_t{std::numeric_limits<int>::max()};
+    hugeImage.values["out_w"] = int64_t{std::numeric_limits<int>::max()};
+    refused(hugeImage, "tiles of one image beyond int");
 }
 
 } // namespace

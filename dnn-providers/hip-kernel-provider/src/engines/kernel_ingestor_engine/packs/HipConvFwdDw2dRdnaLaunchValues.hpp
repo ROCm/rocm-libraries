@@ -74,7 +74,8 @@ hipdnn_plugin_sdk::ingestor::MetadataValues
 
 /// Reads the values of the `hipkernel.hip_conv_fwd_dw2d_rdna.dispatch.v1` contract. Every
 /// extent, stride and dilation must be in [1, INT_MAX], every padding in [0, INT_MAX], K a
-/// multiple of C, and the geometry one the engine builds.
+/// multiple of C, the geometry one the engine builds, the grid within the launch limits, and
+/// for the specialized kernel the tiles of one image and N x K within int.
 ///
 /// @throws HipdnnPluginException with a load refusal when the dispatch name is not that
 ///         contract, or when a value is missing, extra, of another type or out of range.
