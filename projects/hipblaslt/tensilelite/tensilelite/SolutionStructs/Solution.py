@@ -42,6 +42,7 @@ from ..Common import assignParameterWithDefault, IsaInfo, \
                     clusterEnabled, streamKCluster, streamKMulticast, \
                     deriveWaveParams, \
                     swizzleGeometry
+from ..Common.Architectures import codeObjectVersionFor
 from ..Common.DataType import DataType
 from ..Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
@@ -997,11 +998,14 @@ class Solution(collections.abc.Mapping):
         printWarning(f"ISA not set on config using {targetIsas[0]}.")
         self._state['ISA'] = targetIsas[0]
 
-    if "CodeObjectVersion" not in self._state:
-      if "CodeObjectVersion" in config:
-        self._state["CodeObjectVersion"] = str(config["CodeObjectVersion"])
-      else:
-        self._state["CodeObjectVersion"] = self.assembler.code_object_version
+    # The runtime takes the code object version from the amdhsa.version metadata,
+    # not the ELF header, so the metadata must follow the version the kernel is
+    # assembled with; a per-solution value from logic files only stands in when
+    # the caller passes no assembler (LibraryLogic hands over the C++ compiler).
+    requested = getattr(self.assembler, "code_object_version", None)
+    if requested is None:
+      requested = str(config.get("CodeObjectVersion", globalParameters["CodeObjectVersion"]))
+    self._state["CodeObjectVersion"] = codeObjectVersionFor(requested, self._state["ISA"])
     # assign parameters without defaults
     for key in config:
       if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:

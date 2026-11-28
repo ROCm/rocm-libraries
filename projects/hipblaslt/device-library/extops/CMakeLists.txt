@@ -31,6 +31,8 @@ foreach(arch IN LISTS archs)
         set(TRUE16_FEATURE "SHELL:-Xclangas -target-feature -Xclangas +real-true16")
     endif()
     add_library(extop-obj-${arch} OBJECT)
+    # The generators write .amdhsa_code_object_version into each source (v5 on
+    # gfx1250 and its steppings), which overrides -mcode-object-version below.
     target_compile_options(extop-obj-${arch}
         PRIVATE
             -Wno-unused-command-line-argument -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=${offload_arch} ${WAVEFRONT} -c ${TRUE16_FEATURE}

@@ -32,7 +32,7 @@ from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from typing import List, Optional
 
 from ..Common import SemanticVersion, print2
-from ..Common.Architectures import compilerTargetOf
+from ..Common.Architectures import codeObjectVersionFor, compilerTargetOf
 from .Validators import validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -226,7 +226,8 @@ class Assembler(Component):
 
         Args:
             assembler_path: The path to the assember.
-            co_version: The code object version to use.
+            co_version: The code object version to use, raised per target to
+                that architecture's minimum (codeObjectVersionFor).
         """
 
         super(Assembler, self).__init__(component_path)
@@ -275,6 +276,32 @@ class Assembler(Component):
             print2(f"Retargeting assembly source {path.name} to {targetGfx}")
             path.write_text(updated)
 
+    @staticmethod
+    def _checkCodeObjectVersion(srcPath: str, coVersion: str):
+        """Refuse a source that declares an older code object version than ``coVersion``.
+
+        An older ``.amdhsa_code_object_version`` directive overrides the flag, and
+        ld.lld refuses to link objects of different versions. Older metadata
+        assembles cleanly, but comgr reads only the notes whose amdhsa.version
+        matches the first one in a code object, so the kernel goes missing at load.
+        """
+        try:
+            src = Path(srcPath).read_text()
+        except (UnicodeDecodeError, OSError):
+            return
+        directive = search(r"^\s*\.amdhsa_code_object_version\s+(\d+)", src, MULTILINE)
+        if directive and int(directive.group(1)) < int(coVersion):
+            raise RuntimeError(
+                f"{srcPath} sets .amdhsa_code_object_version {directive.group(1)}, "
+                f"but its target needs code object v{coVersion} or later")
+        metadata = search(
+            r"amdhsa\.version:\s*(?:\[\s*1\s*,\s*(\d+)\s*\]|\n\s*-\s*1\s*\n\s*-\s*(\d+))", src)
+        minor = metadata and (metadata.group(1) or metadata.group(2))
+        if minor is not None and int(coVersion) >= 5 and int(minor) < 2:
+            raise RuntimeError(
+                f"{srcPath} declares amdhsa.version [1, {minor}] (code object v4 or older), "
+                f"but its target needs code object v{coVersion}: use [1, 2]")
+
     def __call__(self, targetGfx: str, wavefrontSize: int, srcPath: str, destPath: str):
         """Assemble an assembly source file into an object file.
         Args:
@@ -287,6 +314,11 @@ class Assembler(Component):
         targetGfx = compilerTargetOf(targetGfx, self.path)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
+        coVersion = codeObjectVersionFor(self._code_object_version, targetGfx)
+        if coVersion != self._code_object_version:
+            self._checkCodeObjectVersion(srcPath, coVersion)
+            # The last -mcode-object-version wins.
+            args = args + [f"-mcode-object-version={coVersion}"]
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
         if targetGfx.startswith(("gfx11", "gfx12")):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]

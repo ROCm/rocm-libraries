@@ -1526,13 +1526,19 @@ namespace rocisa
             kStr += "    KernArgsVersion: " + std::to_string(kernArgsVersion) + "\n";
             kStr += "amdhsa.version:\n";
             kStr += "  - 1\n";
+            // COv5 and COv6 share metadata version 1.2; the runtime reads the
+            // code object version from here, not from the ELF header.
             if(codeObjectVersion == "4" || codeObjectVersion == "default")
             {
                 kStr += "  - 1\n";
             }
-            else if(codeObjectVersion == "5")
+            else if(codeObjectVersion == "5" || codeObjectVersion == "6")
             {
                 kStr += "  - 2\n";
+            }
+            else
+            {
+                throw std::runtime_error("Unknown code object version: " + codeObjectVersion);
             }
             kStr += "amdhsa.kernels:\n";
             kStr += "  - .name: " + name + "\n";
