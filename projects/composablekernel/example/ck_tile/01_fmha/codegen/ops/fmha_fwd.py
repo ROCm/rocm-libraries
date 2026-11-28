@@ -129,7 +129,8 @@ using fmha_traits = {F_traits_wrapper_begin}ck_tile::TileFmhaTraits<{F_spad},
                                             {F_qscale},
                                             {F_occupancy},
                                             {F_skip},
-                                            {F_sink}>{F_traits_wrapper_end};
+                                            {F_sink},
+                                            {F_max_logits}>{F_traits_wrapper_end};
 
 using fmha_variant = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
 
@@ -165,7 +166,7 @@ using fmha_kernel = {F_kernel}<fmha_pipeline, fmha_epilogue>;
 
 
 using trait = fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}{F_packgqa}>;
+                        {F_pipeline_enum}, {F_logits}, fmha_mask, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}, {F_max_logits}{F_packgqa}>;
 
 template<>
 float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_args a)
@@ -293,9 +294,9 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
 }}
 """
 
-FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}{F_packgqa}>"""
+FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}, {F_max_logits}{F_packgqa}>"""
 
-FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && ({F_skip_check}) &&(t.has_sink == {F_sink}) &&
+FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && ({F_skip_check}) &&(t.has_sink == {F_sink}) && ((a.max_logits_ptr != nullptr) == {F_max_logits}) &&
         ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
     using trait_ = {F_trait_type};
     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
@@ -376,6 +377,7 @@ class FmhaFwdApiTrait:
     occupancy: int = -1
     constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
     packgqa: str = "f"
+    max_logits: str = "f"  # also store the max logits
 
     @property
     def name(self) -> str:
@@ -550,6 +552,7 @@ class FmhaFwdPipeline:
     F_use_double_kv_lds_buffer: str = "f"  # true/false
     F_progressive_ds_load_k: str = "f"  # true/false
     F_packgqa: str = "f"  # true/false
+    F_max_logits: str = "f"  # t/f, also store the max logits next to the LSE
 
     @property
     def name(self) -> str:
@@ -637,6 +640,8 @@ class FmhaFwdPipeline:
             n += "_sink"
         else:
             n += "_nsink"
+        if self.F_max_logits == "t":
+            n += "_maxl"
 
         return n
 
@@ -665,6 +670,7 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
         F_qscale_check=QSCALE_CHECK_MAP[trait.qscale],
         F_qscale=QSCALE_MAP[trait.qscale],
         F_sink=BOOL_MAP[trait.sink],
+        F_max_logits=BOOL_MAP[trait.max_logits],
         F_scheck=trait.scheck,
         F_seqtune=trait.seqtune(max_bm0),
         F_skcheck=trait.skcheck,
@@ -1011,6 +1017,7 @@ class FmhaFwdKernel:
                 "ck_tile::TileFmhaMergeHeadsTraits<" if is_packgqa else ""
             ),
             F_traits_wrapper_end=">" if is_packgqa else "",
+            F_max_logits=BOOL_MAP[self.F_pipeline.F_max_logits],
             F_epilogue=self._get_epilogue_decl(),
         )
         if emits_kvscale_align(self.F_pipeline.tag, self.F_pipeline.F_qscale):
@@ -1061,6 +1068,7 @@ class FmhaFwdKernel:
             occupancy=int(self.F_tile.F_occupancy),
             constraint=self.F_tile.F_constraint & self._pipeline_constraint(),
             packgqa=self.F_pipeline.F_packgqa,
+            max_logits=self.F_pipeline.F_max_logits,
         )
 
     def _pipeline_constraint(self) -> CppConstraint:
@@ -3029,6 +3037,38 @@ def get_product(receipt: int) -> Product:
         return Product(name="Default", rule=fit)
 
 
+# Receipts and archs that also get instances storing the max logits next to the LSE, which the
+# dispatch selects when fmha_fwd_args::max_logits_ptr is set, and the pipelines that support it.
+MAX_LOGITS_RECEIPTS = (0, 700)
+MAX_LOGITS_ARCHS = ("gfx9", "gfx950")
+MAX_LOGITS_PIPELINES = ("qr", "qr_async", "qr_async_trload")
+
+
+def with_max_logits_variants(
+    pipelines: Iterable[FmhaFwdPipeline], receipt, arch: ArchTrait, hdim
+) -> List[FmhaFwdPipeline]:
+    pipelines = list(pipelines)
+    if receipt not in MAX_LOGITS_RECEIPTS or arch.name not in MAX_LOGITS_ARCHS:
+        return pipelines
+    return pipelines + [
+        replace(p, F_max_logits="t")
+        for p in pipelines
+        if p.tag in MAX_LOGITS_PIPELINES
+        # the hdim 256 body of qr_async_trload does not store the max logits
+        and not (p.tag == "qr_async_trload" and hdim == 256)
+        # required for correct max logits; the pipelines static_assert these
+        and p.F_lse == "t"
+        and p.F_bias == "no"
+        and p.F_qscale == "no"
+        and p.F_logits == "f"
+        # these don't change the scores; left out only to limit the instance count
+        and p.F_dropout == "f"
+        and p.F_skip == "f"
+        # the default receipt leaves out the sink twins
+        and (p.F_sink == "f" or receipt != 0)
+    ]
+
+
 def get_fwd_blobs(
     targets: List[str], kernel_filter: Optional[str], receipt, optdim_list, mask_impl
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
@@ -3054,7 +3094,13 @@ def get_fwd_blobs(
                 )
 
             for tile, pipeline in itertools.product(
-                tiles, factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl)
+                tiles,
+                with_max_logits_variants(
+                    factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl),
+                    receipt,
+                    factory.arch,
+                    hdim,
+                ),
             ):
                 problem_ctx = ProblemContext(
                     dtype=dtype, mode=mode, hdim=hdim, hdim_v=hdim_v
