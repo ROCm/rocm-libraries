@@ -34,6 +34,8 @@ Documentation for rocFFT is available at
   MPI ranks when a rank owns no brick or several bricks of an input or output field.
 * Fixed failures of single-process transforms without RCCL support when an input or output
   field has several bricks on the same device.
+* Fixed `rocfft_setup` failing when a kernel cache file is corrupt or not a database.  The bad file is now skipped
+  and the next cache location is used; the skip is logged when RTC logging is enabled in `ROCFFT_LAYER`.
 
 ### Known issues
 

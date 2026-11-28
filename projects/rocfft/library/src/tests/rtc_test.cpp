@@ -22,7 +22,12 @@
 #include "../../../shared/hiprtc_except.h"
 #include "rtc_cache.h"
 #include "rtc_kernel.h"
+#include <array>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <memory>
+#include <random>
+#include <vector>
 
 #if __has_include(<filesystem>)
 #include <filesystem>
@@ -173,4 +178,114 @@ TEST(rocfft_internal, rtc_compile_failure)
         ASSERT_TRUE(f.valid());
         ASSERT_THROW(f.get(), hiprtc_runtime_error);
     }
+}
+
+TEST(rocfft_internal, rtc_cache_store_then_get)
+{
+    // keep off any on-disk cache named in the environment
+    EnvironmentSetTemp env_user("ROCFFT_RTC_CACHE_PATH", ":memory:");
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+
+    RTCCache cache;
+
+    const std::string    name = "internal_test_kernel";
+    const std::string    arch = "gfx942";
+    std::array<char, 32> sum{};
+    sum[0]                       = 'a';
+    const std::vector<char> code = {'c', 'o', 'd', 'e'};
+
+    // nothing stored yet
+    EXPECT_TRUE(cache.get_code_object(name, arch, sum).empty());
+
+    cache.store_code_object(name, arch, sum, code);
+    EXPECT_EQ(cache.get_code_object(name, arch, sum), code);
+
+    // a different name, architecture or generator checksum is a different kernel
+    EXPECT_TRUE(cache.get_code_object("other_kernel", arch, sum).empty());
+    EXPECT_TRUE(cache.get_code_object(name, "gfx90a", sum).empty());
+
+    std::array<char, 32> other_sum{};
+    other_sum[0] = 'b';
+    EXPECT_TRUE(cache.get_code_object(name, arch, other_sum).empty());
+}
+
+TEST(rocfft_internal, rtc_cache_store_replaces)
+{
+    EnvironmentSetTemp env_user("ROCFFT_RTC_CACHE_PATH", ":memory:");
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+
+    RTCCache cache;
+
+    const std::string    name = "internal_test_replace";
+    const std::string    arch = "gfx942";
+    std::array<char, 32> sum{};
+
+    cache.store_code_object(name, arch, sum, {'o', 'l', 'd'});
+    cache.store_code_object(name, arch, sum, {'n', 'e', 'w'});
+
+    EXPECT_EQ(cache.get_code_object(name, arch, sum), (std::vector<char>{'n', 'e', 'w'}));
+}
+
+TEST(rocfft_internal, rtc_cache_serialize_round_trip)
+{
+    EnvironmentSetTemp env_user("ROCFFT_RTC_CACHE_PATH", ":memory:");
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+
+    const std::string       name = "internal_test_serialize";
+    const std::string       arch = "gfx942";
+    std::array<char, 32>    sum{};
+    const std::vector<char> code = {'s', 'e', 'r'};
+
+    void*  buffer     = nullptr;
+    size_t buffer_len = 0;
+    {
+        RTCCache source;
+        source.store_code_object(name, arch, sum, code);
+        ASSERT_EQ(source.serialize(&buffer, &buffer_len), rocfft_status_success);
+    }
+    std::unique_ptr<void, decltype(&RTCCache::serialize_free)> owner(buffer,
+                                                                     &RTCCache::serialize_free);
+    ASSERT_NE(buffer, nullptr);
+    ASSERT_GT(buffer_len, 0u);
+
+    RTCCache destination;
+    EXPECT_TRUE(destination.get_code_object(name, arch, sum).empty());
+    ASSERT_EQ(destination.deserialize(buffer, buffer_len), rocfft_status_success);
+    EXPECT_EQ(destination.get_code_object(name, arch, sum), code);
+}
+
+TEST(rocfft_internal, rtc_cache_corrupt_file_is_survivable)
+{
+    const auto path = fs::temp_directory_path()
+                      / ("rocfft_internal_test_corrupt_cache_"
+                         + std::to_string(std::random_device{}()) + ".db");
+    // remove the file however the test exits
+    struct remove_on_exit
+    {
+        fs::path p;
+        ~remove_on_exit()
+        {
+            std::error_code ec;
+            fs::remove(p, ec);
+        }
+    } cleanup{path};
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "this is not a sqlite database";
+        out.close();
+        ASSERT_TRUE(out) << "failed to write " << path;
+    }
+
+    EnvironmentSetTemp env_path("ROCFFT_RTC_CACHE_PATH", path.string().c_str());
+    EnvironmentSetTemp env_sys("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
+
+    std::array<char, 32>    sum{};
+    const std::vector<char> code = {'o', 'k'};
+    EXPECT_NO_THROW({
+        RTCCache cache;
+        EXPECT_TRUE(cache.get_code_object("internal_test_corrupt", "gfx942", sum).empty());
+        // the corrupt file was skipped in favour of the in-memory fallback, which still works
+        cache.store_code_object("internal_test_corrupt", "gfx942", sum, code);
+        EXPECT_EQ(cache.get_code_object("internal_test_corrupt", "gfx942", sum), code);
+    });
 }
