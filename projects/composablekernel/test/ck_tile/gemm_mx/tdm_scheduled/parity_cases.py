@@ -206,6 +206,73 @@ PARITY_CASES = [
         mnk=(1024, 1024, 2048 + 160),
     ),
     _row("grid_3x3_cluster_4x4", T256X256X512, "cluster_grid", mnk=(768, 768, 1024)),
+    # LdsBuffers: 3 buffers at the FP6 SM tile; rows that divide a GL2 line (FP8 at tile_k 128:
+    # 128 B) need 2, shorter rows that do not (FP6 at tile_k 128: 96 B) take 3; the FP6 MAB tile
+    # does not fit 3, aligned (interleaved) or not; the refill looks 3 tiles ahead, so K =
+    # 2^31 - 1024 is too long with 3 buffers and runs with 2.
+    _row("lds_buffers_4", T256X256X512, "lds_buffers", tuning={"lds_buffers": 4}),
+    _row(
+        "fp8_128b_rows_lb3",
+        _tile(128, 128, 128, 2, 2, 16),
+        "lds_buffers_row",
+        a="fp8",
+        tuning={"lds_buffers": 3},
+    ),
+    _row(
+        "fp6_96b_rows_lb3",
+        _tile(64, 128, 128, 2, 2, 16),
+        "ok",
+        a="fp6",
+        out="bf16",
+        tuning={**FP6_SM, "lds_buffers": 3},
+    ),
+    _row(
+        "fp6_sm_lb3",
+        T64X128X512,
+        "ok",
+        a="fp6",
+        out="bf16",
+        tuning={**FP6_SM, "lds_buffers": 3},
+    ),
+    _row(
+        "fp6_sm_lb3_256x2048x2048",
+        T64X128X512,
+        "ok",
+        a="fp6",
+        out="bf16",
+        tuning={**FP6_SM, "lds_buffers": 3},
+        mnk=(256, 2048, 2048),
+    ),
+    _row(
+        "fp6_mab_lb3",
+        T256X16X512,
+        "interleave_capacity",
+        a="fp6",
+        out="bf16",
+        tuning={**FP6_MAB, "lds_buffers": 3},
+    ),
+    _row(
+        "fp6_mab_lb3_lsi0",
+        T256X16X512,
+        "lds_capacity",
+        a="fp6",
+        out="bf16",
+        tuning={**FP6_MAB, "interleave_lds_regions": False, "lds_buffers": 3},
+    ),
+    _row(
+        "k_long_lb3",
+        _tile(32, 32, 256, 2, 2, 16),
+        "k_long",
+        a="fp8",
+        tuning={
+            "cluster_dim": (1, 1),
+            "gl2_prefetch_distance": 0,
+            "split_b_lds_read": False,
+            "interleave_lds_regions": False,
+            "lds_buffers": 3,
+        },
+        mnk=(32, 32, 2147482624),
+    ),
 ]
 
 #: Reasons no row reaches, with why.

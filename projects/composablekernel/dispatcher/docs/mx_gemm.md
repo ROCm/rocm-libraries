@@ -98,8 +98,8 @@ scales as for the other pipelines; the bridge converts them with
 `KMajorScales`. The kernel checks the problem itself
 (`IsSupportedArgument` on its `MxGemmKernelArgs`; `GetUnsupportedReason`
 says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
-32, and the K tail, the tile parity and partial M and N tiles must match the
-instance's shape traits.
+32, and the K tail, the tile count's variant and partial M and N tiles must match
+the instance's shape traits.
 
 `comp_tdm_scheduled` takes the cluster and its policy's knobs
 (`MxGemmPipelineAgBgCrCompTDMScheduledPolicy`) as a tuning, set per kernel or as a product
@@ -112,15 +112,17 @@ instance's shape traits.
 | `prefetch_lds_read` | `true` | Read K step s+1 from LDS while step s computes |
 | `split_b_lds_read` | `true` | Read B from LDS in two halves (needs `prefetch_lds_read` and an even N repeat) |
 | `interleave_lds_regions` | `true` | Place the A and B components in different 64 KiB LDS segments |
+| `lds_buffers` | `2` | K tiles the LDS holds, 2 or 3: tile k refills its buffer with tile k + `lds_buffers` (A and B rows that divide a 256 B GL2 line, 64 or 128 B, need 2) |
 | `edge` | `true` | Partial M and N tiles (`false` drops the edge code) |
 | `tail_steps` | `0` | K tail in 128-wide steps (`K mod tile_k`) |
 | `wide` | `false` | 64-bit offsets for operands past 2^31 bytes |
 
-The first five are the tuning knobs; the last three are shape traits fixed at
-compile time. Every kernel runs any K tile count: the pipeline picks the odd or even
-variant at run time, as the other TDM pipelines do. The kernel name adds the tuning
-suffix (`_pf<n>`, and `_lp0`, `_hplrnone` and `_lsi0` for the three knobs turned off)
-and the non-default traits, for example
+The first six are the tuning knobs; the last three are shape traits fixed at
+compile time. Every kernel runs any K tile count: the pipeline picks the variant at run
+time (odd or even with 2 LDS buffers, the count modulo 3 with 3), as the other TDM
+pipelines do. The kernel name adds the tuning suffix (`_pf<n>`; `_lp0`, `_hplrnone` and
+`_lsi0` for the three knobs turned off; `_lb3` for 3 LDS buffers) and the non-default traits,
+for example
 `..._256x256x512_2x2x1_32x16x128_c2x2_pf2_noedge`.
 
 In the dispatcher, put the keys at the top level of the configuration, or in

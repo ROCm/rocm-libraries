@@ -38,6 +38,8 @@ enum class MxTdmScheduledReason : int
     KLong,
     SplitBRead,
     Gl2Distance,
+    LdsBuffers,
+    LdsBuffersRow,
     ClusterDim,
     ClusterSize,
     ClusterGrid,
@@ -70,6 +72,8 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_code(MxTdmSche
     case MxTdmScheduledReason::KLong: return "k_long";
     case MxTdmScheduledReason::SplitBRead: return "split_b_read";
     case MxTdmScheduledReason::Gl2Distance: return "gl2_distance";
+    case MxTdmScheduledReason::LdsBuffers: return "lds_buffers";
+    case MxTdmScheduledReason::LdsBuffersRow: return "lds_buffers_row";
     case MxTdmScheduledReason::ClusterDim: return "cluster_dim";
     case MxTdmScheduledReason::ClusterSize: return "cluster_size";
     case MxTdmScheduledReason::ClusterGrid: return "cluster_grid";
@@ -108,12 +112,16 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
         return "A and B scale bytes must each be at most 2^31 (i32 offsets)";
     case MxTdmScheduledReason::KShort: return "K must hold at least one full tile";
     case MxTdmScheduledReason::KLong:
-        return "K plus the K the loads look ahead (max(gl2_prefetch_distance, 2) + 1 tiles) must "
-               "fit in i32";
+        return "K plus the K the loads look ahead (max(gl2_prefetch_distance, lds_buffers) + 1 "
+               "tiles) must fit in i32";
     case MxTdmScheduledReason::SplitBRead:
         return "SplitBLdsRead needs PrefetchLdsRead and an even N wave repeat";
     case MxTdmScheduledReason::Gl2Distance:
         return "gl2_prefetch_distance must be 0 (off) or 2..8 tiles";
+    case MxTdmScheduledReason::LdsBuffers: return "lds_buffers must be 2 or 3";
+    case MxTdmScheduledReason::LdsBuffersRow:
+        return "lds_buffers 3 cannot take A and B rows of a K tile that divide a 256 B GL2 line "
+               "(64 or 128 B)";
     case MxTdmScheduledReason::ClusterDim: return "cluster_dim must be a positive (x, y, z) triple";
     case MxTdmScheduledReason::ClusterSize:
         return "cluster_dim must be 2D with at most 16 workgroups";
@@ -146,7 +154,8 @@ CK_TILE_HOST_DEVICE constexpr const char* mx_tdm_scheduled_reason_message(MxTdmS
  * The edge and wide paths are
  * supersets of the ones they replace (an edge kernel runs whole tiles, a wide one narrow offsets),
  * so one instance serves every problem its traits cover; TailSteps must be the problem's. The
- * parity of the loop's tile count is the pipeline's TailNumber, chosen at run time.
+ * loop's tile count modulo the LDS buffer count (its parity with 2 buffers) is the pipeline's
+ * TailNumber, chosen at run time.
  * MxTdmScheduledSelectTraits gives the values an M x N x K problem needs.
  */
 template <bool EdgeM_        = false,
@@ -253,9 +262,10 @@ MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
  * pipeline is one explicitly scheduled loop in which every wave interleaves its LDS reads and
  * WMMAs.
  *
- * TailNum is the K loop's variant, as in CK's GemmPipelineProblem: TailNumber::One (an odd count
- * of whole K tiles) or Two (even), picked on the host by the pipeline's TailHandler, one kernel
- * per variant; TailNumber::Full runs any count, its odd tile chosen at run time.
+ * TailNum is the K loop's variant, as in CK's GemmPipelineProblem: TailNumber N for a count of
+ * whole K tiles congruent to N modulo the policy's LdsBuffers (One and Two; Three with 3 buffers;
+ * with 2, One is odd and Two even), picked on the host by the pipeline's TailHandler, one kernel
+ * per variant; TailNumber::Full runs any count, its remainder chosen at run time.
  */
 template <typename ADataType_,
           typename BDataType_,
@@ -272,8 +282,9 @@ struct MxGemmTdmScheduledProblem
 
     static constexpr auto TailNum = TailNum_;
     static_assert(TailNum == TailNumber::One || TailNum == TailNumber::Two ||
-                      TailNum == TailNumber::Full,
-                  "comp_tdm_scheduled: TailNum is TailNumber::One, Two or Full");
+                      TailNum == TailNumber::Three || TailNum == TailNumber::Full,
+                  "comp_tdm_scheduled: TailNum is TailNumber::One, Two, Three (3 LDS buffers) or "
+                  "Full");
     /// This Problem with TailNum T.
     template <TailNumber T>
     using WithTailNum = MxGemmTdmScheduledProblem<ADataType_,
@@ -320,17 +331,24 @@ struct InvalidTuning<MxTdmScheduledReason::Ok>
  *                              Needs PrefetchLdsRead and an even N wave repeat.
  * @tparam InterleaveLdsRegions Place the A and B components in different 64 KiB LDS segments
  *                              (GetInterleavePlacement). Off: the regions follow one another.
+ * @tparam LdsBuffers           K tiles the LDS holds, each in its own buffer: 2 or 3. Tile k
+ *                              refills its buffer with tile k + LdsBuffers, so a tile's loads
+ *                              have LdsBuffers - 1 tiles of compute to land. A and B rows that
+ *                              divide a GL2 line (64 or 128 B) need 2: their GL2 prefetch
+ *                              follows the parity of the tile index (GetGl2DataLines).
  */
 template <index_t Gl2PrefetchDistance = 4,
           bool PrefetchLdsRead        = true,
           bool SplitBLdsRead          = true,
-          bool InterleaveLdsRegions   = true>
+          bool InterleaveLdsRegions   = true,
+          index_t LdsBuffers          = 2>
 struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 {
     static constexpr index_t kGl2PrefetchDistance = Gl2PrefetchDistance;
     static constexpr bool kPrefetchLdsRead        = PrefetchLdsRead;
     static constexpr bool kSplitBLdsRead          = SplitBLdsRead;
     static constexpr bool kInterleaveLdsRegions   = InterleaveLdsRegions;
+    static constexpr index_t kLdsBuffers          = LdsBuffers;
 
     /// K of the scaled WMMA atom, the warp tile's K.
     static constexpr index_t kAtomK = 128;
@@ -521,7 +539,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return min_i(GetLdsReads<Problem>(), kDscntMax);
     }
 
-    /// Reads of the other buffer left in flight at the cluster late wait, clamped.
+    /// Reads of the next buffer left in flight at the cluster late wait, clamped.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
     {
@@ -613,12 +631,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
             return R::SplitBRead;
         if(kGl2PrefetchDistance != 0 && !(2 <= kGl2PrefetchDistance && kGl2PrefetchDistance <= 8))
             return R::Gl2Distance;
+        if(kLdsBuffers != 2 && kLdsBuffers != 3)
+            return R::LdsBuffers;
+        // The GL2 prefetch of rows that divide a line follows the parity of the tile index, which
+        // a tile's buffer gives at compile time only with two buffers.
+        const index_t row_bytes = GetKBytes<Problem>(tile_k);
+        if(kLdsBuffers != 2 && row_bytes < kGl2LineBytes && kGl2LineBytes % row_bytes == 0)
+            return R::LdsBuffersRow;
         if(Shape::kclusterN < 1 || Shape::kclusterM < 1 || Shape::kclusterK < 1)
             return R::ClusterDim;
         if(Shape::kclusterK != 1 || Shape::kclusterN * Shape::kclusterM > 16)
             return R::ClusterSize;
-        const DerivedPads pads  = GetDerivedLdsPads<Problem>();
-        const index_t row_bytes = GetKBytes<Problem>(tile_k);
+        const DerivedPads pads = GetDerivedLdsPads<Problem>();
         struct PadCheck
         {
             LdsPad pad;
@@ -659,14 +683,14 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return r == MxTdmScheduledReason::Ok ? nullptr : mx_tdm_scheduled_reason_code(r);
     }
 
-    /// Bytes of LDS: both buffers.
+    /// Bytes of LDS: every buffer.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return GetLdsLayout<Problem>().lds_bytes;
     }
 
-    /// Bytes between the two LDS buffers.
+    /// Bytes between consecutive LDS buffers.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetLdsBufferStride()
     {
@@ -1198,7 +1222,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
      * @brief The tuning part of a kernel name: the cluster, then every value that is not its
      *        default, each with a leading "_": the out dtype, the wave group, pf<N> (a GL2
      *        prefetch distance other than 4), lp0 (PrefetchLdsRead off), hplrnone (SplitBLdsRead
-     *        off), lsi0 (InterleaveLdsRegions off) and mma16 (the 16x16 atom, any type).
+     *        off), lsi0 (InterleaveLdsRegions off), lb<N> (LdsBuffers other than 2) and mma16 (the
+     *        16x16 atom, any type).
      *
      * @param with_shape_parts  Include the out dtype, wave group and mma16, which a CK kernel name
      *                          already carries in its tile and type fields.
@@ -1226,6 +1251,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
             name += "_hplrnone";
         if(!kInterleaveLdsRegions)
             name += "_lsi0";
+        if(kLdsBuffers != 2)
+            name += "_lb" + std::to_string(kLdsBuffers);
         if(with_shape_parts && !IsMma32<Problem>())
             name += "_mma16";
         return name;
@@ -1324,8 +1351,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         index_t iterate_stride = 0;
     };
 
-    /// The two LDS buffers. Buffer 1 starts buffer_stride after buffer 0; buffer_bytes is where
-    /// buffer 0's last region ends. reason is not Ok when InterleaveLdsRegions does not apply.
+    /// The kLdsBuffers LDS buffers. Buffer i starts i * buffer_stride after buffer 0; buffer_bytes
+    /// is where buffer 0's last region ends. reason is not Ok when InterleaveLdsRegions does not
+    /// apply.
     struct LdsLayout
     {
         MxTdmScheduledReason reason = MxTdmScheduledReason::Ok;
@@ -1584,25 +1612,30 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                 return out;
             }
         }
+        // Buffer i starts i * buffer_stride in. Not aligned, the stride is natural_stride rounded
+        // up to a power of two when the last buffer still fits, else natural_stride. Aligned, it
+        // is the power of two at or above natural_stride and the placement's span, so that every
+        // buffer has the same place in the 64 KiB segments, and kLdsBuffers strides must fit.
         index_t buffer_stride = 0;
         index_t lds_bytes     = 0;
         if(placement.aligned)
         {
             buffer_stride = static_cast<index_t>(
                 pow2_ceil(natural_stride > placement.span ? natural_stride : placement.span));
-            if(2ll * buffer_stride > kLdsCapacityBytes)
+            if(long_index_t{kLdsBuffers} * buffer_stride > kLdsCapacityBytes)
             {
                 out.reason = MxTdmScheduledReason::InterleaveCapacity;
                 return out;
             }
-            lds_bytes = max_i(buffer_stride + baseline_span, buffer_stride + placement.span);
+            const index_t last = (kLdsBuffers - 1) * buffer_stride;
+            lds_bytes          = max_i(last + baseline_span, last + placement.span);
         }
         else
         {
             buffer_stride = natural_stride;
-            if(natural_stride + pow2_ceil(natural_stride) <= kLdsCapacityBytes)
+            if((kLdsBuffers - 1) * pow2_ceil(natural_stride) + natural_stride <= kLdsCapacityBytes)
                 buffer_stride = static_cast<index_t>(pow2_ceil(natural_stride));
-            lds_bytes = buffer_stride + baseline_span;
+            lds_bytes = (kLdsBuffers - 1) * buffer_stride + baseline_span;
         }
         const index_t b_scale_base = placement.scale_base;
         const index_t a_scale_base = b_scale_base + b_scale_region;

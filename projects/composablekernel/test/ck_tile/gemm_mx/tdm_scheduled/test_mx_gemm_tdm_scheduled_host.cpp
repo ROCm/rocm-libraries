@@ -77,12 +77,14 @@ void check_layout(index_t M, index_t N, index_t K, const index_t (&want)[12])
 }
 
 // The LDS layouts of the tuned FP4 instances, FP8 variants of 256x16 and 128x128 tiles, a BF8
-// variant of 256x16 and the FP6 SM and MAB instances, each valid for its problem. An operand is two
-// components (one per wave pair) of tile / 2 rows of GetKBytes(tile_k) bytes, padded 16 B per pad
-// block; a scale region is 2 x rows x K steps x 4 B. The scale regions, and B's two components when
-// not interleaved, are rounded up to the region alignment (512 B for FP4 and FP6, 256 B for 8-bit).
-// The second buffer starts at the buffer stride, the power of two above the buffer when both fit in
-// the 320 KiB of LDS; the LDS size is the stride plus the buffer.
+// variant of 256x16, the FP6 SM and MAB instances, and three-buffer layouts (FP6 SM, FP6 128x16,
+// FP4 256x128), each valid for its problem. An operand is two components (one per wave pair) of
+// tile / 2 rows of GetKBytes(tile_k) bytes, padded 16 B per pad block; a scale region is
+// 2 x rows x K steps x 4 B. The scale regions, and B's two components when not interleaved, are
+// rounded up to the region alignment (512 B for FP4 and FP6, 256 B for 8-bit). Buffer i starts i
+// buffer strides in; the stride is the power of two above the buffer when the last buffer still
+// fits in the 320 KiB of LDS, else the buffer; the LDS size is the last buffer's start plus the
+// buffer.
 TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
 {
     using ck_tile::bf16_t;
@@ -151,6 +153,38 @@ TEST(MxGemmTdmScheduledHost, LdsLayoutOfTheTunedInstances)
             2048,
             2048,
             {0, 24832, 52736, 12544, 49664, 51712, 131072, 208896, 2, 784, 4, 1552});
+    }
+    {
+        // FP6 SM with 3 buffers: the same buffer, whose 77824 B are its stride (two 128 KiB
+        // strides and the buffer exceed the LDS): LDS 2 x 77824 + 77824.
+        SCOPED_TRACE("fp6 64x128x512, 3 buffers");
+        using Sm3 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2, true, false, false, 3>;
+        check_layout<ProblemOf<pk_fp6x16_t, bf16_t, 64, 128, 512, 2, 2, 16>, Sm3>(
+            256,
+            2048,
+            2048,
+            {0, 24832, 52736, 12544, 49664, 51712, 77824, 233472, 2, 784, 4, 1552});
+    }
+    {
+        // FP6 128x16x512 4x1 with 3 buffers, not interleaved: A's lanes read rows 2 apart (32 x
+        // 784 B, 25088) and B's 1 (4 x 784 B, 3136); B twice (6272, rounded to 6656), the B scales
+        // (256 B, rounded to 512), the A scales (2048 B), A at 9216. Buffer 59392; two 64 KiB
+        // strides and the buffer fit: stride 65536, LDS 2 x 65536 + 59392.
+        SCOPED_TRACE("fp6 128x16x512, 3 buffers");
+        using Narrow3 =
+            ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<0, false, false, false, 3>;
+        check_layout<ProblemOf<pk_fp6x16_t, bf16_t, 128, 16, 512, 4, 1, 16, 1, 2>, Narrow3>(
+            512, 16, 2048, {0, 3136, 9216, 25088, 6656, 7168, 65536, 190464, 2, 784, 2, 784});
+    }
+    {
+        // FP4 256x128x512 with 3 buffers, interleaved without segment alignment: B0 at 0, A0 and A1
+        // (33280 B each) after it, B1 at 83200, then the B scales (2048 B) and the A scales
+        // (4096 B): buffer 105984. Two 128 KiB strides and the buffer exceed the LDS: stride
+        // 105984, LDS 3 x 105984.
+        SCOPED_TRACE("fp4 256x128x512, 3 buffers");
+        using Lb3 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, true, true, 3>;
+        check_layout<ProblemOf<pk_fp4_t, fp8_t, 256, 128, 512, 2, 2, 32, 2, 2>, Lb3>(
+            1024, 1024, 1536, {0, 83200, 16640, 33280, 99840, 101888, 105984, 317952, 0, 0, 0, 0});
     }
     {
         // FP6 MAB: A's lanes read rows 4 apart (32 x 1552 B, 49664) and B's 1 (16 B per 2 rows,
@@ -309,6 +343,12 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     EXPECT_EQ(SmTune::GetReadsPerStep<Fp6Sm>(), 20);
     EXPECT_EQ((PipelineOf<Fp6Sm, SmTune>::GetKernelName()),
               "mx_gemm_tdm_scheduled_mxfp6_t64x128x512_c4x4_bf16_pf2_hplrnone_lsi0_mma16");
+    // With 3 LDS buffers: lb3 in the name, three buffers of 77824 B.
+    using SmTune3 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2, true, false, false, 3>;
+    EXPECT_EQ(SmTune3::Validate<Fp6Sm>(), nullptr);
+    static_assert(SmTune3::GetSmemSize<Fp6Sm>() == 233472);
+    EXPECT_EQ((PipelineOf<Fp6Sm, SmTune3>::GetKernelName()),
+              "mx_gemm_tdm_scheduled_mxfp6_t64x128x512_c4x4_bf16_pf2_hplrnone_lsi0_lb3_mma16");
 
     // FP6 MAB: 2 scale reads and 3 reads for each of 4 A fragments and 1 B fragment.
     using Fp6Mab  = ProblemOf<ck_tile::pk_fp6x16_t, ck_tile::bf16_t, 256, 16, 512, 4, 1, 16, 1, 2>;
@@ -549,6 +589,52 @@ TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCount)
     }
 }
 
+// With 3 LDS buffers the host picks the kernel of a whole-tile count modulo 3: TailNumber::One and
+// Two for remainders 1 and 2, Three for multiples of 3, with the K tail excluded; each variant
+// rejects the other counts, Full none.
+TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCountModuloThree)
+{
+    using ck_tile::TailNumber;
+    using Sm3 = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2, true, false, false, 3>;
+    using Full =
+        PipelineOf<ProblemOf<ck_tile::pk_fp6x16_t, ck_tile::bf16_t, 64, 128, 512, 2, 2, 16>, Sm3>;
+    using One   = Full::WithTailNum<TailNumber::One>;
+    using Two   = Full::WithTailNum<TailNumber::Two>;
+    using Three = Full::WithTailNum<TailNumber::Three>;
+    static_assert(Full::PrefetchStages == 3);
+    static_assert(Full::GetTailNumber(512) == TailNumber::One);
+    static_assert(Full::GetTailNumber(1024) == TailNumber::Two);
+    static_assert(Full::GetTailNumber(1536) == TailNumber::Three);
+    static_assert(Full::GetTailNumber(2048 + 128) == TailNumber::One);
+    const auto picked = [](index_t K) {
+        const index_t tiles = Full::GetFullTiles(K);
+        return Full::TailHandler([](auto, auto tail_num) { return decltype(tail_num)::value; },
+                                 Full::BlockHasHotloop(tiles),
+                                 Full::GetBlockLoopTailNum(tiles));
+    };
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
+    EXPECT_EQ(picked(512), TailNumber::One);
+    EXPECT_EQ(picked(1024), TailNumber::Two);
+    EXPECT_EQ(picked(1536), TailNumber::Three);
+    EXPECT_EQ(picked(3584), TailNumber::One);
+#else
+    EXPECT_EQ(picked(512), TailNumber::Full);
+#endif
+    const std::string base =
+        "mx_gemm_tdm_scheduled_mxfp6_t64x128x512_c4x4_bf16_pf2_hplrnone_lsi0_lb3_mma16";
+    EXPECT_EQ(One::GetKernelName(), base + "_r1");
+    EXPECT_EQ(Two::GetKernelName(), base + "_r2");
+    EXPECT_EQ(Three::GetKernelName(), base + "_r0");
+    for(index_t tiles = 1; tiles <= 7; ++tiles)
+    {
+        const index_t K = tiles * 512;
+        EXPECT_EQ(One::GetUnsupportedReason(256, 2048, K) == nullptr, tiles % 3 == 1) << K;
+        EXPECT_EQ(Two::GetUnsupportedReason(256, 2048, K) == nullptr, tiles % 3 == 2) << K;
+        EXPECT_EQ(Three::GetUnsupportedReason(256, 2048, K) == nullptr, tiles % 3 == 0) << K;
+        EXPECT_EQ(Full::GetUnsupportedReason(256, 2048, K), nullptr) << K;
+    }
+}
+
 /// The code of a GetUnsupportedReason result: "ok" for nullptr, the reason whose message it is,
 /// else the message (a shape path the traits lack).
 const char* reason_code_of(const char* why)
@@ -595,6 +681,23 @@ TEST(MxGemmTdmScheduledHost, KLimit)
     const char* below  = Pipe::GetUnsupportedReason(32, 32, 2147482336);
     EXPECT_TRUE(below == nullptr || std::string(below) != k_long) << below;
     EXPECT_STREQ(Pipe::GetUnsupportedReason(32, 32, 2147482368), k_long);
+}
+
+// With 3 LDS buffers the refill looks 3 tiles ahead: at GL2 distance 2, (3 + 1) tiles of 256 take K
+// to at most 2^31 - 1 - 1024, where 2 buffers' (2 + 1) tiles allow 2^31 - 1 - 768.
+TEST(MxGemmTdmScheduledHost, KLimitThreeBuffers)
+{
+    using P     = ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 32, 32, 256, 2, 2, 16, 1, 1>;
+    using Lb2   = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2, true, false, false>;
+    using Lb3   = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<2, true, false, false, 3>;
+    using Pipe2 = PipelineOf<P, Lb2>;
+    using Pipe3 = PipelineOf<P, Lb3>;
+    const auto* k_long = ck_tile::mx_tdm_scheduled_reason_message(MxTdmScheduledReason::KLong);
+    const char* below  = Pipe3::GetUnsupportedReason(32, 32, 2147482592);
+    EXPECT_TRUE(below == nullptr || std::string(below) != k_long) << below;
+    EXPECT_STREQ(Pipe3::GetUnsupportedReason(32, 32, 2147482624), k_long);
+    const char* two = Pipe2::GetUnsupportedReason(32, 32, 2147482624);
+    EXPECT_TRUE(two == nullptr || std::string(two) != k_long) << two;
 }
 
 // A K tail has at most tile_k / 128 - 1 K steps: a partial tile of every K step (K mod tile_k

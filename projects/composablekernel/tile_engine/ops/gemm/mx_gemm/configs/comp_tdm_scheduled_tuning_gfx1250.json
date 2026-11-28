@@ -25,6 +25,7 @@
         "prefetch_lds_read": {"values": [true, false]},
         "split_b_lds_read": {"values": [true, false]},
         "interleave_lds_regions": {"values": [true, false]},
+        "lds_buffers": {"values": [2, 3]},
         "edge": {"values": [true]},
         "tail_steps": {"values": [0]},
         "wide": {"values": [false]}

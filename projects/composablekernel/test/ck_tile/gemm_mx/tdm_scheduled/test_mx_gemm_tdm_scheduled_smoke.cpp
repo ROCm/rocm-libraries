@@ -3,8 +3,9 @@
 
 // comp_tdm_scheduled smoke test on gfx1250: a few small problems against
 // reference_mx_gemm_tdm_scheduled, bit for bit on the sparse check inputs. FP4 whole tiles, an
-// FP4 edge with a K tail, one 8-bit instance, FP6 with and without PrefetchLdsRead, and FP8
-// saturation. test_mx_gemm_tdm_scheduled.cpp has the full coverage. Needs a gfx1250 device.
+// FP4 edge with a K tail, one 8-bit instance, FP6 with and without PrefetchLdsRead, FP6 with 3
+// LDS buffers, and FP8 saturation. test_mx_gemm_tdm_scheduled.cpp has the full coverage. Needs a
+// gfx1250 device.
 
 #include "test_mx_gemm_tdm_scheduled_util.hpp"
 
@@ -63,6 +64,26 @@ TEST(MxGemmTdmScheduledSmoke, Fp6NoPrefetchLdsRead)
                  16,
                  Tu<1, 1, 0, false, false>,
                  Shape<false, false, 0>>>(512, 32, 1024 + 480);
+}
+
+// FP6 with 3 LDS buffers and PrefetchLdsRead, without a cluster, 2x2 tiles: 5 whole tiles
+// (TailNumber::Two) and a K tail of one K step. Only the TailNumber::Two kernel, the one this
+// problem runs, is built.
+TEST(MxGemmTdmScheduledSmoke, Fp6ThreeBuffers)
+{
+    using Fp6Lb3 = Kernel<pk_fp6x16_t,
+                          pk_fp6x16_t,
+                          bf16_t,
+                          64,
+                          128,
+                          512,
+                          2,
+                          2,
+                          16,
+                          Tu<1, 1, 2, true, false, false, 3>,
+                          Shape<false, false, 1>>;
+    check_kernel<WithTailNum<Fp6Lb3, ck_tile::TailNumber::Two>::type>(
+        128, 256, 5 * 512 + 128, kSparseScaleShift);
 }
 
 /// Scales 2^14 above the sparse check's on each operand take E past +-448: FP8 saturates.

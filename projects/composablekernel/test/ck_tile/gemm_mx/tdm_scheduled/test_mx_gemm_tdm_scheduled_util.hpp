@@ -75,7 +75,7 @@ struct WithTailNum<ck_tile::MxGemmKernel<Partitioner, P, Epilogue>, T>
 };
 
 /// Calls f(WithTailNum<Kernel, T>{}) with T the TailNum of K: the pipeline's TailHandler picks
-/// TailNumber::One or Two from the loop's tile count on the host.
+/// TailNumber::One or Two (Three with 3 LDS buffers) from the loop's tile count on the host.
 template <typename Kernel, typename F>
 auto for_tail_num(index_t K, F&& f)
 {
@@ -104,18 +104,22 @@ using Kernel =
     KernelOf<Pipeline<A, B, O, TileM, TileN, TileK, WarpM, WarpN, AtomM, Tuning, Traits>>;
 
 /// A tuning: the cluster (CX N tiles by CY M tiles), then the policy's knobs with its defaults:
-/// GL2 prefetch distance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions.
+/// GL2 prefetch distance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions, LdsBuffers.
 template <index_t CX,
           index_t CY,
-          index_t Gl2      = 4,
-          bool LdsPrefetch = true,
-          bool SplitB      = true,
-          bool Interleave  = true>
+          index_t Gl2        = 4,
+          bool LdsPrefetch   = true,
+          bool SplitB        = true,
+          bool Interleave    = true,
+          index_t LdsBuffers = 2>
 struct Tu
 {
     using Cluster = ck_tile::sequence<CY, CX, 1>;
-    using Policy =
-        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, LdsPrefetch, SplitB, Interleave>;
+    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2,
+                                                                        LdsPrefetch,
+                                                                        SplitB,
+                                                                        Interleave,
+                                                                        LdsBuffers>;
 };
 
 template <bool EdgeM, bool EdgeN, index_t TailSteps>

@@ -3,8 +3,9 @@
 
 // comp_tdm_scheduled on gfx1250 against reference_mx_gemm_tdm_scheduled, bit for bit on the
 // sparse check inputs: every type and output, both atoms and wave groups, each schedule variant,
-// clusters, K paths (even and odd tile counts, K tails, K a multiple of 32 only), edges and FP8
-// saturation. E goes through LDS and is stored by TDM. Needs a gfx1250 device.
+// clusters, K paths (even and odd tile counts, the tile count modulo 3 with 3 LDS buffers, K
+// tails, K a multiple of 32 only), edges and FP8 saturation. E goes through LDS and is stored by
+// TDM. Needs a gfx1250 device.
 
 #include "test_mx_gemm_tdm_scheduled_util.hpp"
 
@@ -215,6 +216,91 @@ TEST(MxGemmTdmScheduled, Fp6KTail)
     check<MabTail3>(1024, 16, 2048 + 352);
     check<Fp6Sm<Fp6SmTu, Shape<false, false, 0>>>(256, 2048, 1536 + 416);
     check<Fp6Mab<Fp6MabTu, Shape<false, false, 0>>>(1024, 16, 1536 + 480);
+}
+
+// Three LDS buffers: the SM tuning (PrefetchLdsRead, cluster 4x4) and a direct-read tile
+// (128x16x512 4x1, no PrefetchLdsRead, regions not interleaved; the MAB tile does not fit 3
+// buffers) at tile counts 1 to 7, every remainder modulo 3 (TailNumber::One, Two, Three) and fewer
+// tiles than buffers; and FP8 with SplitBLdsRead and a cluster, whose GL2 distance 4 prefetches
+// the tile after the three loaded.
+using Fp6Sm3Tu = Tu<4, 4, 2, true, false, false, 3>;
+template <typename Tuning, typename Traits>
+using Fp6Narrow = Kernel<pk_fp6x16_t, pk_fp6x16_t, bf16_t, 128, 16, 512, 4, 1, 16, Tuning, Traits>;
+using Fp6Narrow3Tu = Tu<1, 2, 0, false, false, false, 3>;
+
+TEST(MxGemmTdmScheduled, ThreeBuffersTileCounts)
+{
+    using Fp8 = Kernel<fp8_t,
+                       fp8_t,
+                       fp8_t,
+                       128,
+                       128,
+                       256,
+                       2,
+                       2,
+                       16,
+                       Tu<2, 2, 4, true, true, false, 3>,
+                       Shape<false, false, 0>>;
+    for(index_t tiles = 1; tiles <= 7; ++tiles)
+    {
+        check<Fp6Sm<Fp6Sm3Tu, Shape<false, false, 0>>>(256, 2048, tiles * 512);
+        check<Fp6Narrow<Fp6Narrow3Tu, Shape<false, false, 0>>>(512, 16, tiles * 512);
+        check<Fp8>(512, 512, tiles * 256);
+    }
+}
+
+// K tails after each remainder modulo 3 of the whole tiles (one K step with the SM tuning, three
+// with the direct-read tile without a cluster), one with a partial last K step; a partial last tile
+// of every K step, run in the loop's third buffer; SplitBLdsRead without a cluster (its refill
+// waits on the next tile's reads) with edges, after each remainder.
+TEST(MxGemmTdmScheduled, Fp6ThreeBuffersKTail)
+{
+    using SmTail1     = Fp6Sm<Fp6Sm3Tu, Shape<false, false, 1>>;
+    using NarrowTail3 = Fp6Narrow<Tu<1, 1, 0, false, false, false, 3>, Shape<false, false, 3>>;
+    using SplitBEdge  = Fp6Sm<Tu<1, 1, 2, true, true, false, 3>, Shape<true, true, 1>>;
+    for(index_t tiles = 1; tiles <= 3; ++tiles)
+    {
+        check<SmTail1>(256, 2048, tiles * 512 + 128);
+        check<NarrowTail3>(512, 16, tiles * 512 + 384);
+        check<SplitBEdge>(64 + 41, 128 + 67, (tiles + 3) * 512 + 128);
+    }
+    check<SmTail1>(256, 2048, 2048 + 32);
+    check<Fp6Sm<Fp6Sm3Tu, Shape<false, false, 0>>>(256, 2048, 1024 + 416);
+}
+
+// TailNumber::Full runs any whole-tile count: the tile triples from buffer 0, then the remainder
+// modulo 3 chosen at run time, which without a K tail ends in the last tile and with one feeds the
+// K tail; counts 1 and 2 run no triple. The SM tuning without a cluster: k_tile_full's refill
+// behind the workgroup barrier.
+TEST(MxGemmTdmScheduled, Fp6ThreeBuffersFullTailNumber)
+{
+    using SmFull     = Fp6Sm<Tu<1, 1, 2, true, false, false, 3>, Shape<false, false, 0>>;
+    using SmFullTail = Fp6Sm<Tu<1, 1, 2, true, false, false, 3>, Shape<false, false, 1>>;
+    for(index_t tiles = 1; tiles <= 6; ++tiles)
+    {
+        check_kernel<SmFull>(256, 2048, tiles * 512, kSparseScaleShift);
+        check_kernel<SmFullTail>(256, 2048, tiles * 512 + 128, kSparseScaleShift);
+    }
+}
+
+// FP4 with 3 LDS buffers: the 32x16 atom, SplitBLdsRead and interleaved regions whose buffer stride
+// is the buffer (not a power of two), the third buffer ending near the top of the LDS; GL2 distance
+// 4; tile counts 1 to 3 (TailNumber::One, Two, Three).
+TEST(MxGemmTdmScheduled, Fp4ThreeBuffers)
+{
+    using Fp4Lb3 = Kernel<pk_fp4_t,
+                          pk_fp4_t,
+                          fp8_t,
+                          256,
+                          128,
+                          512,
+                          2,
+                          2,
+                          32,
+                          Tu<2, 2, 4, true, true, true, 3>,
+                          Shape<false, false, 0>>;
+    for(index_t tiles = 1; tiles <= 3; ++tiles)
+        check<Fp4Lb3>(1024, 1024, tiles * 512);
 }
 
 // Partial M and N tiles with both tunings, the SM one with a K tail. A and B load in iterate mode

@@ -46,20 +46,25 @@ MX_DTYPES = ("fp4", "fp6", "fp8", "bf8")
 #: Bits per K value of an A or B type (the policy's GetElemBits); "fp6" is pk_fp6x16_t.
 DTYPE_BITS = {"fp4": 4, "fp6": 6, "fp8": 8, "bf8": 8}
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
+#: The LDS buffer counts (the policy's LdsBuffers).
+LDS_BUFFERS = (2, 3)
+#: The GL2 prefetch's granule (the policy's kGl2LineBytes).
+GL2_LINE_BYTES = 256
 
 #: The tuning knobs and their defaults: the cluster and the policy's template parameters
-#: (Gl2PrefetchDistance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions).
+#: (Gl2PrefetchDistance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions, LdsBuffers).
 TUNING_DEFAULTS: Dict[str, object] = {
     "cluster_dim": (4, 4, 1),
     "gl2_prefetch_distance": 4,
     "prefetch_lds_read": True,
     "split_b_lds_read": True,
     "interleave_lds_regions": True,
+    "lds_buffers": 2,
 }
 
 #: Shape-dependent code paths of an instance (the Problem's MxTdmScheduledGemmTraits): an
 #: instance fixes them and runs every problem they cover. The defaults run any M and N with no
-#: K tail. Every instance runs any tile count (the pipeline's TailNumber picks the parity).
+#: K tail. Every instance runs any tile count (the pipeline's TailNumber picks the variant).
 SHAPE_DEFAULTS: Dict[str, object] = {
     "edge": True,
     "tail_steps": 0,
@@ -84,6 +89,8 @@ REASONS = (
     "k_long",
     "split_b_read",
     "gl2_distance",
+    "lds_buffers",
+    "lds_buffers_row",
     "cluster_dim",
     "cluster_size",
     "cluster_grid",
@@ -214,6 +221,7 @@ class MxTdmScheduledSpec:
     prefetch_lds_read: bool = True
     split_b_lds_read: bool = True
     interleave_lds_regions: bool = True
+    lds_buffers: int = 2
     mma: str = "32x16"
     a_dtype: str = "fp4"
     b_dtype: str = "fp4"
@@ -270,7 +278,8 @@ class MxTdmScheduledSpec:
     @property
     def reads_per_fragment(self) -> int:
         """ds_loads per lane of a row fragment of a K step (the policy's GetReadsPerFragment):
-        the fewest that carry its chunks' bytes, at most LDS_READ_MAX_BYTES each (FP6: three)."""
+        the fewest that carry its chunks' bytes, at most LDS_READ_MAX_BYTES each (FP6: three).
+        """
         return self.chunks_per_lane * self.chunk_bytes // LDS_READ_MAX_BYTES
 
     @property
@@ -486,18 +495,22 @@ class MxTdmScheduledSpec:
             )
             if placement.reason != "ok":
                 return LdsLayout(reason=placement.reason)
+        # Buffer i starts i * buffer_stride in (the policy's GetLdsLayout): not aligned, the
+        # stride is natural_stride rounded up to a power of two when the last buffer still fits;
+        # aligned, always a power of two, and lds_buffers strides must fit.
+        buffers = self.lds_buffers
         if placement.aligned:
             buffer_stride = _pow2_ceil(max(natural_stride, placement.span))
-            if 2 * buffer_stride > LDS_CAPACITY_BYTES:
+            if buffers * buffer_stride > LDS_CAPACITY_BYTES:
                 return LdsLayout(reason="interleave_capacity")
-            lds_bytes = max(
-                buffer_stride + baseline_span, buffer_stride + placement.span
-            )
+            last = (buffers - 1) * buffer_stride
+            lds_bytes = max(last + baseline_span, last + placement.span)
         else:
             buffer_stride = natural_stride
-            if natural_stride + _pow2_ceil(natural_stride) <= LDS_CAPACITY_BYTES:
-                buffer_stride = _pow2_ceil(natural_stride)
-            lds_bytes = buffer_stride + baseline_span
+            pow2 = _pow2_ceil(natural_stride)
+            if (buffers - 1) * pow2 + natural_stride <= LDS_CAPACITY_BYTES:
+                buffer_stride = pow2
+            lds_bytes = (buffers - 1) * buffer_stride + baseline_span
         b_scale_base = placement.scale_base
         a_scale_base = b_scale_base + b_scale_region
         a_scale_comp = scale_component(a_rows, pads["a_scale"])
@@ -609,14 +622,27 @@ class MxTdmScheduledSpec:
                 return "scale_span"
             if self.K < self.tile_k:
                 return "k_short"
-            # The loads look max(gl2_prefetch_distance, 2) + 1 tiles past K in i32.
-            lookahead = (max(self.gl2_prefetch_distance, 2) + 1) * self.tile_k
+            # The loads look max(gl2_prefetch_distance, lds_buffers) + 1 tiles past K in i32.
+            lookahead = (
+                max(self.gl2_prefetch_distance, self.lds_buffers) + 1
+            ) * self.tile_k
             if self.K > I32_SPAN - 1 - lookahead:
                 return "k_long"
         if self.split_b_lds_read and (not self.prefetch_lds_read or rn % 2):
             return "split_b_read"
         if self.gl2_prefetch_distance != 0 and not 2 <= self.gl2_prefetch_distance <= 8:
             return "gl2_distance"
+        if self.lds_buffers not in LDS_BUFFERS:
+            return "lds_buffers"
+        # The GL2 prefetch of rows that divide a line follows the tile index's parity, which a
+        # tile's buffer gives at compile time only with two buffers.
+        row_bytes = self.k_bytes(self.tile_k)
+        if (
+            self.lds_buffers != 2
+            and row_bytes < GL2_LINE_BYTES
+            and GL2_LINE_BYTES % row_bytes == 0
+        ):
+            return "lds_buffers_row"
         cx, cy, cz = self.cluster_dim
         if cx < 1 or cy < 1 or cz < 1:
             return "cluster_dim"
@@ -626,7 +652,6 @@ class MxTdmScheduledSpec:
         if check_shape and (gx % cx or gy % cy):
             return "cluster_grid"
         pads = self.derived_pads()
-        row_bytes = self.k_bytes(self.tile_k)
         checks = (
             (pads["a"], self.tile_m // 2, 16, True),
             (pads["b"], self.tile_n // 2, 16, True),
@@ -670,6 +695,8 @@ class MxTdmScheduledSpec:
             name += "_hplrnone"
         if not self.interleave_lds_regions:
             name += "_lsi0"
+        if self.lds_buffers != 2:
+            name += f"_lb{self.lds_buffers}"
         if with_shape_parts and self.mma == "16x16":
             name += "_mma16"
         return name
@@ -692,6 +719,12 @@ def normalize_tuning(tuning: Optional[Dict]) -> Dict[str, object]:
         out["cluster_dim"] = (*out["cluster_dim"], 1)
     for key in ("prefetch_lds_read", "split_b_lds_read", "interleave_lds_regions"):
         out[key] = bool(out[key])
+    buffers = out["lds_buffers"]
+    if isinstance(buffers, bool) or int(buffers) != buffers:
+        raise ValueError(
+            f"comp_tdm_scheduled lds_buffers must be an integer: {buffers!r}"
+        )
+    out["lds_buffers"] = int(buffers)
     out["edge"] = bool(out["edge"])
     out["wide"] = bool(out["wide"])
     return out
@@ -704,7 +737,8 @@ def is_default_tuning(tuning: Optional[Dict]) -> bool:
 
 def schedule_tunings() -> List[Dict[str, object]]:
     """Tunings that reach every tile-dependent outcome of validate() (the defaults first): the
-    knobs a tile's validity turns on are SplitBLdsRead, PrefetchLdsRead and InterleaveLdsRegions.
+    knobs a tile's validity turns on are SplitBLdsRead, PrefetchLdsRead, InterleaveLdsRegions
+    and LdsBuffers.
     """
     return [
         normalize_tuning(
@@ -712,10 +746,11 @@ def schedule_tunings() -> List[Dict[str, object]]:
                 "split_b_lds_read": split_b,
                 "prefetch_lds_read": prefetch,
                 "interleave_lds_regions": interleave,
+                "lds_buffers": buffers,
             }
         )
-        for split_b, prefetch, interleave in itertools.product(
-            (True, False), (True, False), (True, False)
+        for buffers, split_b, prefetch, interleave in itertools.product(
+            LDS_BUFFERS, (True, False), (True, False), (True, False)
         )
     ]
 
@@ -780,6 +815,7 @@ def spec_from_tile(
         prefetch_lds_read=t["prefetch_lds_read"],
         split_b_lds_read=t["split_b_lds_read"],
         interleave_lds_regions=t["interleave_lds_regions"],
+        lds_buffers=t["lds_buffers"],
         mma=mma,
         a_dtype=a_dtype,
         b_dtype=b_dtype or a_dtype,
@@ -818,13 +854,15 @@ def cpp_cluster_sequence(tuning: Optional[Dict]) -> str:
 
 
 def cpp_policy_type(tuning: Optional[Dict]) -> str:
-    """The MxGemmPipelineAgBgCrCompTDMScheduledPolicy<...> spelling of a tuning's other knobs."""
+    """The MxGemmPipelineAgBgCrCompTDMScheduledPolicy<...> spelling of a tuning's other knobs;
+    LdsBuffers only when it is not its default, 2."""
     t = normalize_tuning(tuning)
     knobs = ("prefetch_lds_read", "split_b_lds_read", "interleave_lds_regions")
     flags = ", ".join("true" if t[k] else "false" for k in knobs)
+    buffers = "" if t["lds_buffers"] == 2 else f", {t['lds_buffers']}"
     return (
         f"ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<{t['gl2_prefetch_distance']}, "
-        f"{flags}>"
+        f"{flags}{buffers}>"
     )
 
 

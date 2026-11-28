@@ -68,6 +68,13 @@ class TestTuning(unittest.TestCase):
         with self.assertRaises(ValueError):
             sched.normalize_tuning({"store_width": 1})
 
+    def test_lds_buffers_must_be_an_integer(self):
+        # 3.0 is 3; a fraction, a string or a bool is refused, not truncated to a count.
+        self.assertEqual(sched.normalize_tuning({"lds_buffers": 3.0})["lds_buffers"], 3)
+        for value in (2.7, "3", True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                sched.normalize_tuning({"lds_buffers": value})
+
     def test_instance_rules(self):
         def reason(t):
             return sched.validate_instance(
@@ -101,6 +108,25 @@ class TestTuning(unittest.TestCase):
 
         self.assertNotEqual(reason(2147482336), "k_long")
         self.assertEqual(reason(2147482368), "k_long")
+        # Without GL2 prefetch, 3 LDS buffers look (3 + 1) tiles ahead and 2 buffers (2 + 1):
+        # K = 2^31 - 1024 is too long with 3 and runs with 2. Regions not interleaved: 3 buffers
+        # of the interleaved layout exceed the LDS.
+        t3 = {**t, "gl2_prefetch_distance": 0, "interleave_lds_regions": False}
+
+        def reason_lb(K, buffers):
+            return sched.spec_from_tile(
+                tile,
+                {**t3, "lds_buffers": buffers},
+                a_dtype="fp8",
+                out_dtype="fp16",
+                M=32,
+                N=32,
+                K=K,
+            ).validate()
+
+        self.assertEqual(reason_lb(2147482592, 3), "ok")
+        self.assertEqual(reason_lb(2147482624, 3), "k_long")
+        self.assertEqual(reason_lb(2147482624, 2), "ok")
 
     def test_long_k_tail(self):
         # A K tail has fewer K steps than a tile (K mod tile_k at most tile_k - 128); a partial
@@ -148,6 +174,17 @@ class TestTuning(unittest.TestCase):
         self.assertEqual(
             sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
             "_c2x2_lsi0_noedge_tail2",
+        )
+        # LdsBuffers is spelled only when it is not 2, so 2-buffer sources stay as they were.
+        t3 = {**t, "lds_buffers": 3}
+        spec3 = sched.spec_from_tile(TILE, t3, out_dtype="fp16")
+        self.assertEqual(
+            sched.cpp_policy_type(t3),
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, true, false, 3>",
+        )
+        self.assertEqual(
+            sched.instance_name_suffix(spec3, {**t3, "edge": False}),
+            "_c2x2_lsi0_lb3_noedge",
         )
 
 
@@ -211,6 +248,18 @@ class TestParity(unittest.TestCase):
         no_row = {r: i for r, i in first.items() if r != "ok" and r not in rows}
         self.assertFalse(no_row, "reasons without a parity row")
         self.assertEqual(ok_dtypes, set(sched.MX_DTYPES))
+
+    def test_problem_rows_sit_on_valid_instances(self):
+        # check_problem instantiates the pipeline, whose static_assert needs the policy's
+        # GetReason to be Ok, so every problem row's tile and tuning must be a valid instance,
+        # whatever the problem's reason. validate() checks the shape rules first, so test_rows
+        # does not see an invalid instance behind a shape reason.
+        for row in parity_cases.PARITY_CASES:
+            if row["mnk"] == (0, 0, 0):
+                continue
+            with self.subTest(row=row["name"]):
+                spec = parity_cases.row_spec(row)
+                self.assertEqual(sched.validate_instance(spec, row["tuning"]), "ok")
 
     def test_ok_problem_rows_fit_their_instance(self):
         # GetUnsupportedReason also checks that the instance's traits cover the problem (edge,
@@ -326,6 +375,32 @@ class TestLdsLayout(unittest.TestCase):
                 (256, 2048, 2048),
                 (0, 24832, 52736, 12544, 49664, 51712, 131072, 208896, 2, 784, 4, 1552),
                 (96, 24, 2, 3, 20),
+                False,
+            ),
+            (
+                "fp6 64x128x512, 3 buffers",
+                parity_cases.T64X128X512,
+                {**parity_cases.FP6_SM, "lds_buffers": 3},
+                "fp6",
+                (256, 2048, 2048),
+                (0, 24832, 52736, 12544, 49664, 51712, 77824, 233472, 2, 784, 4, 1552),
+                (96, 24, 2, 3, 20),
+                False,
+            ),
+            (
+                # Stride 65536 (2 x 65536 + the buffer fit) and LDS 2 x 65536 + 59392 B: the
+                # last buffer's end, not 3 strides.
+                "fp6 128x16x512, 3 buffers",
+                parity_cases.T128X16X512,
+                {
+                    **parity_cases.FP6_MAB,
+                    "interleave_lds_regions": False,
+                    "lds_buffers": 3,
+                },
+                "fp6",
+                (512, 16, 3584),
+                (0, 3136, 9216, 25088, 6656, 7168, 65536, 190464, 2, 784, 2, 784),
+                (96, 24, 2, 3, 11),
                 False,
             ),
             (
@@ -731,6 +806,21 @@ class TestDispatcher(unittest.TestCase):
         self.assertIn("_comp_tdm_scheduled_tdm_", path.name)
         self.assertIn("ck_tile::MxTdmStoreEpilogue<P>", header)
 
+    def test_three_lds_buffers(self):
+        # The top-level lds_buffers key reaches the name (_lb3) and the policy's fifth argument;
+        # the default 256x256x512 tile does not fit 3 buffers.
+        cfg = _cfg(lds_buffers=3, tile_config={**TILE, "tile_m": 128})
+        with tempfile.TemporaryDirectory() as out:
+            path = codegen.generate_kernel(Path(out), cfg)
+            header = path.read_text()
+        self.assertTrue(path.name.endswith("_c4x4_lb3.hpp"), path.name)
+        self.assertIn(
+            "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, true, true, 3>",
+            header,
+        )
+        with self.assertRaisesRegex(ValueError, "lds_capacity"):
+            codegen.kernel_name(_cfg(lds_buffers=3))
+
     def test_kernel_config(self):
         cfg = _kernel_config(
             tuning={"cluster_dim": (2, 2), "gl2_prefetch_distance": 2}
@@ -789,6 +879,8 @@ class TestDispatcher(unittest.TestCase):
         self.assertTrue(cfgs)
         self.assertEqual({c.pipeline for c in cfgs}, {"comp_tdm_scheduled"})
         self.assertEqual({c.epilogue for c in cfgs}, {"tdm"})
+        # Both buffer counts survive the rules, so the unique names below include _lb3.
+        self.assertEqual({c.tuning["lds_buffers"] for c in cfgs}, {2, 3})
         names = [c.name for c in cfgs]
         self.assertEqual(len(set(names)), len(names))
         problems = json.loads(

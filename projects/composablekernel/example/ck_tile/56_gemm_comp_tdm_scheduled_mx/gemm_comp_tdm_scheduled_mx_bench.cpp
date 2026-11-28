@@ -97,18 +97,22 @@ float launch(const ck_tile::stream_config& s, const typename K::KernelArgs& karg
 }
 
 /// A tuning: the cluster (CX N tiles by CY M tiles), then the policy's knobs with its defaults:
-/// GL2 prefetch distance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions.
+/// GL2 prefetch distance, PrefetchLdsRead, SplitBLdsRead, InterleaveLdsRegions, LdsBuffers.
 template <index_t CX,
           index_t CY,
-          index_t Gl2      = 4,
-          bool LdsPrefetch = true,
-          bool SplitB      = true,
-          bool Interleave  = true>
+          index_t Gl2        = 4,
+          bool LdsPrefetch   = true,
+          bool SplitB        = true,
+          bool Interleave    = true,
+          index_t LdsBuffers = 2>
 struct Tu
 {
     using Cluster = ck_tile::sequence<CY, CX, 1>;
-    using Policy =
-        ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2, LdsPrefetch, SplitB, Interleave>;
+    using Policy  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<Gl2,
+                                                                        LdsPrefetch,
+                                                                        SplitB,
+                                                                        Interleave,
+                                                                        LdsBuffers>;
 };
 
 // Whole M and N tiles, no K tail.
@@ -731,8 +735,8 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
              {"fp8 x bf8, bf16 out, t128x128x256 c2x2",
               run<Pipeline<fp8_t, bf8_t, bf16_t, 128, 128, 256, 2, 2, 16, Tu<2, 2>, Whole>>}},
             {"sm_fp6",
-             {"mxfp6 t64x128x512 16x16 atom, c4x4, GL2 prefetch 2, no SplitBLdsRead or "
-              "InterleaveLdsRegions, bf16 out (SM)",
+             {"mxfp6 t64x128x512 16x16 atom, c4x4, GL2 prefetch 2, 3 LDS buffers, no "
+              "SplitBLdsRead or InterleaveLdsRegions, bf16 out (SM)",
               run<Pipeline<pk_fp6x16_t,
                            pk_fp6x16_t,
                            bf16_t,
@@ -742,7 +746,7 @@ const std::map<std::string, std::pair<const char*, std::function<int(const Optio
                            2,
                            2,
                            16,
-                           Tu<4, 4, 2, true, false, false>,
+                           Tu<4, 4, 2, true, false, false, 3>,
                            Whole>>}},
             {"mab_fp6",
              {"mxfp6 t256x16x512 wave 4x1, 16x16 atom, c1x2, no GL2 prefetch or "

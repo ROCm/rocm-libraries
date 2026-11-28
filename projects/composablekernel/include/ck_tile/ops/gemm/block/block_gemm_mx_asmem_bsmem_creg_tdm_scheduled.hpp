@@ -140,7 +140,7 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
           as_window(MakeLdsScaleWindow<true>(smem_, wave_m_)),
           bs_window(MakeLdsScaleWindow<false>(smem_, wave_n_))
     {
-        static_for<0, 2, 1>{}([&](auto parity) {
+        static_for<0, kLdsBuffers, 1>{}([&](auto parity) {
             const index_t buffer = parity * kBufferStride;
             origins[0][parity]   = detail::opaque_scalar(FragmentOrigin<true>(buffer));
             origins[1][parity]   = detail::opaque_scalar(FragmentOrigin<false>(buffer));
@@ -221,6 +221,7 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
 
     private:
     static constexpr index_t kBufferStride = Policy::template GetLdsBufferStride<Problem>();
+    static constexpr index_t kLdsBuffers   = Policy::kLdsBuffers;
 
     /// The word offset, from a linear read window's, of the wave's repeat-0, K-step-0 fragment
     /// of A or B in LDS buffer `buffer` (a byte offset).
@@ -243,10 +244,15 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
         return buffer / 4 + Policy::template GetLdsOperand<Problem, IsA, true>().base / 4;
     }
 
-    /// origins[i][parity] for the LDS buffer at byte offset `buffer`.
+    /// origins[i][parity] for the LDS buffer at byte offset `buffer` = parity * kBufferStride.
     CK_TILE_DEVICE index_t Origin(index_t i, index_t buffer) const
     {
-        return buffer == 0 ? origins[i][0] : origins[i][1];
+        if constexpr(kLdsBuffers == 2)
+            return buffer == 0 ? origins[i][0] : origins[i][1];
+        else
+            return buffer == 0               ? origins[i][0]
+                   : buffer == kBufferStride ? origins[i][1]
+                                             : origins[i][2];
     }
 
     /// A's or B's fragment of repeat r at K step `step`, as words. With linear reads the wave,
@@ -329,7 +335,7 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
     /// FragmentOrigin and ScaleOrigin. Opaque, so that each operand and buffer keeps one address
     /// VGPR and the reads' remaining offsets fit the 16-bit DS immediate; folded into each
     /// read's constant, the offsets pass 64 KiB and every read holds its own address VGPR.
-    index_t origins[4][2];
+    index_t origins[4][kLdsBuffers];
     ALdsWindow a_window;
     BLdsWindow b_window;
     AScaleWindow as_window;
