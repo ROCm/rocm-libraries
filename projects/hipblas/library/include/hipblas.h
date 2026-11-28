@@ -665,11 +665,11 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle,
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
-    @param[inout]
+              specifies the increment for the elements of x.
+    @param[out]
     result
               device pointer or host pointer to store the amax index.
-              Return value is 0.0 if n, incx<=0.
+              Return value is 0 if n, incx<=0.
 
     ********************************************************************/
 HIPBLAS_EXPORT hipblasStatus_t
@@ -895,11 +895,11 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzamaxStridedBatched_64(hipblasHandle_t   
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
-    @param[inout]
+              specifies the increment for the elements of x.
+    @param[out]
     result
               device pointer or host pointer to store the amin index.
-              Return value is 0.0 if n, incx<=0.
+              Return value is 0 if n, incx<=0.
 
     ********************************************************************/
 
@@ -1122,15 +1122,15 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzaminStridedBatched_64(hipblasHandle_t   
               handle to the hipBLAS library context queue.
     @param[in]
     n         [int]
-              the number of elements in x and y.
+              the number of elements in x.
     @param[in]
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
               specifies the increment for the elements of x. incx must be > 0.
-    @param[inout]
+    @param[out]
     result
-              device pointer or host pointer to store the asum product.
+              device pointer or host pointer to store the asum result.
               Return value is 0.0 if n <= 0.
 
     ********************************************************************/
@@ -1375,9 +1375,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDzasumStridedBatched_64(hipblasHandle_t   
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
-    @param[out]
-    y         device pointer storing vector y.
     @param[inout]
+    y         device pointer storing vector y.
+    @param[in]
     incy      [int]
               specifies the increment for the elements of y.
 
@@ -1483,13 +1483,13 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpy_64(hipblasHandle_t         handle,
     @param[in]
     alpha     specifies the scalar alpha.
     @param[in]
-    x         pointer storing vector x on the GPU.
+    x         device array of device pointers storing each vector x_i.
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
-    @param[out]
-    y         pointer storing vector y on the GPU.
     @param[inout]
+    y         device array of device pointers storing each vector y_i.
+    @param[in]
     incy      [int]
               specifies the increment for the elements of y.
 
@@ -1605,19 +1605,20 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpyBatched_64(hipblasHandle_t           
               handle to the hipBLAS library context queue.
     @param[in]
     n         [int]
+              the number of elements in x and y.
     @param[in]
     alpha     specifies the scalar alpha.
     @param[in]
-    x         pointer storing vector x on the GPU.
+    x         device pointer to the first vector x_1 in the batch.
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
     @param[in]
     stridex   [hipblasStride]
               specifies the increment between vectors of x.
-    @param[out]
-    y         pointer storing vector y on the GPU.
     @param[inout]
+    y         device pointer to the first vector y_1 in the batch.
+    @param[in]
     incy      [int]
               specifies the increment for the elements of y.
     @param[in]
@@ -2067,13 +2068,13 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZcopyStridedBatched_64(hipblasHandle_t    
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[in]
     y         device pointer storing vector y.
     @param[in]
     incy      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the dot product.
               Return value is 0.0 if n <= 0.
@@ -2247,7 +2248,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotu_64(hipblasHandle_t         handle,
     @param[in]
     batchCount [int]
                 number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -2443,7 +2444,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotuBatched_64(hipblasHandle_t           
     @param[in]
     batchCount [int]
                 number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -2650,10 +2651,10 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotuStridedBatched_64(hipblasHandle_t    
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
-    @param[inout]
+              specifies the increment for the elements of x.
+    @param[out]
     result
-              device pointer or host pointer to store the nrm2 product.
+              device pointer or host pointer to store the nrm2 result.
               Return value is 0.0 if n, incx<=0.
 
             ********************************************************************/
@@ -3385,9 +3386,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdrotStridedBatched_64(hipblasHandle_t   h
     a       device pointer or host pointer to the input vector element, overwritten with r.
     @param[inout]
     b       device pointer or host pointer to the input vector element, overwritten with z.
-    @param[inout]
+    @param[out]
     c       device pointer or host pointer to the cosine element of the Givens rotation.
-    @param[inout]
+    @param[out]
     s       device pointer or host pointer to the sine element of the Givens rotation.
 
             ********************************************************************/
@@ -3443,9 +3444,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZrotg_64(hipblasHandle_t   handle,
     a       device array of device pointers storing each single input vector element a_i, overwritten with r_i.
     @param[inout]
     b       device array of device pointers storing each single input vector element b_i, overwritten with z_i.
-    @param[inout]
+    @param[out]
     c       device array of device pointers storing each cosine element of the Givens rotation for the batch.
-    @param[inout]
+    @param[out]
     s       device array of device pointers storing each sine element of the Givens rotation for the batch.
     @param[in]
     batchCount [int]
@@ -3536,12 +3537,12 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZrotgBatched_64(hipblasHandle_t         ha
     @param[in]
     strideb [hipblasStride]
              distance between elements of b in batch (distance between b_i and b_(i + 1)).
-    @param[inout]
+    @param[out]
     c       device strided_batched pointer or host strided_batched pointer to the first cosine element of the Givens rotations c_1.
     @param[in]
     stridec [hipblasStride]
              distance between elements of c in batch (distance between c_i and c_(i + 1)).
-    @param[inout]
+    @param[out]
     s       device strided_batched pointer or host strided_batched pointer to the sine element of the Givens rotations s_1.
     @param[in]
     strides [hipblasStride]
@@ -3674,13 +3675,13 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZrotgStridedBatched_64(hipblasHandle_t   h
             - param[1] = H11
             - param[2] = H21
             - param[3] = H12
-            - param[4] = H22  
+            - param[4] = H22
             The flag parameter defines the form of H:
             - flag = -1 => H = ( H11 H12 H21 H22 )
             - flag =  0 => H = ( 1.0 H12 H21 1.0 )
             - flag =  1 => H = ( H11 1.0 -1.0 H22 )
             - flag = -2 => H = ( 1.0 0.0 0.0 1.0 )
-            
+
 
             ********************************************************************/
 
@@ -3740,7 +3741,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDrotm_64(hipblasHandle_t handle,
             - param[1] = H11
             - param[2] = H21
             - param[3] = H12
-            - param[4] = H22  
+            - param[4] = H22
             The flag parameter defines the form of H:
             - flag = -1 => H = ( H11 H12 H21 H22 )
             - flag =  0 => H = ( 1.0 H12 H21 1.0 )
@@ -3828,7 +3829,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDrotmBatched_64(hipblasHandle_t     handle
             - param[1] = H11
             - param[2] = H21
             - param[3] = H12
-            - param[4] = H22  
+            - param[4] = H22
             The flag parameter defines the form of H:
             - flag = -1 => H = ( H11 H12 H21 H22 )
             - flag =  0 => H = ( 1.0 H12 H21 1.0 )
@@ -3923,7 +3924,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDrotmStridedBatched_64(hipblasHandle_t han
             - param[1] = H11
             - param[2] = H21
             - param[3] = H12
-            - param[4] = H22  
+            - param[4] = H22
             The flag parameter defines the form of H:
             - flag = -1 => H = ( H11 H12 H21 H22 )
             - flag =  0 => H = ( 1.0 H12 H21 1.0 )
@@ -3976,7 +3977,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDrotmg_64(
             - param[1] = H11
             - param[2] = H21
             - param[3] = H12
-            - param[4] = H22  
+            - param[4] = H22
             The flag parameter defines the form of H:
             - flag = -1 => H = ( H11 H12 H21 H22 )
             - flag =  0 => H = ( 1.0 H12 H21 1.0 )
@@ -4064,7 +4065,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDrotmgBatched_64(hipblasHandle_t     handl
             - param[1] = H11
             - param[2] = H21
             - param[3] = H12
-            - param[4] = H22  
+            - param[4] = H22
             The flag parameter defines the form of H:
             - flag = -1 => H = ( H11 H12 H21 H22 )
             - flag =  0 => H = ( 1.0 H12 H21 1.0 )
@@ -4781,15 +4782,15 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZswapStridedBatched_64(hipblasHandle_t   h
               of the banded matrix. The leading diagonal resides in row (ku + 1) with
               the first super-diagonal above on the RHS of row ku. The first sub-diagonal
               resides below on the LHS of row ku + 2. This propagates up and down across
-              sub/super-diagonals.  
-                Ex: (m = n = 7; ku = 2, kl = 2)  
-                1 2 3 0 0 0 0    ->    0 0 3 3 3 3 3  
-                4 1 2 3 0 0 0    ->    0 2 2 2 2 2 2  
-                5 4 1 2 3 0 0    ->    1 1 1 1 1 1 1  
-                0 5 4 1 2 3 0    ->    4 4 4 4 4 4 0  
-                0 0 5 4 1 2 0    ->    5 5 5 5 5 0 0  
-                0 0 0 5 4 1 2    ->    0 0 0 0 0 0 0  
-                0 0 0 0 5 4 1    ->     0 0 0 0 0 0 0  
+              sub/super-diagonals.
+                Ex: (m = n = 7; ku = 2, kl = 2)
+                1 2 3 0 0 0 0    ->    0 0 3 3 3 3 3
+                4 1 2 3 0 0 0    ->    0 2 2 2 2 2 2
+                5 4 1 2 3 0 0    ->    1 1 1 1 1 1 1
+                0 5 4 1 2 3 0    ->    4 4 4 4 4 4 0
+                0 0 5 4 1 2 0    ->    5 5 5 5 5 0 0
+                0 0 0 5 4 1 2    ->    0 0 0 0 0 0 0
+                0 0 0 0 5 4 1    ->     0 0 0 0 0 0 0
               Note that empty elements that don't correspond to data will not
               be referenced.
     @param[in]
@@ -4976,15 +4977,15 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgbmv_64(hipblasHandle_t         handle,
               of the banded matrix. The leading diagonal resides in row (ku + 1) with
               the first super-diagonal above on the RHS of row ku. The first sub-diagonal
               resides below on the LHS of row ku + 2. This propagates up and down across
-              sub/super-diagonals.  
-                Ex: (m = n = 7; ku = 2, kl = 2)  
-                1 2 3 0 0 0 0    ->    0 0 3 3 3 3 3  
-                4 1 2 3 0 0 0    ->    0 2 2 2 2 2 2  
-                5 4 1 2 3 0 0    ->    1 1 1 1 1 1 1  
-                0 5 4 1 2 3 0    ->    4 4 4 4 4 4 0  
-                0 0 5 4 1 2 0    ->    5 5 5 5 5 0 0  
-                0 0 0 5 4 1 2    ->    0 0 0 0 0 0 0  
-                0 0 0 0 5 4 1    ->    0 0 0 0 0 0 0  
+              sub/super-diagonals.
+                Ex: (m = n = 7; ku = 2, kl = 2)
+                1 2 3 0 0 0 0    ->    0 0 3 3 3 3 3
+                4 1 2 3 0 0 0    ->    0 2 2 2 2 2 2
+                5 4 1 2 3 0 0    ->    1 1 1 1 1 1 1
+                0 5 4 1 2 3 0    ->    4 4 4 4 4 4 0
+                0 0 5 4 1 2 0    ->    5 5 5 5 5 0 0
+                0 0 0 5 4 1 2    ->    0 0 0 0 0 0 0
+                0 0 0 0 5 4 1    ->    0 0 0 0 0 0 0
               Note that empty elements that don't correspond to data will not
               be referenced.
     @param[in]
@@ -5182,15 +5183,15 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgbmvBatched_64(hipblasHandle_t           
               of the banded matrix. The leading diagonal resides in row (ku + 1) with
               the first super-diagonal above on the RHS of row ku. The first sub-diagonal
               resides below on the LHS of row ku + 2. This propagates up and down across
-              sub/super-diagonals.  
-                Ex: (m = n = 7; ku = 2, kl = 2)  
-                1 2 3 0 0 0 0    ->   0 0 3 3 3 3 3  
-                4 1 2 3 0 0 0    ->   0 2 2 2 2 2 2  
-                5 4 1 2 3 0 0    ->   1 1 1 1 1 1 1  
-                0 5 4 1 2 3 0    ->   4 4 4 4 4 4 0  
-                0 0 5 4 1 2 0    ->   5 5 5 5 5 0 0  
-                0 0 0 5 4 1 2    ->   0 0 0 0 0 0 0  
-                0 0 0 0 5 4 1    ->   0 0 0 0 0 0 0  
+              sub/super-diagonals.
+                Ex: (m = n = 7; ku = 2, kl = 2)
+                1 2 3 0 0 0 0    ->   0 0 3 3 3 3 3
+                4 1 2 3 0 0 0    ->   0 2 2 2 2 2 2
+                5 4 1 2 3 0 0    ->   1 1 1 1 1 1 1
+                0 5 4 1 2 3 0    ->   4 4 4 4 4 4 0
+                0 0 5 4 1 2 0    ->   5 5 5 5 5 0 0
+                0 0 0 5 4 1 2    ->   0 0 0 0 0 0 0
+                0 0 0 0 5 4 1    ->   0 0 0 0 0 0 0
               Note that empty elements that don't correspond to data will not
               be referenced.
     @param[in]
@@ -6321,7 +6322,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgercBatched_64(hipblasHandle_t           
               There are no restrictions placed on stridex. However, the user should
               ensure that stridex is of an appropriate size. For a typical
               case, this means stridex >= m * incx.
-    @param[inout]
+    @param[in]
     y         device pointer to the first vector (y_1) in the batch.
     @param[in]
     incy      [int]
@@ -6564,25 +6565,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgercStridedBatched_64(hipblasHandle_t    
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (k + 1), the first super-diagonal on the RHS
                 of row k, and so forth.
-                The top left k by x triangle of A will not be referenced.  
-                    Ex (upper, lda = n = 4, k = 1):  
-                    A ->                            Represented matrix  
-                    (0,0) (5,9) (6,8) (7,7) ->       (1, 0) (5, 9) (0, 0) (0, 0)  
-                    (1,0) (2,0) (3,0) (4,0) ->      (5,-9) (2, 0) (6, 8) (0, 0)  
-                    (0,0) (0,0) (0,0) (0,0) ->      (0, 0) (6,-8) (3, 0) (7, 7)  
-                    (0,0) (0,0) (0,0) (0,0) ->      (0, 0) (0, 0) (7,-7) (4, 0)  
+                The top left k by x triangle of A will not be referenced.
+                    Ex (upper, lda = n = 4, k = 1):
+                    A ->                            Represented matrix
+                    (0,0) (5,9) (6,8) (7,7) ->       (1, 0) (5, 9) (0, 0) (0, 0)
+                    (1,0) (2,0) (3,0) (4,0) ->      (5,-9) (2, 0) (6, 8) (0, 0)
+                    (0,0) (0,0) (0,0) (0,0) ->      (0, 0) (6,-8) (3, 0) (7, 7)
+                    (0,0) (0,0) (0,0) (0,0) ->      (0, 0) (0, 0) (7,-7) (4, 0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The leading (k + 1) by n part of A must contain the lower
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (1), the first sub-diagonal on the LHS of
                 row 2, and so forth.
-                The bottom right k by k triangle of A will not be referenced.  
-                    Ex (lower, lda = 2, n = 4, k = 1):  
-                    A ->                              Represented matrix  
-                    (1,0) (2,0) (3,0) (4,0) ->        (1, 0) (5,-9) (0, 0) (0, 0)  
-                    (5,9) (6,8) (7,7) (0,0) ->        (5, 9) (2, 0) (6,-8) (0, 0)  
-                    ->                               (0, 0) (6, 8) (3, 0) (7,-7)  
-                    ->                                (0, 0) (0, 0) (7, 7) (4, 0)  
+                The bottom right k by k triangle of A will not be referenced.
+                    Ex (lower, lda = 2, n = 4, k = 1):
+                    A ->                              Represented matrix
+                    (1,0) (2,0) (3,0) (4,0) ->        (1, 0) (5,-9) (0, 0) (0, 0)
+                    (5,9) (6,8) (7,7) (0,0) ->        (5, 9) (2, 0) (6,-8) (0, 0)
+                    ->                               (0, 0) (6, 8) (3, 0) (7,-7)
+                    ->                                (0, 0) (0, 0) (7, 7) (4, 0)
               - As a Hermitian matrix, the imaginary part of the main diagonal
               of A will not be referenced and is assumed to be == 0.
     @param[in]
@@ -6693,24 +6694,24 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhbmv_64(hipblasHandle_t         handle,
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (k + 1), the first super-diagonal on the RHS
                 of row k, and so forth.
-                The top left k by x triangle of each A_i will not be referenced.  
-                    Ex (upper, lda = n = 4, k = 1):  
-                    A   ->                           Represented matrix  
-                    (0,0) (5,9) (6,8) (7,7)  ->      (1, 0) (5, 9) (0, 0) (0, 0)  
-                    (1,0) (2,0) (3,0) (4,0)  ->      (5,-9) (2, 0) (6, 8) (0, 0)  
-                    (0,0) (0,0) (0,0) (0,0)  ->      (0, 0) (6,-8) (3, 0) (7, 7)  
-                    (0,0) (0,0) (0,0) (0,0)  ->      (0, 0) (0, 0) (7,-7) (4, 0)  
+                The top left k by x triangle of each A_i will not be referenced.
+                    Ex (upper, lda = n = 4, k = 1):
+                    A   ->                           Represented matrix
+                    (0,0) (5,9) (6,8) (7,7)  ->      (1, 0) (5, 9) (0, 0) (0, 0)
+                    (1,0) (2,0) (3,0) (4,0)  ->      (5,-9) (2, 0) (6, 8) (0, 0)
+                    (0,0) (0,0) (0,0) (0,0)  ->      (0, 0) (6,-8) (3, 0) (7, 7)
+                    (0,0) (0,0) (0,0) (0,0)  ->      (0, 0) (0, 0) (7,-7) (4, 0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The leading (k + 1) by n part of each A_i must contain the lower
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (1), the first sub-diagonal on the LHS of
                 row 2, and so forth.
-                The bottom right k by k triangle of each A_i will not be referenced.  
-                    Ex (lower, lda = 2, n = 4, k = 1):  
-                    A   ->                             Represented matrix  
-                    (1,0) (2,0) (3,0) (4,0)  ->        (1, 0) (5,-9) (0, 0) (0, 0)  
-                    (5,9) (6,8) (7,7) (0,0)  ->        (5, 9) (2, 0) (6,-8) (0, 0)  
-                    ->                                (0, 0) (6, 8) (3, 0) (7,-7)  
+                The bottom right k by k triangle of each A_i will not be referenced.
+                    Ex (lower, lda = 2, n = 4, k = 1):
+                    A   ->                             Represented matrix
+                    (1,0) (2,0) (3,0) (4,0)  ->        (1, 0) (5,-9) (0, 0) (0, 0)
+                    (5,9) (6,8) (7,7) (0,0)  ->        (5, 9) (2, 0) (6,-8) (0, 0)
+                    ->                                (0, 0) (6, 8) (3, 0) (7,-7)
                     ->                                (0, 0) (0, 0) (7, 7) (4, 0)
               - As a Hermitian matrix, the imaginary part of the main diagonal
               of each A_i will not be referenced and is assumed to be == 0.
@@ -6830,25 +6831,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhbmvBatched_64(hipblasHandle_t           
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (k + 1), the first super-diagonal on the RHS
                 of row k, and so forth.
-                The top left k by x triangle of each A_i will not be referenced.  
-                    Ex (upper, lda = n = 4, k = 1):  
-                    A   ->                           Represented matrix  
-                    (0,0) (5,9) (6,8) (7,7)  ->      (1, 0) (5, 9) (0, 0) (0, 0)  
-                    (1,0) (2,0) (3,0) (4,0)  ->      (5,-9) (2, 0) (6, 8) (0, 0)  
-                    (0,0) (0,0) (0,0) (0,0) ->       (0, 0) (6,-8) (3, 0) (7, 7)  
+                The top left k by x triangle of each A_i will not be referenced.
+                    Ex (upper, lda = n = 4, k = 1):
+                    A   ->                           Represented matrix
+                    (0,0) (5,9) (6,8) (7,7)  ->      (1, 0) (5, 9) (0, 0) (0, 0)
+                    (1,0) (2,0) (3,0) (4,0)  ->      (5,-9) (2, 0) (6, 8) (0, 0)
+                    (0,0) (0,0) (0,0) (0,0) ->       (0, 0) (6,-8) (3, 0) (7, 7)
                     (0,0) (0,0) (0,0) (0,0)  ->      (0, 0) (0, 0) (7,-7) (4, 0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The leading (k + 1) by n part of each A_i must contain the lower
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (1), the first sub-diagonal on the LHS of
                 row 2, and so forth.
-                The bottom right k by k triangle of each A_i will not be referenced.    
-                    Ex (lower, lda = 2, n = 4, k = 1):  
-                    A                               Represented matrix  
-                    (1,0) (2,0) (3,0) (4,0)   ->       (1, 0) (5,-9) (0, 0) (0, 0)  
-                    (5,9) (6,8) (7,7) (0,0)  ->        (5, 9) (2, 0) (6,-8) (0, 0)  
-                    ->                               (0, 0) (6, 8) (3, 0) (7,-7)  
-                    ->                              (0, 0) (0, 0) (7, 7) (4, 0)  
+                The bottom right k by k triangle of each A_i will not be referenced.
+                    Ex (lower, lda = 2, n = 4, k = 1):
+                    A                               Represented matrix
+                    (1,0) (2,0) (3,0) (4,0)   ->       (1, 0) (5,-9) (0, 0) (0, 0)
+                    (5,9) (6,8) (7,7) (0,0)  ->        (5, 9) (2, 0) (6,-8) (0, 0)
+                    ->                               (0, 0) (6, 8) (3, 0) (7,-7)
+                    ->                              (0, 0) (0, 0) (7, 7) (4, 0)
               - As a Hermitian matrix, the imaginary part of the main diagonal
               of each A_i will not be referenced and is assumed to be == 0.
     @param[in]
@@ -7961,25 +7962,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZher2StridedBatched_64(hipblasHandle_t    
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of the Hermitian matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (3, 2)  
-                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,1), (4,0), (3,2), (5,-1), (6,0)]  
-                        (3,-2) (5, 1) (6, 0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (3, 2)
+                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,1), (4,0), (3,2), (5,-1), (6,0)]
+                        (3,-2) (5, 1) (6, 0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of the Hermitian matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (3, 2)  
-                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,-1), (3,-2), (4,0), (5,1), (6,0)]  
-                        (3,-2) (5, 1) (6, 0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (3, 2)
+                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,-1), (3,-2), (4,0), (5,1), (6,0)]
+                        (3,-2) (5, 1) (6, 0)
               - Note that the imaginary parts of the diagonal elements are not accessed and are assumed
               to be 0.
     @param[in]
@@ -8076,25 +8077,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpmv_64(hipblasHandle_t         handle,
             - if uplo == HIPBLAS_FILL_MODE_UPPER:
             The upper triangular portion of each Hermitian matrix A_i is supplied.
             The matrix is compacted so that each AP_i contains the triangular portion column-by-column
-            so that:  
-            AP(0) = A(0,0)  
-            AP(1) = A(0,1)  
-            AP(2) = A(1,1), and so forth.  
-                Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                    (1, 0) (2, 1) (3, 2)  
-                    (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,1), (4,0), (3,2), (5,-1), (6,0)]  
-                    (3,-2) (5, 1) (6, 0)  
+            so that:
+            AP(0) = A(0,0)
+            AP(1) = A(0,1)
+            AP(2) = A(1,1), and so forth.
+                Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                    (1, 0) (2, 1) (3, 2)
+                    (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,1), (4,0), (3,2), (5,-1), (6,0)]
+                    (3,-2) (5, 1) (6, 0)
             - if uplo == HIPBLAS_FILL_MODE_LOWER:
             The lower triangular portion of each Hermitian matrix A_i is supplied.
             The matrix is compacted so that each AP_i contains the triangular portion column-by-column
-            so that:  
-            AP(0) = A(0,0)  
-            AP(1) = A(1,0)  
-            AP(2) = A(2,1), and so forth.  
-                Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                    (1, 0) (2, 1) (3, 2)  
-                    (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,-1), (3,-2), (4,0), (5,1), (6,0)]  
-                    (3,-2) (5, 1) (6, 0)  
+            so that:
+            AP(0) = A(0,0)
+            AP(1) = A(1,0)
+            AP(2) = A(2,1), and so forth.
+                Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                    (1, 0) (2, 1) (3, 2)
+                    (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,-1), (3,-2), (4,0), (5,1), (6,0)]
+                    (3,-2) (5, 1) (6, 0)
             - Note that the imaginary parts of the diagonal elements are not accessed and are assumed
               to be 0.
     @param[in]
@@ -8199,25 +8200,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpmvBatched_64(hipblasHandle_t           
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that each AP_i contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (3, 2)  
-                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,1), (4,0), (3,2), (5,-1), (6,0)]  
-                        (3,-2) (5, 1) (6, 0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (3, 2)
+                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,1), (4,0), (3,2), (5,-1), (6,0)]
+                        (3,-2) (5, 1) (6, 0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that each AP_i contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.   
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (3, 2)  
-                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,-1), (3,-2), (4,0), (5,1), (6,0)]  
-                        (3,-2) (5, 1) (6, 0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (3, 2)
+                        (2,-1) (4, 0) (5,-1)    -> [(1,0), (2,-1), (3,-2), (4,0), (5,1), (6,0)]
+                        (3,-2) (5, 1) (6, 0)
               - Note that the imaginary parts of the diagonal elements are not accessed and are assumed
                 to be 0.
     @param[in]
@@ -8348,25 +8349,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpmvStridedBatched_64(hipblasHandle_t    
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of the Hermitian matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of the Hermitian matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - Note that the imaginary parts of the diagonal elements are not accessed and are assumed
                 to be 0.
     ********************************************************************/
@@ -8445,25 +8446,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr_64(hipblasHandle_t         handle,
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - Note that the imaginary part of the diagonal elements are not accessed and are assumed
               to be 0.
     @param[in]
@@ -8551,25 +8552,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhprBatched_64(hipblasHandle_t            
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - Note that the imaginary parts of the diagonal elements are not accessed and are assumed
                 to be 0.
     @param[in]
@@ -8670,25 +8671,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhprStridedBatched_64(hipblasHandle_t     
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of the Hermitian matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of the Hermitian matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - Note that the imaginary parts of the diagonal elements are not accessed and are assumed
                 to be 0.
     ********************************************************************/
@@ -8779,25 +8780,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr2_64(hipblasHandle_t         handle,
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - Note that the imaginary parts of the diagonal elements are not accessed and are assumed
                 to be 0.
     @param[in]
@@ -8901,25 +8902,25 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr2Batched_64(hipblasHandle_t           
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,1), (3,0), (4,9), (5,3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each Hermitian matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)  
-                        (1, 0) (2, 1) (4,9)  
-                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]  
-                        (4,-9) (5,-3) (6,0)  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 3)
+                        (1, 0) (2, 1) (4,9)
+                        (2,-1) (3, 0) (5,3)  -> [(1,0), (2,-1), (4,-9), (3,0), (5,-3), (6,0)]
+                        (4,-9) (5,-3) (6,0)
               - Note that the imaginary part of the diagonal elements are not accessed and are assumed
                 to be 0.
     @param[in]
@@ -9012,6 +9013,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr2StridedBatched_64(hipblasHandle_t    
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     k         [int]
               specifies the number of sub- and super-diagonals.
@@ -9030,7 +9032,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr2StridedBatched_64(hipblasHandle_t    
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[inout]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [int]
@@ -9138,7 +9140,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmv_64(hipblasHandle_t   handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [int]
@@ -9261,7 +9263,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmvBatched_64(hipblasHandle_t     handle
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [int]
@@ -9372,6 +9374,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmvStridedBatched_64(hipblasHandle_t   h
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -9384,7 +9387,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmvStridedBatched_64(hipblasHandle_t   h
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[inout]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [int]
@@ -9477,7 +9480,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspmv_64(hipblasHandle_t   handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [int]
@@ -9586,7 +9589,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspmvBatched_64(hipblasHandle_t     handle
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         Device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [int]
@@ -9704,27 +9707,27 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspmvStridedBatched_64(hipblasHandle_t   h
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of the symmetric matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)  
-                        1 2 4 7  
-                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        4 5 6 9  
-                        7 8 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)
+                        1 2 4 7
+                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        4 5 6 9
+                        7 8 9 0
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of the symmetric matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)  
-                        1 2 3 4  
-                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        3 6 8 9  
-                        4 7 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)
+                        1 2 3 4
+                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        3 6 8 9
+                        4 7 9 0
     ********************************************************************/
 
 HIPBLAS_EXPORT hipblasStatus_t hipblasSspr(hipblasHandle_t   handle,
@@ -9832,27 +9835,27 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZspr_64(hipblasHandle_t         handle,
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)  
-                        1 2 4 7  
-                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        4 5 6 9  
-                        7 8 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)
+                        1 2 4 7
+                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        4 5 6 9
+                        7 8 9 0
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)  
-                        1 2 3 4  
-                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        3 6 8 9  
-                        4 7 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)
+                        1 2 3 4
+                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        3 6 8 9
+                        4 7 9 0
     @param[in]
     batchCount [int]
                 number of instances in the batch.
@@ -9974,27 +9977,27 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsprBatched_64(hipblasHandle_t            
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)  
-                        1 2 4 7  
-                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        4 5 6 9  
-                        7 8 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)
+                        1 2 4 7
+                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        4 5 6 9
+                        7 8 9 0
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(2) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)  
-                        1 2 3 4  
-                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        3 6 8 9  
-                        4 7 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(2) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)
+                        1 2 3 4
+                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        3 6 8 9
+                        4 7 9 0
     @param[in]
     strideA    [hipblasStride]
                 stride from the start of one (A_i) to the next (A_i+1).
@@ -10137,27 +10140,27 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsprStridedBatched_64(hipblasHandle_t     
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of the symmetric matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)  
-                        1 2 4 7  
-                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        4 5 6 9  
-                        7 8 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)
+                        1 2 4 7
+                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        4 5 6 9
+                        7 8 9 0
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of the symmetric matrix A is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(n) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)  
-                        1 2 3 4  
-                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        3 6 8 9  
-                        4 7 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(n) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)
+                        1 2 3 4
+                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        3 6 8 9
+                        4 7 9 0
     ********************************************************************/
 
 HIPBLAS_EXPORT hipblasStatus_t hipblasSspr2(hipblasHandle_t   handle,
@@ -10246,27 +10249,27 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspr2_64(hipblasHandle_t   handle,
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)  
-                        1 2 4 7  
-                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        4 5 6 9  
-                        7 8 9 0  
-              - if uplo == HIPBLAS_FILL_MODE_LOWER:  
-                The lower triangular portion of each symmetric matrix A_i is supplied.  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)
+                        1 2 4 7
+                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        4 5 6 9
+                        7 8 9 0
+              - if uplo == HIPBLAS_FILL_MODE_LOWER:
+                The lower triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(n) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)  
-                        1 2 3 4  
-                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        3 6 8 9  
-                        4 7 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(n) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)
+                        1 2 3 4
+                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        3 6 8 9
+                        4 7 9 0
     @param[in]
     batchCount [int]
                 number of instances in the batch.
@@ -10368,27 +10371,27 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspr2Batched_64(hipblasHandle_t     handle
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The upper triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(0,1)  
-                AP(2) = A(1,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)  
-                        1 2 4 7  
-                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        4 5 6 9  
-                        7 8 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(0,1)
+                AP(2) = A(1,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_UPPER; n = 4)
+                        1 2 4 7
+                        2 3 5 8   -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        4 5 6 9
+                        7 8 9 0
               - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The lower triangular portion of each symmetric matrix A_i is supplied.
                 The matrix is compacted so that AP contains the triangular portion column-by-column
-                so that:  
-                AP(0) = A(0,0)  
-                AP(1) = A(1,0)  
-                AP(n) = A(2,1), and so forth.  
-                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)  
-                        1 2 3 4  
-                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]  
-                        3 6 8 9  
-                        4 7 9 0  
+                so that:
+                AP(0) = A(0,0)
+                AP(1) = A(1,0)
+                AP(n) = A(2,1), and so forth.
+                    Ex: (HIPBLAS_FILL_MODE_LOWER; n = 4)
+                        1 2 3 4
+                        2 5 6 7    -> [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+                        3 6 8 9
+                        4 7 9 0
     @param[in]
     strideA   [hipblasStride]
                 stride from the start of one (A_i) to the next (A_i+1).
@@ -10479,6 +10482,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspr2StridedBatched_64(hipblasHandle_t   h
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -10494,7 +10498,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspr2StridedBatched_64(hipblasHandle_t   h
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[inout]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [int]
@@ -10643,7 +10647,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymv_64(hipblasHandle_t         handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [int]
@@ -10812,7 +10816,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymvBatched_64(hipblasHandle_t           
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         Device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [int]
@@ -11858,28 +11862,28 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyr2StridedBatched_64(hipblasHandle_t    
                - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The matrix represented is an upper banded triangular matrix
                 with the main diagonal and k super-diagonals. Everything
-                else can be assumed to be 0.  
+                else can be assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the k'th
                 row, the first super diagonal resides on the RHS of the k-1'th row, and so forth,
-                with the k'th diagonal on the RHS of the 0'th row.  
-                   Ex: (HIPBLAS_FILL_MODE_UPPER; n = 5; k = 2)  
-                      1 6 9 0 0     ->       0 0 9 8 7  
-                      0 2 7 8 0     ->       0 6 7 8 9  
-                      0 0 3 8 7     ->       1 2 3 4 5  
-                      0 0 0 4 9     ->       0 0 0 0 0  
-                      0 0 0 0 5     ->       0 0 0 0 0  
+                with the k'th diagonal on the RHS of the 0'th row.
+                   Ex: (HIPBLAS_FILL_MODE_UPPER; n = 5; k = 2)
+                      1 6 9 0 0     ->       0 0 9 8 7
+                      0 2 7 8 0     ->       0 6 7 8 9
+                      0 0 3 8 7     ->       1 2 3 4 5
+                      0 0 0 4 9     ->       0 0 0 0 0
+                      0 0 0 0 5     ->       0 0 0 0 0
                - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The matrix represnted is a lower banded triangular matrix
                 with the main diagonal and k sub-diagonals. Everything else can be
-                assumed to be 0.  
+                assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the 0'th row,
-                working up to the k'th diagonal residing on the LHS of the k'th row.  
-                   Ex: (HIPBLAS_FILL_MODE_LOWER; n = 5; k = 2)  
-                      1 0 0 0 0     ->      1 2 3 4 5  
-                      6 2 0 0 0     ->      6 7 8 9 0  
-                      9 7 3 0 0     ->      9 8 7 0 0  
-                      0 8 8 4 0     ->      0 0 0 0 0  
-                      0 0 7 9 5     ->      0 0 0 0 0  
+                working up to the k'th diagonal residing on the LHS of the k'th row.
+                   Ex: (HIPBLAS_FILL_MODE_LOWER; n = 5; k = 2)
+                      1 0 0 0 0     ->      1 2 3 4 5
+                      6 2 0 0 0     ->      6 7 8 9 0
+                      9 7 3 0 0     ->      9 8 7 0 0
+                      0 8 8 4 0     ->      0 0 0 0 0
+                      0 0 7 9 5     ->      0 0 0 0 0
     @param[in]
     lda       [int]
               specifies the leading dimension of A. lda must satisfy lda > k.
@@ -12028,28 +12032,28 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbmv_64(hipblasHandle_t         handle,
                - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The matrix represented is an upper banded triangular matrix
                 with the main diagonal and k super-diagonals. Everything
-                else can be assumed to be 0.  
+                else can be assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the k'th
                 row, the first super diagonal resides on the RHS of the k-1'th row, and so forth,
-                with the k'th diagonal on the RHS of the 0'th row.  
-                   Ex: (HIPBLAS_FILL_MODE_UPPER; n = 5; k = 2)  
-                      1 6 9 0 0        ->      0 0 9 8 7  
-                      0 2 7 8 0        ->      0 6 7 8 9  
-                      0 0 3 8 7        ->      1 2 3 4 5  
-                      0 0 0 4 9        ->      0 0 0 0 0  
-                      0 0 0 0 5        ->      0 0 0 0 0  
+                with the k'th diagonal on the RHS of the 0'th row.
+                   Ex: (HIPBLAS_FILL_MODE_UPPER; n = 5; k = 2)
+                      1 6 9 0 0        ->      0 0 9 8 7
+                      0 2 7 8 0        ->      0 6 7 8 9
+                      0 0 3 8 7        ->      1 2 3 4 5
+                      0 0 0 4 9        ->      0 0 0 0 0
+                      0 0 0 0 5        ->      0 0 0 0 0
                - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The matrix represnted is a lower banded triangular matrix
                 with the main diagonal and k sub-diagonals. Everything else can be
-                assumed to be 0.  
+                assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the 0'th row,
-                working up to the k'th diagonal residing on the LHS of the k'th row.  
-                   Ex: (HIPBLAS_FILL_MODE_LOWER; n = 5; k = 2)  
-                      1 0 0 0 0        ->      1 2 3 4 5  
-                      6 2 0 0 0        ->      6 7 8 9 0  
-                      9 7 3 0 0        ->      9 8 7 0 0  
-                      0 8 8 4 0        ->      0 0 0 0 0  
-                      0 0 7 9 5        ->      0 0 0 0 0  
+                working up to the k'th diagonal residing on the LHS of the k'th row.
+                   Ex: (HIPBLAS_FILL_MODE_LOWER; n = 5; k = 2)
+                      1 0 0 0 0        ->      1 2 3 4 5
+                      6 2 0 0 0        ->      6 7 8 9 0
+                      9 7 3 0 0        ->      9 8 7 0 0
+                      0 8 8 4 0        ->      0 0 0 0 0
+                      0 0 7 9 5        ->      0 0 0 0 0
     @param[in]
     lda       [int]
               specifies the leading dimension of each A_i. lda must satisfy lda > k.
@@ -12209,28 +12213,28 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbmvBatched_64(hipblasHandle_t           
               - if uplo == HIPBLAS_FILL_MODE_UPPER:
                 The matrix represented is an upper banded triangular matrix
                 with the main diagonal and k super-diagonals. Everything
-                else can be assumed to be 0.  
+                else can be assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the k'th
                 row, the first super diagonal resides on the RHS of the k-1'th row, and so forth,
-                with the k'th diagonal on the RHS of the 0'th row.  
-                   Ex: (HIPBLAS_FILL_MODE_UPPER; n = 5; k = 2)  
-                      1 6 9 0 0     ->         0 0 9 8 7  
-                      0 2 7 8 0     ->         0 6 7 8 9  
-                      0 0 3 8 7     ->         1 2 3 4 5  
-                      0 0 0 4 9     ->         0 0 0 0 0  
-                      0 0 0 0 5     ->         0 0 0 0 0  
+                with the k'th diagonal on the RHS of the 0'th row.
+                   Ex: (HIPBLAS_FILL_MODE_UPPER; n = 5; k = 2)
+                      1 6 9 0 0     ->         0 0 9 8 7
+                      0 2 7 8 0     ->         0 6 7 8 9
+                      0 0 3 8 7     ->         1 2 3 4 5
+                      0 0 0 4 9     ->         0 0 0 0 0
+                      0 0 0 0 5     ->         0 0 0 0 0
                - if uplo == HIPBLAS_FILL_MODE_LOWER:
                 The matrix represnted is a lower banded triangular matrix
                 with the main diagonal and k sub-diagonals. Everything else can be
-                assumed to be 0.  
+                assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the 0'th row,
-                working up to the k'th diagonal residing on the LHS of the k'th row.  
-                   Ex: (HIPBLAS_FILL_MODE_LOWER; n = 5; k = 2)  
-                      1 0 0 0 0     ->         1 2 3 4 5  
-                      6 2 0 0 0     ->         6 7 8 9 0  
-                      9 7 3 0 0     ->         9 8 7 0 0  
-                      0 8 8 4 0     ->         0 0 0 0 0  
-                      0 0 7 9 5     ->         0 0 0 0 0  
+                working up to the k'th diagonal residing on the LHS of the k'th row.
+                   Ex: (HIPBLAS_FILL_MODE_LOWER; n = 5; k = 2)
+                      1 0 0 0 0     ->         1 2 3 4 5
+                      6 2 0 0 0     ->         6 7 8 9 0
+                      9 7 3 0 0     ->         9 8 7 0 0
+                      0 8 8 4 0     ->         0 0 0 0 0
+                      0 0 7 9 5     ->         0 0 0 0 0
     @param[in]
     lda       [int]
               specifies the leading dimension of each A_i. lda must satisfy lda > k.
@@ -12876,7 +12880,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbsvStridedBatched_64(hipblasHandle_t    
     \details
     The tpmv functions perform one of the matrix-vector operations:
 
-         x = A*x or x = A**T*x,
+         x = A*x or x = A^T*x or x = A^H*x,
 
     where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix, supplied in the pack form.
 
@@ -12896,6 +12900,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbsvStridedBatched_64(hipblasHandle_t    
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -12920,7 +12927,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbsvStridedBatched_64(hipblasHandle_t    
           - Note that when DIAG = HIPBLAS_DIAG_UNIT, the diagonal elements of A are
           not referenced, but are assumed to be unity.
 
-    @param[in]
+    @param[inout]
     x       device pointer storing vector x.
 
     @param[in]
@@ -13009,7 +13016,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmv_64(hipblasHandle_t         handle,
     \details
     The tpmvBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix).
 
@@ -13029,6 +13036,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmv_64(hipblasHandle_t         handle,
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13043,7 +13053,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmv_64(hipblasHandle_t         handle,
     AP         device pointer storing pointer of matrices A_i
               of dimension ( lda, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vectors x_i.
 
     @param[in]
@@ -13145,7 +13155,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmvBatched_64(hipblasHandle_t           
     \details
     The tpmvStridedBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an n element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix),
     with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
@@ -13166,6 +13176,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmvBatched_64(hipblasHandle_t           
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13184,7 +13197,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmvBatched_64(hipblasHandle_t           
     strideA  [hipblasStride]
               stride from the start of one A_i matrix to the next A_{i + 1}.
 
-    @param[in]
+    @param[inout]
     x         device pointer storing the vector x_0.
 
     @param[in]
@@ -13734,7 +13747,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpsvStridedBatched_64(hipblasHandle_t    
     \details
     The trmv functions perform one of the matrix-vector operations:
 
-         x = A*x or x = A**T*x,
+         x = A*x or x = A^T*x or x = A^H*x,
 
     where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix.
 
@@ -13754,6 +13767,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpsvStridedBatched_64(hipblasHandle_t    
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13773,7 +13789,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpsvStridedBatched_64(hipblasHandle_t    
               specifies the leading dimension of A.
               lda = max( 1, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vector x.
 
     @param[in]
@@ -13870,7 +13886,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmv_64(hipblasHandle_t         handle,
     \details
     The trmvBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix.
 
@@ -13890,6 +13906,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmv_64(hipblasHandle_t         handle,
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13909,7 +13928,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmv_64(hipblasHandle_t         handle,
               specifies the leading dimension of A_i.
               lda >= max( 1, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vectors x_i.
 
     @param[in]
@@ -14018,7 +14037,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvBatched_64(hipblasHandle_t           
     \details
     The trmvStridedBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i``is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix,
     with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
@@ -14039,6 +14058,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvBatched_64(hipblasHandle_t           
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14062,7 +14084,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvBatched_64(hipblasHandle_t           
     strideA  [hipblasStride]
               stride from the start of one A_i matrix to the next A_{i + 1}.
 
-    @param[in]
+    @param[inout]
     x         device pointer storing the vector x_0.
 
     @param[in]
@@ -14212,6 +14234,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvStridedBatched_64(hipblasHandle_t    
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14231,7 +14256,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvStridedBatched_64(hipblasHandle_t    
               specifies the leading dimension of A.
               lda = max( 1, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vector x.
 
     @param[in]
@@ -14349,6 +14374,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsv_64(hipblasHandle_t         handle,
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14367,7 +14395,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsv_64(hipblasHandle_t         handle,
               specifies the leading dimension of each A_i.
               lda = max(1, n).
 
-    @param[in]
+    @param[inout]
     x         device array of device pointers storing each vector x_i.
 
     @param[in]
@@ -14497,6 +14525,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsvBatched_64(hipblasHandle_t           
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14679,7 +14710,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsvStridedBatched_64(hipblasHandle_t    
               specifies the form of op( B ).
     @param[in]
     m         [int]
-              number or rows of matrices op( A ) and C.
+              number of rows of matrices op( A ) and C.
     @param[in]
     n         [int]
               number of columns of matrices op( B ) and C.
@@ -15299,7 +15330,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDgemmGroupedBatched_64(hipblasHandle_t    
     @param[in]
     batchCount
               [int]
-              number of gemm operatons in the batch.
+              number of gemm operations in the batch.
 
     ********************************************************************/
 
@@ -15818,7 +15849,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZherkBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -16266,7 +16297,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZherkxBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -16720,7 +16751,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZher2kBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -17281,7 +17312,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymmBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, m ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -17866,7 +17897,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrkBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -18480,7 +18511,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyr2kBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -19127,7 +19158,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrkxBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -20244,7 +20275,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhemmBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, m ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -20414,14 +20445,14 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhemmStridedBatched_64(hipblasHandle_t    
             - If side == HIPBLAS_SIDE_LEFT,  lda >= max( 1, m ).
             - If side == HIPBLAS_SIDE_RIGHT, lda >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     B       Device pointer to the matrix B of dimension (ldb, n) on the GPU.
 
     @param[in]
     ldb    [int]
            ldb specifies the first dimension of B. ldb >= max( 1, m ).
 
-    @param[in]
+    @param[out]
     C      Device pointer to the matrix C of dimension (ldc, n) on the GPU.
            Users can pass in the same matrix B to parameter C to achieve
            in-place functionality for trmm.
@@ -20638,7 +20669,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmm_64(hipblasHandle_t         handle,
             - If side == HIPBLAS_SIDE_LEFT,  lda >= max( 1, m ).
             - If side == HIPBLAS_SIDE_RIGHT, lda >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     B       device array of device pointers storing each matrix B_i of
             dimension (ldb, n) on the GPU.
 
@@ -20646,7 +20677,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmm_64(hipblasHandle_t         handle,
     ldb    [int]
            ldb specifies the first dimension of B_i. ldb >= max( 1, m ).
 
-    @param[in]
+    @param[out]
     C      device array of device pointers storing each matrix C_i of
            dimension (ldc, n) on the GPU. Users can pass in the same
            matrices B to parameter C to achieve in-place functionality of trmmBatched.
@@ -20878,7 +20909,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmBatched_64(hipblasHandle_t           
     strideA  [hipblasStride]
               stride from the start of one matrix (A_i) to the next one (A_i+1).
 
-    @param[inout]
+    @param[in]
     B      Device pointer to the first matrix B_0 on the GPU. Each B_i is of
            dimension ( ldb, n ).
 
@@ -20890,7 +20921,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmBatched_64(hipblasHandle_t           
     strideB  [hipblasStride]
               stride from the start of one matrix (B_i) to the next one (B_i+1).
 
-    @param[in]
+    @param[out]
     C      Device pointer to the first matrix C_0 on the GPU. Each C_i is of
            dimension ( ldc, n ).
 
@@ -21329,7 +21360,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsm_64(hipblasHandle_t         handle,
            ldb specifies the first dimension of each B_i. ldb >= max( 1, m ).
     @param[in]
     batchCount [int]
-                number of trsm operatons in the batch.
+                number of trsm operations in the batch.
     ********************************************************************/
 
 HIPBLAS_EXPORT hipblasStatus_t hipblasStrsmBatched(hipblasHandle_t    handle,
@@ -21527,7 +21558,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsmBatched_64(hipblasHandle_t           
              stride from the start of one B_i matrix to the next B_(i + 1).
     @param[in]
     batchCount [int]
-                number of trsm operatons in the batch.
+                number of trsm operations in the batch.
     ********************************************************************/
 
 HIPBLAS_EXPORT hipblasStatus_t hipblasStrsmStridedBatched(hipblasHandle_t    handle,
@@ -21665,7 +21696,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsmStridedBatched_64(hipblasHandle_t    
 
     \details
     The trtri functions compute the inverse of a matrix A, namely:
-    
+
         invA
 
     and write the result into ``invA``.
@@ -21761,6 +21792,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrtri(hipblasHandle_t         handle,
               - 'HIPBLAS_DIAG_UNIT', A is unit triangular.
     @param[in]
     n         [int]
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     AP         device array of device pointers storing each matrix A_i.
     @param[in]
@@ -21847,6 +21879,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrtriBatched(hipblasHandle_t             
               - 'HIPBLAS_DIAG_UNIT', A is unit triangular.
     @param[in]
     n         [int]
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     AP         device pointer pointing to address of first matrix A_1.
     @param[in]
@@ -23101,7 +23134,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgetriBatched(hipblasHandle_t         hand
     The gels functions solve an overdetermined (or underdetermined) linear system defined by an ``m``-by-``n``
     matrix ``A`` and a corresponding matrix ``B``, using the QR factorization computed by \ref hipblasSgeqrf "GEQRF" (or the LQ
     factorization computed by ``GELQF``).
-    
+
     Depending on the value of ``trans``, the problem solved by this function is either of the form:
 
     \f[
@@ -23221,7 +23254,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgels(hipblasHandle_t    handle,
     The gelsBatched functions solve a batch of overdetermined (or underdetermined) linear systems
     defined by a set of ``m``-by-``n`` matrices \f$A_j\f$ and corresponding matrices \f$B_j\f$, using the
     QR factorizations computed by ``GEQRF_BATCHED`` (or the LQ factorizations computed by ``GELQF_BATCHED``).
-    
+
     For each instance in the batch, depending on the value of ``trans``, the problem solved by this function is either of the form:
 
     \f[
@@ -23243,7 +23276,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgels(hipblasHandle_t    handle,
 
     - Supported precisions in rocSOLVER : ``s``, ``d``, ``c``, and ``z``.
     - Supported precisions in cuBLAS    : ``s``, ``d``, ``c``, and ``z``.
-    
+
     Note that the cuBLAS backend supports only the non-transpose operation and only solves over-determined systems (``m >= n``).
 
     @param[in]
@@ -23352,7 +23385,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgelsBatched(hipblasHandle_t         handl
     systems defined by a set of ``m``-by-``n`` matrices \f$A_j\f$ and corresponding matrices \f$B_j\f$,
     using the QR factorizations computed by ``GEQRF_STRIDED_BATCHED``
     (or the LQ factorizations computed by ``GELQF_STRIDED_BATCHED``).
-    
+
     For each instance in the batch, depending on the value of ``trans``, the problem solved by this function is either of the form:
 
     \f[
@@ -24626,7 +24659,7 @@ HIPBLAS_EXPORT hipblasStatus_t
     @param[in]
     beta      [const void *]
               device pointer or host pointer specifying the scalar beta. Same datatype as computeType.
-    @param[in]
+    @param[inout]
     C         [void *]
               device pointer storing matrix C.
     @param[in]
@@ -24846,7 +24879,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
     @param[in]
     beta      [const void *]
               device pointer or host pointer specifying the scalar beta. Same datatype as computeType.
-    @param[in]
+    @param[inout]
     C         [void *]
               device pointer storing matrix C.
     @param[in]
@@ -25453,7 +25486,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasAxpyStridedBatchedEx_64(hipblasHandle_t ha
               specifies the datatype of vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[in]
     y         device pointer storing vector y.
     @param[in]
@@ -25463,7 +25496,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasAxpyStridedBatchedEx_64(hipblasHandle_t ha
     @param[in]
     incy      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the dot product.
               Return value is 0.0 if n <= 0.
@@ -25573,7 +25606,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcEx_64(hipblasHandle_t handle,
     @param[in]
     batchCount [int]
               number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -25693,7 +25726,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcBatchedEx_64(hipblasHandle_t handle,
     @param[in]
     batchCount [int]
               number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -25795,10 +25828,10 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcStridedBatchedEx_64(hipblasHandle_t ha
               specifies the datatype of the vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
-    @param[inout]
+              specifies the increment for the elements of x.
+    @param[out]
     result
-              device pointer or host pointer to store the nrm2 product.
+              device pointer or host pointer to store the nrm2 result.
               The return value is 0.0 if n, incx<=0.
     @param[in]
     resultType
