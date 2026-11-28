@@ -183,7 +183,10 @@ jobs:
             if grep -q '^projects/hipblaslt/' <<< "${files}"; then
               labels+=('"test:hipblaslt"')
             fi
-            if grep -q '^projects/hipsparselt/' <<< "${files}"; then
+            # hipSPARSELt builds on hipBLASLt, TensileLite, Origami and
+            # StinkyTofu, so a change to any of them also runs its tests. These
+            # are the paths that trigger Math CI's hipSPARSELt precheckin job.
+            if grep -qE '^(projects/hipsparselt|projects/hipblaslt|shared/origami|shared/stinkytofu)/' <<< "${files}"; then
               labels+=('"test:hipsparselt"')
             fi
             if (( ${#labels[@]} > 0 )); then
