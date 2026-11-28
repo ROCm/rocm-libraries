@@ -12,6 +12,11 @@ on:
       - release/therock-*
   pull_request:
   workflow_dispatch:
+    inputs:
+      build_runner:
+        description: Override for the default build runner
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -33,6 +38,7 @@ jobs:
       pull-requests: read
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
+      linux-runner: ${{ inputs.build_runner || fromJSON(steps.ci-runners.outputs.build-runners).linux.default }}
     steps:
       - name: Checkout rocm-libraries
         timeout-minutes: 30
@@ -41,6 +47,10 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           fetch-depth: 2
+
+      - name: Select CI runners
+        id: ci-runners
+        uses: ./.github/actions/ci-runners
 
       - name: Define opted-in libraries
         id: lib-config
@@ -111,7 +121,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
       fail-fast: false
-    runs-on: az-linux-scale-rocm-default-prod
+    runs-on: ${{ needs.setup.outputs.linux-runner }}
     steps:
       - name: Checkout rocm-libraries
         timeout-minutes: 30

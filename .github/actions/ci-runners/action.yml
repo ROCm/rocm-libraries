@@ -1,0 +1,54 @@
+name: "CI runners"
+description: "Select runner labels from ROCm/therock-ci-config"
+
+outputs:
+  build-runners:
+    description: |
+      JSON keyed by build_runners platform, then pool. Each value is a
+      runner label selected by that pool's weights.
+
+      Example Output:
+        {
+          "linux": {
+            "sanitizer": "<runner-label>"
+          }
+        }
+
+      Example Usage:
+        fromJSON(steps.ci-runners.outputs.build-runners).linux.sanitizer
+    value: ${{ steps.select.outputs.build-runners }}
+  gpu-runners:
+    description: |
+      gpu_runner_labels as JSON, keyed by family, then platform, then runner
+      key. Each runner list is replaced by one label selected by its counts or
+      weights; single labels are unchanged.
+
+      Example Output:
+        {
+          "gfx950": {
+            "linux": {
+              "test-runs-on": "<runner-label>",
+              "test-runs-on-labels": "<runner-label>"
+            }
+          }
+        }
+
+      Example Usage:
+        fromJSON(steps.ci-runners.outputs.gpu-runners).gfx950.linux.test-runs-on-labels
+    value: ${{ steps.select.outputs.gpu-runners }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout CI config
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: ROCm/therock-ci-config
+        ref: main
+        path: ci-config
+        persist-credentials: false
+
+    - name: Select CI runners
+      id: select
+      shell: bash
+      run: python3 "${GITHUB_ACTION_PATH}/ci_runners.py"

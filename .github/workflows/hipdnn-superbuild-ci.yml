@@ -17,6 +17,15 @@ on:
   schedule:
     - cron: '17 7 * * *'
   workflow_dispatch:
+    inputs:
+      linux_build_runner:
+        description: Override for the default Linux build runner
+        type: string
+        default: ""
+      windows_build_runner:
+        description: Override for the default Windows build runner
+        type: string
+        default: ""
 permissions:
   contents: read
 
@@ -42,10 +51,12 @@ jobs:
       pull-requests: read
     outputs:
       run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+      linux-runner: ${{ inputs.linux_build_runner || fromJSON(steps.ci-runners.outputs.build-runners).linux.default }}
+      windows-runner: ${{ inputs.windows_build_runner || fromJSON(steps.ci-runners.outputs.build-runners).windows.default }}
     steps:
-      # No checkout: on pull_request, paths-filter reads the changed-file list
-      # from the GitHub REST API (hence `pull-requests: read`), and the filters
-      # are inline.
+      # The filter needs no checkout: on pull_request, paths-filter reads the
+      # changed-file list from the GitHub REST API (hence `pull-requests:
+      # read`), and the filters are inline.
 
       # Schedule and manual dispatch always build; only PRs are filtered.
       # `every` makes a file count only if it matches all patterns: inside the
@@ -66,11 +77,20 @@ jobs:
               - '!projects/hipdnn/docs/**'
               - '!dnn-providers/**/docs/**'
 
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-runners
+          persist-credentials: false
+
+      - name: Select CI runners
+        id: ci-runners
+        uses: ./.github/actions/ci-runners
+
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: az-windows-scale-rocm-default-prod
+    runs-on: ${{ needs.changes.outputs.windows-runner }}
     defaults:
       run:
         shell: bash
@@ -358,7 +378,7 @@ jobs:
     name: HipDNN Linux Superbuild
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: az-linux-scale-rocm-default-prod
+    runs-on: ${{ needs.changes.outputs.linux-runner }}
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
       # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather

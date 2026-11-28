@@ -1,5 +1,5 @@
 name: "CI Environment"
-description: "Single source of truth for shared CI constants (TheRock ref, Docker image, runners)"
+description: "Single source of truth for shared CI constants (TheRock ref, Docker image)"
 
 outputs:
   therock-ref:
@@ -17,14 +17,6 @@ outputs:
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:d666e4613c1ca919bc7d1a31a4c368740b66c34b5c19ef95ba15cd31db7783fb"
-  linux-runner:
-    description: "GitHub Actions runner label for Linux jobs"
-    # TODO: Select runner labels from https://github.com/ROCm/therock-ci-config
-    # instead of hard-coding them.
-    value: "az-linux-scale-rocm-default-prod"
-  windows-runner:
-    description: "GitHub Actions runner label for Windows jobs"
-    value: "az-windows-scale-rocm-default-prod"
 
 runs:
   using: "composite"
