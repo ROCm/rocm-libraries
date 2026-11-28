@@ -104,6 +104,34 @@ static int make_spec(int idx, rocke_elementwise_spec_t* spec)
         spec->block_size = 256;
         spec->vec = 2;
         break;
+    /* f64 transcendental ops (f64_math expansions) and the natural exp / log
+     * on 16-bit I/O. */
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    {
+        static const char* const ops[] = {"exp", "log", "tanh", "sigmoid", "sqrt", "rcp"};
+        spec->op = ops[idx - 14];
+        spec->dtype = "f64";
+        spec->block_size = 256;
+        spec->vec = 2;
+        break;
+    }
+    case 20:
+        spec->op = "exp";
+        spec->dtype = "f16";
+        spec->block_size = 256;
+        spec->vec = 8;
+        break;
+    case 21:
+        spec->op = "log";
+        spec->dtype = "bf16";
+        spec->block_size = 256;
+        spec->vec = 8;
+        break;
     default:
         return -1;
     }

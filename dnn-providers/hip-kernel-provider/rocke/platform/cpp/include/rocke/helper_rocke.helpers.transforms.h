@@ -87,6 +87,19 @@ rocke_value_t* rocke_do_magic_division(rocke_ir_builder_t* b,
                                        uint64_t multiplier,
                                        int shift);
 
+/* Python: do_magic_division_u31_dynamic(b, dividend, multiplier, shift, *, one) -> Value.
+ *
+ * Emits `dividend // divisor` for 0 <= dividend < 2**31 with the runtime round-up pair of
+ * calculate_magic_numbers_u31 ((0, 0) for a divisor of 1):
+ *   q = b.lshr(b.umul_hi_i32(dividend, multiplier), shift)
+ *   one: return b.select(b.cmp_eq(multiplier, b.const_i32(0)), dividend, q)
+ *   else: return q (the caller guarantees divisor >= 2, or dividend == 0 where it is 1) */
+rocke_value_t* rocke_do_magic_division_u31_dynamic(rocke_ir_builder_t* b,
+                                                   rocke_value_t* dividend,
+                                                   rocke_value_t* multiplier,
+                                                   rocke_value_t* shift,
+                                                   bool one);
+
 /* -------------------------------------------------------------------- CoordVar */
 
 /* Python: @dataclass(frozen=True) class CoordVar.
