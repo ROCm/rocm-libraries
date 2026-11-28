@@ -236,7 +236,7 @@ RppStatus hip_exec_spatter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
             make_float3((float)spatterColor.B, (float)spatterColor.G, (float)spatterColor.R);
     } else if (dstDescPtr->c == 1) {
         float meanGreyVal =
-            ((float)spatterColor.B + (float)spatterColor.G + (float)spatterColor.R) * 0.3333;
+            ((float)spatterColor.B + (float)spatterColor.G + (float)spatterColor.R) * ONE_OVER_3;
         spatterColor_f3 = make_float3(meanGreyVal, meanGreyVal, meanGreyVal);
     }
 

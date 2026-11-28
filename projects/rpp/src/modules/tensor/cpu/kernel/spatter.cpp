@@ -172,7 +172,7 @@ RppStatus spatter_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u
 
         if (srcDescPtr->c == 1)
             spatterValue[0] = spatterValue[1] = spatterValue[2] =
-                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * 0.3333;
+                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * ONE_OVER_3;
 
 #if __AVX2__
         __m256 pSpatterValue[3];
@@ -549,7 +549,7 @@ RppStatus spatter_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
         if (srcDescPtr->c == 1)
             spatterValue[0] = spatterValue[1] = spatterValue[2] =
-                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * 0.3333;
+                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * ONE_OVER_3;
 
 #if __AVX2__
         Rpp32u alignedLength = (bufferLength / 24) * 24;
@@ -932,7 +932,7 @@ RppStatus spatter_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
         if (srcDescPtr->c == 1)
             spatterValue[0] = spatterValue[1] = spatterValue[2] =
-                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * 0.3333;
+                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * ONE_OVER_3;
 
 #if __AVX2__
         Rpp32u alignedLength = (bufferLength / 24) * 24;
@@ -1365,7 +1365,7 @@ RppStatus spatter_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
 
         if (srcDescPtr->c == 1)
             spatterValue[0] = spatterValue[1] = spatterValue[2] =
-                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * 0.3333;
+                (spatterValue[0] + spatterValue[1] + spatterValue[2]) * ONE_OVER_3;
 
 #if __AVX2__
         __m256 pSpatterValue[3];
