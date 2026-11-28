@@ -5821,6 +5821,16 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         bool selectionWasAttempted = false;
 
+        // Why candidates were turned down, so that an empty selection can be reported
+        // accurately. A tuning that forces GSU or WGM is only accepted by solutions built
+        // with user-tunable arguments (SupportUserGSU / SupportCustomWGM). A library made
+        // only of other kernels (for example Stream-K) may have none for this problem.
+        size_t rejectedOnlyByTuning  = 0; // supported as-is, but not with the requested tuning
+        size_t rejectedForWorkspace  = 0; // supported with the tuning, but over the budget
+        auto   tuningOverridesKernel = [](const hipblaslt_ext::GemmTuning& tuning) {
+            return tuning.getSplitK() != 0 || tuning.getWgm() != 0;
+        };
+
         auto searchForSupportedAlgoViaIndexAPI = [&]() {
             constexpr size_t batchSize        = 100;
             size_t           batchStart       = 0;
@@ -5966,10 +5976,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                                      candidates[j].algo, tuningVec[t], tmpWorkspaceSize)
                                  != HIPBLAS_STATUS_SUCCESS)
                               {
+                                  size_t untunedWorkspaceSize = 0;
+                                  if(tuningOverridesKernel(tuningVec[t])
+                                     && gemmObject.isAlgoSupported(candidates[j].algo,
+                                                                   untunedWorkspaceSize)
+                                            == HIPBLAS_STATUS_SUCCESS)
+                                  {
+                                      rejectedOnlyByTuning++;
+                                  }
                                   continue;
                               }
                               if(tmpWorkspaceSize > max_workspace_size)
                               {
+                                  rejectedForWorkspace++;
                                   continue;
                               }
                               heuristicResult.push_back(candidates[j]);
@@ -6144,21 +6163,46 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else if(!validIndices.empty())
         {
+            if(heuristicResult.empty() && rejectedOnlyByTuning > 0 && rejectedForWorkspace == 0)
+            {
+                // Every candidate that supports this problem turned down only the forced
+                // GSU/WGM: the library has no user-tunable solution for it on this device.
+                // There is nothing for the tuning path to test, which is not a failure.
+                std::string tunings;
+                for(auto gsu : gsu_vector)
+                    tunings += (tunings.empty() ? "gsu=" : ",") + std::to_string(gsu);
+                std::string wgms;
+                for(auto wgm : wgm_vector)
+                    wgms += (wgms.empty() ? " wgm=" : ",") + std::to_string(wgm);
+                const std::string why
+                    = std::to_string(rejectedOnlyByTuning)
+                      + " solutions support this problem, but none accepts the requested tuning ("
+                      + tunings + wgms
+                      + "); the library has no solution with user-tunable GSU/WGM for it on this "
+                        "device";
+#ifdef GOOGLE_TEST
+                GTEST_SKIP() << why;
+#else
+                hipblaslt_cout << why << std::endl;
+                return;
+#endif
+            }
             if(heuristicResult.empty())
             {
-                hipblaslt_cerr
-                    << "MatmulAlgoIndex: " << validIndices.size()
-                    << " algo indices discovered via getAllAlgos() but none produced a "
-                       "viable algo+tuning under the workspace budget (M="
-                    << M[0] << " N=" << N[0] << " K=" << K[0]
-                    << " batch=" << num_batches[0] << " transA=" << arg.transA
-                    << " transB=" << arg.transB
-                    << " a=" << hip_datatype_to_string(arg.a_type)
-                    << " b=" << hip_datatype_to_string(arg.b_type)
-                    << " c=" << hip_datatype_to_string(arg.c_type)
-                    << " d=" << hip_datatype_to_string(arg.d_type)
-                    << " compute=" << hipblas_computetype_to_string(arg.compute_type) << ")"
-                    << std::endl;
+                hipblaslt_cerr << "MatmulAlgoIndex: " << validIndices.size()
+                               << " algo indices discovered via getAllAlgos() but none produced a "
+                                  "viable algo+tuning (rejected only by the tuning: "
+                               << rejectedOnlyByTuning
+                               << ", over the workspace budget: " << rejectedForWorkspace
+                               << ") (M=" << M[0] << " N=" << N[0] << " K=" << K[0]
+                               << " batch=" << num_batches[0] << " transA=" << arg.transA
+                               << " transB=" << arg.transB
+                               << " a=" << hip_datatype_to_string(arg.a_type)
+                               << " b=" << hip_datatype_to_string(arg.b_type)
+                               << " c=" << hip_datatype_to_string(arg.c_type)
+                               << " d=" << hip_datatype_to_string(arg.d_type)
+                               << " compute=" << hipblas_computetype_to_string(arg.compute_type)
+                               << ")" << std::endl;
                 CHECK_SOLUTION_FOUND(0);
             }
             verifyMixedValidityContract();
