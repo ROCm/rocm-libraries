@@ -19,7 +19,10 @@ import pytest
 from tensilelite.CustomKernels import _metadataArgToCustomArg, readCustomKernelConfig
 from tensilelite.RocRollerWgm import (
     WGM_ROLE_ORDER,
+    branchfree_divisor,
+    check_stride_layout,
     classify_wgm_expression,
+    evaluate_branchfree_tree,
     evaluate_wgm,
     magic_div_s32,
     magic_multiple_s32,
@@ -28,6 +31,7 @@ from tensilelite.RocRollerWgm import (
     magic_shift_and_sign_s32,
     magic_shift_and_sign_s64,
     magic_shifts_u32,
+    num_tiles_s64,
     s32,
 )
 
@@ -198,3 +202,233 @@ def test_wgm_expression_classifier_reads_the_tree_not_the_suffix():
         ".expression": {"type": "MagicMultiple", "arg": wgm},
     }
     assert _metadataArgToCustomArg(meta) == {"type": "int32", "semantic": "RR_MagicMultipleWgm"}
+
+
+def _lit(value, kind="Int64"):
+    return {"type": "LiteralValue." + kind, "dataType": kind, "value": value}
+
+
+def _hoisted_num_tiles(size_name, tile, magic=None, sign=0):
+    """The branchfree s64 ceil(size / tile) tree a non-power-of-two macrotile hoists.
+
+    Spelled as gfx950's 256x192 MXFP4 WGM kernel spells BitwiseXor_18: the
+    size read through its kernel argument, the 1 and the shift as UInt32.
+    """
+    shift = magic_shift_and_sign_s64(tile) & 0x3F
+    magic = magic_multiple_s64(tile) if magic is None else magic
+    size = {
+        "type": "Kernel Argument",
+        "name": size_name + "_4",
+        "expression": {"type": "CommandArgument", "name": size_name},
+    }
+    x = {
+        "type": "Subtract",
+        "lhs": {"type": "Add", "lhs": size, "rhs": _lit(tile)},
+        "rhs": _lit(1, "UInt32"),
+    }
+    u = {"type": "Add", "lhs": {"type": "MultiplyHigh", "lhs": x, "rhs": _lit(magic)}, "rhs": x}
+    corr = {
+        "type": "BitwiseAnd",
+        "lhs": {"type": "ArithmeticShiftR", "lhs": u, "rhs": _lit(63)},
+        "rhs": _lit(1 << shift),
+    }
+    q = {
+        "type": "ArithmeticShiftR",
+        "lhs": {"type": "Add", "lhs": u, "rhs": corr},
+        "rhs": _lit(shift, "UInt32"),
+    }
+    return {"type": "BitwiseXor", "lhs": q, "rhs": _lit(sign)}
+
+
+@pytest.mark.parametrize("tile", [96, 128, 160, 192, 256, 320])
+def test_num_tiles_s64_is_ceil_div_without_int32_truncation(tile):
+    for size in (0, 1, tile - 1, tile, tile + 1, 4096, (1 << 31) + 5, (1 << 40) + 3):
+        assert num_tiles_s64(size, tile) == (size + tile - 1) // tile
+    with pytest.raises(ValueError):
+        num_tiles_s64(128, 0)
+
+
+@pytest.mark.parametrize("tile", [96, 160, 192, 320])
+def test_branchfree_tree_with_libdivide_magic_is_the_ceil_div(tile):
+    magic = magic_multiple_s64(tile)
+    shift = magic_shift_and_sign_s64(tile) & 0x3F
+    for size in list(range(0, 4 * tile)) + [1 << 20, (1 << 31) - 1, 1 << 31, (1 << 52) - 1]:
+        assert evaluate_branchfree_tree(size, tile, magic, shift, 1 << shift) == num_tiles_s64(size, tile)
+
+
+def test_hoisted_tile_counts_classify_by_the_size_they_read():
+    # The magic that kernel carries for 192.
+    assert magic_multiple_s64(192) == -6148914691236517205
+    assert branchfree_divisor(_hoisted_num_tiles("Tensor_0_size_0", 192)) == (192, "Tensor_0_size_0")
+    assert classify_wgm_expression(_hoisted_num_tiles("Tensor_0_size_0", 192)) == "RR_NumTilesM"
+    assert classify_wgm_expression(_hoisted_num_tiles("Tensor_2_size_1", 192)) == "RR_NumTilesN"
+    meta = {
+        ".name": "BitwiseXor_7",
+        ".size": 8,
+        ".value_kind": "by_value",
+        ".variableType": {"dataType": "Int64"},
+        ".expression": _hoisted_num_tiles("Tensor_2_size_1", 192),
+    }
+    assert _metadataArgToCustomArg(meta) == {"type": "int64", "semantic": "RR_NumTilesN"}
+    # A missing .variableType still declares int64. Other semantics keep the
+    # int32 fallback; these two counts do not fit in int32.
+    bare = dict(meta)
+    del bare[".variableType"]
+    bare[".expression"] = _hoisted_num_tiles("Tensor_0_size_0", 192)
+    assert _metadataArgToCustomArg(bare) == {"type": "int64", "semantic": "RR_NumTilesM"}
+
+
+def test_hoisted_tile_count_decode_rejects_other_divisions():
+    # A K tile count is not a launch semantic.
+    assert classify_wgm_expression(_hoisted_num_tiles("Tensor_0_size_1", 192)) is None
+    # A negative divisor's sign term.
+    assert branchfree_divisor(_hoisted_num_tiles("Tensor_0_size_0", 192, sign=-1)) is None
+    # 160's magic does not divide by 192.
+    wrong = _hoisted_num_tiles("Tensor_0_size_0", 192, magic=magic_multiple_s64(160))
+    assert branchfree_divisor(wrong) is None
+    assert classify_wgm_expression(wrong) is None
+
+
+# The strides and sizes each layout's gfx950 MXFP8 64x64x128 kernel reads, as
+# JIT-compiled by rocRoller, and the semantic each must launch with.
+_NON_TN_COMMAND_ARGUMENTS = {
+    "NN": {
+        "Tensor_0_stride_1": "StrideA0",
+        "Tensor_0_size_1": "SizeSum",
+        "Tensor_2_stride_1": "StrideB0",
+        "Tensor_2_size_1": "SizeFree1",
+        "Tensor_4_stride_1": "StrideScaleA0",
+        "Tensor_4_size_1": "SizeSumScaleA",
+        "Tensor_7_stride_1": "StrideScaleB0",
+        "Tensor_10_stride_1": "StrideC0",
+        "Tensor_21_stride_1": "StrideD0",
+    },
+    "NT": {
+        "Tensor_0_stride_1": "StrideA0",
+        "Tensor_0_size_1": "SizeSum",
+        "Tensor_2_stride_0": "StrideB0",
+        "Tensor_2_size_1": "SizeFree1",
+        "Tensor_4_stride_1": "StrideScaleA0",
+        "Tensor_4_size_1": "SizeSumScaleA",
+        "Tensor_7_stride_0": "StrideScaleB0",
+        "Tensor_10_stride_1": "StrideC0",
+        "Tensor_21_stride_1": "StrideD0",
+    },
+    "TT": {
+        "Tensor_0_stride_0": "StrideA0",
+        "Tensor_0_size_0": "SizeFree0",
+        "Tensor_0_size_1": "SizeSum",
+        "Tensor_2_stride_0": "StrideB0",
+        "Tensor_2_size_1": "SizeFree1",
+        "Tensor_4_stride_0": "StrideScaleA0",
+        "Tensor_4_size_1": "SizeSumScaleA",
+        "Tensor_7_stride_0": "StrideScaleB0",
+        "Tensor_10_stride_1": "StrideC0",
+        "Tensor_21_stride_1": "StrideD0",
+    },
+}
+
+
+@pytest.mark.parametrize("layout", sorted(_NON_TN_COMMAND_ARGUMENTS))
+def test_non_tn_kernels_command_arguments_map_to_semantics(layout):
+    for index, (name, semantic) in enumerate(_NON_TN_COMMAND_ARGUMENTS[layout].items()):
+        meta = {
+            ".name": f"{name}_{index}",
+            ".size": 8,
+            ".value_kind": "by_value",
+            ".expression": {
+                "type": "CommandArgument",
+                "name": name,
+                "variableType": {"dataType": "Int64", "pointerType": "Value"},
+            },
+        }
+        assert _metadataArgToCustomArg(meta) == {"type": "int64", "semantic": semantic}, name
+
+
+# Index 0 is T, index 1 is N. The suffix on the .name form is not a second stride.
+_TN_STRIDES = [
+    "Tensor_0_stride_0",
+    "Tensor_2_stride_1",
+    "Tensor_4_stride_0_6",
+    "Tensor_7_stride_1_8",
+    "Tensor_10_stride_1_10",
+    "Tensor_21_stride_1_16",
+]
+
+
+def test_stride_layout_accepts_the_indexes_a_tn_kernel_declares():
+    check_stride_layout(
+        _TN_STRIDES, "RR_GEMM_TN_kernel", [("its ProblemType", True, False)]
+    )
+
+
+def test_stride_layout_rejects_a_second_stride_of_one_tensor():
+    with pytest.raises(ValueError, match="declares strides"):
+        check_stride_layout(_TN_STRIDES + ["Tensor_0_stride_1"], "RR_GEMM_TN_kernel")
+
+
+def test_stride_layout_rejects_a_name_that_disagrees_with_the_strides():
+    with pytest.raises(ValueError, match="reads TN strides but its name says NN"):
+        check_stride_layout(_TN_STRIDES, "RR_GEMM_NN_kernel")
+
+
+def test_stride_layout_rejects_a_logic_file_that_disagrees_with_the_strides():
+    with pytest.raises(ValueError, match="the logic file says NN"):
+        check_stride_layout(
+            _TN_STRIDES, "RR_GEMM_TN_kernel", [("the logic file", False, False)]
+        )
+
+
+def test_stride_layout_rejects_a_scale_that_disagrees_with_its_operand():
+    with pytest.raises(ValueError, match="scale A"):
+        check_stride_layout(
+            ["Tensor_0_stride_0", "Tensor_2_stride_1", "Tensor_4_pointer", "Tensor_4_stride_1"],
+            "k",
+        )
+
+
+def test_a_non_mx_tensor_is_not_treated_as_a_scale():
+    # Tag 4 is C on the non-MX kernels. Without the scale pointer it is not a scale.
+    check_stride_layout(
+        ["Tensor_0_stride_0", "Tensor_2_stride_1", "Tensor_4_stride_1"], "RR_GEMM_TN_kernel"
+    )
+
+
+def test_stride_layout_rejects_an_output_transposed_stride():
+    with pytest.raises(ValueError, match="output stride is N"):
+        check_stride_layout(
+            ["Tensor_0_stride_0", "Tensor_2_stride_1", "Tensor_10_pointer", "Tensor_10_stride_0"],
+            "k",
+        )
+
+
+_TN_KERNEL = (
+    "RR_GEMM_TN_BF6_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x32x64_UR_2"
+)
+
+
+def test_loader_rejects_a_logic_layout_that_disagrees(monkeypatch):
+    from tensilelite.CustomKernels import getCustomKernelConfig
+
+    loaded = getCustomKernelConfig(_TN_KERNEL, {})
+    assert loaded["CustomKernel"]["uniformSummationOrder"] is True
+    with pytest.raises(ValueError, match="the logic file says NN"):
+        getCustomKernelConfig(
+            _TN_KERNEL, {}, problemType={"TransposeA": False, "TransposeB": False}
+        )
+
+
+def test_a_problem_type_without_transpose_does_not_raise():
+    class _Missing:
+        def __getitem__(self, key):
+            raise KeyError(key)
+
+    from tensilelite.CustomKernels import getCustomKernelConfig
+
+    loaded = getCustomKernelConfig(_TN_KERNEL, {}, problemType=_Missing())
+    assert loaded["CustomKernel"]["uniformSummationOrder"] is True
+
+
+def test_name_and_logic_file_disagree_without_strides():
+    with pytest.raises(ValueError, match="layout disagrees"):
+        check_stride_layout([], "RR_GEMM_TN_kernel", [("the logic file", False, False)])

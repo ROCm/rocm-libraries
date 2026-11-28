@@ -989,7 +989,7 @@ def test_validate_at_build_counts_issues_and_dedups(tmp_path):
 def test_handle_custom_kernel_uses_mapping_name(monkeypatch):
     monkeypatch.setattr(
         hck_mod, "getCustomKernelConfig",
-        lambda name, isp, directory=None: {"MatrixInstruction": [16, 16, 16, 1]},
+        lambda name, isp, directory=None, *, problemType=None: {"MatrixInstruction": [16, 16, 16, 1]},
     )
     sol = {"CustomKernel": {"name": "k0"}}
 
@@ -1000,7 +1000,7 @@ def test_handle_custom_kernel_uses_mapping_name(monkeypatch):
 
 
 def test_handle_custom_kernel_skips_on_config_error(monkeypatch, capsys):
-    def _raise(name, isp, directory):
+    def _raise(name, isp, directory=None, *, problemType=None):
         raise RuntimeError("missing custom.config")
 
     monkeypatch.setattr(hck_mod, "getCustomKernelConfig", _raise)

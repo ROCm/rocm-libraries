@@ -6,14 +6,13 @@
 #include "rocroller_interop.hpp"
 #include "runtime_args_selection.hpp"
 
-#include "origami/streamk.hpp"
+#include <Tensile/RocRollerStreamKGrid.hpp>
 
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob)
 {
-    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
-
-    const origami::grid_selection_t DEFAULT_DYNAMIC_MODE = origami::grid_selection_t::k_split_aware;
-
+    // One implementation, shared with the rocRoller-off launch. Filling the
+    // inputs here and calling TensileLite::rocRollerStreamKGrid means an edit
+    // to the origami sequence cannot land on only one of the two paths.
     size_t elementSizeA_bits
         = rocRoller::DataTypeInfo::Get(hipblaslt::hip2RocRollerType(gemm->params->kernelType.typeA))
               .elementBits;
@@ -24,37 +23,23 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel> gemm, const RocblasltContr
                                 hipblaslt::hip2RocRollerType(gemm->params->kernelType.typeAcc))
                                 .elementBytes;
 
-    origami::problem_t origami_problem = {
-        .size  = {prob.m, prob.n, prob.k},
-        .batch = prob.batch_count,
-        // 0 = use all CUs;
-        .num_cus  = static_cast<size_t>(prob.sm_count_target),
-        .a_dtype  = hipDataType_to_analytical_type(gemm->params->kernelType.typeA),
-        .b_dtype  = hipDataType_to_analytical_type(gemm->params->kernelType.typeB),
-        .mi_dtype = hipDataType_to_analytical_type(elementSizeA_bits < elementSizeB_bits
-                                                       ? gemm->params->kernelType.typeB
-                                                       : gemm->params->kernelType.typeA),
-    };
-    origami::config_t origami_config = {
-        .mt                        = {static_cast<size_t>(gemm->params->workgroupTile.m),
-                                      static_cast<size_t>(gemm->params->workgroupTile.n),
-                                      static_cast<size_t>(gemm->params->workgroupTile.k)},
-        .occupancy                 = gemm->occupancy,
-        .workspace_size            = prob.workspaceSize,
-        .workspace_size_per_elem_c = elementSizeAcc,
-    };
+    TensileLite::RocRollerStreamKGridInputs inputs;
+    inputs.m                     = prob.m;
+    inputs.n                     = prob.n;
+    inputs.k                     = prob.k;
+    inputs.batch                 = prob.batch_count;
+    inputs.numCUs                = static_cast<size_t>(prob.sm_count_target);
+    inputs.tileM                 = static_cast<size_t>(gemm->params->workgroupTile.m);
+    inputs.tileN                 = static_cast<size_t>(gemm->params->workgroupTile.n);
+    inputs.tileK                 = static_cast<size_t>(gemm->params->workgroupTile.k);
+    inputs.occupancy             = gemm->occupancy;
+    inputs.workspaceSize         = prob.workspaceSize;
+    inputs.workspaceSizePerElemC = elementSizeAcc;
+    inputs.aDtype                = hipDataType_to_analytical_type(gemm->params->kernelType.typeA);
+    inputs.bDtype                = hipDataType_to_analytical_type(gemm->params->kernelType.typeB);
+    inputs.aElementBits          = elementSizeA_bits;
+    inputs.bElementBits          = elementSizeB_bits;
 
-    auto reduction_type = origami::streamk::select_reduction(
-        origami_problem, analytical_hardware, origami_config, DEFAULT_DYNAMIC_MODE);
-
-    origami_config.reduction_strategy = reduction_type;
-
-    // origami_problem.num_cus carries the caller's budget (sm_count_target);
-    // select_grid_size derives the CU budget from it internally.
-    auto result = origami::streamk::select_grid_size(origami_problem,
-                                                    analytical_hardware,
-                                                    origami_config,
-                                                    DEFAULT_DYNAMIC_MODE);
-
-    return result;
+    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
+    return static_cast<int>(TensileLite::rocRollerStreamKGrid(inputs, analytical_hardware));
 }

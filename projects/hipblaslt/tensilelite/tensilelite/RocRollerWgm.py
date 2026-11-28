@@ -15,6 +15,8 @@ tree in FastDivision.cpp.
 
 from __future__ import annotations
 
+import re
+
 _I32_MIN = -2147483648
 _I32_MAX = 2147483647
 _U32_MASK = 0xFFFFFFFF
@@ -48,21 +50,42 @@ WGM_ROLE_ORDER = (
     "RR_QuotientTilesMByWgm",
 )
 
+# Two further hoisted arguments, present only when a macrotile is not a power
+# of two (rocRoller picks 192-wide MXFP4 tiles on gfx950). It cannot lower the tile
+# count to a shift there, so it hoists the division result instead of
+# recomputing it inline. They are deliberately NOT in WGM_ROLE_ORDER: that
+# tuple names the eleven arguments every WGM kernel carries, and these two
+# appear in addition to them, never instead of one.
+NON_POW2_TILE_ROLES = (
+    "RR_NumTilesM",
+    "RR_NumTilesN",
+)
+
 # hipBLASLt rocRoller::DEFAULT_WGM. Every shipped expression reads the WGM
 # command argument, and the library passes this constant.
 DEFAULT_WGM = 2
 
-# Direct command arguments already used by the non-WGM rocRoller kernels.
+# Command arguments rocRoller kernels read directly. rocRoller sizes A {M, K},
+# B {K, N}, scale A {M, K / block} and scale B {K / block, N}, and a kernel
+# reads only the stride that is not 1: index 0 for a "T" operand, index 1 for
+# an "N" one. Either one is the leading dimension Tensile's Stride*0 carries.
+# check_stride_layout rejects a second stride on one tensor, and a layout
+# that disagrees with the kernel name or with TransposeA/TransposeB.
 DIRECT_COMMAND_ARGUMENT = {
     "Tensor_0_stride_0": ("int64", "StrideA0"),
+    "Tensor_0_stride_1": ("int64", "StrideA0"),
     "Tensor_0_pointer": ("address", "AddressA"),
     "Tensor_0_size_0": ("int64", "SizeFree0"),
     "Tensor_0_size_1": ("int64", "SizeSum"),
+    "Tensor_2_stride_0": ("int64", "StrideB0"),
     "Tensor_2_stride_1": ("int64", "StrideB0"),
     "Tensor_2_pointer": ("address", "AddressB"),
     "Tensor_2_size_1": ("int64", "SizeFree1"),
     "Tensor_4_stride_0": ("int64", "StrideScaleA0"),
+    "Tensor_4_stride_1": ("int64", "StrideScaleA0"),
     "Tensor_4_pointer": ("address", "AddressMXScaleA"),
+    "Tensor_4_size_1": ("int64", "SizeSumScaleA"),
+    "Tensor_7_stride_0": ("int64", "StrideScaleB0"),
     "Tensor_7_stride_1": ("int64", "StrideScaleB0"),
     "Tensor_7_pointer": ("address", "AddressMXScaleB"),
     "Tensor_10_stride_1": ("int64", "StrideC0"),
@@ -72,6 +95,125 @@ DIRECT_COMMAND_ARGUMENT = {
     "user_Float_Value_12": ("float32", "Alpha"),
     "user_Float_Value_14": ("float32", "Beta"),
 }
+
+# A {M, K} is tensor 0. B {K, N} is tensor 2. On an MX kernel the scale
+# pointers are tensor 4 and 7, and C and D are 10 and 21. A non-MX kernel
+# reuses those tags, so a stride is a scale or an output only when the
+# matching pointer argument is present.
+_STRIDE_ROLE = {0: "A", 2: "B"}
+_SCALE_POINTER = {4: ("Tensor_4_pointer", "scaleA"), 7: ("Tensor_7_pointer", "scaleB")}
+_OUTPUT_POINTER = {10: ("Tensor_10_pointer", "C"), 21: ("Tensor_21_pointer", "D")}
+_STRIDE_TOKEN = re.compile(r"Tensor_(\d+)_stride_(\d+)(?:_\d+)?")
+_LAYOUT_IN_NAME = re.compile(r"^RR_GEMM_(NN|NT|TN|TT)_")
+_STRIDE_LINE = re.compile(r"name:\s*(Tensor_\d+_stride_\d+(?:_\d+)?)")
+
+
+def stride_names_in_text(contents):
+    """Argument names from ``.name:`` and CommandArgument ``name:`` lines."""
+    if not contents:
+        return []
+    return [match.group(1) for match in _STRIDE_LINE.finditer(contents)]
+
+
+def _layout_pair(transpose_a, transpose_b):
+    if transpose_a is None and transpose_b is None:
+        return None
+    if transpose_a is None or transpose_b is None:
+        return None
+    return ("T" if transpose_a else "N") + ("T" if transpose_b else "N")
+
+
+def _stride_letter(index):
+    if index == 0:
+        return "T"
+    if index == 1:
+        return "N"
+    return None
+
+
+def kernel_name_layout(kernel_name):
+    match = _LAYOUT_IN_NAME.match(kernel_name or "")
+    return None if match is None else match.group(1)
+
+
+def check_stride_layout(names, kernel_name, constraints=()):
+    """Raise ValueError when stride indexes disagree with each other or with layout.
+
+    ``names`` are metadata argument names (``Tensor_0_stride_0`` or the
+    ``.name`` form ``Tensor_0_stride_0_0``). A kernel that declares none is
+    still checked against its name and each ``(source, transpose_a, transpose_b)``
+    constraint. Index 0 is T and index 1 is N, for A and for B.
+    """
+    indexes = {}
+    for name in names or []:
+        match = _STRIDE_TOKEN.search(name or "")
+        if match is None:
+            continue
+        indexes.setdefault(int(match.group(1)), set()).add(int(match.group(2)))
+
+    label = kernel_name or "custom kernel"
+    present = set(names or [])
+    roles = dict(_STRIDE_ROLE)
+    for tensor, (pointer, role) in {**_SCALE_POINTER, **_OUTPUT_POINTER}.items():
+        if pointer in present:
+            roles[tensor] = role
+    derived = {}
+    for tensor, found in indexes.items():
+        role = roles.get(tensor)
+        if len(found) != 1 and role is not None:
+            which = role or f"tensor {tensor}"
+            raise ValueError(
+                f"Custom kernel '{label}' declares strides {sorted(found)} of {which}"
+            )
+        index = next(iter(found))
+        letter = _stride_letter(index)
+        if letter is None:
+            which = role or f"tensor {tensor}"
+            raise ValueError(
+                f"Custom kernel '{label}' {which} stride index {index} is not 0 or 1"
+            )
+        if role is None:
+            continue
+        derived[role] = letter
+
+    if "scaleA" in derived and derived.get("A") != derived["scaleA"]:
+        raise ValueError(
+            f"Custom kernel '{label}' scale A reads {derived['scaleA']} but A reads {derived.get('A')}"
+        )
+    if "scaleB" in derived and derived.get("B") != derived["scaleB"]:
+        raise ValueError(
+            f"Custom kernel '{label}' scale B reads {derived['scaleB']} but B reads {derived.get('B')}"
+        )
+    for output in ("C", "D"):
+        if derived.get(output) not in (None, "N"):
+            raise ValueError(
+                f"Custom kernel '{label}' {output} reads {derived[output]}; the output stride is N"
+            )
+    if any(role in derived for role in ("A", "B", "scaleA", "scaleB")) and (
+        "A" not in derived or "B" not in derived
+    ):
+        raise ValueError(
+            f"Custom kernel '{label}' does not declare both an A stride and a B stride"
+        )
+
+    expected = []
+    named = kernel_name_layout(kernel_name)
+    if named is not None:
+        expected.append(("its name", named))
+    for source, transpose_a, transpose_b in constraints:
+        pair = _layout_pair(transpose_a, transpose_b)
+        if pair is not None:
+            expected.append((source, pair))
+    if "A" in derived and "B" in derived:
+        got = derived["A"] + derived["B"]
+        for source, want in expected:
+            if want != got:
+                raise ValueError(
+                    f"Custom kernel '{label}' reads {got} strides but {source} says {want}"
+                )
+    elif len({want for _, want in expected}) > 1:
+        detail = ", ".join(f"{source} says {want}" for source, want in expected)
+        raise ValueError(f"Custom kernel '{label}' layout disagrees: {detail}")
 
 
 def s32(value):
@@ -278,18 +420,52 @@ def magic_div_s32(numerator, divisor):
     return s32(s32(shifted ^ sign) - sign)
 
 
-def num_tiles(size, tile):
-    """int32 ceil-div of a tensor size by a power-of-two macrotile.
+def num_tiles_s64(size, tile):
+    """int64 tile count. Both of rocRoller's lowerings evaluate to this.
 
-    rocRoller lowers unsigned division by a translate-time power of two to
-    an arithmetic shift, then converts the int64 result to int32.
+    *Power-of-two macrotile.* The division becomes an arithmetic shift right
+    by ``log2(tile)`` and nothing is hoisted -- the kernel recomputes the
+    count inline from the size kernarg it already holds.
+
+    *Any other macrotile* (rocRoller picks 192-wide MXFP4 tiles on gfx950). There is
+    no shift to lower to, so rocRoller emits a libdivide branchfree signed
+    64-bit division and **hoists the result into its own kernarg**:
+
+        x = size + tile - 1
+        u = mulhi_s64(x, magic) + x
+        q = (u + ((u >> 63) & (1 << shift))) >> shift
+        q = q ^ sign              # sign is 0 for a positive divisor
+
+    ``branchfree_divisor`` recognises exactly that tree and recovers ``tile``
+    from it, so the classifier decodes the expression instead of matching a
+    kernarg name. ``evaluate_branchfree_tree`` replays the tree verbatim;
+    the unit tests assert it agrees with this ceil-div.
     """
-    tile = u32(tile)
-    if tile == 0 or (tile & (tile - 1)) != 0:
-        raise ValueError(f"macrotile {tile} is not a positive power of two")
-    log = tile.bit_length() - 1
-    shifted = (int(size) + int(tile) - 1) >> log
-    return s32(shifted)
+    tile = int(tile)
+    if tile <= 0:
+        raise ValueError(f"macrotile {tile} is not positive")
+    return -(-int(size) // tile)
+
+
+def num_tiles(size, tile):
+    """int32 tile count, as the hoisted int32 kernargs consume it."""
+    return s32(num_tiles_s64(size, tile))
+
+
+def evaluate_branchfree_tree(size, tile, magic, shift, add):
+    """rocRoller's hoisted division, evaluated exactly as the tree spells it.
+
+    Kept next to ``num_tiles_s64`` so the two can be compared in a test
+    rather than one being asserted to imply the other.
+    """
+    x = s64(s64(size + tile) - 1)
+    u = s64(_mulhi_s64(x, magic) + x)
+    corr = s64(u >> 63) & add
+    return s64(s64(u + corr) >> shift)
+
+
+def _mulhi_s64(a, b):
+    return s64((s64(a) * s64(b)) >> 64)
 
 
 def evaluate_wgm(m, n, tile_m, tile_n, wgm=DEFAULT_WGM):
@@ -320,6 +496,10 @@ def evaluate_wgm(m, n, tile_m, tile_n, wgm=DEFAULT_WGM):
         "RR_MagicShiftAndSignWgmTail": magic_shift_and_sign_s32(tail),
         "RR_MagicShiftAndSignWgmMainBlock": magic_shift_and_sign_s32(main),
         "RR_QuotientTilesMByWgm": q_m,
+        # Present in the kernarg list only when the corresponding macrotile is
+        # not a power of two; harmless to compute either way.
+        "RR_NumTilesM": num_tiles_s64(m, tile_m),
+        "RR_NumTilesN": num_tiles_s64(n, tile_n),
     }
 
 
@@ -335,6 +515,83 @@ def _command_argument_names(node, found=None):
         for value in node:
             _command_argument_names(value, found)
     return found
+
+
+def branchfree_divisor(expr):
+    """Recover the divisor from a hoisted libdivide branchfree s64 division.
+
+    Returns ``(divisor, command_argument_name)`` when ``expr`` is exactly the
+    shape ``num_tiles_s64`` documents, else ``None``. Everything is read out
+    of the tree: the divisor appears as the ``size + tile`` literal, the
+    shift as the outer ``ArithmeticShiftR`` count, and the correction mask as
+    ``1 << shift``. Shape and arithmetic are both checked, so a different
+    division that happens to be rooted at ``BitwiseXor`` is rejected rather
+    than silently mapped.
+    """
+    def lit(node, kinds=("LiteralValue.Int64", "LiteralValue.UInt32",
+                         "LiteralValue.Int32")):
+        if isinstance(node, dict) and node.get("type") in kinds:
+            return node.get("value")
+        return None
+
+    if not isinstance(expr, dict) or expr.get("type") != "BitwiseXor":
+        return None
+    if lit(expr.get("rhs")) != 0:          # sign term; non-zero = negative divisor
+        return None
+    shr = expr.get("lhs")
+    if not isinstance(shr, dict) or shr.get("type") != "ArithmeticShiftR":
+        return None
+    shift = lit(shr.get("rhs"))
+    if not isinstance(shift, int) or not 0 < shift < 64:
+        return None
+    add = shr.get("lhs")
+    if not isinstance(add, dict) or add.get("type") != "Add":
+        return None
+    mask = add.get("rhs")
+    if not isinstance(mask, dict) or mask.get("type") != "BitwiseAnd":
+        return None
+    if lit(mask.get("rhs")) != 1 << shift:
+        return None
+
+    # x = size + tile - 1, reached through Subtract(Add(KernArg, tile), 1)
+    inner = add.get("lhs")
+    if not isinstance(inner, dict) or inner.get("type") != "Add":
+        return None
+    mulhi = inner.get("lhs")
+    if not isinstance(mulhi, dict) or mulhi.get("type") != "MultiplyHigh":
+        return None
+    magic = lit(mulhi.get("rhs"))
+    sub = mulhi.get("lhs")
+    if not isinstance(sub, dict) or sub.get("type") != "Subtract":
+        return None
+    if lit(sub.get("rhs")) != 1:
+        return None
+    plus = sub.get("lhs")
+    if not isinstance(plus, dict) or plus.get("type") != "Add":
+        return None
+    divisor = lit(plus.get("rhs"))
+    if not isinstance(divisor, int) or divisor <= 0:
+        return None
+    if not isinstance(magic, int):
+        return None
+
+    names = set(_command_argument_names(expr))
+    if len(names) != 1:
+        return None
+
+    # The decode is only trusted if replaying the tree agrees with the plain
+    # ceil-div: exact and remainder cases, and sizes large enough that a magic
+    # constant outside libdivide's rounding slack would show up. (Inside the
+    # slack several magics compute the same function, and any of them is a
+    # correct decode -- the divisor is what the classifier needs, not the
+    # constant.)
+    for size in (1, divisor - 1, divisor, divisor + 1, 7 * divisor,
+                 7 * divisor + 1, 1 << 20, (1 << 31) - 1, 1 << 31,
+                 (1 << 40) + divisor - 1, (1 << 52) - 1):
+        if evaluate_branchfree_tree(size, divisor, magic, shift,
+                                    1 << shift) != num_tiles_s64(size, divisor):
+            return None
+    return divisor, names.pop()
 
 
 def _role_suffix(names):
@@ -363,6 +620,16 @@ def classify_wgm_expression(expr):
     names = _command_argument_names(expr)
     if root == "CommandArgument" and expr.get("name") == _CA_WGM:
         return "RR_WorkgroupMapping"
+    if root == "BitwiseXor":
+        decoded = branchfree_divisor(expr)
+        if decoded is None:
+            return None
+        _, read = decoded
+        if read == _CA_M:
+            return "RR_NumTilesM"
+        if read == _CA_N:
+            return "RR_NumTilesN"
+        return None
     suffix = _role_suffix(names)
     if suffix is None:
         return None
@@ -395,9 +662,14 @@ def custom_arg_for_metadata(meta_arg):
         return None
     semantic = classify_wgm_expression(expr)
     if semantic is not None:
-        arg_type = _variable_arg_type(meta_arg)
-        if arg_type is None:
-            arg_type = "uint32" if semantic.startswith("RR_MagicShiftAndSign") else "int32"
+        # Tile counts are ceil-divs of int64 sizes. A missing .variableType
+        # must not fall back to int32: that truncates counts above 2^31.
+        if semantic in ("RR_NumTilesM", "RR_NumTilesN"):
+            arg_type = "int64"
+        else:
+            arg_type = _variable_arg_type(meta_arg)
+            if arg_type is None:
+                arg_type = "uint32" if semantic.startswith("RR_MagicShiftAndSign") else "int32"
         return {"type": arg_type, "semantic": semantic}
     if expr.get("type") == "CommandArgument":
         mapped = DIRECT_COMMAND_ARGUMENT.get(expr.get("name"))

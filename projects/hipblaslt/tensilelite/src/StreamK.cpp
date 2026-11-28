@@ -8,11 +8,15 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipHardware.hpp>
+#include <Tensile/RocRollerStreamKGrid.hpp>
+#include <Tensile/RocRollerStreamKKernargs.hpp>
+#include <Tensile/UtilsOrigami.hpp>
 
 #include <origami/streamk.hpp>
 
 #include <algorithm>
 #include <iostream>
+#include <vector>
 #include <mutex>
 #include <string>
 #include <tuple>
@@ -405,4 +409,140 @@ namespace TensileLite
         return sizeMapping.hasDynamicAssignment()
                || (sizeMapping.hasHybridAssignment() && effectiveDynamic);
     }
+    bool ContractionSolution::rocRollerStreamKHasDataParallelTiles(Problem const&  problem,
+                                                                   Hardware const& hardware) const
+    {
+        if(!usesRocRollerStreamK() || problem.problemSizes().size() < 3)
+            return false;
+        return TensileLite::rocRollerStreamKHasDataParallelTiles(
+            static_cast<int64_t>(problem.problemSizes()[0]),
+            static_cast<int64_t>(problem.problemSizes()[1]),
+            static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
+            customKernel.macrotile.x,
+            customKernel.macrotile.y,
+            customKernel.macrotile.z,
+            rocRollerStreamKGrid(problem, hardware));
+    }
+
+    uint32_t ContractionSolution::rocRollerStreamKGrid(Problem const&  problem,
+                                                       Hardware const& hardware) const
+    {
+        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+        if(pAMDGPU == nullptr)
+            throw std::runtime_error("rocRoller Stream-K grid needs AMDGPU hardware");
+
+        auto extents = [](size_t n, auto&& at) {
+            std::vector<size_t> out;
+            out.reserve(n);
+            for(size_t i = 0; i < n; ++i)
+                out.push_back(static_cast<size_t>(at(i)));
+            return out;
+        };
+
+        RocRollerStreamKGridRequest req;
+        req.freeA = extents(problem.freeIndicesA().size(),
+                            [&](size_t i) { return problem.freeSizeA(i); });
+        req.freeB = extents(problem.freeIndicesB().size(),
+                            [&](size_t i) { return problem.freeSizeB(i); });
+        req.bound = extents(problem.boundIndices().size(),
+                            [&](size_t i) { return problem.boundSize(i); });
+        req.batch = extents(problem.batchIndices().size(),
+                            [&](size_t i) { return problem.batchSize(i); });
+        req.smCountTarget          = problem.getParams().smCountTarget();
+        req.computeUnitCount       = pAMDGPU->computeUnitCount;
+        req.persistentMaxCUs       = pAMDGPU->persistentMaxCUs;
+        req.tileM                  = static_cast<size_t>(customKernel.macrotile.x);
+        req.tileN                  = static_cast<size_t>(customKernel.macrotile.y);
+        req.tileK                  = static_cast<size_t>(customKernel.macrotile.z);
+        req.occupancy              = static_cast<int>(customKernel.occupancy);
+        req.workspaceSize          = problem.workspaceSize();
+        req.workspaceSizePerElemC  = sizeMapping.workspaceSizePerElemC;
+
+        // The kernargs below count tiles in M and N only. The grid folds batch
+        // in, so the two agree only for a single batch. Selection also emits
+        // BatchSizeEqual(1) for RR_GEMM_ kernels; this refuses a launch that
+        // reaches here without that predicate.
+        for(size_t extent : req.batch)
+        {
+            if(extent != 1)
+                throw RocRollerStreamKBatchError(
+                    "rocRoller Stream-K kernels launch a single batch; the grid "
+                    "counts every batch and the kernargs do not");
+        }
+
+        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        req.hasAnalyticalHardware
+            = hipAMDGPU != nullptr && hipAMDGPU->analyticalHardware != nullptr;
+        // rocRoller reads the element widths off its kernel's own A/B types;
+        // for the kernel selected to serve this problem those are the problem's
+        // types, which is all TensileLite has here.
+        if(req.hasAnalyticalHardware)
+        {
+            auto elementBits = [](rocisa::DataType type) -> size_t {
+                return static_cast<size_t>(rocisa::GetElementSize(type) * 8.0f + 0.5f);
+            };
+            req.aDtype       = datatypeToAnalyticalDatatype(problem.a().dataType());
+            req.bDtype       = datatypeToAnalyticalDatatype(problem.b().dataType());
+            req.aElementBits = elementBits(problem.a().dataType());
+            req.bElementBits = elementBits(problem.b().dataType());
+        }
+
+        // occupancy 0, missing analytical hardware, and an empty M, N or batch
+        // do not call origami. The grid is then the CU count capped by
+        // smCountTarget, persistentMaxCUs and the flag region.
+        RocRollerStreamKGridPlan plan = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+        if(!plan.useOrigami)
+            return plan.fallbackGrid;
+
+        // chooseStreamKGridSize returns this answer unchanged. Each problem's
+        // Stream-K flag slot is StreamKFlagElements ints (c_syncSkSlotElements),
+        // and rocRoller writes a flag only from a workgroup that holds a partial
+        // tile, which is tiles % grid != 0. A data-parallel grid (one workgroup
+        // per tile, so the remainder is 0) writes no flags and may be wider than
+        // the slot. A grid that does write flags and is wider than the slot is
+        // clamped, the same line Tensile's own Stream-K path draws.
+        uint32_t grid
+            = TensileLite::rocRollerStreamKGrid(plan.inputs, *(hipAMDGPU->analyticalHardware));
+        uint64_t tiles = 1;
+        if(plan.inputs.tileM != 0 && plan.inputs.tileN != 0)
+            tiles = ((plan.inputs.m + plan.inputs.tileM - 1) / plan.inputs.tileM)
+                    * ((plan.inputs.n + plan.inputs.tileN - 1) / plan.inputs.tileN);
+        if(grid > StreamKFlagElements && grid != 0 && tiles % grid != 0)
+            grid = StreamKFlagElements;
+        return grid;
+    }
+
+
+    uint32_t ContractionSolution::rocRollerStreamKCheckedGrid(Problem const&  problem,
+                                                              Hardware const& hardware) const
+    {
+        if(problem.problemSizes().size() < 3)
+            throw std::runtime_error(
+                "rocRoller Stream-K launches need M, N and K problem sizes");
+        uint32_t grid = rocRollerStreamKGrid(problem, hardware);
+        if(TensileLite::rocRollerStreamKHasDataParallelTiles(
+               static_cast<int64_t>(problem.problemSizes()[0]),
+               static_cast<int64_t>(problem.problemSizes()[1]),
+               static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
+               customKernel.macrotile.x,
+               customKernel.macrotile.y,
+               customKernel.macrotile.z,
+               grid))
+            throw RocRollerStreamKDataParallelError(concatenate(
+                "rocRoller Stream-K kernel ",
+                customKernel.name,
+                " cannot run data-parallel tiles: grid ",
+                grid,
+                " is too small for problem ",
+                problem.problemSizes()[0],
+                "x",
+                problem.problemSizes()[1],
+                " with macrotile ",
+                customKernel.macrotile.x,
+                "x",
+                customKernel.macrotile.y));
+        return grid;
+    }
+
+
 }

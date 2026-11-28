@@ -132,6 +132,26 @@ def test_assign_custom_kernel_params_split_k_grid_is_accepted(grid):
     assert state["InternalSupportParams"]["SupportUserGSU"] is True
 
 
+def test_assign_custom_kernel_params_rocroller_streamk_rejects_gsu():
+    # The kernel does not implement GlobalSplitU. A TilesXY grid already
+    # raises; RocRollerStreamK must too, or the launch returns success with
+    # D unwritten.
+    state = _ck_state(GlobalSplitU=4, GlobalSplitUAlgorithm="MultipleBuffer")
+    state["CustomKernel"]["grid"] = ["RocRollerStreamK", "One", "One"]
+    state["CustomKernel"]["workspaceType"] = "RocRollerStreamK"
+    state["CustomKernel"]["args"] = [{"semantic": "RR_SKNumWGs"}]
+    with pytest.raises(RuntimeError, match="one GSU slice per tile"):
+        Solution._assignCustomKernelParameters(state)
+
+
+def test_assign_custom_kernel_params_rocroller_streamk_pieces_must_agree():
+    state = _ck_state()
+    state["CustomKernel"]["args"] = [{"semantic": "RR_SKNumWGs"}]
+    state["CustomKernel"]["workspaceType"] = "None"
+    with pytest.raises(RuntimeError, match="mixes rocRoller Stream-K"):
+        Solution._assignCustomKernelParameters(state)
+
+
 @pytest.mark.parametrize("over", [
     {"GlobalSplitU": 16},
     {"GlobalSplitU": -1},  # lets the runtime pick a split above 1
