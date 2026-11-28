@@ -829,7 +829,7 @@ TEST(TestGfx950ConvFwdGeometry, WindowedDirectRefusesSentinelAddressingOverflow)
 }
 
 /// One (instance, problem) case of the AOT direct variants and what
-/// gfx950_conv_fwd_aot_serves, Gfx950ConvFwdAotSpec.grid() and .block() in
+/// conv_fwd_aot_serves, Gfx950ConvFwdAotSpec.grid() and .block() in
 /// convolution_forward.py give for it: whether the instance serves the problem, and then
 /// its grid and block. test_make_conv_aot_config.py recomputes every row from the adapter,
 /// which test_convolution_forward_aot_packaging.py holds to rocKE's own plan_for.

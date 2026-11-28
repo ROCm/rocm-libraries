@@ -114,6 +114,14 @@ _SHAPES = {
     "stem_c3": dict(
         C=3, K=64, Y=7, X=7, Hi=64, Wi=64, stride_h=2, stride_w=2, pad_h=3, pad_w=3
     ),
+    # gfx1250's few-output-channel kernels (direct_fwd_smallk_wmma bakes K)
+    # and its dilation-2 tap-outer kernels.
+    "dense_k3": dict(N=1, C=64, K=3, Hi=64, Wi=64),
+    # A 1-D filter padded along the row only (per-axis padding).
+    "row_1x7_k1": dict(N=1, C=32, K=1, Hi=1, Wi=4096, Y=1, X=7, pad_h=0, pad_w=3),
+    "dilated2": dict(
+        N=1, C=256, K=256, Hi=32, Wi=32, pad_h=2, pad_w=2, dilation_h=2, dilation_w=2
+    ),
 }
 
 # Shapes that reach every registered dgrad family: implicit GEMM with one
@@ -259,8 +267,7 @@ def test_an_instance_builds_only_for_its_own_arch():
     [
         (dict(arch="gfx90a"), "arch 'gfx90a'"),
         (dict(arch="gfx942"), "arch 'gfx942'"),
-        (dict(arch="gfx1250"), "arch 'gfx1250'"),
-        (dict(arch="gfx1250", llvm_flavor="llvm23"), "arch 'gfx1250'"),
+        (dict(arch="gfx1250", llvm_flavor="llvm23"), "built for LLVM flavor llvm24"),
         (dict(direction="wgrad"), "no 'wgrad' instances"),
         (dict(dtype="fp32"), "fp16 or bf16 only"),
         (dict(C=63, G=2), "divisible by G"),
@@ -281,7 +288,7 @@ def test_nothing_outside_the_lists_dispatches(kw, match):
     results = gc.dispatch_conv_grouped_all(req)
     if fields["arch"] == "gfx1250" and kw.get("llvm_flavor") == "llvm23":
         # Only the opt-in Winograd forward route (its 3x3 plans lower at
-        # llvm23 only); never an auto pick.
+        # llvm23; the registered instances at llvm24); never an auto pick.
         assert results
         assert {r.spec.algorithm for r in results} == {"winograd"}
         assert all(r.candidate.opt_in for r in results)
@@ -385,6 +392,15 @@ def test_unknown_llvm_flavor_request_is_rejected():
         gc.dispatch_conv_grouped(_req(llvm_flavor="llvm-other"))
 
 
+def test_negative_padding_is_rejected():
+    # pad_w=-1 is the internal "use row padding" sentinel; a negative request
+    # padding must be refused before the sentinel encoding is applied.
+    with pytest.raises(ValueError, match="pad_w"):
+        gc.dispatch_conv_grouped(_req(pad_w=-1))
+    with pytest.raises(ValueError, match="pad_h"):
+        gc.dispatch_conv_grouped(_req(pad_h=-1))
+
+
 def test_unrecognized_llvm_flavor_env_raises(monkeypatch):
     """A typo'd ROCKE_LLVM_FLAVOR must fail loudly, not fall back to auto-detect."""
     from rocke.core.lower_llvm import _detect_llvm_flavor
@@ -437,6 +453,8 @@ def _direct_problem(req):
         dtype=req.dtype,
         dil_h=req.dilation_h,
         dil_w=req.dilation_w,
+        # As benchmark_direct_conv builds a problem with a column padding.
+        pad_w=-1 if req.pad_w == req.pad_h else req.pad_w,
     )
 
 
@@ -492,7 +510,7 @@ def _cache_side_admits(spec, req) -> bool:
 
         problem = _launch_problem(spec.direction, _implicit_problem(req))
         return KernelCache.supports_problem(ident, problem)[0]
-    if req.stride_h != req.stride_w or req.pad_h != req.pad_w:
+    if req.stride_h != req.stride_w:
         return False
     if ident.algorithm == "direct_nongrouped" and req.G != 1:
         return False
@@ -504,7 +522,12 @@ def _cache_side_admits(spec, req) -> bool:
 @pytest.mark.parametrize("arch, direction, shape", _CASES)
 def test_admission_matches_the_aot_run_path(arch, direction, shape):
     req = _case_req(arch, direction, shape)
-    admitted = [r.spec.name for r in gc.dispatch_conv_grouped_all(req)]
+    # The instances; gfx1250's opt-in Winograd routes are no list's records.
+    admitted = [
+        r.spec.name
+        for r in gc.dispatch_conv_grouped_all(req)
+        if isinstance(r.spec, gc.ConvInstanceSpec)
+    ]
     expected = [
         s.name
         for s in gc.registered_conv_grouped_instances(arch, direction=direction)
@@ -527,6 +550,7 @@ def test_the_shapes_reach_every_registered_family(arch, direction):
         for r in gc.dispatch_conv_grouped_all(
             _req(arch=arch, direction=direction, **kw)
         )
+        if isinstance(r.spec, gc.ConvInstanceSpec)
     }
     assert reached == families
 
@@ -621,6 +645,8 @@ _SIZES = {name: 100 + i for i, name in enumerate(_PTRS)}
 @pytest.mark.parametrize("arch, direction, shape", _CASES)
 def test_launch_plan_matches_the_aot_run_path(arch, direction, shape):
     for result in gc.dispatch_conv_grouped_all(_case_req(arch, direction, shape)):
+        if not isinstance(result.spec, gc.ConvInstanceSpec):
+            continue  # an opt-in Winograd route (test_conv_winograd_*_dispatch)
         name = result.spec.name
         plan = gc.launch_plan_for(result.request, result.spec)
         got = [
@@ -893,6 +919,16 @@ def test_pin_to_an_instance_that_cannot_run_the_shape_is_refused():
     )
     with pytest.raises(PinRefused, match="not divisible by vector_size_a"):
         gc.dispatch_conv_grouped(_req(C=3, K=64, spec_id=vec8))
+
+
+def test_a_pin_no_candidate_matches_says_so():
+    """A pinned algorithm no registered candidate has is refused with that reason,
+    not as an empty registry."""
+    with pytest.raises(
+        ValueError,
+        match=r"no candidate matches algorithm='no_such_family', spec_id='auto'",
+    ):
+        gc.dispatch_conv_grouped(_req(algorithm="no_such_family"))
 
 
 def test_algorithm_pin_keeps_one_family():

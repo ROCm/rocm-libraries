@@ -1,7 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Packaging adapter for the gfx950 implicit-GEMM forward convolution.
+"""Packaging adapter for the gfx950 and gfx1250 forward convolution.
+
+Two shape-generic AOT-instance engines share it, one per architecture
+(:data:`TARGETS`): ``hipkernel:Gfx950ConvFwdAot`` (wave64) and
+``hipkernel:Gfx1250ConvFwdAot`` (wave32). Each has one flat descriptor spec
+(:class:`Gfx950ConvFwdAotSpec`, :class:`Gfx1250ConvFwdAotSpec`) per rocKE
+``KernelIdentity`` of its forward sweeps; the gfx1250 spec is the gfx950 one plus
+the knobs of its WMMA direct pipelines. Everything below the exact-shape spec is
+written for both; what differs per architecture is the target's table.
 
 The descriptor spec is flat, while the original builder takes nested problem
 and data specs plus optional fusion callbacks. :class:`Gfx950ConvFwdSpec`
@@ -24,10 +32,10 @@ B_bytes:i32, D_bytes:i32)`` followed by the problem block of
 ``kernels.common.conv_abi`` (extents, strides, magic divisors and tile counts as
 i32 kernel arguments). A packaged kernel is built for one problem, but it
 computes every problem its build-time capabilities admit, and the native pack
-matches it to all of them. :func:`gfx950_conv_fwd_aot_capabilities` reports
+matches it to all of them. :func:`conv_fwd_aot_capabilities` reports
 what a binary keeps from its build problem (grouped and pointwise code paths,
 load and store widths; for the direct kernels the filter, stride and padding)
-and :func:`gfx950_conv_fwd_aot_serves` decides a
+and :func:`conv_fwd_aot_serves` decides a
 runtime problem against it. :meth:`Gfx950ConvFwdSpec.launch_signature` and
 :meth:`Gfx950ConvFwdSpec.launch_values` give the launch through rocKE's own
 ``ConvArgs``; the native pack mirrors them.
@@ -55,8 +63,10 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
+from typing import ClassVar
 
 from dispatch.grouped_convolution import (
+    DEFAULT_LLVM_FLAVORS,
     ConvGroupedRequest,
     ConvInstanceSpec,
     launch_plan_for,
@@ -72,7 +82,7 @@ from kernels.common import conv_implicit_gemm as _conv
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
 from kernels.common.conv_args import MUL24_REDUCTION_LIMIT, ConvArgs
 from kernels.conv.aot_jobs import _probe_problem as _aot_probe_problem
-from kernels.conv.aot_jobs import job_for_identity
+from kernels.conv.aot_jobs import job_for_identity, spec_launch_block_size
 from kernels.conv.direct_aot_jobs import DirectCaps, direct_job_for_identity
 from kernels.conv.direct_aot_jobs import probe_problem as _direct_probe_problem
 from kernels.conv.direct_variants import (
@@ -137,7 +147,7 @@ class Gfx950ConvFwdSpec:
     Direct construction is useful for descriptor hydration; the AOT-instance
     packaging and validators below use it for the build problem, while the
     kernel takes the runtime problem as AOT arguments (see
-    :func:`gfx950_conv_fwd_aot_serves`).
+    :func:`conv_fwd_aot_serves`).
 
     The trailing family fields default to the implicit-GEMM family, so a spec
     serialized before they existed hydrates and hashes unchanged.
@@ -484,13 +494,19 @@ def _direct_error(spec: Gfx950ConvFwdSpec) -> str:
 
 
 def _base_spec_for_request(
-    request: ConvGroupedRequest, *, decline_grouped_pointwise: bool = True
+    request: ConvGroupedRequest,
+    *,
+    decline_grouped_pointwise: bool = True,
+    arches: tuple[str, ...] = (_ARCH,),
 ) -> Gfx950ConvFwdSpec:
-    """The request's problem fields under the packaged contract's request checks."""
+    """The request's problem fields under the packaged contract's request checks;
+    the request's arch must be one of ``arches``."""
     if not isinstance(request, ConvGroupedRequest):
         raise TypeError("expected ConvGroupedRequest")
-    if request.arch != _ARCH:
-        raise ValueError(f"this adapter requires arch={_ARCH}")
+    if request.arch not in arches:
+        if arches == (_ARCH,):
+            raise ValueError(f"this adapter requires arch={_ARCH}")
+        raise ValueError(f"this adapter requires arch in {list(arches)}")
     if request.direction != "fwd":
         raise ValueError("the packaged contract supports forward convolution only")
     if any(
@@ -561,7 +577,7 @@ def _direct_serves(
     checks. It must pass the direct guard and have the compiled filter, stride and
     padding (the guard already pins dilation to 1).
 
-    Used by :func:`gfx950_conv_fwd_aot_serves`.
+    Used by :func:`conv_fwd_aot_serves`.
     """
     error = _direct_error(runtime)
     if error:
@@ -848,6 +864,227 @@ AOT_REFUSED_SPLIT_REDUCE = (
     "launch of a split-C non-grouped instance, not a convolution"
 )
 
+# The gfx1250 direct variants: rocKE's wave32 WMMA forward pipelines, the
+# Toeplitz WMMA depthwise kernel, and the four VALU depthwise kernels of gfx950.
+#: DwFwdWmmaSpec: Toeplitz WMMA depthwise (one-hot weights x 8 channels).
+DIRECT_VARIANT_DW_WMMA = "dw_wmma"
+#: DirectFwdWmmaSpec: dense and grouped WMMA + TDM forward.
+DIRECT_VARIANT_WMMA = "wmma"
+#: The tiny-channel WMMA forms: C <= 4 stems and K <= 8 layers.
+DIRECT_VARIANT_SMALLC_WMMA = "smallc_wmma"
+DIRECT_VARIANT_SMALLK_WMMA = "smallk_wmma"
+#: FwdGstreamWmmaSpec: grouped WMMA forward for 8..64 channels per group.
+DIRECT_VARIANT_GSTREAM_WMMA = "gstream_wmma"
+#: DirectFwdTapOuterSpec: large dilations, taps as shifted 1x1 GEMMs.
+DIRECT_VARIANT_TAPOUTER_WMMA = "tapouter_wmma"
+#: Each forward algorithm of gfx1250's direct sweep the packaged launch runs,
+#: and the ``direct_variant`` an instance of it carries.
+GFX1250_DIRECT_ALGORITHMS = {
+    "direct_depthwise": DIRECT_VARIANT_STD,
+    "direct_depthwise_spatial": DIRECT_VARIANT_SPATIAL,
+    "direct_depthwise_tiled": DIRECT_VARIANT_TILED,
+    "direct_depthwise_col": DIRECT_VARIANT_COL,
+    "direct_dw_fwd_wmma": DIRECT_VARIANT_DW_WMMA,
+    "direct_fwd_wmma": DIRECT_VARIANT_WMMA,
+    "direct_fwd_smallc_wmma": DIRECT_VARIANT_SMALLC_WMMA,
+    "direct_fwd_smallk_wmma": DIRECT_VARIANT_SMALLK_WMMA,
+    "direct_fwd_gstream_wmma": DIRECT_VARIANT_GSTREAM_WMMA,
+    "direct_fwd_tapouter_wmma": DIRECT_VARIANT_TAPOUTER_WMMA,
+}
+#: The WMMA pipelines' common knobs. ``tile_n`` (output-channel tiles per wave)
+#: is carried in ``tile_n_out``, so it cannot be the implicit-GEMM ``tile_n``.
+_GFX1250_WMMA_KNOBS = {
+    "ck": "ck",
+    "stages": "stages",
+    "tile_w": "tile_w",
+    "tiles_k": "tiles_k",
+    "tiles_p": "tiles_p",
+    "waves_k": "waves_k",
+    "waves_p": "waves_p",
+    "prefetch": "prefetch",
+}
+#: Per gfx1250 variant, the direct identity's knob keys and the instance field
+#: each one is carried in. Every one is optional: rocKE's grid writes a knob
+#: only where the kernel uses it off its default, so the field holds its
+#: absent value (:data:`_GFX1250_ABSENT`) where the identity leaves it out.
+GFX1250_DIRECT_KNOBS = {
+    DIRECT_VARIANT_STD: {
+        "block_w": "block_w",
+        "block_waves": "block_waves",
+        "cpl": "cpl",
+    },
+    DIRECT_VARIANT_SPATIAL: {"block_waves": "block_waves"},
+    DIRECT_VARIANT_TILED: {
+        "block_w": "block_w",
+        "block_h": "block_h",
+        "block_waves": "block_waves",
+        "cpl": "cpl",
+        "unroll_rows": "unroll_rows",
+    },
+    DIRECT_VARIANT_COL: {
+        "block_w": "block_w",
+        "block_h": "block_h",
+        "block_waves": "block_waves",
+        "max_live_f32": "max_live_f32",
+    },
+    DIRECT_VARIANT_DW_WMMA: {
+        "block_h": "block_h",
+        "block_waves": "block_waves",
+        "prefetch_rows": "prefetch_rows",
+        "w_fold": "w_fold",
+    },
+    DIRECT_VARIANT_WMMA: {
+        **_GFX1250_WMMA_KNOBS,
+        "tile_n": "tile_n_out",
+        "pack_groups": "pack_groups",
+        "pp_group": "pp_group",
+        "sched": "sched",
+        "split_barrier": "split_barrier",
+        "wave_epilogue": "wave_epilogue",
+        "phase_split": "phase_split",
+        "row_ring": "row_ring",
+        "tap_ring": "tap_ring",
+        "pingpong": "pingpong",
+        "tap_reuse": "tap_reuse",
+        "tap_shift": "tap_shift",
+        "strided_view": "strided_view",
+        "fold_n": "fold_n",
+        "poly_view": "poly_view",
+    },
+    DIRECT_VARIANT_GSTREAM_WMMA: {
+        **_GFX1250_WMMA_KNOBS,
+        "walk": "walk",
+        "pf_depth": "pf_depth",
+        "sched": "sched",
+        "phase_split": "phase_split",
+    },
+    DIRECT_VARIANT_TAPOUTER_WMMA: {**_GFX1250_WMMA_KNOBS, "tdm_split": "tdm_split"},
+    DIRECT_VARIANT_SMALLC_WMMA: {
+        **_GFX1250_WMMA_KNOBS,
+        "out_h": "out_h",
+        "out_w": "out_w",
+        "tiles_per_block": "tiles_per_block",
+        "tdm_store": "tdm_store",
+    },
+    DIRECT_VARIANT_SMALLK_WMMA: {
+        **_GFX1250_WMMA_KNOBS,
+        "out_h": "out_h",
+        "out_w": "out_w",
+        "tiles_c": "tiles_c",
+        "waves_c": "waves_c",
+        "sched": "sched",
+    },
+}
+#: The gfx1250 fields rocKE spells as a bool: 0 when the identity leaves the
+#: knob out, 1 for ``True`` and 2 for ``False`` (an identity may state it), so
+#: no value of the field stands for two identities. (gfx950's ``unroll_rows``,
+#: which its grid always states, is 0 or 1.)
+_GFX1250_BOOL_FIELDS = (
+    "unroll_rows",
+    "prefetch",
+    "split_barrier",
+    "wave_epilogue",
+    "phase_split",
+    "row_ring",
+    "tap_ring",
+    "pingpong",
+    "tap_reuse",
+    "tap_shift",
+    "strided_view",
+    "fold_n",
+    "poly_view",
+    "tdm_store",
+)
+_GFX1250_TRUE, _GFX1250_FALSE = 1, 2
+_GFX1250_STRING_FIELDS = ("sched",)
+#: Fields the gfx1250 spec adds to the gfx950 one; the value each holds where
+#: its variant does not use it or the identity leaves the knob out (the KMD
+#: default). Every rocKE int knob of these pipelines is positive, so 0 is free
+#: to mean absent.
+_GFX1250_KNOB_DEFAULTS = {
+    "stages": 0,
+    "tiles_k": 0,
+    "tiles_p": 0,
+    "waves_k": 0,
+    "waves_p": 0,
+    "prefetch": 0,
+    "tile_n_out": 0,
+    "pack_groups": 0,
+    "pp_group": 0,
+    "sched": "none",
+    "split_barrier": 0,
+    "wave_epilogue": 0,
+    "phase_split": 0,
+    "row_ring": 0,
+    "tap_ring": 0,
+    "pingpong": 0,
+    "tap_reuse": 0,
+    "tap_shift": 0,
+    "strided_view": 0,
+    "fold_n": 0,
+    "poly_view": 0,
+    "walk": 0,
+    "pf_depth": 0,
+    "tdm_split": 0,
+    "out_h": 0,
+    "out_w": 0,
+    "tiles_per_block": 0,
+    "tdm_store": 0,
+    "tiles_c": 0,
+    "waves_c": 0,
+    "cpl": 0,
+    "max_live_f32": 0,
+}
+#: A gfx1250 field's absent value: the gfx950 knobs it shares keep their
+#: :data:`_AOT_FAMILY_DEFAULTS` value (``unroll_rows`` 0, the bools' absent value).
+_GFX1250_ABSENT = {
+    "block_w": 0,
+    "block_waves": 0,
+    **_AOT_DIRECT_KNOB_DEFAULTS,
+    **_GFX1250_KNOB_DEFAULTS,
+}
+#: The gfx1250 variants whose compiled ``cpg``/``kpg`` the identity records
+#: (0 where that count is runtime); the VALU and Toeplitz depthwise kernels
+#: compile 1 and 1.
+_GFX1250_RECORDED_CAPS = (
+    DIRECT_VARIANT_WMMA,
+    DIRECT_VARIANT_SMALLC_WMMA,
+    DIRECT_VARIANT_SMALLK_WMMA,
+    DIRECT_VARIANT_GSTREAM_WMMA,
+    DIRECT_VARIANT_TAPOUTER_WMMA,
+)
+
+
+@dataclass(frozen=True)
+class ConvFwdAotTarget:
+    """One architecture's AOT-instance engine and what its sweeps build.
+
+    ``direct_algorithms`` maps each direct algorithm with a packaged launch to
+    the ``direct_variant`` its instances carry, ``direct_knobs`` each variant's
+    knob keys to their fields. The direct contract itself lives in each target's
+    spec class: gfx950's is square filters, one stride and one padding, required
+    knobs, and std and spatial instances on the exact-shape engine's direct rule
+    (:func:`_direct_serves`); on gfx1250 the WMMA pipelines compile per-axis
+    geometry, every knob is optional (:data:`_GFX1250_ABSENT`), and every direct
+    instance serves what the dispatcher admits.
+    """
+
+    arch: str
+    engine: str
+    wave_size: int
+    llvm_flavor: str
+    pipelines: tuple[str, ...]
+    direct_algorithms: dict
+    direct_knobs: dict
+    #: The value each field after the implicit-GEMM ones holds where unused.
+    family_defaults: dict
+
+    def algorithm_of_variant(self, variant: str) -> str:
+        for algorithm, value in self.direct_algorithms.items():
+            if value == variant:
+                return algorithm
+        raise KeyError(variant)
+
 
 def aot_direct_grouped_block_h() -> int:
     """The row tile a grouped direct instance compiles: DirectConvSpec's default,
@@ -855,12 +1092,22 @@ def aot_direct_grouped_block_h() -> int:
     return _direct.DirectConvSpec.__dataclass_fields__["block_h"].default
 
 
-def aot_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
+def aot_direct_fields_from_knobs(variant: str, knobs: dict, arch: str = _ARCH) -> dict:
     """The instance fields a direct identity's ``knobs`` of ``variant`` set.
 
     Raises ``ValueError`` when the keys are not exactly the variant's (its
-    optional knobs may be absent), or a constant knob holds another value.
+    optional knobs may be absent), or a constant knob holds another value. On
+    gfx1250 every knob is optional (:func:`_gfx1250_fields_from_knobs`).
     """
+    spec_class = SPEC_CLASSES.get(arch)
+    if spec_class is None:
+        raise ValueError(f"no forward AOT engine for arch {arch!r}")
+    return spec_class.fields_from_knobs(variant, knobs)
+
+
+def _gfx950_fields_from_knobs(variant: str, knobs: dict) -> dict:
+    """gfx950's knob contract: exactly the variant's keys (see
+    :func:`aot_direct_fields_from_knobs`)."""
     mapping = AOT_DIRECT_KNOBS[variant]
     constants = _AOT_DIRECT_CONSTANT_KNOBS.get(variant, {})
     optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(variant, {})
@@ -888,6 +1135,78 @@ def aot_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
     return values
 
 
+def _gfx1250_fields_from_knobs(variant: str, knobs: dict) -> dict:
+    """The fields a gfx1250 direct identity's ``knobs`` set: every field of the
+    variant, at its absent value (:data:`_GFX1250_ABSENT`) for a knob the
+    identity leaves out. ``ValueError`` for a key the variant does not take or a
+    value of the wrong kind (a bool, a non-empty string, a positive int)."""
+    mapping = GFX1250_DIRECT_KNOBS[variant]
+    unknown = sorted(set(knobs) - set(mapping))
+    if unknown:
+        raise ValueError(
+            f"knobs {unknown} are not the {variant} variant's (it takes {sorted(mapping)})"
+        )
+    values = {name: _GFX1250_ABSENT[name] for name in mapping.values()}
+    for key, value in knobs.items():
+        field_name = mapping[key]
+        if field_name in _GFX1250_BOOL_FIELDS:
+            if type(value) is not bool:
+                raise ValueError(f"knob {key} must be a bool, got {value!r}")
+            value = _GFX1250_TRUE if value else _GFX1250_FALSE
+        elif field_name in _GFX1250_STRING_FIELDS:
+            if type(value) is not str or value in ("", _GFX1250_ABSENT[field_name]):
+                raise ValueError(f"knob {key} must be a name, got {value!r}")
+        elif type(value) is not int or not 0 < value <= _INT32_MAX:
+            raise ValueError(f"knob {key} must be a positive integer, got {value!r}")
+        values[field_name] = value
+    return values
+
+
+def _gfx950_recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+    """The channel counts (and row tile) gfx950's grouped and windowed variants record."""
+    if variant == DIRECT_VARIANT_GROUPED:
+        return {
+            "cpg": identity.cpg,
+            "kpg": identity.kpg,
+            "block_h": aot_direct_grouped_block_h(),
+        }
+    if variant == DIRECT_VARIANT_WIN:
+        return {"cpg": identity.cpg, "kpg": identity.kpg}
+    return {}
+
+
+def _gfx1250_recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+    """The channel counts gfx1250's capped variants record."""
+    if variant in _GFX1250_RECORDED_CAPS:
+        return {"cpg": identity.cpg, "kpg": identity.kpg}
+    return {}
+
+
+TARGETS = {
+    "gfx950": ConvFwdAotTarget(
+        arch="gfx950",
+        engine="hipkernel:Gfx950ConvFwdAot",
+        wave_size=_DIRECT_WAVE_SIZE,
+        llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR,
+        pipelines=_AOT_PIPELINES,
+        direct_algorithms=AOT_DIRECT_ALGORITHMS,
+        direct_knobs=AOT_DIRECT_KNOBS,
+        family_defaults=_AOT_FAMILY_DEFAULTS,
+    ),
+    "gfx1250": ConvFwdAotTarget(
+        arch="gfx1250",
+        engine="hipkernel:Gfx1250ConvFwdAot",
+        wave_size=32,
+        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx1250"],
+        # wavelet adds load waves to the workgroup (spec_launch_block_size).
+        pipelines=("mem", "wavelet"),
+        direct_algorithms=GFX1250_DIRECT_ALGORITHMS,
+        direct_knobs=GFX1250_DIRECT_KNOBS,
+        family_defaults={**_AOT_FAMILY_DEFAULTS, **_GFX1250_KNOB_DEFAULTS},
+    ),
+}
+
+
 def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
     """The direct fields of the instance packaged from a forward direct identity.
 
@@ -895,13 +1214,16 @@ def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
     dilation and channel counts, and ``knobs`` JSON. Raises ``ValueError`` for
     an algorithm without a packaged launch or knobs that are not exactly its
     variant's. The caller states the placeholders (``_AOT_DIRECT_PLACEHOLDERS``)
-    and checks the result with :func:`supports_gfx950_conv_fwd_aot`.
+    and checks the result with :func:`supports_conv_fwd_aot`.
     """
-    variant = AOT_DIRECT_ALGORITHMS.get(identity.algorithm)
+    target = TARGETS.get(identity.arch)
+    if target is None:
+        raise ValueError(f"no forward AOT engine for arch {identity.arch!r}")
+    variant = target.direct_algorithms.get(identity.algorithm)
     if variant is None:
         raise ValueError(
             f"direct algorithm {identity.algorithm!r} has no packaged launch "
-            f"(supported: {sorted(AOT_DIRECT_ALGORITHMS)})"
+            f"(supported: {sorted(target.direct_algorithms)})"
         )
     knobs = json.loads(identity.knobs) if identity.knobs else {}
     fields_ = {
@@ -916,19 +1238,15 @@ def aot_direct_instance_fields(identity: KernelIdentity) -> dict:
         "dilation_h": identity.dilation_h,
         "dilation_w": identity.dilation_w,
     }
-    fields_.update(aot_direct_fields_from_knobs(variant, knobs))
-    if variant == DIRECT_VARIANT_GROUPED:
-        fields_.update(
-            cpg=identity.cpg, kpg=identity.kpg, block_h=aot_direct_grouped_block_h()
-        )
-    elif variant == DIRECT_VARIANT_WIN:
-        fields_.update(cpg=identity.cpg, kpg=identity.kpg)
+    fields_.update(aot_direct_fields_from_knobs(variant, knobs, target.arch))
+    fields_.update(SPEC_CLASSES[identity.arch].recorded_fields(identity, variant))
     return fields_
 
 
 @dataclass(frozen=True)
-class Gfx950ConvFwdAotSpec:
-    """One shape-generic forward instance.
+class ConvFwdAotSpec:
+    """One shape-generic forward instance of :attr:`TARGET`'s engine; use
+    :class:`Gfx950ConvFwdAotSpec` or :class:`Gfx1250ConvFwdAotSpec`.
 
     Booleans are ints (0/1) so every field is a descriptor ``int`` or
     ``string``. ``async_chunk_a``/``async_chunk_b`` are the async loaders'
@@ -949,6 +1267,33 @@ class Gfx950ConvFwdAotSpec:
     :meth:`identity` is the rocKE ``KernelIdentity`` the fields spell; a
     packageable instance's ``instance_id`` is its ``stable_hash()``.
     """
+
+    TARGET: ClassVar[ConvFwdAotTarget]
+
+    @staticmethod
+    def fields_from_knobs(variant: str, knobs: dict) -> dict:
+        """The instance fields a direct identity's ``knobs`` of ``variant`` set (the
+        target's knob contract; see :func:`aot_direct_fields_from_knobs`)."""
+        raise NotImplementedError
+
+    @staticmethod
+    def recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+        """The extra channel counts (and row tile) the target's variants record."""
+        raise NotImplementedError
+
+    def _target_direct_knobs(self) -> dict:
+        """The target's spelling of :meth:`direct_knobs`."""
+        raise NotImplementedError
+
+    def direct_contract_error(self) -> str:
+        """The target's direct-instance contract beyond the shared checks; "" when
+        accepted. Each target's spec class states its own rule set."""
+        raise NotImplementedError
+
+    def direct_serves(self, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
+        """Whether a direct instance computes ``problem``, which already passed the
+        problem checks. Each target's spec class states its own rule set."""
+        raise NotImplementedError
 
     dtype: str
     tile_m: int
@@ -1028,7 +1373,7 @@ class Gfx950ConvFwdAotSpec:
         """rocKE's ``KernelIdentity.algorithm`` of this instance."""
         if not self.is_direct:
             return "implicit_gemm"
-        return _AOT_ALGORITHM_OF_VARIANT[self.direct_variant]
+        return self.TARGET.algorithm_of_variant(self.direct_variant)
 
     def identity(self) -> KernelIdentity:
         """The rocKE identity these fields spell.
@@ -1042,10 +1387,14 @@ class Gfx950ConvFwdAotSpec:
     def _direct_caps(self) -> tuple[int, int]:
         """``(cpg, kpg)`` the direct kernel compiles: 1 for the depthwise variants,
         the recorded counts for grouped, 0 (runtime) for non-grouped and
-        grouped-halo."""
+        grouped-halo; gfx1250's WMMA pipelines record theirs, 0 where runtime."""
         if self.direct_variant in _AOT_HALO_VARIANTS:
             return 0, 0
-        if self.direct_variant in (DIRECT_VARIANT_GROUPED, DIRECT_VARIANT_WIN):
+        if self.direct_variant in (
+            DIRECT_VARIANT_GROUPED,
+            DIRECT_VARIANT_WIN,
+            *_GFX1250_RECORDED_CAPS,
+        ):
             return self.cpg, self.kpg
         return 1, 1
 
@@ -1059,6 +1408,10 @@ class Gfx950ConvFwdAotSpec:
             kpg=kpg,
             dil_h=self.dilation_h,
             dil_w=self.dilation_w,
+            # A non-square filter or per-axis padding (gfx1250's per-axis rows),
+            # spelled as rocKE's direct sweep does.
+            kw=0 if self.filter_w == self.filter_h else self.filter_w,
+            pad_w=-1 if self.pad_w == self.pad_h else self.pad_w,
         )
 
     def probe_problem(self) -> _conv.ConvProblem | _direct.DirectConvProblem:
@@ -1135,30 +1488,16 @@ class Gfx950ConvFwdAotSpec:
         :func:`aot_direct_fields_from_knobs`."""
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct knobs")
-        knobs = {}
-        for key, field_name in AOT_DIRECT_KNOBS[self.direct_variant].items():
-            value = getattr(self, field_name)
-            if field_name in _AOT_DIRECT_BOOL_KNOBS:
-                value = bool(value)
-            elif (
-                field_name in _AOT_DIRECT_NONE_KNOBS
-                and value == _AOT_DIRECT_NONE_KNOBS[field_name]
-            ):
-                value = None
-            knobs[key] = value
-        knobs.update(_AOT_DIRECT_CONSTANT_KNOBS.get(self.direct_variant, {}))
-        optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(self.direct_variant, {})
-        for key, (field_name, default) in optional.items():
-            if getattr(self, field_name) != default:
-                knobs[key] = getattr(self, field_name)
-        return knobs
+        return self._target_direct_knobs()
 
     def rocke_direct_spec(self, problem: _direct.DirectConvProblem):
         """The rocKE kernel spec of this direct instance on ``problem``, as
         ``direct_variants.make_direct_spec`` makes it; only the name differs."""
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct spec")
-        spec = make_direct_spec(self.algorithm, problem, self.direct_knobs())
+        spec = make_direct_spec(
+            self.algorithm, problem, self.direct_knobs(), self.wave_size
+        )
         return replace(spec, name=self.kernel_symbol_prefix())
 
     def to_direct_spec(self):
@@ -1172,15 +1511,18 @@ class Gfx950ConvFwdAotSpec:
         probe = _direct_probe_problem(
             DirectCaps(**job.caps), self.dtype, self.algorithm, job.spec_kwargs
         )
-        spec = make_direct_spec(self.algorithm, probe, job.spec_kwargs)
+        spec = make_direct_spec(
+            self.algorithm, probe, job.spec_kwargs, job.identity.wave_size
+        )
         return replace(spec, name=self.kernel_symbol_prefix())
 
     def kernel_symbol_prefix(self) -> str:
         # rocKE appends the probe problem and tuning to this; the instance id
         # alone already makes the symbol unique.
+        arch = self.TARGET.arch
         if self.is_direct:
-            return f"hkp_conv_fwd_dw_aot_gfx950_{self.instance_id[:24]}"
-        return f"hkp_conv_fwd_aot_gfx950_{self.instance_id[:24]}"
+            return f"hkp_conv_fwd_dw_aot_{arch}_{self.instance_id[:24]}"
+        return f"hkp_conv_fwd_aot_{arch}_{self.instance_id[:24]}"
 
     def kernel_name(self) -> str:
         if self.is_direct:
@@ -1217,6 +1559,9 @@ class Gfx950ConvFwdAotSpec:
         if self.is_direct:
             spec = self.rocke_direct_spec(self.probe_problem())
             return spec.threads_per_block, 1, 1
+        if self.pipeline == "wavelet":
+            # Wavelet appends load waves to the workgroup; the spec knows how many.
+            return spec_launch_block_size(self.to_instance_spec()), 1, 1
         return self.warp_m * self.warp_n * self.wave_size, 1, 1
 
     def request(self, problem: Gfx950ConvFwdSpec) -> ConvGroupedRequest:
@@ -1230,7 +1575,7 @@ class Gfx950ConvFwdAotSpec:
             Wi=problem.Wi,
             Y=problem.Y,
             X=problem.X,
-            arch=_ARCH,
+            arch=self.TARGET.arch,
             G=problem.groups,
             stride_h=problem.sH,
             stride_w=problem.sW,
@@ -1273,6 +1618,17 @@ class Gfx950ConvFwdAotSpec:
             step = replace(step, buffers=(step.buffers[0], step.buffers[1], "ws_split"))
         return step
 
+    def launch_plan(self, problem: Gfx950ConvFwdSpec):
+        """The dispatcher's launch plan of this instance on ``problem`` with the
+        packaged launch's steps: :meth:`launch_step`, and a split-C instance's
+        fold (:meth:`split_reduce_step`). The plan's workspaces are the
+        dispatcher's (none for a single-step instance)."""
+        plan = launch_plan_for(self.request(problem), _aot_instance(self))
+        steps = (self.launch_step(problem),)
+        if self.is_split_c:
+            steps += (self.split_reduce_step(problem),)
+        return replace(plan, steps=steps)
+
     def split_reduce_spec(self):
         """The ``direct_split_reduce`` spec a split-C instance launches second:
         rocKE's fold of ``split_c`` fp32 slabs, as the direct sweep builds it for
@@ -1284,7 +1640,9 @@ class Gfx950ConvFwdAotSpec:
             self.probe_problem(),
             {"split_c": self.split_c},
         )
-        return replace(spec, name=f"hkp_conv_fwd_sr_aot_gfx950_{self.instance_id[:24]}")
+        return replace(
+            spec, name=f"hkp_conv_fwd_sr_aot_{self.TARGET.arch}_{self.instance_id[:24]}"
+        )
 
     def split_workspace_bytes(self, problem: Gfx950ConvFwdSpec) -> int:
         """Bytes of the fp32 ``[split_c, N, Ho, Wo, K]`` workspace a split-C
@@ -1337,10 +1695,141 @@ class Gfx950ConvFwdAotSpec:
         )
 
 
-def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
+@dataclass(frozen=True)
+class Gfx950ConvFwdAotSpec(ConvFwdAotSpec):
+    """One shape-generic instance of ``hipkernel:Gfx950ConvFwdAot``."""
+
+    TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx950"]
+
+    @staticmethod
+    def fields_from_knobs(variant: str, knobs: dict) -> dict:
+        return _gfx950_fields_from_knobs(variant, knobs)
+
+    @staticmethod
+    def recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+        return _gfx950_recorded_fields(identity, variant)
+
+    def _target_direct_knobs(self) -> dict:
+        """gfx950: every knob the variant states, constants included."""
+        knobs = {}
+        for key, field_name in AOT_DIRECT_KNOBS[self.direct_variant].items():
+            value = getattr(self, field_name)
+            if field_name in _AOT_DIRECT_BOOL_KNOBS:
+                value = bool(value)
+            elif (
+                field_name in _AOT_DIRECT_NONE_KNOBS
+                and value == _AOT_DIRECT_NONE_KNOBS[field_name]
+            ):
+                value = None
+            knobs[key] = value
+        knobs.update(_AOT_DIRECT_CONSTANT_KNOBS.get(self.direct_variant, {}))
+        optional = _AOT_DIRECT_OPTIONAL_KNOBS.get(self.direct_variant, {})
+        for key, (field_name, default) in optional.items():
+            if getattr(self, field_name) != default:
+                knobs[key] = getattr(self, field_name)
+        return knobs
+
+    def direct_contract_error(self) -> str:
+        """gfx950's direct contract (:func:`_gfx950_direct_contract_error`)."""
+        return _gfx950_direct_contract_error(self)
+
+    def direct_serves(self, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
+        """std and spatial instances serve on the exact-shape engine's direct rule
+        (:func:`_direct_serves`); the others on :func:`_gfx950_direct_launch_serves`."""
+        if self.direct_variant in _DIRECT_VARIANTS:
+            caps = conv_fwd_aot_capabilities(self)
+            return _direct_serves(caps, self.runtime_spec(problem))
+        return _gfx950_direct_launch_serves(self, problem)
+
+
+@dataclass(frozen=True)
+class Gfx1250ConvFwdAotSpec(ConvFwdAotSpec):
+    """One shape-generic instance of ``hipkernel:Gfx1250ConvFwdAot``: the gfx950
+    fields, then the knobs of gfx1250's direct pipelines
+    (:data:`GFX1250_DIRECT_KNOBS`), each at its absent value
+    (:data:`_GFX1250_KNOB_DEFAULTS`) where the instance's variant does not use it
+    or its identity leaves it out. A bool knob is 0 when left out, 1 for true and
+    2 for false (:data:`_GFX1250_BOOL_FIELDS`); that includes ``unroll_rows``,
+    which the gfx1250 tiled grid may leave out, where gfx950 states it as 0 or 1.
+    """
+
+    TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx1250"]
+
+    @staticmethod
+    def fields_from_knobs(variant: str, knobs: dict) -> dict:
+        return _gfx1250_fields_from_knobs(variant, knobs)
+
+    @staticmethod
+    def recorded_fields(identity: KernelIdentity, variant: str) -> dict:
+        return _gfx1250_recorded_fields(identity, variant)
+
+    def _target_direct_knobs(self) -> dict:
+        """gfx1250: each knob its variant uses that is not absent."""
+        return {
+            key: (
+                getattr(self, name) == _GFX1250_TRUE
+                if name in _GFX1250_BOOL_FIELDS
+                else getattr(self, name)
+            )
+            for key, name in GFX1250_DIRECT_KNOBS[self.direct_variant].items()
+            if getattr(self, name) != _GFX1250_ABSENT[name]
+        }
+
+    def direct_contract_error(self) -> str:
+        """gfx1250's direct contract: every knob is optional
+        (:func:`_gfx1250_direct_knob_error`)."""
+        return _gfx1250_direct_knob_error(self)
+
+    def direct_serves(self, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
+        """Every direct instance serves what the dispatcher admits, within the launch
+        bounds (:func:`_gfx1250_direct_launch_serves`)."""
+        return _gfx1250_direct_launch_serves(self, problem)
+
+    stages: int = 0
+    tiles_k: int = 0
+    tiles_p: int = 0
+    waves_k: int = 0
+    waves_p: int = 0
+    prefetch: int = 0
+    tile_n_out: int = 0
+    pack_groups: int = 0
+    pp_group: int = 0
+    sched: str = "none"
+    split_barrier: int = 0
+    wave_epilogue: int = 0
+    phase_split: int = 0
+    row_ring: int = 0
+    tap_ring: int = 0
+    pingpong: int = 0
+    tap_reuse: int = 0
+    tap_shift: int = 0
+    strided_view: int = 0
+    fold_n: int = 0
+    poly_view: int = 0
+    walk: int = 0
+    pf_depth: int = 0
+    tdm_split: int = 0
+    out_h: int = 0
+    out_w: int = 0
+    tiles_per_block: int = 0
+    tdm_store: int = 0
+    tiles_c: int = 0
+    waves_c: int = 0
+    cpl: int = 0
+    max_live_f32: int = 0
+
+
+#: Each target's spec class, by arch.
+SPEC_CLASSES: dict[str, type[ConvFwdAotSpec]] = {
+    "gfx950": Gfx950ConvFwdAotSpec,
+    "gfx1250": Gfx1250ConvFwdAotSpec,
+}
+
+
+def _aot_identity_fields(spec: ConvFwdAotSpec) -> dict:
     """The ``KernelIdentity`` fields ``spec`` spells, all but ``llvm_flavor``."""
     values = dict(
-        arch=_ARCH,
+        arch=spec.TARGET.arch,
         dtype_a=spec.dtype,
         dtype_b=spec.dtype,
         dtype_d=spec.dtype,
@@ -1377,17 +1866,17 @@ def _aot_identity_fields(spec: Gfx950ConvFwdAotSpec) -> dict:
 
 
 @functools.lru_cache(maxsize=1 << 18)
-def _aot_identity(spec: Gfx950ConvFwdAotSpec) -> KernelIdentity:
+def _aot_identity(spec: ConvFwdAotSpec) -> KernelIdentity:
     values = _aot_identity_fields(spec)
     for flavor in LLVM_FLAVORS:
         identity = KernelIdentity(**values, llvm_flavor=flavor)
         if identity.stable_hash() == spec.instance_id:
             return identity
-    return KernelIdentity(**values, llvm_flavor=_AOT_DEFAULT_LLVM_FLAVOR)
+    return KernelIdentity(**values, llvm_flavor=spec.TARGET.llvm_flavor)
 
 
 @functools.lru_cache(maxsize=1 << 14)
-def _aot_sweep_job(spec: Gfx950ConvFwdAotSpec):
+def _aot_sweep_job(spec: ConvFwdAotSpec):
     """The job rocKE's sweep builds ``spec``'s identity from; ``ValueError`` when
     the sweep does not build it."""
     identity = spec.identity()
@@ -1397,12 +1886,12 @@ def _aot_sweep_job(spec: Gfx950ConvFwdAotSpec):
         return job_for_identity(identity)
     except LookupError as exc:
         raise ValueError(
-            f"not an identity of rocKE's {_ARCH} forward AOT sweep: {exc}"
+            f"not an identity of rocKE's {spec.TARGET.arch} forward AOT sweep: {exc}"
         ) from None
 
 
 @functools.lru_cache(maxsize=1 << 14)
-def _aot_instance(spec: Gfx950ConvFwdAotSpec) -> ConvInstanceSpec:
+def _aot_instance(spec: ConvFwdAotSpec) -> ConvInstanceSpec:
     """``spec`` as the dispatcher's instance, for its launch plan."""
     identity = spec.identity()
     return ConvInstanceSpec(
@@ -1412,7 +1901,9 @@ def _aot_instance(spec: Gfx950ConvFwdAotSpec) -> ConvInstanceSpec:
 
 def aot_direct_problem(problem: Gfx950ConvFwdSpec) -> _direct.DirectConvProblem:
     """``problem`` as rocKE's direct kernels see it, dilation included. They take
-    one stride and one padding, so the caller has checked sH == sW and pH == pW."""
+    one stride, so the caller has checked sH == sW; the column padding is
+    ``pad_w`` where it differs (gfx1250's per-axis rows; gfx950's kernels take one
+    padding, which the caller has checked)."""
     return _direct.DirectConvProblem(
         N=problem.N,
         H=problem.Hi,
@@ -1427,10 +1918,69 @@ def aot_direct_problem(problem: Gfx950ConvFwdSpec) -> _direct.DirectConvProblem:
         dtype=problem.dtype,
         dil_h=problem.dH,
         dil_w=problem.dW,
+        pad_w=-1 if problem.pW == problem.pH else problem.pW,
     )
 
 
-def _aot_direct_knob_error(spec: Gfx950ConvFwdAotSpec) -> str:
+#: The family fields that are no knob: the family, the variant and the compiled
+#: geometry.
+_AOT_GEOMETRY_FIELDS = (
+    "kernel_family",
+    "direct_variant",
+    "filter_h",
+    "filter_w",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+    "dilation_h",
+    "dilation_w",
+)
+
+
+def _family_defaults(target: ConvFwdAotTarget) -> dict:
+    """The value each field after the implicit-GEMM ones holds where an instance
+    does not use it: :data:`_AOT_FAMILY_DEFAULTS`, and on gfx1250 also its
+    pipelines' knobs at their absent values."""
+    return target.family_defaults
+
+
+def _gfx1250_direct_knob_error(spec: ConvFwdAotSpec) -> str:
+    """The knobs of a gfx1250 direct instance: each one its variant uses has its
+    kind (a bool 0, 1 or 2, a name, an int with 0 for absent; ``cpg``/``kpg``
+    0 where runtime), every other one holds its absent value; "" when accepted.
+    rocKE's validators and sweep decide the values further."""
+    variant = spec.direct_variant
+    used = set(GFX1250_DIRECT_KNOBS[variant].values())
+    if variant in _GFX1250_RECORDED_CAPS:
+        used |= {"cpg", "kpg"}
+    for name, default in _family_defaults(spec.TARGET).items():
+        if name in _AOT_GEOMETRY_FIELDS:
+            continue
+        value = getattr(spec, name)
+        if name not in used:
+            if value != default or type(value) is not type(default):
+                return (
+                    f"the {variant} direct variant does not use {name}; it must be "
+                    f"{default!r}, got {value!r}"
+                )
+            continue
+        if name in _GFX1250_BOOL_FIELDS:
+            if type(value) is not int or value not in (
+                0,
+                _GFX1250_TRUE,
+                _GFX1250_FALSE,
+            ):
+                return f"{name} must be 0 (unset), 1 (true) or 2 (false)"
+        elif name in _GFX1250_STRING_FIELDS:
+            if type(value) is not str or not value:
+                return f"{name} must be a name"
+        elif type(value) is not int or not 0 <= value <= _INT32_MAX:
+            return f"{name} must be 0 (unset) or a positive signed 32-bit integer"
+    return ""
+
+
+def _aot_direct_knob_error(spec: ConvFwdAotSpec) -> str:
     """The block knobs of a direct instance other than std or spatial: each used
     one has its type and a sane range (rocKE's validators bound it further), every
     other one holds its ``_AOT_FAMILY_DEFAULTS`` value; "" when accepted."""
@@ -1481,40 +2031,9 @@ def _aot_direct_knob_error(spec: Gfx950ConvFwdAotSpec) -> str:
     return ""
 
 
-def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
-    """The direct instance contract, before rocKE's validators; "" when accepted.
-
-    rocKE's direct kernels compile one stride and one padding (they read
-    neither ``sW`` nor ``pW``), and the direct sweep builds square filters
-    only; the per-axis fields state that without a convention. Only the
-    non-grouped and grouped-halo kernels compute a dilated convolution.
-    """
-    for name, value in _AOT_DIRECT_PLACEHOLDERS.items():
-        actual = getattr(spec, name)
-        if actual != value or type(actual) is not type(value):
-            return f"a direct depthwise instance must set {name} to {value!r}, got {actual!r}"
-    if spec.wave_size != _DIRECT_WAVE_SIZE:
-        return f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
-    if spec.direct_variant not in _AOT_DIRECT_VARIANTS:
-        return (
-            f"direct_variant must be one of {_AOT_DIRECT_VARIANTS} for a direct "
-            f"instance, got {spec.direct_variant!r}"
-        )
-    for name in (
-        "filter_h",
-        "filter_w",
-        "stride_h",
-        "stride_w",
-        "dilation_h",
-        "dilation_w",
-    ):
-        value = getattr(spec, name)
-        if type(value) is not int or not 0 < value <= _INT32_MAX:
-            return f"{name} must be a positive signed 32-bit integer"
-    for name in ("pad_h", "pad_w"):
-        value = getattr(spec, name)
-        if type(value) is not int or not 0 <= value <= _INT32_MAX:
-            return f"{name} must be a nonnegative signed 32-bit integer"
+def _gfx950_direct_contract_error(spec: ConvFwdAotSpec) -> str:
+    """gfx950's direct contract after the checks both targets share: one stride and
+    one padding, square filters, required knobs; "" when accepted."""
     if spec.direct_variant not in _AOT_HALO_VARIANTS and (
         spec.dilation_h != 1 or spec.dilation_w != 1
     ):
@@ -1545,7 +2064,48 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
     return ""
 
 
-def _aot_sweep_error(spec: Gfx950ConvFwdAotSpec) -> tuple[bool, str]:
+def _aot_direct_error(spec: ConvFwdAotSpec) -> str:
+    """The direct instance contract, before rocKE's validators; "" when accepted.
+
+    On gfx950, rocKE's direct kernels compile one stride and one padding (they
+    read neither ``sW`` nor ``pW``), and the direct sweep builds square filters
+    only; the per-axis fields state that without a convention. Only the
+    non-grouped and grouped-halo kernels compute a dilated convolution. gfx1250's
+    WMMA pipelines compile per-axis filters, padding and dilation, which rocKE's
+    validators and sweep decide; only the knob fields are checked here.
+    """
+    for name, value in _AOT_DIRECT_PLACEHOLDERS.items():
+        actual = getattr(spec, name)
+        if actual != value or type(actual) is not type(value):
+            return f"a direct depthwise instance must set {name} to {value!r}, got {actual!r}"
+    target = spec.TARGET
+    if spec.wave_size != target.wave_size:
+        return f"wave_size must be {target.wave_size} on {target.arch}"
+    variants = tuple(target.direct_algorithms.values())
+    if spec.direct_variant not in variants:
+        return (
+            f"direct_variant must be one of {variants} for a direct "
+            f"instance, got {spec.direct_variant!r}"
+        )
+    for name in (
+        "filter_h",
+        "filter_w",
+        "stride_h",
+        "stride_w",
+        "dilation_h",
+        "dilation_w",
+    ):
+        value = getattr(spec, name)
+        if type(value) is not int or not 0 < value <= _INT32_MAX:
+            return f"{name} must be a positive signed 32-bit integer"
+    for name in ("pad_h", "pad_w"):
+        value = getattr(spec, name)
+        if type(value) is not int or not 0 <= value <= _INT32_MAX:
+            return f"{name} must be a nonnegative signed 32-bit integer"
+    return spec.direct_contract_error()
+
+
+def _aot_sweep_error(spec: ConvFwdAotSpec) -> tuple[bool, str]:
     """``spec`` must be an identity of rocKE's sweep, and ``instance_id`` its hash."""
     try:
         _aot_sweep_job(spec)
@@ -1559,20 +2119,27 @@ def _aot_sweep_error(spec: Gfx950ConvFwdAotSpec) -> tuple[bool, str]:
     return True, "ok"
 
 
-def supports_gfx950_conv_fwd_aot(
-    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+def supports_conv_fwd_aot(
+    spec: ConvFwdAotSpec, *, arch: str | None = None
 ) -> tuple[bool, str]:
-    """Whether ``spec`` is a packageable instance.
+    """Whether ``spec`` is a packageable instance of its target's engine
+    (``arch``, when given, must be that target's).
 
     The packaged contract's field checks, then rocKE's validators on the
     sweep's probe, then rocKE's sweep itself: the fields must spell an identity
     the sweep builds (``job_for_identity`` / ``direct_job_for_identity``), whose
     ``stable_hash()`` is ``instance_id``.
     """
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
-    if not isinstance(spec, Gfx950ConvFwdAotSpec):
-        return False, "expected Gfx950ConvFwdAotSpec"
+    if not isinstance(spec, ConvFwdAotSpec) or type(spec) is ConvFwdAotSpec:
+        return (
+            False,
+            f"expected one of {sorted(c.__name__ for c in SPEC_CLASSES.values())}",
+        )
+    target = spec.TARGET
+    if arch is None:
+        arch = target.arch
+    if arch != target.arch:
+        return False, f"this adapter requires arch={target.arch}, got {arch!r}"
     if spec.dtype not in ("fp16", "bf16"):
         return False, "the packaged forward contract supports fp16 or bf16 only"
     if spec.layout != "NHWC":
@@ -1605,7 +2172,7 @@ def supports_gfx950_conv_fwd_aot(
         if not ok:
             return False, why
         return _aot_sweep_error(spec)
-    for name, default in _AOT_FAMILY_DEFAULTS.items():
+    for name, default in _family_defaults(target).items():
         value = getattr(spec, name)
         if name == "group_merge":
             if type(value) is not int or not 1 <= value <= _MAX_GRID_DIM:
@@ -1629,11 +2196,11 @@ def supports_gfx950_conv_fwd_aot(
         value = getattr(spec, name)
         if type(value) is not int or not 0 < value <= _INT32_MAX:
             return False, f"{name} must be a positive signed 32-bit integer"
-    if spec.wave_size != _DIRECT_WAVE_SIZE:
-        return False, f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
-    if spec.pipeline not in _AOT_PIPELINES:
+    if spec.wave_size != target.wave_size:
+        return False, f"wave_size must be {target.wave_size} on {target.arch}"
+    if spec.pipeline not in target.pipelines:
         return False, (
-            f"the packaged forward contract supports pipelines {_AOT_PIPELINES}, "
+            f"the packaged forward contract supports pipelines {target.pipelines}, "
             f"got {spec.pipeline!r}"
         )
     if spec.epilogue not in ("default", "cshuffle"):
@@ -1659,7 +2226,13 @@ def supports_gfx950_conv_fwd_aot(
     if not spec.async_dma and (spec.async_chunk_a or spec.async_chunk_b):
         return False, "async_chunk_a/async_chunk_b are 0 without async_dma"
     try:
-        instance = spec._field_instance_spec()
+        # A wavelet spec's load waves come from the sweep's job, so it is the
+        # job's spec (which raises for an identity the sweep does not build).
+        instance = (
+            spec.to_instance_spec()
+            if spec.pipeline == "wavelet"
+            else spec._field_instance_spec()
+        )
         instance.validate()
         ok, reason = _conv.is_valid_spec_for_problem(
             instance, instance.problem, arch=arch
@@ -1679,28 +2252,52 @@ def supports_gfx950_conv_fwd_aot(
     return _aot_sweep_error(spec)
 
 
-def gfx950_conv_fwd_aot_spec_for_identity(
+def supports_gfx950_conv_fwd_aot(
+    spec: ConvFwdAotSpec, *, arch: str = "gfx950"
+) -> tuple[bool, str]:
+    """hkp_pack's predicate for :func:`build_gfx950_conv_fwd_aot`:
+    :func:`supports_conv_fwd_aot` of a :class:`Gfx950ConvFwdAotSpec`."""
+    if not isinstance(spec, Gfx950ConvFwdAotSpec):
+        return False, "expected Gfx950ConvFwdAotSpec"
+    return supports_conv_fwd_aot(spec, arch=arch)
+
+
+def supports_gfx1250_conv_fwd_aot(
+    spec: ConvFwdAotSpec, *, arch: str = "gfx1250"
+) -> tuple[bool, str]:
+    """hkp_pack's predicate for :func:`build_gfx1250_conv_fwd_aot`:
+    :func:`supports_conv_fwd_aot` of a :class:`Gfx1250ConvFwdAotSpec`."""
+    if not isinstance(spec, Gfx1250ConvFwdAotSpec):
+        return False, "expected Gfx1250ConvFwdAotSpec"
+    return supports_conv_fwd_aot(spec, arch=arch)
+
+
+def conv_fwd_aot_spec_for_identity(
     identity: KernelIdentity,
-) -> tuple[Gfx950ConvFwdAotSpec | None, str]:
+) -> tuple[ConvFwdAotSpec | None, str]:
     """``(instance, "")`` for a packageable rocKE identity, else ``(None, reason)``.
 
-    Packageable: a gfx950 forward identity in fp16 or bf16 of rocKE's sweeps,
-    with no feature the packaged launch does not model. Refused, each with its
-    reason:
+    Packageable: a forward identity of a :data:`TARGETS` arch in fp16 or bf16 of
+    rocKE's sweeps, with no feature the packaged launch does not model; the
+    instance is that target's spec class. Refused, each with its reason:
 
     * implicit GEMM with any identity field off its ``KernelIdentity`` default
       that the instance does not carry (``AOT_IMPLICIT_GEMM_CARRIED`` and
       ``group_merge``);
-    * the direct algorithms without a packaged launch: any one outside
-      ``AOT_DIRECT_ALGORITHMS``, and ``direct_split_reduce``, which ships as the
+    * the direct algorithms without a packaged launch: any one outside the
+      target's ``direct_algorithms``, and ``direct_split_reduce``, which ships as the
       second launch of each split-C instance (``AOT_REFUSED_SPLIT_REDUCE``);
-    * anything :func:`supports_gfx950_conv_fwd_aot` declines.
+    * anything :func:`supports_conv_fwd_aot` declines.
     """
     if not isinstance(identity, KernelIdentity):
         return None, "expected a KernelIdentity"
     kind = f"({identity.arch}, {identity.direction}, {identity.algorithm})"
-    if identity.arch != _ARCH:
-        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
+    spec_class = SPEC_CLASSES.get(identity.arch)
+    if spec_class is None:
+        return (
+            None,
+            f"no forward AOT engine for {kind}: arch is not one of {sorted(TARGETS)}",
+        )
     if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
         return None, "mixed operand dtypes are not packaged"
     if identity.direction == "direct_fwd_helper":
@@ -1716,7 +2313,7 @@ def gfx950_conv_fwd_aot_spec_for_identity(
             direct_job_for_identity(identity)
         except (KeyError, LookupError, TypeError, ValueError) as exc:
             return None, str(exc)
-        spec = Gfx950ConvFwdAotSpec(
+        spec = spec_class(
             dtype=identity.dtype_a,
             wave_size=identity.wave_size,
             instance_id=identity.stable_hash(),
@@ -1739,15 +2336,17 @@ def gfx950_conv_fwd_aot_spec_for_identity(
         values = {name: getattr(identity, name) for name in AOT_IMPLICIT_GEMM_CARRIED}
         for name in ("unroll_k", "async_dma", "grouped"):
             values[name] = int(values[name])
-        spec = Gfx950ConvFwdAotSpec(
+        spec = spec_class(
             dtype=identity.dtype_a,
             instance_id=identity.stable_hash(),
             group_merge=identity.group_merge,
             **values,
         )
     else:
-        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
-    ok, reason = supports_gfx950_conv_fwd_aot(spec)
+        return None, (
+            f"not a {identity.arch} forward implicit-GEMM or direct identity {kind}"
+        )
+    ok, reason = supports_conv_fwd_aot(spec)
     if not ok:
         return None, reason
     if spec.identity() != identity:
@@ -1757,8 +2356,18 @@ def gfx950_conv_fwd_aot_spec_for_identity(
     return spec, ""
 
 
-def gfx950_conv_fwd_aot_capabilities(
-    spec: Gfx950ConvFwdAotSpec,
+def gfx950_conv_fwd_aot_spec_for_identity(
+    identity: KernelIdentity,
+) -> tuple[Gfx950ConvFwdAotSpec | None, str]:
+    """:func:`conv_fwd_aot_spec_for_identity` for a gfx950 identity only."""
+    if isinstance(identity, KernelIdentity) and identity.arch != _ARCH:
+        kind = f"({identity.arch}, {identity.direction}, {identity.algorithm})"
+        return None, f"not a {_ARCH} forward implicit-GEMM or direct identity {kind}"
+    return conv_fwd_aot_spec_for_identity(identity)
+
+
+def conv_fwd_aot_capabilities(
+    spec: ConvFwdAotSpec,
 ) -> Gfx950ConvFwdCapabilities:
     """What instance ``spec`` bakes in, as a :class:`Gfx950ConvFwdCapabilities`.
 
@@ -1787,9 +2396,7 @@ def gfx950_conv_fwd_aot_capabilities(
     )
 
 
-def _aot_admits(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
-) -> tuple[bool, str]:
+def _aot_admits(spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec) -> tuple[bool, str]:
     """rocKE's grouped-convolution dispatcher's admission of ``spec``'s identity
     for ``problem``: ``identity_supports_problem``, and for a direct identity the
     per-shape re-validation of its knobs (``direct_spec_for_problem``)."""
@@ -1797,10 +2404,35 @@ def _aot_admits(
     return (True, "ok") if ok else (False, why)
 
 
-def _aot_direct_serves(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+def _gfx1250_direct_launch_serves(
+    spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
-    """Whether a direct instance other than std or spatial computes ``problem``,
+    """Whether a gfx1250 direct instance computes ``problem``, which already passed
+    the problem checks: the admission alone decides what the problem must have (the
+    WMMA pipelines bake per-axis geometry and some channel counts), then the launch
+    has to fit: grid y and z 65535, grid x a 32-bit dispatch (its WMMA kernels walk
+    output columns or tiles along x).
+    """
+    ok, why = _aot_admits(spec, problem)
+    if not ok:
+        return False, why
+    step = spec.launch_step(problem)
+    grid = step.grid
+    if (
+        grid[0] > _AOT_NONGROUPED_MAX_GRID_X
+        or grid[0] * step.block[0] > _AOT_MAX_DISPATCH_ITEMS
+    ):
+        return False, f"direct grid x = {grid[0]} does not fit one dispatch"
+    for axis, extent in zip("yz", grid[1:]):
+        if extent > _MAX_GRID_DIM:
+            return False, f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
+    return True, "ok"
+
+
+def _gfx950_direct_launch_serves(
+    spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """Whether a gfx950 direct instance other than std or spatial computes ``problem``,
     which already passed the problem checks.
 
     rocKE's dispatcher admission (:func:`_aot_admits`), after naming the first
@@ -1810,6 +2442,7 @@ def _aot_direct_serves(
     rocKE's ``direct_plans`` offers them. Then the launch has to fit: every grid
     axis 65535, the flat grid of the non-grouped and grouped-halo kernels (and
     of a split-C instance's fold) a 32-bit dispatch.
+
     """
     variant = spec.direct_variant
     if problem.sH != problem.sW or problem.pH != problem.pW:
@@ -1859,7 +2492,7 @@ def _aot_direct_serves(
     return True, "ok"
 
 
-def gfx950_conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | None:
+def conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | None:
     """Images per launch of a non-grouped or grouped-halo kernel on ``problem``, or
     None when one launch serves it: rocKE's ``direct_kernel_sweep._batch_chunks``.
 
@@ -1883,8 +2516,8 @@ def gfx950_conv_fwd_aot_batch_chunks(problem: Gfx950ConvFwdSpec) -> list[int] | 
     return [base + (i < extra) for i in range(n_steps)]
 
 
-def gfx950_conv_fwd_aot_serves(
-    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+def conv_fwd_aot_serves(
+    spec: ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
 ) -> tuple[bool, str]:
     """Whether instance ``spec`` computes ``problem`` (only its problem fields).
 
@@ -1899,11 +2532,11 @@ def gfx950_conv_fwd_aot_serves(
     (:func:`_direct_serves`) on the instance's compiled filter, stride and
     padding, which the native pack shares with the exact-shape engine. The
     other direct variants: rocKE's dispatcher admission plus the packaged
-    launch bounds (:func:`_aot_direct_serves`). Batch, image and group count
+    launch bounds (``spec.direct_serves``). Batch, image and group count
     are kernel arguments, and for non-grouped the channel counts too.
 
     A non-grouped or grouped-halo instance runs a batch rocKE splits in pieces
-    (:func:`gfx950_conv_fwd_aot_batch_chunks`) one launch per chunk, as
+    (:func:`conv_fwd_aot_batch_chunks`) one launch per chunk, as
     ``direct_kernel_sweep._batch_split_plan`` does: it serves when it serves each
     chunk as a problem of its own, and a split-C one, whose workspace would span
     the whole batch, never does. Every other instance needs the whole problem in
@@ -1914,12 +2547,12 @@ def gfx950_conv_fwd_aot_serves(
         and spec.direct_variant in _AOT_HALO_VARIANTS
         and problem.dtype == spec.dtype
     ):
-        chunks = gfx950_conv_fwd_aot_batch_chunks(problem)
+        chunks = conv_fwd_aot_batch_chunks(problem)
         if chunks is not None:
             if spec.is_split_c:
                 return False, "a batch-split launch does not take split-C kernels"
             for images in sorted(set(chunks)):
-                ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, N=images))
+                ok, why = conv_fwd_aot_serves(spec, replace(problem, N=images))
                 if not ok:
                     return False, f"batch chunk of {images} image(s): {why}"
             return True, "ok"
@@ -1929,21 +2562,18 @@ def gfx950_conv_fwd_aot_serves(
     if problem.dtype != spec.dtype:
         return False, f"dtype {problem.dtype} != instance dtype {spec.dtype}"
     if spec.is_direct:
-        if spec.direct_variant in _DIRECT_VARIANTS:
-            caps = gfx950_conv_fwd_aot_capabilities(spec)
-            return _direct_serves(caps, spec.runtime_spec(problem))
-        return _aot_direct_serves(spec, problem)
+        return spec.direct_serves(problem)
     if problem.Y * problem.X * (problem.C // problem.groups) >= MUL24_REDUCTION_LIMIT:
         return False, "the reduction extent Y*X*C/groups must stay below 2**23"
     return _aot_admits(spec, problem)
 
 
-def gfx950_conv_fwd_aot_runtime_candidates(
-    problem: Gfx950ConvFwdSpec, specs: Sequence[Gfx950ConvFwdAotSpec]
-) -> list[Gfx950ConvFwdAotSpec]:
+def conv_fwd_aot_runtime_candidates(
+    problem: Gfx950ConvFwdSpec, specs: Sequence[ConvFwdAotSpec]
+) -> list[ConvFwdAotSpec]:
     """The instances of ``specs`` hipkernel:Gfx950ConvFwdAot selects for ``problem``.
 
-    "Serves" (:func:`gfx950_conv_fwd_aot_serves`) is what a binary can compute;
+    "Serves" (:func:`conv_fwd_aot_serves`) is what a binary can compute;
     this is what the engine then runs, so it depends on the whole catalog ``specs``,
     not on one instance. The problem's widest combination is the widest load width
     C/groups admits and the widest store width K/groups admits (the largest of 8, 4,
@@ -1959,7 +2589,7 @@ def gfx950_conv_fwd_aot_runtime_candidates(
     ``conv::widestVectorSelection`` is the same policy; the result keeps the order
     of ``specs``.
     """
-    serving = [spec for spec in specs if gfx950_conv_fwd_aot_serves(spec, problem)[0]]
+    serving = [spec for spec in specs if conv_fwd_aot_serves(spec, problem)[0]]
     load = _widest_vector_width(problem.C // problem.groups)
     store = _widest_vector_width(problem.K // problem.groups)
     widest = [
@@ -1985,22 +2615,43 @@ def _widest_vector_width(channels: int) -> int:
     return next(width for width in (8, 4, 2, 1) if channels % width == 0)
 
 
-def build_gfx950_conv_fwd_aot(
-    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
-) -> KernelDef:
-    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance.
+def build_conv_fwd_aot(spec: ConvFwdAotSpec, *, arch: str | None = None) -> KernelDef:
+    """The kernel of an instance of either target.
 
     Builds what rocKE's AOT build builds for the identity: ``kernel_for_job`` of
     its sweep job for implicit GEMM, ``direct_kernel_for_job`` (the variant's
     builder, ``select_direct_kernel_builder``) for a direct one. Only the kernel
     symbol differs.
     """
-    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    ok, reason = supports_conv_fwd_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT forward instance: {reason}")
+    arch = spec.TARGET.arch
     if spec.is_direct:
         return select_direct_kernel_builder(spec.algorithm, spec.to_direct_spec(), arch)
     return _conv.build_implicit_gemm_conv(spec.to_instance_spec(), arch=arch)
+
+
+def build_gfx950_conv_fwd_aot(
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for a
+    ``hipkernel:Gfx950ConvFwdAot`` instance (:func:`build_conv_fwd_aot`)."""
+    ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid packaged AOT forward instance: {reason}")
+    return build_conv_fwd_aot(spec, arch=arch)
+
+
+def build_gfx1250_conv_fwd_aot(
+    spec: Gfx1250ConvFwdAotSpec, *, arch: str = "gfx1250"
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for a
+    ``hipkernel:Gfx1250ConvFwdAot`` instance (:func:`build_conv_fwd_aot`)."""
+    ok, reason = supports_gfx1250_conv_fwd_aot(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid packaged AOT forward instance: {reason}")
+    return build_conv_fwd_aot(spec, arch=arch)
 
 
 def supports_gfx950_conv_fwd_aot_split_reduce(
@@ -2033,17 +2684,41 @@ def build_gfx950_conv_fwd_aot_split_reduce(
     )
 
 
-def gfx950_conv_fwd_aot_problem_for_request(
+def conv_fwd_aot_problem_for_request(
     request: ConvGroupedRequest,
 ) -> Gfx950ConvFwdSpec:
-    """The problem hipkernel:Gfx950ConvFwdAot would match for ``request``.
+    """The problem the AOT engine of ``request.arch`` would match for ``request``.
 
     Instances are chosen per problem by capability, so there is no single spec
     to resolve; this is the graph side of that match (the profile's
     ``dispatch``). Raises ``ValueError`` outside the graph contract, which
     unlike the exact-shape one includes grouped pointwise.
     """
+    return _base_spec_for_request(
+        request,
+        decline_grouped_pointwise=False,
+        arches=tuple(TARGETS),
+    )
+
+
+def gfx950_conv_fwd_aot_problem_for_request(
+    request: ConvGroupedRequest,
+) -> Gfx950ConvFwdSpec:
+    """The problem hipkernel:Gfx950ConvFwdAot would match for ``request``."""
     return _base_spec_for_request(request, decline_grouped_pointwise=False)
+
+
+def supports_conv_fwd_aot_problem(
+    problem: Gfx950ConvFwdSpec, *, arch: str = _ARCH
+) -> tuple[bool, str]:
+    """The graph contract of the AOT engine of ``arch`` (the profile's
+    predicate); the same for both targets."""
+    if arch not in TARGETS:
+        return False, f"this adapter requires arch in {sorted(TARGETS)}, got {arch!r}"
+    if not isinstance(problem, Gfx950ConvFwdSpec):
+        return False, "expected Gfx950ConvFwdSpec"
+    error = _problem_error(problem, decline_grouped_pointwise=False)
+    return (False, error) if error else (True, "ok")
 
 
 def supports_gfx950_conv_fwd_aot_problem(
@@ -2052,7 +2727,4 @@ def supports_gfx950_conv_fwd_aot_problem(
     """The graph contract of hipkernel:Gfx950ConvFwdAot (the profile's predicate)."""
     if arch != _ARCH:
         return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
-    if not isinstance(problem, Gfx950ConvFwdSpec):
-        return False, "expected Gfx950ConvFwdSpec"
-    error = _problem_error(problem, decline_grouped_pointwise=False)
-    return (False, error) if error else (True, "ok")
+    return supports_conv_fwd_aot_problem(problem, arch=arch)

@@ -197,6 +197,22 @@ static void test_pad_w_below_minus_one_refused(void)
           reason);
 }
 
+/* pad_w = -1 is the "same as PAD" sentinel the Python DirectConvProblem sends
+ * for every square-padded problem (all of gfx950's): the C++ consumers read the
+ * column padding through rocke_direct_conv_problem_pad_w and must see PAD. */
+static void test_pad_w_sentinel_reads_as_pad(void)
+{
+    rocke_direct_conv_problem_t p = dw_problem(3, 3, 2, -1);
+
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 2, "pad_w=-1 did not read as PAD");
+    p.pad_w = 2;
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 2, "pad_w equal to PAD changed");
+    p.pad_w = 0;
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 0, "an explicit pad_w=0 read as PAD");
+    p.pad_w = 1;
+    CHECK(rocke_direct_conv_problem_pad_w(&p) == 1, "an explicit pad_w was not honoured");
+}
+
 /* The row-streaming kernel offsets columns by PAD: it takes one padding. */
 static void test_stream_refuses_per_axis_padding(void)
 {
@@ -569,6 +585,42 @@ static void test_dw_fwd_build_null_arch(void)
           "dw fwd NULL arch must build the gfx1250 kernel");
     free(ll_null);
     free(ll_1250);
+}
+
+/* grid Z = ceil(N / w_fold) * ceil(Ho / block_h): exactly 65535 is admitted,
+ * 65536 is refused (test_direct_dw_fwd_wmma.py test_grid_z_boundary). */
+static void test_dw_fwd_grid_z_boundary(void)
+{
+    rocke_direct_dw_fwd_wmma_spec_t s = rocke_direct_dw_fwd_wmma_spec_default();
+    char reason[ERR_CAP];
+
+    s.problem = dw_problem(3, 3, 1, -1);
+    s.problem.N = 1;
+    s.problem.W = 1;
+    s.problem.groups = 8;
+    s.block_h = 1;
+    s.w_fold = 1;
+    s.problem.H = 65535;
+    CHECK(rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 65535 refused: %s",
+          reason);
+    s.problem.H = 65536;
+    CHECK(!rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 65536 accepted");
+    CHECK(strstr(reason, "grid Z") != NULL, "reason names grid Z: %s", reason);
+
+    /* Each factor counts: ceil(6 / 2) * ceil(43690 / 2) = 65535, and one more output row
+     * gives 3 * 21846 = 65538. */
+    s.problem.N = 6;
+    s.w_fold = 2;
+    s.block_h = 2;
+    s.problem.H = 43690;
+    CHECK(rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 3 * 21845 refused: %s",
+          reason);
+    s.problem.H = 43691;
+    CHECK(!rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 3 * 21846 accepted");
 }
 
 static void test_toeplitz_wmma_refusals(void)
@@ -1179,6 +1231,7 @@ int main(void)
     test_py_str_repr();
     test_stream_lower_name_overflow();
     test_pad_w_below_minus_one_refused();
+    test_pad_w_sentinel_reads_as_pad();
     test_stream_refuses_per_axis_padding();
     test_tiled_dgrad_name_carries_per_axis_padding();
     test_tiled_dgrad_refuses_cpl();
@@ -1186,6 +1239,7 @@ int main(void)
     test_stem_wmma_kernels_refuse_per_axis_padding();
     test_toeplitz_wmma_refusals();
     test_dw_fwd_build_null_arch();
+    test_dw_fwd_grid_z_boundary();
     test_fwd_wmma_strided_view_refusals();
     test_fwd_wmma_poly_view_refusals();
     test_fwd_wmma_padded_poly_view_chunk();

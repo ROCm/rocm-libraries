@@ -158,6 +158,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_GFX1250_CONV_DGRAD_AOT=1
         )
     endif()
+    # The gfx1250 forward-convolution AOT-instance engine, gated like the dgrad one; it
+    # GTEST_SKIPs off gfx1250.
+    hkp_product_offers_engine(_hkp_gfx1250_conv_fwd_aot_bundle "hipkernel:Gfx1250ConvFwdAot")
+    if(_hkp_gfx1250_conv_fwd_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx1250ConvFwd.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX1250_CONV_FWD_AOT=1
+        )
+    endif()
     # The FlyDSL SDPA engines end to end through the frontend Graph API (Graph::sdpa needs
     # HIPDNN_ENABLE_SDPA; the source compiles empty without it).
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPDNN_ENABLE_SDPA)

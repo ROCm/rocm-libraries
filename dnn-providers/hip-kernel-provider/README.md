@@ -28,6 +28,7 @@ HipKernelEngine
     - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default). Data-type contract: [asm_kernels/README.md](src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#data-type-contract)
     - **HIP Flash2 engine** (`src/engines/hip_flash2_engine/`): Flash-Attention 2 V7 SDPA kernel using precompiled `.co` files for gfx942/gfx950 (FP16). Enabled via `ENABLE_HIP_FLASH2_ENGINE` (off by default)
     - **Packaged gfx950 convolution** (`hipkernel:Gfx950ConvFwdAot`): rocKE forward convolution with FP16/BF16 channels-last storage. See the [integration guide](docs/gfx950_conv_fwd/README.md) for catalog scope, packaging, and tests.
+    - **Packaged gfx1250 convolution** (`hipkernel:Gfx1250ConvFwdAot`): the gfx1250 sibling, rocKE's gfx1250 forward dispatcher list (WMMA direct, depthwise and implicit-GEMM kernels). See the [integration guide](docs/gfx1250_conv_fwd/README.md).
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces

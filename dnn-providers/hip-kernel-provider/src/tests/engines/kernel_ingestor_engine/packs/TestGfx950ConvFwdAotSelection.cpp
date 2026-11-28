@@ -15,7 +15,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdAotSelection.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvFwdAotSelection.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -30,7 +30,7 @@ namespace
 
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using namespace hipdnn_plugin_sdk::ingestor;
-namespace conv = hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd;
+namespace conv = hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 constexpr const char* AOT_GRAPH_MATCHER = "hipkernel.gfx950_conv_fwd_aot.graph_match";
@@ -104,7 +104,7 @@ const std::vector<AotSample>& aotSample()
 }
 
 /// A graph, as (N, C, K, Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW, groups), and the rows of
-/// aotSample() selected for it, in table order. gfx950_conv_fwd_aot_runtime_candidates
+/// aotSample() selected for it, in table order. conv_fwd_aot_runtime_candidates
 /// computes them, and test_make_conv_aot_config.py checks this table against it: keep
 /// one row per line.
 struct SelectionCase
