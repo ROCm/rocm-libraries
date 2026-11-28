@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -96,6 +96,55 @@ struct mtgp32_device_engine : ::rocrand_device::mtgp32_engine
         return o;
 #endif
     }
+
+    /// \brief Per-thread register copy of the block-uniform engine values used by every step.
+    ///
+    /// \p pos, \p mask, \p sh1 and \p sh2 are constant for the whole kernel, and \p offset
+    /// advances by the same amount in every thread. Keeping them in registers lets each step
+    /// start addressing the state immediately; during generation only the status array and
+    /// the parameter/tempering lookup tables are read from shared memory.
+    struct registers
+    {
+        unsigned int offset;
+        unsigned int pos;
+        unsigned int mask;
+        unsigned int sh1;
+        unsigned int sh2;
+    };
+
+    /// \brief Load the register copy from the engine. Call after the engine has been copied
+    ///   into shared memory and the block has been synchronized.
+    __forceinline__ __host__ __device__
+    registers load_registers() const
+    {
+        return registers{static_cast<unsigned int>(m_state.offset),
+                         pos_tbl,
+                         mask,
+                         sh1_tbl,
+                         sh2_tbl};
+    }
+
+    /// \brief Write the offset back. Every thread stores the same value, so no barrier is
+    ///   needed before a thread that called this reads \p m_state.offset (e.g. in copy()).
+    __forceinline__ __host__ __device__
+    void store_registers(const registers& regs)
+    {
+        m_state.offset = regs.offset;
+    }
+
+    /// \brief Device-only step using the register copy. All threads in the block produce one
+    ///   value and advance the state by blockDim.x values. A single barrier per step is
+    ///   sufficient because the status words read and written within one step do not overlap
+    ///   (see advance_offset() in rocrand_mtgp32.h).
+    __forceinline__ __device__
+    unsigned int next(registers& regs)
+    {
+        const unsigned int o
+            = next_thread(threadIdx.x, regs.offset, regs.pos, regs.mask, regs.sh1, regs.sh2);
+        __syncthreads();
+        regs.offset = (regs.offset + blockDim.x) & MTGP_MASK;
+        return o;
+    }
 };
 
 template<bool UseLDS, class T, class Distribution, unsigned int BlockSize>
@@ -103,7 +152,8 @@ __host__
 void generate(unsigned int (&input)[BlockSize][Distribution::input_width],
               T (&output)[BlockSize][Distribution::output_width],
               Distribution&         distribution,
-              mtgp32_device_engine& engine)
+              mtgp32_device_engine& engine,
+              mtgp32_device_engine::registers& /*regs*/)
 {
     for(unsigned int i = 0; i < Distribution::input_width; i++)
     {
@@ -127,12 +177,13 @@ template<bool UseLDS, class T, class Distribution>
 __forceinline__ __device__
 void generate(unsigned int (&input)[Distribution::input_width],
               T (&output)[Distribution::output_width],
-              Distribution&         distribution,
-              mtgp32_device_engine& engine)
+              Distribution&                    distribution,
+              mtgp32_device_engine&            engine,
+              mtgp32_device_engine::registers& regs)
 {
     for(unsigned int i = 0; i < Distribution::input_width; i++)
     {
-        input[i] = engine.next();
+        input[i] = engine.next(regs);
     }
 #ifdef __HIP_DEVICE_COMPILE__
     if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
@@ -276,6 +327,8 @@ struct generate_mtgp
 #endif
         mtgp32_device_engine engine;
         engine.copy(&engines[engine_id]);
+        // Block-uniform values kept in registers for the whole kernel (unused by the host path).
+        mtgp32_device_engine::registers regs = engine.load_registers();
 
 #ifdef __HIP_DEVICE_COMPILE__
         unsigned int input[input_width];
@@ -310,25 +363,28 @@ struct generate_mtgp
         // Generate and store all aligned vector multiples
         while(index < vec_n_down)
         {
-            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine);
+            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine, regs);
             save_vec_n(vec_data, output, index);
             index += stride;
         }
         // Generate and store all aligned vector multiples for which not all threads participate in storing
         if(index < vec_n_up)
         {
-            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine);
+            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine, regs);
             save_n(vec_data, output, index, vec_n);
             index += stride;
         }
         // Generate and store the remaining T that are not aligned to vec_type
         if(output_width > 1 && (head_size > 0 || tail_size > 0))
         {
-            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine);
+            ::rocrand_impl::host::generate<UseLDS>(input, output, distribution, engine, regs);
             save_head_tail(output, index, data, n, head_size, tail_size, vec_n_up);
         }
 
         // Save engine with its state
+#ifdef __HIP_DEVICE_COMPILE__
+        engine.store_registers(regs);
+#endif
         engines[engine_id].copy(&engine);
     }
 };

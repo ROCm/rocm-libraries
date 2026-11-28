@@ -250,6 +250,65 @@ float normal_distribution(unsigned long long int x)
     return v;
 }
 
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
+/// \brief Square root using the hardware instruction (v_sqrt_f32, about 1 ulp) instead of the
+///   correctly rounded, denormal-safe sequence that sqrtf() expands to by default.
+__forceinline__ __device__
+float fast_sqrtf(float x)
+{
+    #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_sqrtf)
+    return __builtin_amdgcn_sqrtf(x);
+    #else
+    return sqrtf(x);
+    #endif
+}
+
+/// \brief Natural logarithm using the hardware instruction (v_log_f32 computes log2, about 1 ulp)
+///   instead of the full-precision, denormal-safe sequence that logf() expands to by default.
+__forceinline__ __device__
+float fast_logf(float x)
+{
+    #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_logf)
+    return __builtin_amdgcn_logf(x) * 0.693147180559945f; // log2(x) * ln(2)
+    #else
+    return __logf(x);
+    #endif
+}
+#endif
+
+/// \brief Faster variant of normal_distribution(unsigned int), used only by the MTGP32 device API.
+///
+/// Computes the same formula as roc_f_erfinv(): Winitzki's closed-form approximation of erfinv
+/// (the constant 0.147), whose result differs from the exact erfinv by up to about 2e-3
+/// (relative). On AMD GPUs the logarithm and square roots use the hardware instructions
+/// (v_log_f32, v_sqrt_f32, about 1 ulp) instead of the full-precision, denormal-safe library
+/// sequences. Measured over all 2^32 inputs, results differ from normal_distribution() by at
+/// most a few ulp when |result| >= 1. Closer to 0 the difference grows, up to about 1e-3 when
+/// |result| < 0.01, because the formula subtracts two nearly equal numbers there and both
+/// versions are limited by float rounding.
+/// The denormal handling of the library functions and the NaN check of roc_f_erfinv() are not
+/// needed here: w = (1 - u)(1 + u) with |u| <= 1 is never NaN and is either 0 or >= 2^-23.
+/// The host API keeps using normal_distribution().
+__forceinline__ __device__ __host__
+float normal_distribution_fast(unsigned int x)
+{
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
+    const float p   = ::rocrand_device::detail::uniform_distribution(x);
+    const float u   = 2.0f * p - 1.0f;
+    const float sgn = (u < 0.0f) ? -1.0f : 1.0f;
+    const float w   = (1.0f - u) * (1.0f + u);
+    const float lnx = fast_logf(w);
+    const float tt1 = 2.0f / (ROCRAND_PI * 0.147f) + 0.5f * lnx;
+    const float tt2 = 1.0f / (0.147f) * lnx;
+    const float v   = ROCRAND_SQRT2 * (sgn * fast_sqrtf(-tt1 + fast_sqrtf(tt1 * tt1 - tt2)));
+    // w == 0 (u == +-1) gives lnx == -inf; return 0 in that case, as roc_f_erfinv() does,
+    // using a select instead of a branch.
+    return isinf(lnx) ? 0.0f : v;
+#else
+    return ::rocrand_device::detail::normal_distribution(x);
+#endif
+}
+
 __forceinline__ __device__ __host__
 float2 normal_distribution2(unsigned int v1, unsigned int v2)
 {
@@ -870,6 +929,7 @@ double2 rocrand_normal_double2(rocrand_state_xorwow* state)
  * generator in \p state, and increments position of the generator by one.
  * Used normal distribution has mean value equal to 0.0f, and standard deviation
  * equal to 1.0f.
+ * On AMD GPUs the inverse-CDF transform uses hardware \c log and \c sqrt instructions.
  *
  * \param state Pointer to a state to use
  *
@@ -878,7 +938,7 @@ double2 rocrand_normal_double2(rocrand_state_xorwow* state)
 __forceinline__ __device__
 float rocrand_normal(rocrand_state_mtgp32* state)
 {
-    return rocrand_device::detail::normal_distribution(rocrand(state));
+    return rocrand_device::detail::normal_distribution_fast(rocrand(state));
 }
 
 /**

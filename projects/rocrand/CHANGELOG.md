@@ -3,6 +3,18 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND a.b.c for ROCm x.y.z
+
+### Optimized
+
+* Improved MTGP32 performance by using one block-wide barrier per generation step instead of two. This affects both the host and device APIs, and the generated values are unchanged.
+* Improved MTGP32 host API performance by loading block-uniform generator parameters into registers once per kernel instead of reloading them from shared memory every step. The generated values are unchanged.
+* Improved the performance of the MTGP32 device API functions `rocrand_normal` and `rocrand_log_normal` (`float`) by using hardware `log`, `sqrt` and `exp` instructions in the inverse-CDF transform. The values returned by these functions differ slightly from previous versions; their statistical distribution is unchanged. The host API is not affected.
+
+### Resolved Issues
+
+* Fixed the MTGP32 `rocrand_normal` unit test in `test_rocrand_kernel_mtgp32.cpp`, which tested the `double` functions instead of the `float` ones, and tightened its tolerances.
+
 ## rocRAND 5.3.0 for ROCm 10.3.0
 
 ### Changed
