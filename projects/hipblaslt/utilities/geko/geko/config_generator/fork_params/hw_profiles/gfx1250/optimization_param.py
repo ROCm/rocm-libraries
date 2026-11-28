@@ -585,7 +585,7 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def compact_loop_store(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("CompactLoopStore", [False])
+        return self._make_param("CompactLoopStore", [True])
 
     @param
     def preload_kern_args(self, ctx: SizeContext) -> ForkParameter:
