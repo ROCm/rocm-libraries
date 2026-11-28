@@ -63,6 +63,31 @@ class PullRequestGateTest(unittest.TestCase):
     def test_pr_without_an_org_label_is_skipped(self):
         self.assertFalse(decide(pr_env(LABELS="[]"), self.CHANGE, RULES).run)
 
+    def test_draft_with_run_label_runs(self):
+        env = pr_env(DRAFT="true", LABELS='["organization: ROCm", "ci:run-on-draft"]')
+        self.assertTrue(decide(env, self.CHANGE, RULES).run)
+
+    def test_run_label_arriving_on_a_draft_runs(self):
+        env = pr_env(
+            ACTION="labeled",
+            LABEL="ci:run-on-draft",
+            DRAFT="true",
+            LABELS='["organization: ROCm", "ci:run-on-draft"]',
+        )
+        self.assertTrue(decide(env, self.CHANGE, RULES).run)
+
+    def test_run_label_arriving_on_a_ready_pr_is_skipped(self):
+        env = pr_env(
+            ACTION="labeled",
+            LABEL="ci:run-on-draft",
+            LABELS='["organization: ROCm", "ci:run-on-draft"]',
+        )
+        self.assertFalse(decide(env, self.CHANGE, RULES).run)
+
+    def test_draft_with_run_label_still_needs_the_org_label(self):
+        env = pr_env(DRAFT="true", LABELS='["ci:run-on-draft"]')
+        self.assertFalse(decide(env, self.CHANGE, RULES).run)
+
     def test_streamhpc_label_alone_is_skipped(self):
         env = pr_env(LABELS='["organization: streamhpc"]')
         self.assertFalse(decide(env, self.CHANGE, RULES).run)
