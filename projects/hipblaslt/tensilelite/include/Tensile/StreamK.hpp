@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -21,6 +22,7 @@
 
 namespace TensileLite
 {
+    struct AMDGPU;
     struct PersistentLaunchSettings;
 
     struct StreamK
@@ -131,33 +133,123 @@ namespace TensileLite
         struct Dynamic
         {
             /**
-             * Kernel arguments of a dynamic StreamK launch: whole tiles plus `split`
-             * parts per split tile. Tiles split only under the debug overrides
-             * (TENSILE_STREAMK_TILES / _SPLIT).
+             * Kernel arguments of a dynamic StreamK launch (DynamicWorkQueue, and
+             * Hybrid's dynamic sub-mode): totalItems work items, the whole tiles
+             * plus `tiles` tiles cut into `split` parts; grid is the workgroups the
+             * dynamic grid policy launches. A part is itersPerWI iterations, and on
+             * kernels with uneven parts the first parts take one K unit more (see
+             * partIterRange()).
              */
             struct KernelArguments
             {
                 uint32_t totalItems = 0;
+                // SKTiles: tiles cut into `split` parts.
                 uint32_t tiles      = 0;
                 uint32_t split      = 0;
                 uint32_t itersPerWI = 0;
                 uint32_t grid       = 0;
+
+                // Workspace partial-tile slots (and, on the flag-protocol kernels, ready
+                // flags) the kernel indexes: one per part of every split tile.
+                size_t partialSlots() const
+                {
+                    return size_t{tiles} * split;
+                }
             };
 
+            struct SplitInputs
+            {
+                // Problem shape. totalTiles is batch-inclusive, getNumTiles(sizeMapping, 1);
+                // itersPerTile is at least 1; kGranularity is skKGranularity().
+                size_t totalTiles   = 0;
+                size_t itersPerTile = 1;
+                size_t kGranularity = 1;
+
+                // Launch limits. maxGrid: workgroups the dynamic grid policy may launch
+                // (CUs x occupancy). splitCUs: CUs the split is sized for, origami's
+                // cu_count for the static grid. flagSlots: flag-region entries left
+                // after the per-XCD queue counters.
+                size_t maxGrid          = 0;
+                size_t splitCUs         = 0;
+                size_t flagSlots        = 0;
+                size_t workspaceBytes   = 0;
+                size_t partialTileBytes = 0;
+                // Threads per workgroup of the kernel. Nonzero holds splits to the
+                // tree-fixup bounds (StreamK::exceedsTreeFixupBounds), as grid
+                // selection does; 0 leaves them unchecked.
+                size_t threadsPerWorkGroup = 0;
+
+                // Policy. allowSplit false keeps every tile whole unless the debug
+                // overrides ask otherwise; uniform summation order ignores overrides
+                // that split only some tiles (see isRowUniform).
+                bool allowSplit            = true;
+                bool uniformSummationOrder = false;
+                // InternalArgsSupport::dynamicUnevenParts: the kernel decodes parts
+                // of unequal length, so a tile splits into exactly the parts asked
+                // for. Otherwise every part but the last is itersPerWI long, which
+                // can leave fewer parts.
+                bool unevenParts = false;
+
+                // Debug overrides: TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
+                int overrideTiles = -1;
+                int overrideSplit = -1;
+            };
+
+            // Fewest iterations per split part (origami MinItersPerCU, grid_k_split_aware).
+            static constexpr size_t MinItersPerWI = 8;
+
+            // Split factors origami grid_k_split_aware tries for tree reduction, largest first.
+            static constexpr size_t SplitFactors[] = {16, 12, 8, 6, 4, 3, 2};
+
             /**
-             * Compute the work items of a dynamic launch. Every field but `grid`
-             * is filled in; `grid` is left at 0 for the caller.
+             * Choose the dynamic StreamK work decomposition.
              *
-             * @param hardware      Source of the AMDGPU skTiles / skSplit overrides.
-             * @param tiles         Tile count the work queue covers.
-             * @param itersPerTile  Iterations per tile; clamped to at least 1.
-             * @param kGranularity  Iterations per indivisible K unit. Chunk
-             *                      boundaries are rounded onto that unit.
+             * Fewer tiles than splitCUs are each cut into the largest of
+             * SplitFactors parts with tiles*split <= splitCUs, at least
+             * MinItersPerWI iterations per part, partials that fit flagSlots and
+             * the workspace and a grid within the tree-fixup bounds; otherwise every
+             * tile is whole. The debug overrides replace this rule, within the same
+             * limits.
              */
-            TENSILELITEHOST_EXPORT static KernelArguments items(Hardware const& hardware,
-                                                                size_t          tiles,
-                                                                size_t          itersPerTile,
-                                                                size_t          kGranularity = 1);
+            TENSILELITEHOST_EXPORT static KernelArguments computeSplit(SplitInputs const& in);
+
+            /**
+             * Whether every tile of a dynamic StreamK decomposition is folded from the
+             * same ordered list of chunk lengths: all whole, or all split alike (one
+             * SKSplit and SKItersPerWI for every tile, summed in part order).
+             */
+            TENSILELITEHOST_EXPORT static bool isRowUniform(KernelArguments const& d,
+                                                            size_t                 totalTiles);
+
+            /**
+             * Iterations [start, end) of part `part` of a split tile, as the kernel
+             * decodes them. The tile is padded to whole K units of kGranularity
+             * iterations; the units left over after split * itersPerWI go one each
+             * to the first parts. The last part is clipped to itersPerTile. An
+             * equal-parts split leaves no units over, so each part starts at
+             * part * itersPerWI.
+             */
+            TENSILELITEHOST_EXPORT static Static::IterRange partIterRange(KernelArguments const& d,
+                                                                          size_t itersPerTile,
+                                                                          size_t kGranularity,
+                                                                          size_t part);
+
+            // Workgroups per CU the dynamic grid launches at most.
+            // TODO Verify this limit is best
+            static constexpr size_t MaxOccupancy = 3;
+
+            // Workgroups the dynamic grid launches at most: up to MaxOccupancy per
+            // CU, within TENSILE_STREAMK_MAX_CUS and a fixed grid
+            // (TENSILE_STREAMK_FIXED_GRID), so every split part keeps a workgroup of
+            // its own.
+            TENSILELITEHOST_EXPORT static size_t maxGrid(AMDGPU const& gpu, int cuOccupancy);
+
+            // Whether tiles that all split alike keep uniform summation order. The
+            // fixup adds the parts in part order from the raw accumulator bits;
+            // atomic partials add in arrival order, and 16-bit compute types under
+            // HPA widen the partial.
+            TENSILELITEHOST_EXPORT static bool
+                keepsSummationOrder(ContractionSolution const& solution);
 
             /**
              * Work item i sits in queue i % numQueues, and a workgroup pops only its
@@ -409,8 +501,8 @@ namespace TensileLite
             size_t idealWorkspaceBytes = 0;
             // available: problem.workspaceSize().
             size_t givenWorkspaceBytes = 0;
-            // recomputed: StreamK4 skTiles*skSplit slot count for the dynamic path (informational; does
-            // NOT feed the allocation guard, which is sized by grid).
+            // recomputed: skTiles*skSplit slot count for the dynamic path. When tiles are
+            // split this, not the grid, sizes the partials workspace.
             size_t dynamicPartialsSlots = 0;
             // available: StreamK::Dynamic::bakedQueueCount() -- baked per-XCD work-queue count (NUM_XCD),
             // 0 if unknown.
@@ -559,6 +651,30 @@ namespace TensileLite
         static inline bool straddlesTiles(size_t itersPerTile, size_t skGrid, size_t tiles)
         {
             return skGrid > 0 && itersPerTile > 1 && (tiles % skGrid) != 0;
+        }
+
+        // The tile count past which one workgroup per tile no longer fits the
+        // 32-bit work-item count: 2^24 tiles at 256 threads, 2^25 at 128 and
+        // 2^22 at 1024.
+        static inline size_t treeFixupMaxTiles(size_t threadsPerWorkGroup)
+        {
+            return (size_t{std::numeric_limits<uint32_t>::max()} + 1)
+                   / std::max(threadsPerWorkGroup, size_t{1});
+        }
+
+        // Whether a tree-reduction launch of `grid` workgroups over tiles x
+        // itersPerTile passes the bounds of the tree fixup, which divides with
+        // scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
+        // getPersistentGridImpl() then falls back to one workgroup per tile, and
+        // the dynamic split keeps every tile whole rather than split into parts
+        // that fallback would serialise.
+        static inline bool exceedsTreeFixupBounds(size_t tiles,
+                                                  size_t itersPerTile,
+                                                  size_t grid,
+                                                  size_t threadsPerWorkGroup)
+        {
+            return itersPerTile >= 65536 || (grid > 0 && tiles * itersPerTile / grid >= 65536)
+                   || tiles * itersPerTile >= treeFixupMaxTiles(threadsPerWorkGroup);
         }
 
         /**

@@ -1,0 +1,88 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# StreamK dynamic split tiles with uniform summation order off, forced through
+# the debug overrides to split only the first 100 tiles of each problem into
+# 16 parts: whole and split tiles in one launch, partial indices past the whole
+# tiles and across batches, on DynamicWorkQueue and on Hybrid's dynamic
+# sub-mode, both reduced by the arrival fixup. Repeated launches reuse the
+# arrival counters before validation.
+# 100 x 16 partials fit the flag region; sk_dynamic_split_overrides_flagcap.yaml
+# covers an override that does not.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
+  client_env:
+    TENSILE_STREAMK_TILES: 100
+    TENSILE_STREAMK_SPLIT: 16
+  # The launch summaries (TENSILE_DB=0x200000) must show the overrides applied.
+  streamk_launches:
+    - {tiles: 256, skTiles: 100, skSplit: 16}
+    - {tiles: 12, skTiles: 12, skSplit: 16}
+
+GlobalParameters:
+  Architecture: gfx950
+  HybridAssignmentPolicy: [DynamicWorkQueue]
+  NumElementsToValidate: -1
+  # Uniform summation order ignores overrides that split only some tiles.
+  UniformSummationOrder: 0
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 8
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  # 2 warmups and one group of 3 back-to-back launches per run, 2 runs per
+  # problem, then validation of the output and the Synchronizer.
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 3
+  ValidateAfterEnqueues: True
+  RotatingBufferSize: 512
+  NumWarmups: 2
+  NumBenchmarks: 2
+  SleepPercent: 0
+
+.SkDynamicSplitCommon: &sk_dynamic_split_common
+  - KernelLanguage: [Assembly]
+  - TileProcessingStrategy: [StreamK]
+  - GlobalSplitU: [0]
+  - DepthU: [16]
+  # MT 64x64.
+  - MatrixInstruction: [[16, 16, 4, 1, 1, 2, 2, 2, 2]]
+  - GlobalReadVectorWidthA: [1]
+  - GlobalReadVectorWidthB: [1]
+  - LocalReadVectorWidth: [1]
+  - VectorWidthA: [1]
+  - VectorWidthB: [1]
+  - MIArchVgpr: [False]
+  - PrefetchGlobalRead: [2]
+  - PrefetchLocalRead: [1]
+  - 1LDSBuffer: [1]
+  - ExpandPointerSwap: [False]
+  - ScheduleIterAlg: [3]
+  - SourceSwap: [True]
+  - StoreRemapVectorWidth: [0]
+  - TransposeLDS: [0]
+  - WorkGroupMapping: [1]
+  - StaggerU: [0]
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - BenchmarkCommonParameters: *sk_dynamic_split_common
+      ForkParameters:
+        - WorkAssignment: [DynamicWorkQueue, Hybrid]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 256 tiles: 100 split, 156 whole.
+          - Exact: [1024, 1024, 1, 4096]
+          # 4 batches x 64 tiles: the split tiles span the first two batches.
+          - Exact: [512, 512, 4, 1024]
+          # 12 edge tiles, fewer than the override: every tile split.
+          - Exact: [200, 130, 1, 16384]
