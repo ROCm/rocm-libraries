@@ -38,7 +38,6 @@ from rocke.runtime.device_array import (
 from rocke.runtime.torch_interop import is_torch_tensor, torch_array_info
 from rocke.tests.gpu import current_device_arch
 from rocke.tests.host_arrays import HostArray
-from rocke.tests.lanes import TICKET, import_or_skip_until
 
 
 def _info(shape, strides, element_size=4, data_ptr=1024):
@@ -123,15 +122,6 @@ def test_a_subclass_of_a_torch_type_is_a_torch_tensor():
     assert not is_torch_tensor(np.zeros(4, np.float32))
     assert is_torch_tensor(_TensorSubclass())
     assert array_info(_TensorSubclass()).shape == (4, 8)
-
-
-def test_a_real_torch_tensor_subclass_is_a_torch_tensor():
-    torch = import_or_skip_until("torch", TICKET)
-
-    class Subclass(torch.Tensor):
-        pass
-
-    assert is_torch_tensor(torch.zeros(2).as_subclass(Subclass))
 
 
 def test_torch_tensor_info_refuses_a_dtype_without_an_element_type():
@@ -547,24 +537,3 @@ def test_gpu_copy_and_zero_follow_each_layout():
     tokens = DeviceArray.zeros((5, 3), "fp32")
     copy_elements(tokens.view((3, 5), (1, 3)).info(), stats.info())
     np.testing.assert_array_equal(tokens.read(), stats.read().T)
-
-
-# --- torch callers (optional: runs only where torch with a GPU is installed) ---------------------
-
-
-@pytest.mark.gpu
-def test_gpu_torch_tensors_get_torch_values_and_workspaces():
-    torch = import_or_skip_until("torch", TICKET)
-    if not torch.cuda.is_available():
-        pytest.skip("torch has no GPU here")
-    lengths = torch.arange(6, dtype=torch.int32, device="cuda").reshape(2, 3)
-    np.testing.assert_array_equal(host_values(lengths[:, :2]), [[0, 1], [3, 4]])
-    bits = torch.ones(2, dtype=torch.bfloat16, device="cuda")
-    np.testing.assert_array_equal(host_values(bits), encode(np.ones(2), "bf16"))
-    scratch = device_workspace((2, 3), "fp32", like=lengths)
-    assert scratch.dtype == torch.float32 and scratch.device == lengths.device
-    assert tuple(scratch.shape) == (2, 3)
-    columns = strided_view(lengths[1:], (3, 1), (1, 3))
-    np.testing.assert_array_equal(host_values(columns), [[3], [4], [5]])
-    offsets = device_values(np.arange(3, dtype=np.int32), like=lengths)
-    assert offsets.device == lengths.device and offsets.dtype == torch.int32

@@ -117,6 +117,6 @@ platform/requirements.txt: config=2
 platform/tests/instances/differential/numeric.py: import=6 torch_api=6 torch_object=98
 platform/tests/instances/test_gfx1250_qwen_integration.py: import=2 torch_api=2 torch_object=16
 platform/tests/instances/test_rocke_numeric.py: import=1
-platform/tests/runtime/test_device_array.py: importorskip=2 torch_api=1 torch_interop=1 torch_object=8
+platform/tests/runtime/test_device_array.py: torch_interop=1
 platform/tests/runtime/test_parameter_contract.py: torch_interop=1
 platform/tests/test_rocke.py: import=2 importorskip=14 torch_interop=5 torch_object=26

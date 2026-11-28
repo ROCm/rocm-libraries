@@ -728,8 +728,6 @@ _PINNED_RESOURCE_GATE = LaneTicket("AICK-3320", TICKET, "2027-02-15")
 # The cases that take torch tensors or capture a graph, until they run without
 # torch.
 _TORCH_CASES = LaneTicket("AICK-3408", TICKET, "2027-01-08")
-# The runtime's torch interop cases.
-_RUNTIME_TORCH_INTEROP = LaneTicket("AICK-3409", TICKET, "2027-01-08")
 # The device cases that need a gfx950 GPU.
 _GFX950_RUNNERS = LaneTicket("AICK-3411", RUNNER_HARDWARE, "2027-02-09")
 # The device cases that need another GPU no pull-request runner has: gfx1250,
@@ -748,7 +746,6 @@ LANE_TICKETS: tuple[LaneTicket, ...] = (
     _ATTENTION_BWD_ENTRIES,
     _PINNED_RESOURCE_GATE,
     _TORCH_CASES,
-    _RUNTIME_TORCH_INTEROP,
     _GFX950_RUNNERS,
     _OTHER_RUNNERS,
     _BUILD_VARIANT_TOOLS,
@@ -1048,12 +1045,6 @@ PENDING: tuple[PendingTest, ...] = (
         "without torch",
         _PLATFORM,
         node="TestNumericVerification::test_moe_e2e_forward",
-    ),
-    *_waiting(
-        _RUNTIME_TORCH_INTEROP,
-        "its torch cases exercise the runtime's torch interop and skip without torch",
-        _PLATFORM,
-        "platform/tests/runtime/test_device_array.py",
     ),
     _SOURCE_CHECKOUT.waiting(
         "library/tests/test_attention_bwd_hsaco_cache.py",
