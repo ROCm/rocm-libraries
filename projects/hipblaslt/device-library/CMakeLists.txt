@@ -68,6 +68,20 @@ create_device_library(
     ${_codegen_product_args}
 )
 
+if(ORIGAMI_ENABLE_NN)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/OrigamiNNWeights.cmake)
+    # Downloaded weights live in shared/origami/data/nn/tilewright/<arch>/.
+    get_filename_component(_origami_nn_tilewright
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/origami/data/nn/tilewright" ABSOLUTE)
+    foreach(_arch IN LISTS GPU_TARGETS)
+        origami_nn_colocate_weights(
+            "${_arch}"
+            "${_origami_nn_tilewright}/${_arch}"
+            "${HIPBLASLT_TENSILE_LIBPATH}"
+            tensilelite-device-libraries)
+    endforeach()
+endif()
+
 if(HIPBLASLT_ENABLE_EXTOPS)
     add_subdirectory(extops)
 endif()

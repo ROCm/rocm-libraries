@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-find_package(Catch2 3 QUIET CONFIG)
+find_package(Catch2 3.3 QUIET CONFIG)
 if(NOT Catch2_FOUND)
     if(ORIGAMI_ENABLE_FETCH)
         include(FetchContent)
@@ -23,6 +23,34 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_streamk.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_nn.cpp"
+)
+
+if(ORIGAMI_ENABLE_NN)
+    # The library hides its internal symbols, so the decoder and the manifest validation under
+    # test are compiled in directly.
+    target_sources(
+        origami-tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/nn/twrec/b64_decode.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../src/nn/twrec/load_validate.cpp"
+    )
+endif()
+
+set(_origami_tw_weights_dir
+    "${CMAKE_CURRENT_SOURCE_DIR}/../data/nn/tilewright/gfx950"
+)
+# Tiny checked-in model (see fixtures/gen_tiny_twrec.py). Unlike the weights above, it is always
+# present, so the loader and ranking tests that use it never skip.
+set(_origami_tw_fixture_dir "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/tilewright")
+set(_origami_tw_logic_stem
+    "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950"
+)
+
+target_compile_definitions(
+    origami-tests
+    PRIVATE ORIGAMI_TEST_TW_WEIGHTS_DIR="${_origami_tw_weights_dir}"
+            ORIGAMI_TEST_TW_FIXTURE_DIR="${_origami_tw_fixture_dir}"
+            ORIGAMI_TEST_TW_LOGIC_STEM="${_origami_tw_logic_stem}"
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

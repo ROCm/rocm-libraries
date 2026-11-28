@@ -1,0 +1,4 @@
+# Origami NN weights are TWREC YAML only; MLREC binaries are not tracked here.
+*.tilewright.bin
+*.tilewright.yaml
+*.tilewright.wts.yaml

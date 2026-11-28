@@ -15,6 +15,7 @@ option(ORIGAMI_BUILD_SHARED_LIBS "Build Origami libraries as shared vs static." 
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
+option(ORIGAMI_ENABLE_NN "Build NN inference stack (API, features, and weight layout)." OFF)
 
 find_package(hip REQUIRED)
 
@@ -104,6 +105,7 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/types.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
         "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
@@ -113,6 +115,21 @@ target_include_directories(
 )
 
 target_link_libraries(origami-headers INTERFACE hip::host)
+
+if(ORIGAMI_ENABLE_NN)
+    target_sources(origami-headers
+        INTERFACE
+        FILE_SET HEADERS
+        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/filter.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_tilewright.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/nn.hpp"
+    )
+    target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN=1)
+else()
+    target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN=0)
+endif()
 
 set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
 
@@ -133,6 +150,75 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
 )
+
+if(ORIGAMI_ENABLE_NN)
+    target_sources(
+        origami
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/filter.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_tilewright.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/b64_decode.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/load_validate.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/twrec_loader.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/rank.cpp"
+    )
+
+    # Take yaml-cpp from, in order: a target an earlier project in this build already
+    # defined (rocRoller fetches its own copy), an installed package, a fetched copy.
+    # Both yaml-cpp trees define the CMake target "yaml-cpp", so a second copy in one
+    # build fails at configure time with "add_library cannot create target".
+    if(NOT TARGET yaml-cpp::yaml-cpp)
+        find_package(yaml-cpp 0.8 QUIET CONFIG)
+    endif()
+    if(NOT TARGET yaml-cpp::yaml-cpp)
+        if(ORIGAMI_ENABLE_FETCH)
+            include(FetchContent)
+            # Same FetchContent name as rocRoller. Whichever project declares it first
+            # wins, and the other reuses that copy instead of adding the target twice.
+            FetchContent_Declare(
+                yaml_cpp
+                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+                GIT_TAG yaml-cpp-0.9.0 # 56e3bb550c91fd7005566f19c079cb7a503223cf
+                GIT_SHALLOW TRUE
+            )
+            # 0.8.0 requires CMake < 3.5, which CMake 4 rejects. 0.9.0 does not;
+            # this keeps an older GIT_TAG from failing configure anyway.
+            if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM
+                    OR CMAKE_POLICY_VERSION_MINIMUM VERSION_LESS 3.5)
+                set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+            endif()
+            block(SCOPE_FOR VARIABLES)
+                # yaml-cpp follows BUILD_SHARED_LIBS, which is ON for a shared origami.
+                # A shared yaml-cpp would be a dependency of liborigami that is not in
+                # origami-targets, and install(EXPORT) fails at generate time. Link the
+                # fetched copy in statically (position independent by default) instead.
+                # Set in this scope only, so it does not change other projects' yaml-cpp.
+                # option() honors an existing normal variable only under CMP0077 NEW.
+                set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+                set(YAML_BUILD_SHARED_LIBS OFF)
+                FetchContent_MakeAvailable(yaml_cpp)
+            endblock()
+        else()
+            message(FATAL_ERROR "yaml-cpp not found (set ORIGAMI_ENABLE_FETCH=ON to auto-fetch)")
+        endif()
+    endif()
+    # BUILD_INTERFACE only: a fetched yaml-cpp target is not in origami-targets.
+    # Static origami (hipBLASLt sets ORIGAMI_BUILD_SHARED_LIBS=OFF) would otherwise
+    # export that private link and install(EXPORT) fails at generate time.
+    target_link_libraries(origami PRIVATE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
+    # A static liborigami does not carry its dependencies, so a consumer's final link
+    # needs yaml-cpp too. The exported target links the name origami_yaml_cpp, and
+    # cmake/origami-yaml-deps.cmake, installed with the package config on both install
+    # paths below, defines it and finds yaml-cpp. The name is used instead of
+    # yaml-cpp::yaml-cpp because install(EXPORT) rejects that one when it is the fetched
+    # target. A shared liborigami has yaml-cpp inside it (the fetched copy is static) or
+    # as its own dependency, so its consumers need nothing.
+    if(NOT BUILD_SHARED_LIBS)
+        target_link_libraries(origami INTERFACE $<INSTALL_INTERFACE:origami_yaml_cpp>)
+        set(_origami_yaml_deps "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-yaml-deps.cmake")
+    endif()
+endif()
 
 target_link_libraries(origami PRIVATE hip::host)
 
@@ -162,6 +248,14 @@ if(ORIGAMI_INSTALL_COMPONENT)
         COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
     )
 
+    if(_origami_yaml_deps)
+        # origami-config.cmake includes it when present.
+        install(FILES "${_origami_yaml_deps}"
+            DESTINATION "${_origami_config_dir}"
+            COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+        )
+    endif()
+
     include(CMakePackageConfigHelpers)
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
@@ -190,6 +284,13 @@ else()
         COMPONENT devel
     )
 
+    # rocm_export_targets() writes its own config file, not origami-config.cmake.in. Its
+    # INCLUDE files are installed beside it and included before the targets file.
+    set(_origami_export_include)
+    if(_origami_yaml_deps)
+        set(_origami_export_include INCLUDE "${_origami_yaml_deps}")
+    endif()
+
     rocm_export_targets(
         TARGETS
         roc::origami
@@ -197,10 +298,13 @@ else()
         DEPENDS
         PACKAGE
         hip
+        ${_origami_export_include}
         NAMESPACE
         roc::
     )
+    unset(_origami_export_include)
 endif()
+unset(_origami_yaml_deps)
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     rocm_install(TARGETS origami-tests COMPONENT tests)
