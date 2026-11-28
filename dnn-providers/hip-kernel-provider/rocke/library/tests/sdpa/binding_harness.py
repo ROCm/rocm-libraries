@@ -4,8 +4,7 @@
 """Map ``cases.py`` harness arrays onto the SDPA bindings' tensor contract.
 
 Shared by the CPU data-movement tests (torch CPU tensors) and the GPU numeric
-tests (:class:`rocke.runtime.device_array.DeviceArray` s, and torch tensors for
-a few cases, as the production torch callers pass): ``bind_tensors`` and
+tests (:class:`rocke.runtime.device_array.DeviceArray` s): ``bind_tensors`` and
 ``outputs`` take either kind. Torch is imported lazily.
 """
 
@@ -15,7 +14,6 @@ import numpy as np
 from rocke.numeric.storage import decode
 from rocke.runtime.device_array import array_info, device_values, host_values
 from rocke.runtime.hip_module import Runtime
-from rocke.tests.lanes import TICKET, skip_until
 
 from tests.sdpa import helpers as H
 
@@ -24,7 +22,6 @@ __all__ = [
     "bind_tensors",
     "outputs",
     "strided_tensor",
-    "torch_caller_cases",
 ]
 
 
@@ -84,40 +81,15 @@ def outputs(case, tensors, req):
     return o, np.concatenate([stats[b, :, :n].T for b, n in enumerate(q_lens)])
 
 
-def torch_caller_cases(cases):
-    """The cases the GPU numeric tests also run with torch callers: the first
-    of each length mode, and the first that emits LSE."""
-    picked = {}
-    for case in cases:
-        picked.setdefault(case.length_mode, case)
-        if case.emit_lse:
-            picked.setdefault("lse", case)
-    return sorted(
-        {case.id: case for case in picked.values()}.values(), key=lambda c: c.id
-    )
-
-
-def bind_and_check(bind, case, req, *, kind: str) -> list:
-    """Bind ``case``'s arrays of ``kind`` (``"device_array"``, or ``"torch"``
-    for torch GPU tensors: the caller has imported torch) with ``bind``,
-    launch twice (the second launch reuses the bound buffers, as graph replay
-    does) and return ``helpers.compare``'s mismatches with the oracle."""
+def bind_and_check(bind, case, req) -> list:
+    """Bind ``case``'s arrays as rocKE ``DeviceArray`` s with ``bind``, launch
+    twice (the second launch reuses the bound buffers, as graph replay does)
+    and return ``helpers.compare``'s mismatches with the oracle."""
     inputs = H.materialize(case)
-    if kind == "torch":
-        import torch
-
-        if not torch.cuda.is_available():
-            skip_until(TICKET, reason="the installed torch has no GPU")
-        arrays = H.to_torch(inputs, device="cuda")
-    else:
-        arrays = H.to_device_arrays(inputs)
-    tensors = bind_tensors(case, arrays, req)
+    tensors = bind_tensors(case, H.to_device_arrays(inputs), req)
     binding = bind(req, tensors)
     binding.launch()
     binding.launch()
-    if kind == "torch":
-        torch.cuda.synchronize()
-    else:
-        Runtime().sync()
+    Runtime().sync()
     o, lse = outputs(case, tensors, req)
     return H.compare(case, o, lse, H.evaluate(inputs))

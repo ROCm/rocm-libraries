@@ -930,14 +930,6 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _TORCH_CASES,
-        "its torch-caller cases bind torch GPU tensors, as the production callers do, "
-        "and skip without torch (the DeviceArray cases run)",
-        _LIBRARY,
-        "library/tests/sdpa/test_dense_sdpa_numeric.py",
-        "library/tests/sdpa/test_unified_sdpa_numeric.py",
-    ),
-    *_waiting(
-        _TORCH_CASES,
         "its graph-replay case captures through torch and skips without it",
         _LIBRARY,
         "library/tests/test_attention_unified_lse_numeric.py",

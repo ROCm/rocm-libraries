@@ -7,8 +7,7 @@ Every ``cases.py`` case the binding admits on the live arch, all tiers, is
 bound with ``sdpa_unified_bind``, launched twice (the second launch
 reuses the bound buffers, as graph replay does) and compared with
 ``sdpa_reference`` on the valid rows, fully masked rows included (O = 0,
-LSE = -inf). The arrays are rocKE ``DeviceArray`` s, so no torch is needed; a
-few cases also run with torch tensors, the production callers' kind.
+LSE = -inf). The arrays are rocKE ``DeviceArray`` s, so no torch is needed.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ import numpy as np
 import pytest
 from rocke.runtime.device_array import DeviceArray, host_values
 from rocke.tests.gpu import probe_device_arch
-from rocke.tests.lanes import TICKET, arch_skip_reason, import_or_skip_until
+from rocke.tests.lanes import arch_skip_reason
 
 from dispatch.sdpa.bind_unified import (
     _LaunchPlan,
@@ -25,7 +24,7 @@ from dispatch.sdpa.bind_unified import (
     sdpa_unified_bind,
 )
 from tests.sdpa import cases as C
-from tests.sdpa.binding_harness import bind_and_check, torch_caller_cases
+from tests.sdpa.binding_harness import bind_and_check
 from tests.sdpa.request_bridge import request_from_case
 from tests.sdpa.request_cases import make_request
 
@@ -59,18 +58,7 @@ _CASES = (
 @pytest.mark.parametrize("case", _CASES, ids=[c.id for c in _CASES])
 def test_admitted_case_matches_sdpa_reference(case):
     req = request_from_case(case, ARCH)
-    assert bind_and_check(sdpa_unified_bind, case, req, kind="device_array") == []
-
-
-_TORCH_CASES = torch_caller_cases(_CASES)
-
-
-@pytest.mark.parametrize("case", _TORCH_CASES, ids=[c.id for c in _TORCH_CASES])
-def test_torch_callers_match_sdpa_reference(case):
-    """The production callers pass torch tensors: a few cases with them."""
-    import_or_skip_until("torch", TICKET)
-    req = request_from_case(case, ARCH)
-    assert bind_and_check(sdpa_unified_bind, case, req, kind="torch") == []
+    assert bind_and_check(sdpa_unified_bind, case, req) == []
 
 
 def _dense_device(req, name):

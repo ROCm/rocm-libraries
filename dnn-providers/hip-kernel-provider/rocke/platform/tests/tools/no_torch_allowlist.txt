@@ -44,15 +44,13 @@ library/dispatch/sdpa/bind_shared.py: torch_interop=1
 library/kernels/common/attention_unified.py: import=7 torch_api=13 torch_interop=2 torch_object=1
 library/tests/ctest_lists.cmake: config=4
 library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py: torch_interop=5
-library/tests/sdpa/binding_harness.py: import=2 torch_api=2 torch_object=2
+library/tests/sdpa/binding_harness.py: import=1 torch_object=2
 library/tests/sdpa/bwd_cases.py: import=1 torch_object=7
 library/tests/sdpa/helpers.py: import=1 torch_object=6
 library/tests/sdpa/test_dense_sdpa_binding.py: importorskip=1 torch_object=10
-library/tests/sdpa/test_dense_sdpa_numeric.py: importorskip=1
 library/tests/sdpa/test_sdpa_bwd_case_table.py: importorskip=1 torch_object=1
 library/tests/sdpa/test_sdpa_case_table.py: importorskip=1
 library/tests/sdpa/test_unified_sdpa_binding.py: importorskip=1 torch_object=56
-library/tests/sdpa/test_unified_sdpa_numeric.py: importorskip=1
 library/tests/test_attention_builds.py: importorskip=1
 library/tests/test_attention_bwd_bench.py: importorskip=6 torch_object=3
 library/tests/test_attention_unified_lse_numeric.py: importorskip=1 torch_api=2 torch_object=6
