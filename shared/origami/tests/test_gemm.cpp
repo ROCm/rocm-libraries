@@ -3008,13 +3008,22 @@ TEST_CASE("GEMM: gfx1250 multicast cuts the L2 requests of a 256x256 K-loop",
 TEST_CASE("GEMM: co-resident BF16 WMMA workgroups share only LDS and the matrix pipes",
           "[gemm][gfx1250][occupancy]") {
   const auto hw = gfx1250_hardware();
-  auto one      = gfx1250_config(128, 128, 64, 3);
+  auto one      = gfx1250_config(128, 128, 32, 3);
   auto two      = one;
   two.occupancy = 2;
-  // Thousands of tiles: two resident workgroups per WGP hide each other's waits.
+  // Thousands of tiles: two resident workgroups per WGP hide each other's waits, here the fixed
+  // cost of each K-iteration, which is long next to the LDS reads and WMMAs of a DepthU-32
+  // iteration.
   const auto big = make_problem(8192, 8192, 4096);
   REQUIRE(origami::gemm::compute_total_latency(big, hw, two) <
           origami::gemm::compute_total_latency(big, hw, one));
+  // A 256x256x64 tile keeps LDS and the matrix pipes busy for most of its iteration: the second
+  // workgroup queues behind the first and gains nothing.
+  auto one_wide      = gfx1250_config(256, 256, 64, 3);
+  auto two_wide      = one_wide;
+  two_wide.occupancy = 2;
+  REQUIRE(origami::gemm::compute_total_latency(big, hw, two_wide) >
+          origami::gemm::compute_total_latency(big, hw, one_wide));
   // One wave of tiles: no WGP holds a second workgroup; only the per-kernel occupancy cost differs.
   const auto one_wave = make_problem(2048, 2048, 4096);
   REQUIRE(origami::gemm::compute_total_latency(one_wave, hw, two) - origami::gemm::compute_total_latency(one_wave, hw, one) ==
@@ -3124,11 +3133,11 @@ TEST_CASE("GEMM: AdaptiveGemm widens the edge-tile stores", "[gemm][gfx1250][ada
   REQUIRE(ratio(4000, 65536) <= 1.0);
 }
 
-TEST_CASE("GEMM: PrefetchLocalRead and HalfPLR expose LDS latency on small wave tiles",
-          "[gemm][gfx1250][plr]") {
+TEST_CASE("GEMM: PrefetchLocalRead and HalfPLR do not change the latency", "[gemm][gfx1250][plr]") {
   const auto hw      = make_hardware(1250);
   const auto problem = make_problem(4096, 4096, 4096);
 
+  // No LDS-read latency is charged on gfx1250, so neither knob changes the prediction.
   auto latency = [&](int plr, int half_plr) {
     auto c                          = gfx1250_config(128, 128, 64);
     c.tensile().wave_group_m        = 4;
@@ -3137,32 +3146,13 @@ TEST_CASE("GEMM: PrefetchLocalRead and HalfPLR expose LDS latency on small wave 
     c.tensile().half_plr            = half_plr;
     return origami::gemm::compute_total_latency(problem, hw, c);
   };
+  for (int plr : {-1, 0, 1})
+    for (int half_plr : {0, 1, 2, 3}) {
+      INFO("PrefetchLocalRead " << plr << " HalfPLR " << half_plr);
+      REQUIRE(latency(plr, half_plr) == latency(1, 0));
+    }
 
-  REQUIRE(latency(0, 0) > latency(1, 3));
-  REQUIRE(latency(1, 3) > latency(1, 0));
-  REQUIRE(latency(1, 0) >= latency(-1, 0));
-
-  // HalfPLR 1 / 2 halve only A's / B's early reads: each costs less than both, and the one
-  // halving the operand with fewer reads per sub-iteration (wave.m rows of A, wave.n of B)
-  // costs least.
-  auto per_operand = [&](int wg_m, int wg_n, int half_plr) {
-    auto c                          = gfx1250_config(128, 128, 64);
-    c.tensile().wave_group_m        = wg_m;
-    c.tensile().wave_group_n        = wg_n;
-    c.tensile().prefetch_local_read = 1;
-    c.tensile().half_plr            = half_plr;
-    return origami::gemm::compute_total_latency(problem, hw, c);
-  };
-  for (auto [wg_m, wg_n] : {std::pair{4, 2}, std::pair{2, 4}}) {
-    INFO("waves " << wg_m << "x" << wg_n);
-    REQUIRE(per_operand(wg_m, wg_n, 1) < per_operand(wg_m, wg_n, 3));
-    REQUIRE(per_operand(wg_m, wg_n, 2) < per_operand(wg_m, wg_n, 3));
-    REQUIRE(per_operand(wg_m, wg_n, 0) <= per_operand(wg_m, wg_n, 1));
-  }
-  REQUIRE(per_operand(4, 2, 1) < per_operand(4, 2, 2));  // 32 x 64 per wave: A has fewer reads
-  REQUIRE(per_operand(2, 4, 2) < per_operand(2, 4, 1));  // 64 x 32 per wave: B has fewer reads
-
-  // Architectures without a measured LDS latency keep today's behavior.
+  // The same holds on architectures without a measured LDS latency.
   const auto gfx950                          = make_hardware(950);
   auto c950                                  = make_config(128, 128, 64, 16, 16, 32);
   c950.tensile().prefetch_local_read         = 0;
@@ -3172,22 +3162,26 @@ TEST_CASE("GEMM: PrefetchLocalRead and HalfPLR expose LDS latency on small wave 
           origami::gemm::compute_total_latency(problem, gfx950, c950_unknown));
 }
 
-TEST_CASE("GEMM: PrefetchGL2 hides DRAM latency behind the L2", "[gemm][gfx1250][prefetch]") {
-  // 64 WGPs, latency-bound on their L2 misses.
+TEST_CASE("GEMM: PrefetchGL2 does not change the latency", "[gemm][gfx1250][prefetch]") {
   const auto hw      = gfx1250_hardware();
   const auto problem = make_problem(1024, 1024, 16384);
 
-  auto latency = [&](const origami::hardware_t& h, int prefetch_gl2) {
-    auto c                   = gfx1250_config(128, 128, 64);
-    c.tensile().prefetch_gl2 = prefetch_gl2;
+  // No load-to-use latency is charged on gfx1250, so the L2 prefetch has nothing to hide.
+  auto latency = [&](const origami::hardware_t& h, int pgr, int prefetch_gl2) {
+    auto c                           = gfx1250_config(128, 128, 64);
+    c.tensile().prefetch_global_read = pgr;
+    c.tensile().prefetch_gl2         = prefetch_gl2;
     return origami::gemm::compute_total_latency(problem, h, c);
   };
-  REQUIRE(latency(hw, 2) < latency(hw, 0));
-  REQUIRE(latency(hw, 1) <= latency(hw, 0));
+  for (int pgr : {1, 2}) {
+    INFO("PrefetchGlobalRead " << pgr);
+    REQUIRE(latency(hw, pgr, 2) == latency(hw, pgr, 0));
+    REQUIRE(latency(hw, pgr, 1) == latency(hw, pgr, 0));
+  }
 
   // No GL2 prefetch and no memory latency on CDNA.
   const auto gfx950 = make_hardware(950);
-  REQUIRE(latency(gfx950, 2) == latency(gfx950, 0));
+  REQUIRE(latency(gfx950, 1, 2) == latency(gfx950, 1, 0));
 }
 
 TEST_CASE("GEMM: gfx1250 tensor-DMA bandwidth follows the per-WGP DMA rate",
@@ -3209,12 +3203,13 @@ TEST_CASE("GEMM: gfx1250 tensor-DMA bandwidth follows the per-WGP DMA rate",
 
   // Each WGP's DMA path moves a row per max(row bytes, 256 B) beat, so 256 B rows and larger
   // tiles stream faster.  Tensor loads on gfx1250 reached 16.0-16.4 TB/s from L2 for
-  // 128 x 64 bf16 A + B tiles and 30.9-32.1 TB/s for 256 x 128.  The prefetch depth does not
-  // change this rate: the load latency it leaves exposed is charged by the tile model.
+  // 128 x 64 bf16 A + B tiles and 30.9-32.1 TB/s for 256 x 128.  The WGPs' rate meets the L2 peak
+  // in a hard minimum, so 64 WGPs get 64 x their row rate (17.8 TB/s for the small tile, above the
+  // measured 16.0-16.4).  The prefetch depth does not change this rate.
   const double small = bandwidth(8, 128, 64);
   const double large = bandwidth(8, 256, 128);
-  REQUIRE(small == Catch::Approx(16.2e3).epsilon(0.10));
-  REQUIRE(large == Catch::Approx(31.5e3).epsilon(0.08));
+  REQUIRE(small == Catch::Approx(17.8e3).epsilon(0.02));
+  REQUIRE(large == Catch::Approx(35.6e3).epsilon(0.02));          // measured 30.9-32.1 TB/s
   REQUIRE(bandwidth(8, 128, 128) > 1.7 * bandwidth(8, 256, 64));  // 256 B rows
   REQUIRE(bandwidth(8, 128, 64, 1) == small);
   REQUIRE(hw.mem1_perf_ratio * clk == Catch::Approx(41.93e3));
@@ -3366,4 +3361,86 @@ TEST_CASE("GEMM: gfx1250 ranking prices the WGM the host launches", "[gemm][gfx1
     }
   }
   REQUIRE(discriminates);
+}
+
+TEST_CASE("GEMM: gfx1250 TemporalHint as the kernel emits it, by L2 retention class",
+          "[gemm][gfx1250][cache-hints]") {
+  const auto hw = gfx1250_hardware();
+  auto with     = [](origami::config_t c, int tha, int thb, int tdm_fuse) {
+    c.tensile().temporal_hint_a = tha;
+    c.tensile().temporal_hint_b = thb;
+    c.tensile().tdm_fuse        = tdm_fuse;
+    return c;
+  };
+  auto hits = [&](const origami::problem_t& p, const origami::config_t& c) {
+    origami::gemm::context_t ctx(p, hw, c);
+    return origami::gemm::estimate_l2_hit_cdna5(p, hw, c, ctx, nullptr);
+  };
+  const auto base = gfx1250_config(256, 256, 64, 3);
+  // One tile column: no tile reuses an A slab (A streams), every tile reads the same B slab.
+  const auto skinny = make_problem(256 * 256, 256, 8192);
+  const auto rt     = hits(skinny, with(base, 0, 0, 0));
+  REQUIRE(std::get<1>(rt) > 0.9);
+
+  // TDMFuse 0: A and B share one tensor_load_to_lds, which carries a hint only when both agree.
+  for (int tha = 0; tha < 8; ++tha)
+    for (int thb = 0; thb < 8; ++thb)
+      if (tha != thb) REQUIRE(hits(skinny, with(base, tha, thb, 0)) == rt);
+  // NT and LU lines are low priority, HT and RT_NT regular (the L2 is gfx1250's near cache).  Two
+  // operands of the same priority compete for the L2 as two regular ones do; the loss of lockstep
+  // reuse of low-priority lines next to streaming fills is not modeled.
+  const auto nt = hits(skinny, with(base, 1, 1, 0));
+  REQUIRE(nt == rt);
+  REQUIRE(hits(skinny, with(base, 3, 3, 0)) == nt);
+  REQUIRE(hits(skinny, with(base, 2, 2, 0)) == rt);
+  REQUIRE(hits(skinny, with(base, 5, 5, 0)) == rt);
+  // TH 3 is a value of its own: the config does not equal its TH 1 twin.
+  REQUIRE_FALSE(with(base, 3, 3, 0) == with(base, 1, 1, 0));
+  REQUIRE(with(base, 3, 3, 0).hash() != with(base, 1, 1, 0).hash());
+  // A config without raw hints takes the cache_hints code (>= 4: NT).
+  auto coded          = base;
+  coded.cache_hints_a = coded.cache_hints_b = 4;
+  REQUIRE(hits(skinny, coded) == nt);
+
+  // Separate A and B loads (TDMFuse 1): the shared B keeps its reuse next to a low-priority A and
+  // as a low-priority operand next to regular A fills.
+  const auto b_reg = hits(skinny, with(base, 1, 0, 1));
+  REQUIRE(std::get<1>(b_reg) == Approx(std::get<1>(rt)));
+  const auto b_low = hits(skinny, with(base, 0, 1, 1));
+  REQUIRE(std::get<1>(b_low) == Approx(std::get<1>(nt)));
+
+  // Lockstep reuse of a square grid: both operands shared by many tiles, nothing streams, so NT
+  // keeps it.
+  const auto square = make_problem(8192, 8192, 8192);
+  const auto sq_rt = hits(square, with(base, 0, 0, 0)), sq_nt = hits(square, with(base, 1, 1, 0));
+  REQUIRE(std::get<0>(sq_nt) == Approx(std::get<0>(sq_rt)));
+  REQUIRE(std::get<1>(sq_nt) == Approx(std::get<1>(sq_rt)));
+}
+
+TEST_CASE("GEMM: gfx1250 TemporalHintD does not change the SourceSwap D store",
+          "[gemm][gfx1250][cache-hints]") {
+  const auto hw = gfx1250_hardware();
+  auto epi      = [&](const origami::problem_t& p, origami::config_t c, int thd, size_t gwvw) {
+    c.gwvw_d                    = gwvw;
+    c.tensile().temporal_hint_d = thd;
+    origami::gemm::context_t ctx(p, hw, c);
+    return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
+  };
+  // The model charges a SourceSwap D store the same under every TemporalHintD (the per-instruction
+  // extras of NT / HT / WB and the half-block ceiling of RT / HT / WB stores are not modeled).
+  const auto p64  = gfx1250_config(64, 256, 64, 3);
+  const auto p256 = gfx1250_config(256, 256, 64, 3);
+  const auto prob = make_problem(8192, 8192, 64);
+  const auto odd  = make_problem(8192 + 64, 8192, 64);
+  for (int thd : {1, 2, 3}) {
+    INFO("TemporalHintD " << thd);
+    REQUIRE(epi(prob, p64, thd, 8) == epi(prob, p64, 0, 8));
+    REQUIRE(epi(prob, p256, thd, 8) == epi(prob, p256, 0, 8));
+    REQUIRE(epi(odd, p256, thd, 8) == epi(odd, p256, 0, 8));
+    REQUIRE(epi(prob, p256, thd, 1) == epi(prob, p256, 0, 1));
+  }
+  // Without a raw hint the cache_hints code decides.
+  auto coded          = p64;
+  coded.cache_hints_d = 4;
+  REQUIRE(epi(prob, coded, -1, 8) == Approx(epi(prob, p64, 1, 8)));
 }

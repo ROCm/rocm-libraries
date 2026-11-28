@@ -101,9 +101,6 @@ struct heuristic_defaults_t {
   /// Tensor-DMA row service rate of one WGP from DRAM, B/clk; a row costs at least one 256 B DRAM
   /// block (fitted to a tensor-DMA bandwidth microbenchmark, q fixed at the block).
   static constexpr double GFX1250_TDM_DRAM_ROW_B_PER_CLK = 420.0 / 2.4;  // 175.0 B/clk (420 B/ns)
-  /// Soft-minimum sharpness of the WGPs' tensor-DMA rate against the L2 peak (same fits; the DRAM peak is met
-  /// in a hard minimum, which fits the sweep as well).
-  static constexpr double GFX1250_TDM_L2_SHARPNESS   = 3.30;
   /// Fixed time of one wave's epilogue store instruction, cycles.
   static constexpr double GFX1250_STORE_INST_CLK = 14.31 * 2.4;  // 34.344 clk (14.31 ns)
   /// Store bandwidth of one wave's instruction stream, B/clk.
@@ -134,28 +131,10 @@ struct heuristic_defaults_t {
   /// store model scales the ceilings by the part's DRAM peak (hardware_t::mem3_perf_ratio, B/clk)
   /// over this.
   static constexpr double GFX1250_STORE_REF_DRAM_B_PER_CLK = 17130.0 / 2.4;  // 7137.5 B/clk (17130 B/ns)
-  /// Load-to-use latency of a DRAM access (single-wave pointer chase), cycles.
-  static constexpr double GFX1250_DRAM_LATENCY_CLK = 180.0 * 2.4;  // 432 clk (180 ns)
-  /// Load-to-use latency of an L2 hit, cycles.
-  static constexpr double GFX1250_L2_LATENCY_CLK = 125.0 * 2.4;  // 300 clk (125 ns)
-  /// Dependent LDS read latency in cycles the matrix pipe must cover.
-  static constexpr double GFX1250_LDS_READ_LATENCY_CLK = 70.0;
   /// Per-lane vector loads (one 16 B load per lane in flight): one WGP's ceiling and the device's
   /// L2-resident peak, B/clk (bandwidth microbenchmark).
   static constexpr double GFX1250_LANE_LOAD_WGP_B_PER_CLK = 91.0 / 2.4;     // 37.917 B/clk (91 B/ns)
   static constexpr double GFX1250_LANE_LOAD_L2_B_PER_CLK  = 21100.0 / 2.4;  // 8791.7 B/clk (21100 B/ns)
-  /// StreamK in-kernel linear fixup: time per partial that does not depend on its size (the owner's flag
-  /// poll, flag reset, barrier and read set-up), cycles, with the partial's bytes read at
-  /// GFX1250_LANE_LOAD_WGP_B_PER_CLK (StreamK fixup microbenchmark: 1.52 +- 0.07 us over 31 kernels,
-  /// F = 2..4; no separate peer-release time was found).
-  static constexpr double GFX1250_SK_FIXUP_HANDSHAKE_CLK = 1520.0 * 2.4;  // 3648 clk (1520 ns)
-  /// Loaded tensor-DMA load latency, lat0 + c x device throughput: cycles and cycles per (B/clk) of device
-  /// throughput, from L2 and from DRAM (fitted to a tensor-DMA bandwidth microbenchmark with the 256 B row minimum;
-  /// measured as ns and ns per TB/s; 1 TB/s = 1000 B/ns, so ns per TB/s x 2.4^2 / 1000 = clk per B/clk).
-  static constexpr double GFX1250_TDM_L2_LAT0_CLK        = 216.9 * 2.4;                // 520.56 clk (216.9 ns)
-  static constexpr double GFX1250_TDM_L2_LAT_CLK_PER_BPC = 1.076 * 2.4 * 2.4 / 1000.0;  // 0.00619776 (1.076 ns per TB/s)
-  static constexpr double GFX1250_TDM_DRAM_LAT0_CLK        = 630.6 * 2.4;                // 1513.44 clk (630.6 ns)
-  static constexpr double GFX1250_TDM_DRAM_LAT_CLK_PER_BPC = 18.35 * 2.4 * 2.4 / 1000.0;  // 0.105696 (18.35 ns per TB/s)
   /// Interval between back-to-back kernel launches on one stream, cycles, for 1 to 1024 workgroups
   /// (kernel-launch microbenchmark).  Host / driver time, not clocked by the engine.
   static constexpr double GFX1250_KERNEL_LAUNCH_CLK = 2080.0 * 2.4;  // 4992 clk (2080 ns)
@@ -176,16 +155,15 @@ struct heuristic_defaults_t {
   /// DRAM-streaming (fitted to a K-loop microbenchmark).
   static constexpr double GFX1250_KLOOP_L2_OVERLAP   = 1.93;
   static constexpr double GFX1250_KLOOP_DRAM_OVERLAP = 1.73;
-  /// Fixed cost of one K-iteration (two barriers, tensor waits, TDM issue), cycles: intercept of a K-loop DepthU
-  /// sweep for 4 waves, which nearly all gfx1250 library kernels use (8 waves measured 314 clk).
-  /// The microbenchmark intercept alone is 207 clk; the value used is refit on the 145-size N-sweep (see
-  /// GFX1250_FIT_* below).
-  static constexpr double GFX1250_KITER_FIXED_CLK = 263.43924868273393;
+  /// Fixed cost of one K-iteration (two barriers, tensor waits, TDM issue), cycles: intercept of a
+  /// K-loop DepthU sweep for 4 waves, which nearly all gfx1250 library kernels use (8 waves
+  /// measured 314 clk).  The microbenchmark intercept alone is 207 clk; the value used is refit:
+  /// 263.4 clk on the 145-size N-sweep (see GFX1250_FIT_* below), then x3 on the ranking of
+  /// measured bf16 TN candidates.
+  static constexpr double GFX1250_KITER_FIXED_CLK = 790.3177460482018;  // 3 x 263.4 clk
   /// v_wmma_f32_16x16x32_bf16 issue interval per SIMD with 1, 2 and 4 waves on the SIMD, cycles at the engine
   /// clock (WMMA-rate microbenchmark, independent accumulators).
   static constexpr double GFX1250_WMMA_BF16_CLK = 10.1;  // 1 wave per SIMD; 2 / 4 waves measured 7.5 / 6.05
-  /// Most workgroups per WGP the co-residency law was measured for (1..4 workgroups per WGP).
-  static constexpr double GFX1250_MAX_MEASURED_RESIDENT_WGS = 4.0;
   /// K-loop slowdown of a multicast cluster over its exact 1x1 twin beyond the microbenchmarked multicast model:
   /// 1 + lambda x k / (k + K0) for k K-iterations, lambda by workgroups along the cluster's larger axis (2, 4, 8)
   /// (fitted to real BBS TN kernels on synthetic shapes).
@@ -202,16 +180,19 @@ struct heuristic_defaults_t {
   /// KiB of the DepthU window (measured as K = n DU + 1 vs n DU and K = 1).
   static constexpr double GFX1250_ODD_K_CLK_PER_KIB      = 92.0 * 2.4;  // 220.8 clk/KiB (92.0 ns/KiB)
   static constexpr double GFX1250_ODD_K_CLK_PER_KIB_ITER = 26.9 * 2.4;  // 64.56 clk/KiB (26.9 ns/KiB)
-  /// Cost outside the K-loop that the tile model leaves out, in cycles, as a constant plus growth per KiB of the
-  /// output tile and per KiB of one K-iteration of A and B.  Per tile round (slope of time vs tile
-  /// rounds of real kernels; the constant fits ~0) and once per kernel (one-wave
-  /// intercepts less one round).  The per-kernel cost also grows per doubling of CUOccupancy (measured with one WG
-  /// per WGP; the mechanism is not isolated).  Model-relative (measured minus this model with every fixed term at
-  /// zero): refitted against the issue/wait-recurrence stall, which moves the model's one-wave intercepts (per
-  /// kernel rms 2.4 us, n 405); the per-round fit (K = 1 and K = DU slopes, rms 2.6 us, n 162) is unchanged by it.
-  static constexpr double GFX1250_KERNEL_FIXED_CLK              = 569.0 * 2.4;  // 1365.6 clk (569 ns)
-  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_D    = 28.1 * 2.4;   // 67.44 clk/KiB (28.1 ns/KiB)
-  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_OP   = 6.7 * 2.4;    // 16.08 clk/KiB (6.7 ns/KiB)
+  /// Cost outside the K-loop that the tile model leaves out, in cycles, as a constant plus growth
+  /// per KiB of the output tile and per KiB of one K-iteration of A and B.  Per tile round (slope
+  /// of time vs tile rounds of real kernels; the constant fits ~0) and once per kernel (one-wave
+  /// intercepts less one round).  The per-kernel cost also grows per doubling of CUOccupancy
+  /// (measured with one WG per WGP; the mechanism is not isolated).  Model-relative (measured minus
+  /// this model with every fixed term at zero): refitted against the issue/wait-recurrence stall,
+  /// which moves the model's one-wave intercepts (per kernel rms 2.4 us, n 405); the per-round fit
+  /// (K = 1 and K = DU slopes, rms 2.6 us, n 162) is unchanged by it.  The per-kernel constant and
+  /// its two per-KiB parts are then x3 on the ranking of measured bf16 TN candidates: 3 x 569 ns,
+  /// 3 x 28.1 ns/KiB of D and 3 x 6.7 ns/KiB of A and B.
+  static constexpr double GFX1250_KERNEL_FIXED_CLK              = 4096.8;
+  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_D    = 202.32000000000002;
+  static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_KIB_OP   = 48.24;
   static constexpr double GFX1250_KERNEL_FIXED_CLK_PER_LOG2_OCC = 680.0 * 2.4;  // 1632 clk (680 ns)
   static constexpr double GFX1250_TILE_FIXED_CLK_PER_KIB_D    = 15.2 * 2.4;  // 36.48 clk/KiB (15.2 ns/KiB)
   static constexpr double GFX1250_TILE_FIXED_CLK_PER_KIB_OP   = 16.8 * 2.4;  // 40.32 clk/KiB (16.8 ns/KiB)
@@ -225,13 +206,20 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_FIT_MEM_SCALE = 1.1005829744282523;
   /// Scale of the per-K-iteration compute time L_compute (WMMA issue, LDS-read exposure).
   static constexpr double GFX1250_FIT_COMPUTE_SCALE = 0.7766234901999738;
-  /// Scale of the load-to-use latencies of the K-loop (L2 and DRAM, flat and tensor-DMA loaded).
-  static constexpr double GFX1250_FIT_LATENCY_SCALE = 0.821273602515649;
   /// Epilogue 1/occupancy exposure max(1, S / resident WGs per CU): fitted S, and the S (= EPILOGUE_OCC_SATURATION)
   /// of the base model it was fitted against.  The gfx1250 model has no such factor (it is 1), so the fit is
   /// applied as its ratio, max(1, S_fit / occ) / max(1, S_dev / occ).
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION     = 2.5326976116052373;
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION_DEV = 2.0;
+
+  /// gfx1250 scales fitted to the ranking of measured bf16 TN candidates (rank correlation within a
+  /// shape and the pick's regret), applied on top of the constants and GFX1250_FIT_* above.
+  /// Co-residency: scale of the busy time each further resident workgroup adds, and the most
+  /// resident workgroups per WGP the law is applied to (it was measured for up to 4).
+  static constexpr double GFX1250_RESIDENT_BUSY_SCALE = 2.0;
+  static constexpr double GFX1250_MAX_RESIDENT_WGS    = 2.0;
+  /// Scale of the LocalSplitU LDS reduction.
+  static constexpr double GFX1250_LSU_REDUCTION_SCALE = 3.5;
 };
 
 /**

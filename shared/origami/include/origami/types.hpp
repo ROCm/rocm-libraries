@@ -496,6 +496,17 @@ struct tensile_params_t {
   /// allows instead of the scalar edge path.
   int adaptive_gemm = 0;
 
+  /// TensileLite TemporalHintA / B / D as built (gfx1250 TH field: 0 RT, 1 NT, 2 HT, 3 LU on loads
+  /// and WB on stores, 4..7 near/far splits).  -1 = unknown: the cache_hints_* code decides (>= 4
+  /// is NT).
+  int temporal_hint_a = -1;
+  int temporal_hint_b = -1;
+  int temporal_hint_d = -1;
+
+  /// TensileLite TDMFuse.  0: A and B ride one tensor_load_to_lds per wave, which carries a hint
+  /// only when TemporalHintA == TemporalHintB.  1-3: A and B have their own instructions and hints.
+  int tdm_fuse = 0;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -517,7 +528,9 @@ struct tensile_params_t {
            lds_transpose_read_a == o.lds_transpose_read_a &&
            lds_transpose_read_b == o.lds_transpose_read_b && tdm_inst == o.tdm_inst &&
            prefetch_gl2 == o.prefetch_gl2 && prefetch_local_read == o.prefetch_local_read &&
-           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm;
+           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm &&
+           temporal_hint_a == o.temporal_hint_a && temporal_hint_b == o.temporal_hint_b &&
+           temporal_hint_d == o.temporal_hint_d && tdm_fuse == o.tdm_fuse;
   }
 
   std::size_t hash() const {
@@ -556,7 +569,11 @@ struct tensile_params_t {
                               prefetch_local_read,
                               half_plr,
                               multicast,
-                              adaptive_gemm);
+                              adaptive_gemm,
+                              temporal_hint_a,
+                              temporal_hint_b,
+                              temporal_hint_d,
+                              tdm_fuse);
   }
 };
 
