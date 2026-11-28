@@ -41,6 +41,7 @@
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/MLPClassification.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 
 #if defined(TENSILE_MSGPACK)
@@ -123,6 +124,13 @@ namespace
         EXPECT_FALSE(yin.error()) << yin.error().message();
 #endif
     }
+}
+
+TEST(PredictionLibraryTest, DenseLayerWeightsAreReadableByConsumers)
+{
+    const std::vector<float>            weights{1.0f, -2.0f, 3.0f, 4.0f, 5.0f, -6.0f};
+    const MLPClassification::DenseLayer layer(weights, {0.5f, -0.5f});
+    EXPECT_EQ(layer.weights(), weights);
 }
 
 TEST(PredictionLibraryTest, CopiesClusterDimIntoOrigamiConfig)

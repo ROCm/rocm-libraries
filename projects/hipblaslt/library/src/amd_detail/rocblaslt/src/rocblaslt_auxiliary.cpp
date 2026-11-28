@@ -991,9 +991,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     return problem;
 }
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /********************************************************************************
  * \brief rocblaslt_handle is a structure holding the rocblaslt library context.
@@ -3369,9 +3367,7 @@ rocblaslt_status
     return rocblaslt_status_success;
 }
 
-#ifdef __cplusplus
 }
-#endif
 
 void rocblaslt_init_gemmData(rocblaslt_handle       handle,
                              rocblaslt::RocGemmType gemmType,

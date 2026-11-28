@@ -34,6 +34,18 @@
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
+// Both formats support host conversion; device conversion depends on the target.
+#if HIP_FP8_TYPE_OCP
+#define TENSILELITE_FP8_OCP_HOST_DEVICE HIP_HOST_DEVICE
+#else
+#define TENSILELITE_FP8_OCP_HOST_DEVICE HIP_HOST
+#endif
+#if HIP_FP8_TYPE_FNUZ
+#define TENSILELITE_FP8_FNUZ_HOST_DEVICE HIP_HOST_DEVICE
+#else
+#define TENSILELITE_FP8_FNUZ_HOST_DEVICE HIP_HOST
+#endif
+
 namespace TensileLite
 {
 
@@ -42,19 +54,13 @@ namespace TensileLite
         using __hip_fp8_e4m3:: __hip_fp8_e4m3; // list base's constructor in derive's scope
 
         // constructor -> down cast
-#if HIP_FP8_TYPE_OCP
-        HIP_HOST_DEVICE tensile_hip_fp8_e4m3(const _Float16 f)
-#else
-        HIP_HOST tensile_hip_fp8_e4m3(const _Float16 f)
-#endif
-        : __hip_fp8_e4m3(reinterpret_cast<const __half &>(f)) {}
+        TENSILELITE_FP8_OCP_HOST_DEVICE tensile_hip_fp8_e4m3(const _Float16 f)
+            : __hip_fp8_e4m3(reinterpret_cast<const __half&>(f))
+        {
+        }
 
         // operator overloadiing -> upcast
-#if HIP_FP8_TYPE_OCP
-        HIP_HOST_DEVICE operator _Float16() const
-#else
-        HIP_HOST operator _Float16() const
-#endif
+        TENSILELITE_FP8_OCP_HOST_DEVICE operator _Float16() const
         {
             return _Float16(float(*this));
         }
@@ -67,19 +73,13 @@ namespace TensileLite
     struct tensile_hip_fp8_e5m2: public __hip_fp8_e5m2
     {
         using __hip_fp8_e5m2:: __hip_fp8_e5m2;
-#if HIP_FP8_TYPE_OCP
-        HIP_HOST_DEVICE tensile_hip_fp8_e5m2(const _Float16 f)
-#else
-        HIP_HOST tensile_hip_fp8_e5m2(const _Float16 f)
-#endif
-        : __hip_fp8_e5m2(reinterpret_cast<const __half &>(f)) {}
+        TENSILELITE_FP8_OCP_HOST_DEVICE tensile_hip_fp8_e5m2(const _Float16 f)
+            : __hip_fp8_e5m2(reinterpret_cast<const __half&>(f))
+        {
+        }
 
         // operator overloadiing -> upcast
-#if HIP_FP8_TYPE_OCP
-        HIP_HOST_DEVICE operator _Float16() const
-#else
-        HIP_HOST operator _Float16() const
-#endif
+        TENSILELITE_FP8_OCP_HOST_DEVICE operator _Float16() const
         {
             return _Float16(float(*this));
         }
@@ -91,19 +91,13 @@ namespace TensileLite
     struct tensile_hip_fp8_e4m3_fnuz: public __hip_fp8_e4m3_fnuz
     {
         using __hip_fp8_e4m3_fnuz:: __hip_fp8_e4m3_fnuz;
-#if HIP_FP8_TYPE_FNUZ
-        HIP_HOST_DEVICE tensile_hip_fp8_e4m3_fnuz(const _Float16 f)
-#else
-        HIP_HOST tensile_hip_fp8_e4m3_fnuz(const _Float16 f)
-#endif
-        : __hip_fp8_e4m3_fnuz(reinterpret_cast<const __half &>(f)) {}
+        TENSILELITE_FP8_FNUZ_HOST_DEVICE tensile_hip_fp8_e4m3_fnuz(const _Float16 f)
+            : __hip_fp8_e4m3_fnuz(reinterpret_cast<const __half&>(f))
+        {
+        }
 
         // operator overloadiing -> upcast
-#if HIP_FP8_TYPE_FNUZ
-        HIP_HOST_DEVICE operator _Float16() const
-#else
-        HIP_HOST operator _Float16() const
-#endif
+        TENSILELITE_FP8_FNUZ_HOST_DEVICE operator _Float16() const
         {
             return _Float16(float(*this));
         }
@@ -114,23 +108,20 @@ namespace TensileLite
     struct tensile_hip_fp8_e5m2_fnuz: public __hip_fp8_e5m2_fnuz
     {
         using __hip_fp8_e5m2_fnuz:: __hip_fp8_e5m2_fnuz;
-#if HIP_FP8_TYPE_FNUZ
-        HIP_HOST_DEVICE tensile_hip_fp8_e5m2_fnuz(const _Float16 f)
-#else
-        HIP_HOST tensile_hip_fp8_e5m2_fnuz(const _Float16 f)
-#endif
-        : __hip_fp8_e5m2_fnuz(reinterpret_cast<const __half &>(f)) {}
+        TENSILELITE_FP8_FNUZ_HOST_DEVICE tensile_hip_fp8_e5m2_fnuz(const _Float16 f)
+            : __hip_fp8_e5m2_fnuz(reinterpret_cast<const __half&>(f))
+        {
+        }
 
         // operator overloadiing -> upcast
-#if HIP_FP8_TYPE_FNUZ
-        HIP_HOST_DEVICE operator _Float16() const
-#else
-        HIP_HOST operator _Float16() const
-#endif
+        TENSILELITE_FP8_FNUZ_HOST_DEVICE operator _Float16() const
         {
             return _Float16(float(*this));
         }
     };
+
+#undef TENSILELITE_FP8_OCP_HOST_DEVICE
+#undef TENSILELITE_FP8_FNUZ_HOST_DEVICE
     typedef tensile_hip_fp8_e5m2_fnuz BFloat8_fnuz;
 
 
