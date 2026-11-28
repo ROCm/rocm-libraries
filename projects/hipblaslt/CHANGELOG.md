@@ -38,6 +38,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Optimized
 
 * Improved w4a16 GEMM performance on gfx1151 with Stream-K kernels for prefill and dedicated kernels for 1 to 5 tokens, selected by Origami. For best performance on gfx1150 and gfx1151, pad every row of A, B, C, and D to an odd multiple of 128 bytes and pass a workspace of at least 8 MiB.
+* Improved gfx950 performance of skinny BF16 and FP16 TN GEMMs with one to five tokens and a bias vector of D's type (`F.linear` with a bias) by adding a bias epilogue to the vLLM wave-split-K custom kernels and routing them there.
 
 ### Resolved issues
 
@@ -50,6 +51,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Fixed the extension API examples that passed `stream` as the `useUserArgs` argument of `initialize`, and the device user arguments examples that ran with an undefined buffer.
 * Fixed `hipblaslt.h`, `hipblaslt-ext-op.h`, and `hipblaslt-local-kernel.h` failing to compile in a C translation unit. The C++ standard library includes, the default member initializers in `hipblasLtMatmulHeuristicResult_t`, the `static_cast` in the `*_INVALID` macros, and the C++-only `hipblaslt_e8.h` and `hipblaslt_e5m3.h` types now apply only to C++. In C, the `HIP_R_*_EXT` type ids are enumeration constants, so two C files that include the headers no longer fail to link with duplicate symbols. C++ consumers see no change.
 * gfx1200 and gfx1201 GEMM kernels, and the amax, layer norm and softmax extension-op kernels, now include the `s_wait_alu` instructions these GPUs require, as LLVM does for compiled code. Once a vector instruction has read a scalar register, a later write to that register needs a wait before the next read, or the read can return the old value. Small GEMMs can run 1-4% slower.
+* Fixed a user split-K override (for example `GemmTuning` split-K above 1) on the gfx950 skinny TN custom kernels writing D to the workspace instead of D. Their solutions now refuse split-K and WGM overrides, which the kernels do not take.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 
