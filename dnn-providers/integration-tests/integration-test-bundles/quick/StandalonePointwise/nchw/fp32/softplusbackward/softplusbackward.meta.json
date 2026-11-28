@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "generator": "temporary C++ frontend capture driver",
+  "inputs": {
+    "0": {
+      "hi": 1.0,
+      "kind": "free",
+      "lo": -1.0
+    },
+    "1": {
+      "hi": 1.0,
+      "kind": "free",
+      "lo": -1.0
+    }
+  },
+  "no_gpu_reference": true,
+  "notes": "SoftplusBackward",
+  "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.SoftplusBackward",
+  "seed": 42,
+  "standalone_reason": "round-trip verify failed"
+}
