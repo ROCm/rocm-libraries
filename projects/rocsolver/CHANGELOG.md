@@ -8,6 +8,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 
 * Improved performance of STEDC's secular equation solver
+* Reduced the build time of the GETF2 small-matrix kernels by compiling a few row sizes instead of one
+  kernel per number of columns, which also keeps them from spilling to scratch memory and speeds up
+  single-precision batched GETRF for small matrices.
 
 ### Resolved issues
 

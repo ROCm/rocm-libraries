@@ -298,9 +298,10 @@ int select_spkernel(const I m, const I n, const I inca, const bool pivot)
         }
     }
 
+    // when the small kernel cannot be used, the panel kernel needs m >= n
     if(ker == 1 && (m > GETF2_SSKER_MAX_M || n > GETF2_SSKER_MAX_N))
     {
-        ker = 2;
+        ker = (m >= n) ? 2 : 0;
     }
 
     return ker;
@@ -402,9 +403,10 @@ int select_spkernel(const I m, const I n, const I inca, const bool pivot)
         }
     }
 
+    // when the small kernel cannot be used, the panel kernel needs m >= n
     if(ker == 1 && (m > GETF2_SSKER_MAX_M || n > GETF2_SSKER_MAX_N))
     {
-        ker = 2;
+        ker = (m >= n) ? 2 : 0;
     }
 
     return ker;

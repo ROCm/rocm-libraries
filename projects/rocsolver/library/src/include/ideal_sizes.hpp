@@ -450,7 +450,7 @@
 #define GETF2_SSKER_MAX_M ROCSOLVER_ASAN_VALUE(256, 512) // always <= 512 and <= GETF2_SPKER_MAX_M
 #endif
 #ifndef GETF2_SSKER_MAX_N
-#define GETF2_SSKER_MAX_N 64 // always <= wavefront and <= GETF2_SPKER_MAX_N
+#define GETF2_SSKER_MAX_N 40 // always <= 40 (largest small kernel) and <= GETF2_SPKER_MAX_N
 #endif
 #ifndef GETF2_OPTIM_NGRP
 #define GETF2_OPTIM_NGRP \
@@ -472,7 +472,7 @@
 #define GETRF_BATCH_INTERVALS_REAL 40, 42, 46, 49, 52, 58, 112, 800, 1024
 #endif
 #ifndef GETRF_BATCH_BLKSIZES_REAL
-#define GETRF_BATCH_BLKSIZES_REAL 0, 32, 0, 16, 0, 32, 1, 32, 64, 160
+#define GETRF_BATCH_BLKSIZES_REAL 0, 32, 32, 16, 32, 32, 1, 32, 64, 160
 #endif
 #ifndef GETRF_NPVT_NUM_INTERVALS_REAL
 #define GETRF_NPVT_NUM_INTERVALS_REAL 2
