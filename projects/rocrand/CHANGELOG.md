@@ -17,6 +17,7 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
+* Fixed MT19937 allocating four times more memory than needed for its engine states and initialization buffers.
 * Fixed a compilation error when calling `operator()(result_type* output, size_t size)` on the C++ wrapper engines in `rocrand.hpp`. An unused `template<class Generator>` parameter that could not be deduced from the arguments has been removed.
 
 ### Added
