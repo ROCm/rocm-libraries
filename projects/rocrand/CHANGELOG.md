@@ -21,6 +21,7 @@ Documentation for rocRAND is available at
 
 ### Added
 
+* Added `rocrand_philox4x32_10(uint4 counter, uint2 key)`, a stateless device and host function that computes one Philox4x32-10 block. It is the equivalent of cuRAND's `curand_Philox4x32_10`.
 * New unit tests in `test/test_rocrand_cpp_wrapper.cpp` that call `operator()` on each C++ wrapper engine and compare the output distribution with a reference using a two-sample Kolmogorov-Smirnov test.
 * Added Sobol direction vector equidistribution and scramble tests.
 

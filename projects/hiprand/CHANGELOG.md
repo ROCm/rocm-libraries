@@ -3,6 +3,12 @@
 Documentation for hipRAND is available at
 [https://rocm.docs.amd.com/projects/hipRAND/en/latest/](https://rocm.docs.amd.com/projects/hipRAND/en/latest/).
 
+## hipRAND 3.5.0 for ROCm 10.3.0
+
+### Added
+
+* Added `hiprand_Philox4x32_10(uint4 counter, uint2 key)`, the hipRAND equivalent of cuRAND's `curand_Philox4x32_10`, which computes one Philox4x32-10 block without a generator state. On the AMD backend it requires rocRAND 5.3.0 or later.
+
 ## hipRAND 3.4.0 for ROCm 7.14
 
 ### Added

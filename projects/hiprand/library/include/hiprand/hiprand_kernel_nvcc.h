@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -290,6 +290,11 @@ QUALIFIERS
 uint4 hiprand4(hiprandStatePhilox4_32_10_t * state)
 {
     return curand4(state);
+}
+
+QUALIFIERS uint4 hiprand_Philox4x32_10(uint4 counter, uint2 key)
+{
+    return curand_Philox4x32_10(counter, key);
 }
 
 template<class StateType>
