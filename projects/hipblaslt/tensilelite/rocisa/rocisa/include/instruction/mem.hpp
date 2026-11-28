@@ -2293,29 +2293,26 @@ namespace rocisa
         }
     };
 
-    struct GlobalAtomicIncU32Saddr : public GLOBALStoreInstruction
+    struct GLOBALAtomicSaddrInstruction : public GLOBALStoreInstruction
     {
-        GlobalAtomicIncU32Saddr(const std::shared_ptr<Container>& dst,
-                           const std::shared_ptr<Container>& vaddr,
-                           const std::shared_ptr<Container>& data,
-                           const std::shared_ptr<Container>& saddr,
-                           std::optional<GLOBALModifiers>    modifier = std::nullopt,
-                           const std::string&                comment  = "")
-            : GLOBALStoreInstruction(InstType::INST_B32, vaddr, data, saddr, modifier, comment)
+        GLOBALAtomicSaddrInstruction(InstType                          instType,
+                                     const std::string&                mnemonic,
+                                     const std::shared_ptr<Container>& dst,
+                                     const std::shared_ptr<Container>& vaddr,
+                                     const std::shared_ptr<Container>& data,
+                                     const std::shared_ptr<Container>& saddr,
+                                     std::optional<GLOBALModifiers>    modifier,
+                                     const std::string&                comment)
+            : GLOBALStoreInstruction(instType, vaddr, data, saddr, modifier, comment)
             , dst(dst)
         {
-            setInst("global_atomic_inc_u32");
+            setInst(mnemonic);
         }
 
-        GlobalAtomicIncU32Saddr(const GlobalAtomicIncU32Saddr& other)
+        GLOBALAtomicSaddrInstruction(const GLOBALAtomicSaddrInstruction& other)
             : GLOBALStoreInstruction(other)
             , dst(other.dst ? other.dst->clone() : nullptr)
         {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<GlobalAtomicIncU32Saddr>(*this);
         }
 
         std::vector<InstructionInput> getDstParams() const override
@@ -2336,7 +2333,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            // SADDR returning atomic: "global_atomic_inc_u32 vdst, vaddr, vsrc, saddr".
+            // SADDR returning atomic: "<mnemonic> vdst, vaddr, vsrc, saddr".
             // th:TH_ATOMIC_RETURN is emitted unconditionally; scope: (when the ISA caps
             // allow) is rendered first to match StinkyTofu's canonical order.
             std::string kStr = instStr + " " + getArgStr();
@@ -2350,6 +2347,81 @@ namespace rocisa
 
     private:
         std::shared_ptr<Container> dst;
+    };
+
+    struct GlobalAtomicIncU32Saddr : public GLOBALAtomicSaddrInstruction
+    {
+        GlobalAtomicIncU32Saddr(const std::shared_ptr<Container>& dst,
+                                const std::shared_ptr<Container>& vaddr,
+                                const std::shared_ptr<Container>& data,
+                                const std::shared_ptr<Container>& saddr,
+                                std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                                const std::string&                comment  = "")
+            : GLOBALAtomicSaddrInstruction(InstType::INST_B32,
+                                           "global_atomic_inc_u32",
+                                           dst,
+                                           vaddr,
+                                           data,
+                                           saddr,
+                                           modifier,
+                                           comment)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicIncU32Saddr>(*this);
+        }
+    };
+
+    struct GlobalAtomicCmpswapB64Saddr : public GLOBALAtomicSaddrInstruction
+    {
+        GlobalAtomicCmpswapB64Saddr(const std::shared_ptr<Container>& dst,
+                                    const std::shared_ptr<Container>& vaddr,
+                                    const std::shared_ptr<Container>& data,
+                                    const std::shared_ptr<Container>& saddr,
+                                    std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                                    const std::string&                comment  = "")
+            : GLOBALAtomicSaddrInstruction(InstType::INST_B64,
+                                           "global_atomic_cmpswap_b64",
+                                           dst,
+                                           vaddr,
+                                           data,
+                                           saddr,
+                                           modifier,
+                                           comment)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicCmpswapB64Saddr>(*this);
+        }
+    };
+
+    struct GlobalAtomicMaxU64Saddr : public GLOBALAtomicSaddrInstruction
+    {
+        GlobalAtomicMaxU64Saddr(const std::shared_ptr<Container>& dst,
+                                const std::shared_ptr<Container>& vaddr,
+                                const std::shared_ptr<Container>& data,
+                                const std::shared_ptr<Container>& saddr,
+                                std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                                const std::string&                comment  = "")
+            : GLOBALAtomicSaddrInstruction(InstType::INST_U64,
+                                           "global_atomic_max_u64",
+                                           dst,
+                                           vaddr,
+                                           data,
+                                           saddr,
+                                           modifier,
+                                           comment)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicMaxU64Saddr>(*this);
+        }
     };
 
     struct GlobalStoreB8 : public GLOBALStoreInstruction

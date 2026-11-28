@@ -543,6 +543,20 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return FlatAtomicCmpswapB32(vgpr(0), vgpr(1), vgpr(2));
         case logical::GlobalAtomicIncU32Saddr:
             return GlobalAtomicIncU32Saddr(vgpr(0), vgpr(1), vgpr(2), sgpr(0, 2));
+        case logical::GlobalAtomicCmpswapB64Saddr:
+            return GlobalAtomicCmpswapB64Saddr(vgpr(0, 2), vgpr(2), vgpr(4, 4), sgpr(0, 2));
+        case logical::GlobalAtomicMaxU64Saddr:
+            return GlobalAtomicMaxU64Saddr(vgpr(0, 2), vgpr(2), vgpr(4, 2), sgpr(0, 2));
+        case logical::GlobalLoadB32:
+            return GlobalLoadB32(vgpr(0), vgpr(1), sgpr(0, 2));
+        case logical::GlobalLoadB64:
+            return GlobalLoadB64(vgpr(0, 2), vgpr(2), sgpr(0, 2));
+        case logical::GlobalStoreB32:
+            return GlobalStoreB32(vgpr(0), vgpr(1), sgpr(0, 2));
+        case logical::GlobalStoreB64:
+            return GlobalStoreB64(vgpr(0), vgpr(2, 2), sgpr(0, 2));
+        case logical::GlobalStoreB128:
+            return GlobalStoreB128(vgpr(0), vgpr(4, 4), sgpr(0, 2));
         case logical::FlatAtomicDecU32:
             return FlatAtomicDecU32(vgpr(0), vgpr(1), vgpr(2));
         case logical::SAbsI32:
@@ -806,6 +820,13 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::BufferAtomicAddF32, "buffer_atomic_add_f32"},
     {logical::BufferAtomicPkAddBF16, "buffer_atomic_pk_add_bf16"},
     {logical::GlobalAtomicIncU32Saddr, "global_atomic_inc_u32"},
+    {logical::GlobalAtomicCmpswapB64Saddr, "global_atomic_cmpswap_b64"},
+    {logical::GlobalAtomicMaxU64Saddr, "global_atomic_max_u64"},
+    {logical::GlobalLoadB32, "global_load_b32"},
+    {logical::GlobalLoadB64, "global_load_b64"},
+    {logical::GlobalStoreB32, "global_store_b32"},
+    {logical::GlobalStoreB64, "global_store_b64"},
+    {logical::GlobalStoreB128, "global_store_b128"},
     {logical::DSLoadB32, "ds_load_b32"},
     {logical::DSLoadB64, "ds_load_b64"},
     {logical::SLoadB32, "s_load_b32"},

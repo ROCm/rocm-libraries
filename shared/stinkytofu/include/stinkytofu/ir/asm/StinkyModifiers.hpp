@@ -507,18 +507,21 @@ struct TENSORModifiers : public TypedModifier<TENSORModifiers> {
 struct SMEMModifiers : public TypedModifier<SMEMModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::SMEM;
 
-    SMEMModifiers(bool glc = false, bool nv = false, int offset = 0, bool hasSCOPEModifier = false)
+    SMEMModifiers(bool glc = false, bool nv = false, int offset = 0, bool hasSCOPEModifier = false,
+                  MUBUFScope scope = MUBUFScope::SCOPE_NONE)
         : TypedModifier<SMEMModifiers>(),
           glc(glc),
           nv(nv),
           offset(offset)  // 20u 21s shaes the same
           ,
-          hasSCOPEModifier(hasSCOPEModifier) {}
+          hasSCOPEModifier(hasSCOPEModifier),
+          scope(scope) {}
 
     uint32_t glc : 1;
     uint32_t nv : 1;
     int offset;
     uint32_t hasSCOPEModifier : 1;
+    MUBUFScope scope;
 };
 
 struct SDWAModifiers : public TypedModifier<SDWAModifiers> {

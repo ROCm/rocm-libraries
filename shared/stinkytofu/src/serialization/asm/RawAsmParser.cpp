@@ -841,6 +841,7 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
         if (fields.contains("glc")) modFields["glc"] = "true";
         if (fields.contains("nv")) modFields["nv"] = "true";
+        if (fields.contains("scope")) modFields["scope"] = fields["scope"];
 
     } else if (modKey == "mod.tensor") {
         // TENSORModifiers models th / scope / nv only; any other token keeps the

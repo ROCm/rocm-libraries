@@ -13,6 +13,7 @@
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
+#include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 
 #define DEBUG_TYPE "EpilogueStoreSinkPass"
 
@@ -48,7 +49,8 @@ static int requiredMsbOf(const StinkyInstruction& inst) {
 // Sink one store past following VALU ops; returns how many were crossed.
 // msbGuard: stop before straddling an s_set_vgpr_msb/frames flip.
 static unsigned sinkOneStore(BasicBlock& bb, BasicBlock::iterator storeIt, unsigned targetValu,
-                             bool crossLoadcnt, bool crossAsyncCnt, bool msbGuard) {
+                             bool crossLoadcnt, bool crossAsyncCnt, bool msbGuard,
+                             const StinkyRegister& execReg) {
     StinkyInstruction& store = getStinkyInst(storeIt);
 
     // Regs the store reads: it may not cross any later writer of them (WAR), which
@@ -89,6 +91,8 @@ static unsigned sinkOneStore(BasicBlock& bb, BasicBlock::iterator storeIt, unsig
         // WAR/WAW: candidate writes a reg the store reads → cannot sink past it.
         if (hasDestSourceOverlap(cand, readUnits)) break;
 
+        if (writesExecReg(cand, execReg)) break;
+
         // Legal to cross this instruction.
         if (bumpsVaVdst(cand)) ++valuPassed;
         ++it;
@@ -118,7 +122,7 @@ static unsigned sinkOneStore(BasicBlock& bb, BasicBlock::iterator storeIt, unsig
 }
 
 size_t sinkStoresInBlock(BasicBlock& bb, unsigned targetValu, bool crossLoadcnt, bool crossAsyncCnt,
-                         bool msbGuard) {
+                         bool msbGuard, const StinkyRegister& execReg) {
     size_t moved = 0;
     // Snapshot store iterators first: moving one store must not disturb the walk.
     std::vector<BasicBlock::iterator> stores;
@@ -129,7 +133,8 @@ size_t sinkStoresInBlock(BasicBlock& bb, unsigned targetValu, bool crossLoadcnt,
     // Bottom-up so each store sinks into the slot the one below vacated.
     for (size_t k = 0; k < stores.size(); ++k) {
         const size_t i = stores.size() - 1 - k;
-        if (sinkOneStore(bb, stores[i], targetValu, crossLoadcnt, crossAsyncCnt, msbGuard) > 0)
+        if (sinkOneStore(bb, stores[i], targetValu, crossLoadcnt, crossAsyncCnt, msbGuard,
+                         execReg) > 0)
             ++moved;
     }
     return moved;
@@ -137,7 +142,8 @@ size_t sinkStoresInBlock(BasicBlock& bb, unsigned targetValu, bool crossLoadcnt,
 
 // Pull `store` up to sit right after `anchor` if every inst between is hoppable.
 static bool groupOneStore(BasicBlock& bb, BasicBlock::iterator anchorIt,
-                          BasicBlock::iterator storeIt, bool crossLoadcnt, bool crossAsyncCnt) {
+                          BasicBlock::iterator storeIt, bool crossLoadcnt, bool crossAsyncCnt,
+                          const StinkyRegister& execReg) {
     StinkyInstruction& store = getStinkyInst(storeIt);
     RegKeySet readUnits;
     addSources(readUnits, store);
@@ -151,6 +157,7 @@ static bool groupOneStore(BasicBlock& bb, BasicBlock::iterator anchorIt,
             return false;
         if (hasDestSourceOverlap(cand, readUnits))
             return false;  // WAR: store reads a reg cand writes
+        if (writesExecReg(cand, execReg)) return false;
     }
 
     // Move the store to just after the anchor (before anchor's current next).
@@ -163,7 +170,7 @@ static bool groupOneStore(BasicBlock& bb, BasicBlock::iterator anchorIt,
 
 // Pack stores into groups of up to `maxStoreGroupSize` so one xcnt drain covers each group.
 static size_t groupStoresInBlock(BasicBlock& bb, unsigned maxStoreGroupSize, bool crossLoadcnt,
-                                 bool crossAsyncCnt) {
+                                 bool crossAsyncCnt, const StinkyRegister& execReg) {
     if (maxStoreGroupSize < 2) return 0;
     std::vector<BasicBlock::iterator> stores;
     for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -178,7 +185,8 @@ static size_t groupStoresInBlock(BasicBlock& bb, unsigned maxStoreGroupSize, boo
         BasicBlock::iterator anchor = stores[i];
         size_t g = 1;
         for (; g < maxStoreGroupSize && (i + g) < storeCount; ++g) {
-            if (!groupOneStore(bb, anchor, stores[i + g], crossLoadcnt, crossAsyncCnt)) break;
+            if (!groupOneStore(bb, anchor, stores[i + g], crossLoadcnt, crossAsyncCnt, execReg))
+                break;
             anchor = stores[i + g];  // chain: next store packs behind the one just moved
             ++moved;
         }
@@ -207,12 +215,13 @@ class EpilogueStoreSinkPass : public StinkyInstPass {
         // Without replay protection no drain is emitted, so the guard buys nothing.
         const bool msbGuard =
             options_.avoidMsbXcntDrain && passCtx.getAsmCapsConfig().enableXnackReplay;
+        const StinkyRegister execReg = StinkyRegister::getEXECRegister(passCtx.getWavefrontSize());
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-            const size_t moved =
-                sinkStoresInBlock(bb, options_.targetValu, crossLoadcnt, crossAsyncCnt, msbGuard);
-            const size_t grouped =
-                groupStoresInBlock(bb, options_.maxStoreGroupSize, crossLoadcnt, crossAsyncCnt);
+            const size_t moved = sinkStoresInBlock(bb, options_.targetValu, crossLoadcnt,
+                                                   crossAsyncCnt, msbGuard, execReg);
+            const size_t grouped = groupStoresInBlock(bb, options_.maxStoreGroupSize, crossLoadcnt,
+                                                      crossAsyncCnt, execReg);
             PASS_DEBUG(std::cerr << "[EpilogueStoreSinkPass] bb=\"" << bb.getLabel()
                                  << "\" sunk_stores=" << moved << " grouped=" << grouped
                                  << " target=" << options_.targetValu

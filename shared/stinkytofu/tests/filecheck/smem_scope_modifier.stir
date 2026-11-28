@@ -1,0 +1,23 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# The SMEM cache scope must survive an IR roundtrip.
+
+# CHECK-LABEL: @s_load_scope_sys
+# CHECK: "st.s_load_b64"
+# CHECK-SAME: mod.smem
+# CHECK-SAME: scope = "SCOPE_SYS"
+
+st.func @s_load_scope_sys() {
+^entry:
+  s[4:5] = "st.s_load_b64"(s[0:1], 0) { issueCycles = 1, latencyCycles = 1, mod.smem = { offset = 0, glc = false, nv = false, scope = "SCOPE_SYS" } }
+}
+
+# CHECK-LABEL: @s_load_scope_dev
+# CHECK: "st.s_load_b32"
+# CHECK-SAME: mod.smem
+# CHECK-SAME: scope = "SCOPE_DEV"
+
+st.func @s_load_scope_dev() {
+^entry:
+  s4 = "st.s_load_b32"(s[0:1], 0) { issueCycles = 1, latencyCycles = 1, mod.smem = { offset = 0, glc = false, nv = false, scope = "SCOPE_DEV" } }
+}

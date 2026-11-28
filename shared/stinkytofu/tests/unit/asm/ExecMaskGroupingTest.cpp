@@ -133,6 +133,32 @@ TEST_F(ExecMaskGroupingTest, CollapseAndExpand_RoundTripsSpanExactly) {
         EXPECT_NE(inst->getUnifiedOpcode(), GFX::EXEC_GROUP);
 }
 
+TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_ChildSccWriteIsAnImplicitDest) {
+    createExecNarrow(10);
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* add = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+    add->addDestReg(StinkyRegister("s", 0, 1));
+    add->addDestReg(StinkyRegister::getSCCRegister());
+    add->addSrcReg(StinkyRegister("s", 1, 1));
+    add->addSrcReg(StinkyRegister("s", 2, 1));
+    createExecReset();
+
+    collapseExecMaskedRegions(*bb, builder, /*wavefrontSize=*/32);
+
+    ASSERT_EQ(countStinkyInstructions(*bb), 1);
+    StinkyInstruction* group = collectInstructions(*bb)[0];
+    ASSERT_TRUE(isExecMaskGroup(*group));
+    bool sawScc = false;
+    for (const StinkyRegister& d : group->getDestRegs()) {
+        if (!d.isRegister() || d.reg.type != RegType::SCC) continue;
+        sawScc = true;
+        EXPECT_TRUE(isImplicitDest(d, *group));
+    }
+    EXPECT_TRUE(sawScc);
+
+    expandExecMaskedGroups(*bb);
+}
+
 TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_HandlesNesting) {
     StinkyInstruction* outerNarrow = createExecNarrow(10);
     StinkyInstruction* innerNarrow = createExecNarrow(11);
