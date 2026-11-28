@@ -3,6 +3,27 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+
+* Improved the accuracy of BDSQR (and GESVD), STEQR and the Jacobi eigensolvers and SVD
+  (SYEVJ/HEEVJ, GESVDJ): the plane rotations of LARTG were slightly biased, which reduced the
+  accuracy of the singular values and eigenvalues by up to one or two orders of magnitude for large
+  matrices.
+* Fixed wrong eigenvalues in STEDCJ, and therefore in SYEVDJ/HEEVDJ and SYGVDJ/HEGVDJ, when two
+  nearly equal eigenvalues of the merged blocks were not deflated (the deflation criterion is now
+  that of LAPACK's xLAED2).
+
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
 ### Optimized
