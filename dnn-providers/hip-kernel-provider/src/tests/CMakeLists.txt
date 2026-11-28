@@ -605,8 +605,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DeclaresItsNumericalNotes
         )
     endif()
-    # The trained models of every FlyDSL engine, over every architecture a FlyDSL op ships
-    # for: one suite, because each case checks whichever FlyDSL engines the shard holds.
+    # The trained rankers (L2) of every FlyDSL engine, over every architecture a FlyDSL op
+    # ships for: one suite, because each case checks whichever FlyDSL engines the shard
+    # holds. Their engine predictors (L1) are TestShippedEnginePredictors' below.
     # HKP_REQUIRE_DVC_DESCRIPTORS is set on the file with the rocKE ModelBinding files below.
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         set(_hkp_flydsl_model_arches "")
@@ -623,10 +624,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 SUITES TestFlydslModelBinding
                 EXPECTED_CASES
                     EveryBoundL2KernelRankerLoads
-                    EveryBoundL1EnginePredictorLoadsAndMatchesThisBuild
             )
         endif()
     endif()
+
+    # Every engine-prediction (L1) model the product shard ships, whatever its engine family:
+    # each must load and record the selector revision this build computes, or GenericEngine
+    # refuses it at runtime with one log line and ranks the engine without an estimate. One
+    # entry per architecture the product pack is wired for; a shard that binds none has
+    # nothing to refuse, and engines this build does not pack are named, not checked.
+    hkp_register_census_tests(
+        TARGET hip_kernel_provider_census_tests
+        PACK_NAME product
+        SUITES TestShippedEnginePredictors
+        EXPECTED_CASES
+            EveryEnginePredictorThisShardShipsMatchesThisBuild
+    )
 
     # The cases every generated Test<Engine>Packs suite below registers, shared by the
     # attention and RDNA calls.
@@ -703,6 +716,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestShippedEnginePredictors.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
