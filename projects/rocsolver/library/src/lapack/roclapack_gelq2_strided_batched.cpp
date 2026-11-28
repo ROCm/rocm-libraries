@@ -45,18 +45,23 @@ try
     ROCSOLVER_ENTER_TOP("gelq2_strided_batched", "-m", m, "-n", n, "--lda", lda, "--strideA",
                         strideA, "--strideP", strideP, "--batch_count", batch_count_arg);
 
+    if(!handle)
+        return rocblas_status_invalid_handle;
     {
         auto const A = A_arg;
         auto const ipiv = ipiv_arg;
         auto const batch_count = batch_count_arg;
 
-        if(!handle)
-            return rocblas_status_invalid_handle;
-
         // argument checking
         rocblas_status st = rocsolver_gelq2_gelqf_argCheck(handle, m, n, lda, A, ipiv, batch_count);
         if(st != rocblas_status_continue)
             return st;
+
+        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
     }
 
     // working with unshifted arrays

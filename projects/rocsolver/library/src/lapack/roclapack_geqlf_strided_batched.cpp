@@ -57,6 +57,12 @@ try
         rocblas_status st = rocsolver_geql2_geqlf_argCheck(handle, m, n, lda, A, ipiv, batch_count);
         if(st != rocblas_status_continue)
             return st;
+
+        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
     }
 
     // working with unshifted arrays
