@@ -688,6 +688,8 @@ Arguments:
   - norm_check_assert: c_bool
   - swizzle_a: c_bool
   - swizzle_b: c_bool
+  - order_a: c_int32
+  - order_b: c_int32
   - dump_matrix: c_bool
   - use_ext: c_bool
   - use_ext_setproblem: c_bool
@@ -832,6 +834,8 @@ Defaults:
   norm_check_assert: true
   swizzle_a: false
   swizzle_b: false
+  order_a: 0
+  order_b: 0
   dump_matrix: false
   use_ext: false
   use_ext_setproblem: false

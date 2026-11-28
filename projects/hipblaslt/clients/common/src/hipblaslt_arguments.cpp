@@ -171,6 +171,8 @@ void Arguments::init()
     aux_type          = HIPBLASLT_DATATYPE_INVALID;
     gradient          = false;
     norm_check_assert = true;
+    order_a           = 0;
+    order_b           = 0;
 
     use_ext                  = false;
     use_ext_setproblem       = false;

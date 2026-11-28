@@ -35,4 +35,7 @@ typedef enum class _hipblaslt_scaling_format
     // E8M0 per 32 K elements in 128-row by 4-K-block tiles; FP6 with
     // HIPBLASLT_ORDER_COL256_R128_EXT only.
     Block_32_UE8M0_128_4_EXT = 1018,
+    // The 1018 scales of a 4096-row A placed in 2 MiB pages; A in
+    // HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT only.
+    Block_32_UE8M0_128_4_PAGE24_EXT = 1019,
 } hipblaslt_scaling_format;

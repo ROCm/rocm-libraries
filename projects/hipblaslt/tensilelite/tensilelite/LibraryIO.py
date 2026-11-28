@@ -34,6 +34,7 @@ from .Common.TimingInstrumentation import timing_context
 from .Common.Architectures import gfxToIsa
 from .SolutionStructs import Solution, ProblemSizes
 from .SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
+from .SolutionStructs.Validators.MXScaleFormat import checkCustomKernelSwizzleLayout
 from .SolutionStructs.Problem import ProblemType, problemTypeToEnum
 from .Utilities import BinaryLibraryIO
 
@@ -746,6 +747,7 @@ def parseLibraryLogicData(
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
+            checkCustomKernelSwizzleLayout(customKernelName, customConfig, problemType, srcFile)
             solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:

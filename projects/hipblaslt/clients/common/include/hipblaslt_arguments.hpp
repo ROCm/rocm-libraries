@@ -226,6 +226,9 @@ struct Arguments
     bool                     norm_check_assert;
     bool                     swizzle_a;
     bool                     swizzle_b;
+    // hipblasLtOrder_t of a swizzled A or B in place of the one its type implies (0 = that one).
+    int32_t                  order_a;
+    int32_t                  order_b;
     bool                     dump_matrix;
 
     // API related
@@ -367,6 +370,8 @@ struct Arguments
     OPER(norm_check_assert) SEP      \
     OPER(swizzle_a) SEP              \
     OPER(swizzle_b) SEP              \
+    OPER(order_a) SEP                \
+    OPER(order_b) SEP                \
     OPER(dump_matrix) SEP            \
     OPER(use_ext) SEP                \
     OPER(use_ext_setproblem) SEP     \

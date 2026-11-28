@@ -29,6 +29,7 @@
 #include "auxiliary.hpp"
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_scaling_format.hpp"
+#include "mx_tile128x4.hpp"
 #include <cassert>
 #include <hipblaslt/hipblaslt.h>
 #include <optional>
@@ -82,6 +83,7 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
     case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT:
         return HIP_R_8F_UE8M0;
     case hipblaslt_scaling_format::Block_32_UE4M3:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -156,6 +158,7 @@ inline bool isBlockScaling(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_16_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
     case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT:
         return true;
     default:
         return false;
@@ -171,6 +174,7 @@ inline int blockSize(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_UE5M3:
     case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
     case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
+    case hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT:
         return 32;
     case hipblaslt_scaling_format::Block_16_UE8M0:
     case hipblaslt_scaling_format::Block_16_UE4M3:
@@ -221,6 +225,10 @@ inline size_t blockScaleBufferSize(int64_t                  dataRow,
         size_t const mnDim   = ((kAlongRows ? dataCol : dataRow) + 127) / 128 * 128;
         return kBlocks * mnDim;
     }
+
+    // The 2 MiB pages the placed scales occupy.
+    if(s == hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT)
+        return mx_tile128x4::page24ScaleBytes(((kAlongRows ? dataRow : dataCol) + 127) / 128 * 4);
 
     if(mxUseRocroller)
     {

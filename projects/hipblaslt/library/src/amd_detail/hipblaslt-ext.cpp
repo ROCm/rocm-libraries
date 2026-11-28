@@ -431,6 +431,8 @@ namespace hipblaslt_ext
                 return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
             case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
                 return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(s) << std::endl;
@@ -488,6 +490,8 @@ namespace hipblaslt_ext
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT;
             case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(f) << std::endl;

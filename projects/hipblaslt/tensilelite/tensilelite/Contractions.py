@@ -34,7 +34,8 @@ from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
 from .SolutionStructs import Solution as OriginalSolution
-from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
+from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault, \
+    SWIZZLE_LAYOUT_IDS
 from .Toolchain.Component import Assembler
 from math import ceil
 
@@ -106,7 +107,7 @@ class ProblemType:
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'swizzleLayoutA', 'swizzleLayoutB', 'metadataLayout',
                  'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
@@ -344,6 +345,8 @@ class ProblemType:
 
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
+        rv.swizzleLayoutA = swizzleLayoutId(d, 'A')
+        rv.swizzleLayoutB = swizzleLayoutId(d, 'B')
 
         rv.fusedGemmA2A = d.get('FusedGemmA2A', False)
 
@@ -493,6 +496,11 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
+            # Every swizzled row names its layout, so one layout's row never matches another's.
+            if self.swizzleTensorA:
+                predicates.append(ProblemPredicate("SwizzleLayoutA", value=self.swizzleLayoutA))
+            if self.swizzleTensorB:
+                predicates.append(ProblemPredicate("SwizzleLayoutB", value=self.swizzleLayoutB))
             predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
             if self.fusedGemmA2A and self.batched:
                 predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
@@ -528,6 +536,16 @@ MX_SCALE_FORMAT_IDS = {
 
 def mxScaleFormatId(state):
     return MX_SCALE_FORMAT_IDS.get(state.get("MXScaleFormat", "NoSwizzle"), 0)
+
+def swizzleLayoutId(d, operand):
+    """SWIZZLE_LAYOUT_IDS id of a problem type's SwizzleLayoutA or SwizzleLayoutB."""
+    key = 'SwizzleLayout' + operand
+    layout = d.get(key, 'Default')
+    if layout not in SWIZZLE_LAYOUT_IDS:
+        raise ValueError("%s must be one of %s; got %r" % (key, ", ".join(SWIZZLE_LAYOUT_IDS), layout))
+    if layout != 'Default' and not d.get('SwizzleTensor' + operand, False):
+        raise ValueError("%s %s requires SwizzleTensor%s" % (key, layout, operand))
+    return SWIZZLE_LAYOUT_IDS[layout]
 
 # Serialized names of the C++ ScalarValue enum, keyed by AssertAlphaValue values.
 ASSERT_ALPHA_VALUE_NAMES = {1: "1"}

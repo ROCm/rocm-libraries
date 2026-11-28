@@ -201,20 +201,55 @@ to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0``, the following restrictions app
 *  The scaling data pointed to by ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` must be stored in the same order as ``A``.
 *  The scaling data pointed to by ``HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER`` must be stored in the same order as ``B``.
 
-When ``HIPBLASLT_MATMUL_DESC_A_SCALE_MODE`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_MODE`` are both set
-to ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``, the following restrictions apply:
+When ``HIPBLASLT_MATMUL_DESC_A_SCALE_MODE`` or ``HIPBLASLT_MATMUL_DESC_B_SCALE_MODE`` is set to
+``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` or
+``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT``, or the order of ``A`` or ``B`` is one of the
+``HIPBLASLT_ORDER_COL256_R128`` orders, the following restrictions apply:
 
 *  Atype and Btype must each be ``HIP_R_6F_E2M3`` or ``HIP_R_6F_E3M2``.
-*  The order of ``A`` must be ``HIPBLASLT_ORDER_COL256_R128_EXT``, and the order of ``B`` must be
-   ``HIPBLASLT_ORDER_COL256_R128_EXT`` or ``HIPBLASLT_ORDER_COL``. The caller stores ``A``, and ``B`` when it
-   uses that order, tiled in that order, and both scales shuffled in tiles of 128 rows by 4 K blocks. The
-   descriptions of both enum values in ``hipblaslt.h`` give the byte offset of every element and scale.
+*  The orders and scale modes must be one of these combinations:
+
+   .. list-table::
+      :header-rows: 1
+
+      * - Order of ``A``
+        - Order of ``B``
+        - Scale mode of ``A``
+        - Scale mode of ``B``
+      * - ``HIPBLASLT_ORDER_COL256_R128_EXT``
+        - ``HIPBLASLT_ORDER_COL256_R128_EXT`` or ``HIPBLASLT_ORDER_COL``
+        - ``..._128_4_EXT``
+        - ``..._128_4_EXT``
+      * - ``HIPBLASLT_ORDER_COL256_R128_P48_EXT``
+        - ``HIPBLASLT_ORDER_COL256_R128_P48_EXT``
+        - ``..._128_4_EXT``
+        - ``..._128_4_EXT``
+      * - ``HIPBLASLT_ORDER_COL256_R128_P16_EXT``
+        - ``HIPBLASLT_ORDER_COL``
+        - ``..._128_4_EXT``
+        - ``..._128_4_EXT``
+      * - ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT``
+        - ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT``
+        - ``..._128_4_PAGE24_EXT``
+        - ``..._128_4_EXT``
+
+   The caller stores each operand that uses one of these orders tiled in that order, and the scales shuffled
+   in tiles of 128 rows by 4 K blocks. The descriptions of the enum values in ``hipblaslt.h`` give the byte
+   offset of every element and scale.
 *  ``opA`` must be equal to ``T``, and ``opB`` must be equal to ``N``.
 *  ``m`` must be a multiple of 256 and ``K`` a multiple of 128. ``n`` must be a multiple of 256 with ``B`` in
-   ``HIPBLASLT_ORDER_COL256_R128_EXT``, and a multiple of 128 with ``B`` in ``HIPBLASLT_ORDER_COL``.
+   one of the ``HIPBLASLT_ORDER_COL256_R128`` orders, and a multiple of 128 with ``B`` in
+   ``HIPBLASLT_ORDER_COL``.
 *  ``lda`` and ``ldb`` must be equal to ``K``.
+*  With ``A`` in ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT``, ``m`` and ``n`` must be equal to ``4096``,
+   and ``K`` must be at most ``98304``.
 
-The solutions for this scale mode are rocKE GEMM kernels, which add these restrictions:
+Each order selects its own solutions: a solution for one ``HIPBLASLT_ORDER_COL256_R128`` order is never
+returned for another. Solutions are registered for ``HIPBLASLT_ORDER_COL256_R128_EXT``, for
+``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` on ``A`` and ``B``, for ``HIPBLASLT_ORDER_COL256_R128_P16_EXT`` on
+``A`` with ``B`` in ``HIPBLASLT_ORDER_COL``, and for ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT`` on ``A``
+with ``B`` in ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT``. The registered solutions are rocKE GEMM
+kernels, which add these restrictions:
 
 *  Atype and Btype must be the same type.
 *  Ctype and Dtype must be ``HIP_R_16BF``, and the compute type must be ``HIPBLAS_COMPUTE_32F``.
@@ -222,9 +257,20 @@ The solutions for this scale mode are rocKE GEMM kernels, which add these restri
 *  The batch count must be equal to ``1``.
 *  Epilogues are not supported.
 *  ``alpha`` must be equal to ``1``, and ``beta`` must be equal to ``0``.
-*  Solutions are registered for gfx950 PCI chip IDs ``0x75a0`` and ``0x75a3``, at ``m = n = 4096`` with
-   ``K = 65536`` or ``K = 131584``. With ``B`` in ``HIPBLASLT_ORDER_COL``, they exist only for
-   ``HIP_R_6F_E2M3`` at ``K = 65536``.
+*  Solutions are registered for gfx950 PCI chip IDs ``0x75a0`` and ``0x75a3``, at ``m = n = 4096``:
+
+   *  With ``HIPBLASLT_ORDER_COL256_R128_EXT`` on ``A`` and ``B``, for ``HIP_R_6F_E2M3`` and
+      ``HIP_R_6F_E3M2`` at ``K = 65536`` or ``K = 131584``.
+   *  With ``HIPBLASLT_ORDER_COL256_R128_EXT`` on ``A`` and ``B`` in ``HIPBLASLT_ORDER_COL``, for
+      ``HIP_R_6F_E2M3`` at ``K = 65536`` only.
+   *  With ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` on ``A`` and ``B``,
+      ``HIPBLASLT_ORDER_COL256_R128_P16_EXT`` on ``A`` and ``B`` in ``HIPBLASLT_ORDER_COL``, or
+      ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT`` on ``A`` and
+      ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT`` on ``B``, for ``HIP_R_6F_E2M3`` and
+      ``HIP_R_6F_E3M2`` at ``K = 65536`` only.
+*  The ``PAGE24`` solutions are selected on amdgpu 6.19 and 7.1 only. On those drivers each launch passes the
+   kernel bit 0 of the device's ``xgmi_physical_id``, which decides which work-groups read which half of the
+   placed blocks. The bit affects speed only.
 *  ``hipblasLtMatmulAlgoGetHeuristic`` does not return these solutions, because it does not assume
    ``beta = 0``. Query them through the extension API (``hipblaslt_ext::Gemm::setProblem`` with ``beta = 0``,
    then ``algoGetHeuristic``), and run the returned algorithm with ``hipblaslt_ext::Gemm::run`` or
@@ -261,3 +307,35 @@ HIP_R_16BF              HIP_R_32F
 HIP_R_8I                HIP_R_32F
 HIP_R_32I               HIP_R_32F
 ======================= ===================
+
+It also packs one MXFP6 operand of 4096 rows (M or N) with ``K = 65536`` on gfx950. A pack reads A
+and writes C, which must not overlap. ``HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSA`` must stay
+``HIPBLAS_OP_N`` and B must be NULL; alpha, beta, and scaleType are not used.
+
+* Data: Adesc is ``HIP_R_6F_E2M3`` or ``HIP_R_6F_E3M2`` in ``HIPBLASLT_ORDER_COL``, with 65536 rows,
+  4096 columns, and ``ld = 65536``. Cdesc is the same in ``HIPBLASLT_ORDER_COL256_R128_P16_EXT``.
+* Scales: ``HIPBLASLT_MATRIX_TRANSFORM_DESC_C_SCALE_MODE_EXT`` is
+  ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Adesc and Cdesc are ``HIP_R_8F_UE8M0`` in
+  ``HIPBLASLT_ORDER_COL``, with 2048 rows, 4096 columns, and ``ld = 2048``.
+
+It also places such an operand for the page24 GEMM, writing only the bytes the destination layout places:
+
+* A data: Adesc is ``HIP_R_6F_E2M3`` or ``HIP_R_6F_E3M2`` in ``HIPBLASLT_ORDER_COL256_R128_P48_EXT``, with
+  65536 rows, 4096 columns, and ``ld = 65536``. Cdesc is the same in
+  ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT``, and C is ``1026*2097152`` bytes.
+* B data: as for A, with Cdesc in ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT``, and C is
+  ``514*2097152`` bytes.
+* A scales: ``HIPBLASLT_MATRIX_TRANSFORM_DESC_C_SCALE_MODE_EXT`` is
+  ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT``. A holds the scales in the
+  ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` layout. Adesc and Cdesc are as for the scale
+  pack, and C is ``46*2097152`` bytes.
+
+The transform reads ``/sys/module/amdgpu/version``. On a driver other than amdgpu 6.19 and 7.1 a placement returns
+``HIPBLAS_STATUS_NOT_SUPPORTED`` and writes nothing. The GEMM reads each 8 KiB of the placed data and scales from the
+die it is on only when C starts at a 512 MiB-aligned offset of a 2 MiB-aligned, physically contiguous allocation
+(``hipExtMallocWithFlags`` with ``hipDeviceMallocContiguous``). That affects speed only: in any other buffer the GEMM
+reads the same bytes and gives the same results, more slowly.
+
+There is no pack into ``HIPBLASLT_ORDER_COL256_R128_EXT`` or ``HIPBLASLT_ORDER_COL256_R128_P48_EXT``.
+Those layouts, any other source layout, and any other shape return ``HIPBLAS_STATUS_INVALID_VALUE``. Other
+devices return ``HIPBLAS_STATUS_ARCH_MISMATCH``.

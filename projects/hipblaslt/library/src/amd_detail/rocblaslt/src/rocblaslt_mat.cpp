@@ -239,6 +239,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags  = streamKFlags;
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.orderA            = matA->order;
+    problem.orderB            = matB->order;
     problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
@@ -472,6 +474,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.orderA            = matA->order;
+    problem.orderB            = matB->order;
     problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
@@ -833,6 +837,8 @@ rocblaslt_status
                                         effective_sm_count_target(handle, matmul_descr[i], nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr[i])});
         problems.back().int4EncodingA = matmul_descr[i]->int4_encoding_a_ext;
+        problems.back().orderA            = matA[i]->order;
+        problems.back().orderB            = matB[i]->order;
         problems.back().deviceScalarAlpha = deviceScalarAlpha;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
@@ -1249,6 +1255,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         effective_sm_count_target(handle, nullptr, nullptr),
         effective_uniform_summation_order(handle, nullptr)};
     problem.int4EncodingA = problemtype.int4_encoding_a;
+    problem.orderA            = problemtype.order_a;
+    problem.orderB            = problemtype.order_b;
     problem.deviceScalarAlpha = inputs.deviceScalarAlpha;
     return gemmCreate(problem, gemmData, gemmCount);
 }
@@ -1631,6 +1639,8 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         effective_sm_count_target(handle, nullptr, nullptr),
                                         effective_uniform_summation_order(handle, nullptr)});
         problems.back().int4EncodingA = int4EncA;
+        problems.back().orderA            = orderA;
+        problems.back().orderB            = orderB;
         problems.back().deviceScalarAlpha = deviceScalarAlpha;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);

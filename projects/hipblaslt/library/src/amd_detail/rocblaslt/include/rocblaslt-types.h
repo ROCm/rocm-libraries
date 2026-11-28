@@ -272,7 +272,8 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
-    rocblaslt_status_continue                = 13  /**< nothing preventing function to proceed. */
+    rocblaslt_status_continue                = 13, /**< nothing preventing function to proceed. */
+    rocblaslt_status_not_supported           = 14  /**< not supported on this platform. */
 } rocblaslt_status;
 
 /*! \ingroup types_module
@@ -493,6 +494,7 @@ typedef struct _rocblaslt_matrix_transform_desc
     hipblasLtPointerMode_t pointerMode{HIPBLASLT_POINTER_MODE_HOST};
     hipblasOperation_t     opA{HIPBLAS_OP_N};
     hipblasOperation_t     opB{HIPBLAS_OP_N};
+    hipblasLtMatmulMatrixScale_t scaleModeC{HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F};
 } rocblaslt_matrix_transform_desc;
 #ifdef __cplusplus
 }
@@ -540,6 +542,8 @@ struct RocblasltContractionProblem
         Block_128_F16_ZP,
         // E8M0 per 32 K elements, shuffled in 128-row by 4-K-block tiles.
         Block_32_UE8M0_128_4_EXT,
+        // Block_32_UE8M0_128_4_EXT scales placed in 2 MiB pages (B only).
+        Block_32_UE8M0_128_4_PAGE24_EXT,
     };
 
     hipblasOperation_t trans_a;
@@ -642,6 +646,10 @@ struct RocblasltContractionProblem
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
+    // Orders of A and B, which select the tile layout when swizzleA or swizzleB is set.
+    // Set after construction, like streamKFlags.
+    hipblasLtOrder_t     orderA = HIPBLASLT_ORDER_COL;
+    hipblasLtOrder_t     orderB = HIPBLASLT_ORDER_COL;
     hipblasLtBatchMode_t batchMode;   
     int32_t bias_stride; 
     // Mirrors HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. Forwarded

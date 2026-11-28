@@ -255,6 +255,9 @@ private:
         case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
             mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
             break;
+        case hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT:
+            mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
+            break;
         default:
             mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
             break;
