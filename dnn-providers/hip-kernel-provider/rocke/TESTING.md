@@ -137,6 +137,25 @@ the strategy's biggest holes live (see
   [`instances/differential/numeric.py`](platform/tests/instances/differential/numeric.py))
   drive kernels on device and check the result within tolerance. Model-glue lanes
   exercise end-to-end kernel wiring for real model shapes.
+- **How a GPU numeric test bounds the error.** Hold each output element to its
+  own bound, `|out - ref| <= atol + rtol * |ref|` (`Tolerance` and
+  `assert_within_tolerance` in `rocke.numeric.compare`). A bound on the
+  largest error alone, absolute or as a fraction of the peak, is sized by the
+  largest outputs, so a zeroed element, a dropped term or a few-percent scale
+  error on a small output passes it. A NaN or infinity never passes. Size the
+  bound from the arithmetic, not from a measured run:
+  - Outputs that each sum products (a GEMM, a convolution and its gradients):
+    `rocke.numeric.tolerance.sum_of_products_tolerance`. It allows the output
+    type's rounding, one subnormal step, and the rounding of the partial sums,
+    sized per element by the same sum over the products' absolute values.
+  - Attention outputs and their LSE: `attention_tolerance` and `LSE_TOLERANCE`
+    in `library/tests/_attention_tolerance.py`.
+
+  These tests use these bounds: the dense gfx942, gfx950 and strict, unified
+  LSE, biased tiled 2D and scalar masked-tile attention numerics; the
+  convolution wgrad and direct correctness tests and the fp16/bf16 branch of
+  the forward one; and the block-scale GEMM tests. The tests that do not yet
+  are in G5.
 - The pinned SDPA reference lane qualifies old rocKE
   against independent NumPy SDPA offline, then executes old and current rocKE
   on each published architecture using a conservative triangle-inequality
@@ -241,6 +260,29 @@ the strategy's biggest holes live (see
   arithmetic path, and each mutation that breaks the key-value pairing must
   leave that bound in every head. The lane needs NumPy and HIP only; its CPU
   contracts run in `rocke_library_attention_cpu_pytest`.
+
+- **Shipped packs through hipDNN.** The provider's external integration tests
+  run each rocKE pack end to end through hipDNN, pinned to its engine
+  (`--test-engine hipkernel:<engine>`). A lane is registered only when the
+  build ships its engine for its arch, which needs
+  `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` (default off): with rocKE off the rocKE
+  descriptors are pruned and no lane exists. The tiers come from the
+  `hipkernel_*_test_categories_integration.yaml` files of the provider, not from
+  rocKE's categories, so these lanes are outside rocKE's registry
+  ([§5.4](#54-tests-that-do-not-run-normally-one-registry)) and budgets
+  ([Budgets](#budgets)).
+
+  | Pack (engine) | CTest name prefix (one suite per tier) | Tiers | Arch |
+  |---|---|---|---|
+  | gfx942 attention dense, unified 2D, unified 3D (`hipkernel:Gfx942AttentionDense`, `Gfx942AttentionUnified2D`, `Gfx942AttentionUnified3d`) | `hip-kernel-provider-gfx942-attention-<dense, unified-2d, unified-3d>-external-integration` | quick to full, and ffm-quick | gfx942 |
+  | gfx950 attention dense, unified 2D, unified 3D (`hipkernel:Gfx950AttentionDense`, `Gfx950AttentionUnified2D`, `Gfx950AttentionUnified3D`) | `hip-kernel-provider-gfx950-attention-<dense, unified-2d, unified-3d>-external-integration`; dense also has a graph-capture lane (standard to full) | quick to full, and ffm-quick | gfx950 |
+  | gfx950 conv forward AOT (`hipkernel:Gfx950ConvFwdAot`) | `hip-kernel-provider-gfx950-conv-fwd-aot-external-integration` | quick (smoke cases only) to full | gfx950 |
+
+  The other rocKE packs (gfx1151 WMMA attention and decode, gfx950 and gfx1250
+  conv dgrad AOT) and the gfx950 conv forward AOT seed catalog have no hipDNN
+  lane; only the provider's own `hip_kernel_provider_integration_tests` binary
+  runs them. The provider's `src/CMakeLists.txt` and
+  `src/integration_tests/CMakeLists.txt` register both kinds.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -1302,6 +1344,20 @@ sets `ROCKE_BACKEND=both`: its tests run the kernels the Python engine builds,
 which the provider ships, and each lowering fails when the C++ engine's output
 differs.
 
+#### Which engine lowers an installed entry's kernels
+
+In a build that installs the shared C++ engine (`librocke`) beside the
+package, as the Linux provider build does:
+
+| Installed entries | Engine |
+|---|---|
+| GPU pytest entries | Both: `rocke.tests.differential_engines` sets `ROCKE_BACKEND=both`, so each lowering runs both engines, fails when they differ, and returns the Python engine's kernel, which the provider ships |
+| The other pytest entries, except the explicit gates | The C++ engine, the package default, in strict mode (`rocke.tests.require_cpp_engine`): a missing or broken engine fails instead of falling back to the Python engine |
+| The explicit gates (`rocke_library_counted_structural_gate`, `rocke_library_counted_compiler_gate`) | The C++ engine, the package default, not in strict mode: they load no plugin, so a missing engine falls back to the Python engine |
+| The golden entries (`rocke_golden_static`, `rocke_differential_golden_ll`, `rocke_differential_golden_canonical`) | The Python engine only |
+| The import smoke (`rocke_python_import_smoke`) | The Python engine, then the C++ engine on the same kernel, which must give the same bytes |
+| The pinned reference lanes, and any test or kernel entry that passes `backend="python"` | The Python engine only: an explicit backend outranks `ROCKE_BACKEND` |
+
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
 checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).
 
@@ -1798,10 +1854,11 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 |---|---|---|---|
 | G1 | **Many legacy numeric lanes still require Torch** | Pinned SDPA and the bounded forward-convolution cohort run without Torch. Other Torch-gated cohorts remain uncovered in environments without Torch | Extend independently qualified references to the remaining cohorts |
 | G2 | **Numeric coverage is narrow** — only fp32/fp16/bf16 across a handful of families | Pinned reference coverage is bounded; broader convolution directions, low-precision and fused families need independent numeric coverage beyond differential agreement | Extend correctness lanes to the low-precision & fused families |
-| G3 | **No C-engine on-GPU correctness lane** | C++ engine numerics validated only transitively (byte-identity to the Python engine) | Add a C-emitted `.ll` → HSACO → launch → compare lane |
+| G3 | **No C-engine on-GPU correctness lane** | No kernel the C++ engine lowers runs on a GPU; its numerics are covered only through byte identity with the Python engine, which the developer gate checks over the parity corpus and, where the build installs `librocke`, every lowering of the installed GPU entries checks ([which engine each entry uses](#which-engine-lowers-an-installed-entrys-kernels)) | Add a C-emitted `.ll` → HSACO → launch → compare lane |
 | G4 | **Two overlapping correctness lanes** | Duplication between the platform and legacy numeric lanes | Consolidate to one canonical lane (needs GPU validation) |
-| G5 | **Loose correctness verdict** — single worst-case tolerance (fp16 `atol=rtol=1e-2`) | Structural bugs can hide inside dtype-truncation noise; no structural-vs-quantization separation; NaN/Inf/denormal caught only incidentally | Split structural from dtype tolerance; add numeric edge-case tests |
+| G5 | **Some correctness verdicts are still loose** — the element-wise bounds of [§3.1](#31-are-the-kernels-correct) are not used everywhere | About 120 `assert_allclose` calls in the platform and library tests use hand-picked bounds; the other convolution tests (the pp, flex, WMMA and TF32 files) and the convolution and attention benchmarks' verify bounds still judge the largest error as a fraction of the peak, which a wrong small output can pass; the other attention numeric tests (paged mask, SWA and sink, additive bias, runtime shape, scalar block table, backward) check one `max_abs` bound, and the fp32/TF32 branch of the forward convolution correctness test checks a peak-relative bound; NaN, infinity and subnormal inputs are caught only incidentally | Move the rest to `rocke.numeric.tolerance` and `_attention_tolerance`; add special-value input tests |
 | G8 | **Performance largely ungated** ([§3.2](#32-are-the-kernels-fast)) | Perf regression caught only by a manual smoke gate | Run the benchmark suites in the benchmarking tier, on its own system; performance does not run in CI |
+| G12 | **Every numeric oracle comes from one team** | With torch gone from CI, the NumPy references (`rocke.numeric`, the library's reference harnesses) are written in this repository by the team that writes the kernels. They are tested against scalar loops and identities, but a misreading of a mask, padding or rounding rule that kernel and reference share passes | Check one case per operator against hipDNN's CPU reference through the provider's integration tests |
 
 > **Reference CI policy:** pinned-reference verification runs with NumPy and
 > ROCm, without installing Torch. Independent oracles, including optional Torch,
@@ -1812,7 +1869,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN/KDA, library-host (`rocke_library_host_pytest`: shared dispatch helpers, benchmark early stop, occupancy calibration), reference-contract, and GPU cohorts, plus the comprehensive-tier `rocke_library_conv_exhaustive_pytest` for the `exhaustive` items of the conv files, but source tests outside the explicit CMake selections remain ungated; the C++/Python engine parity files (`test_selector_cpp_parity.py`, `test_attention_ir_cpp_parity.py`, `test_gdn_decode_ir_cpp_parity.py`) run in `rocke_library_engine_parity_pytest` and the selector's full grid in the comprehensive-tier `rocke_library_engine_parity_exhaustive_pytest`, neither registered on Windows, where provider builds make no engine modules; on Linux every case of theirs skips where the configure did not set `ROCKE_BUILD_PYBIND=ON`, which a provider build does not (it uses no pybind11), and the standard-tier `rocke_engine_modules_check` reports that reason (it reads the configure's marker `tests/rocke_engine_modules.json`, and fails instead when a module the build made does not import or the `cpp` backend falls back to the Python engine); registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN/KDA, library-host (`rocke_library_host_pytest`: shared dispatch helpers, benchmark early stop, occupancy calibration), reference-contract, and GPU cohorts, plus the comprehensive-tier `rocke_library_conv_exhaustive_pytest` for the `exhaustive` items of the conv files, but source tests outside the explicit CMake selections remain ungated; the C++/Python engine parity files (`test_selector_cpp_parity.py`, `test_attention_ir_cpp_parity.py`, `test_gdn_decode_ir_cpp_parity.py`) run in `rocke_library_engine_parity_pytest`, not registered on Windows, where provider builds make no C++ engine; on Linux the attention and GDN/KDA files lower through the shared engine (`librocke`), which a provider build installs, while the selector file needs the engine's Python module, which only a configure with `ROCKE_BUILD_PYBIND=ON` builds and a provider build does not (it uses no pybind11), so its cases skip there; the selector's full grid runs in the comprehensive-tier `rocke_library_engine_parity_exhaustive_pytest`, registered only in a build with that module; the standard-tier `rocke_engine_modules_check` reports that reason (it reads the configure's marker `tests/rocke_engine_modules.json`, and fails instead when a module the build made does not import or the `cpp` backend falls back to the Python engine); registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/python/rocke/tests/in_tree_suites.py` lists the in-package directories `platform/tests/in_tree` runs; every test file that is assigned to no CI entry is in `platform/python/rocke/tests/pending_lanes.py` with its reason and the lane it waits for | Enrol each listed file as its lane lands |
 | G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
 | G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. Where the build made no engine modules (see G6), the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
@@ -1835,7 +1892,7 @@ A green **matching installed pinned-reference lane** additionally proves the
 enrolled operation/architecture cases matched their independent qualified
 reference under that lane's numerical contract. A green installed host lane or a
 GPU lane that selected no matching test, skipped, or performed zero comparisons
-does not make that claim. The remaining numerical holes are G1–G5.
+does not make that claim. The remaining numerical holes are G1–G5 and G12.
 
 A green **CI run** proves only that the pre-commit hooks that
 [What CI checks today](#what-ci-checks-today) lists passed.

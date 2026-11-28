@@ -10,7 +10,10 @@ Other documents keep their own concerns and point here for numerics:
 which layer supports a dtype is in
 [dtype_support.md](../reference/dtype_support.md); how a packed dtype is
 stored is in [dtype_storage_packing.md](../architecture/dtype_storage_packing.md);
-test tolerances are in the
+how a GPU numeric test bounds a kernel output's error (an element-wise bound
+per output, sized from the output type and the arithmetic) is in
+[TESTING.md, section 3.1](../../../TESTING.md#31-are-the-kernels-correct);
+the optimization parity harness's per-op tolerances are in the
 [optimization runbook, section 1.4](../optimization/optimization_runbook.md#14-dtypes-and-numerics).
 
 **Anchors.** A link into the code names the function, class or constant it
@@ -287,8 +290,9 @@ fp6, fp4 and tf32 products in f32 and integer products in i32; reductions and
 softmax run in f32. The catalog also declares WMMA atoms that accumulate in
 f16 or bf16 (gfx11 and gfx12 targets); no family uses them yet, and their
 results follow the f16 / bf16 rules. Narrow types are storage and matrix-operand formats: widen to f32,
-compute, and narrow once at the end. The tolerances that follow from this are
-in the [runbook](../optimization/optimization_runbook.md#14-dtypes-and-numerics).
+compute, and narrow once at the end. The test bounds that follow from this
+(`rocke.numeric.tolerance`, sized by the output type and the f32 partial sums)
+are described in [TESTING.md, section 3.1](../../../TESTING.md#31-are-the-kernels-correct).
 
 ## Pending changes
 
