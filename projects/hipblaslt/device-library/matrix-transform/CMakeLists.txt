@@ -87,4 +87,20 @@ if("gfx950" IN_LIST archs)
         COMMAND ${CMAKE_COMMAND} -E copy "${pack_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/gfx950/hipblasltTransformPack_gfx950.co"
     )
 
+    # The page24 placement kernels are HIP, built for gfx950 only into their own code object.
+    tensilelite_offload_target(page24_offload_arch "gfx950")
+    set(page24_source "${CMAKE_CURRENT_SOURCE_DIR}/gfx950/mxfp6_page24.cpp")
+    set(page24_library "${CMAKE_CURRENT_BINARY_DIR}/hipblasltTransformPage24_gfx950.hsaco")
+    add_custom_command(
+        OUTPUT "${page24_library}"
+        COMMAND ${CMAKE_CXX_COMPILER} -x hip "${page24_source}" -cuid=hipblasltTransformPage24 --offload-arch=${page24_offload_arch} -c --offload-device-only -Xoffload-linker --build-id=sha1 -O3 -DNDEBUG -o "${page24_library}"
+        DEPENDS "${page24_source}"
+        COMMENT "Building hipblasltTransformPage24_gfx950.hsaco"
+        VERBATIM
+    )
+    add_custom_target(matrix-transform-page24-cp-gfx950 ALL
+        DEPENDS "${page24_library}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/gfx950"
+        COMMAND ${CMAKE_COMMAND} -E copy "${page24_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/gfx950/hipblasltTransformPage24_gfx950.hsaco"
+    )
 endif()

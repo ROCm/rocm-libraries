@@ -34,6 +34,8 @@
 
 #include <tensilelitehost/export.h>
 
+#include <string>
+
 namespace TensileLite
 {
     namespace hip
@@ -58,6 +60,10 @@ namespace TensileLite
 
             virtual std::string archName() const override;
         };
+
+        // Whether the near-die rule, xgmi_physical_id & 1, holds on this amdgpu
+        // version: amdgpu 6.19 and newer.
+        TENSILELITEHOST_EXPORT bool page24RuleHolds(std::string const& amdgpuVersion);
 
         TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetCurrentDevice();
         TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetDevice(int deviceId);
