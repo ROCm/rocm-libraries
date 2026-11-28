@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -41,6 +42,7 @@
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 
 #if defined(TENSILE_MSGPACK)
@@ -73,6 +75,17 @@ namespace
     {
         auto solution                    = makeMappedSolution(index);
         solution->sizeMapping.clusterDim = clusterDim;
+        return solution;
+    }
+
+    // A split-K multiple-buffer solution: needs GSU partial tiles of workspace and
+    // carries the WorkspaceCheck task predicate, as TensileCreateLibrary emits it.
+    std::shared_ptr<ContractionSolution> makeSplitKSolution(int index)
+    {
+        auto solution                               = makeMappedSolution(index);
+        solution->sizeMapping.globalSplitU          = 4;
+        solution->sizeMapping.workspaceSizePerElemC = 4;
+        solution->taskPredicate = std::make_shared<Predicates::Contraction::WorkspaceCheck>();
         return solution;
     }
 
@@ -208,6 +221,72 @@ TEST(PredictionLibraryTest, MlpDeviceScalarAlphaFiltersUnadvertisedSolutions)
     EXPECT_EQ(selected.front(), scalar);
     scalar->problemType.useScaleAlphaVec = 0;
     EXPECT_TRUE(lib.findTopSolutions(problem, hardware, 2).empty());
+}
+
+// ROCM-34287: with uniform summation order off, the heuristic returned split-K
+// solutions needing more workspace than the caller allowed (0 bytes).
+TEST(PredictionLibraryTest, WorkspaceCheckFiltersWithUniformSummationOrderOff)
+{
+    hip::HipAMDGPU hardware;
+    hardware.processor = AMDGPU::Processor::gfx950;
+    hardware.computeUnitCount = 256;
+    hardware.deviceName = "workspace-selection-test";
+    hardware.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950,
+        256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+
+    auto fits   = makeMappedSolution(0);
+    auto splitK = makeSplitKSolution(1);
+    SolutionMap<ContractionSolution> solutions{{0, fits}, {1, splitK}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({0, 1}, solutions, lib);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 256, 256, 64,
+                                               256, 64, 256, 1.0, false, 1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    problem.setParams().setUniformSummationOrder(false);
+    problem.setParams().setGSU(4); // Fixed split count: workspace sizing needs no auto-GSU model.
+
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setWorkspaceSize(0);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), fits);
+}
+
+TEST(PredictionLibraryTest, MlpWorkspaceCheckFiltersWithUniformSummationOrderOff)
+{
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "workspace selection test");
+    auto splitK = makeSplitKSolution(0);
+    auto fits   = makeMappedSolution(1);
+    splitK->libraryLogicIndex = 0;
+    fits->libraryLogicIndex   = 1;
+    MLPClassificationLibrary<ContractionProblemGemm> lib;
+    lib.solutionmap = {{0, splitK}, {1, fits}};
+    lib.probFeatures = {std::make_shared<MLFeatures::FreeSizeA>(),
+                        std::make_shared<MLFeatures::FreeSizeB>(),
+                        std::make_shared<MLFeatures::BatchSize>(),
+                        std::make_shared<MLFeatures::BoundSize>()};
+    lib.model = std::make_shared<MLPClassification::MLPNet>();
+    lib.model->scaler.mean.assign(12, 0.0f);
+    lib.model->scaler.scale.assign(12, 1.0f);
+    // Rank the split-K solution first, then fall through to the one that fits.
+    lib.model->dense = MLPClassification::DenseLayer(std::vector<float>(24, 0.0f), {2.0f, 1.0f});
+    ASSERT_TRUE(lib.model->valid());
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setParams().setUniformSummationOrder(false);
+    problem.setParams().setGSU(4); // Fixed split count: workspace sizing needs no auto-GSU model.
+
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setWorkspaceSize(0);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), fits);
 }
 
 TEST(PredictionLibraryTest, DefaultClusterDimWhenUnset)

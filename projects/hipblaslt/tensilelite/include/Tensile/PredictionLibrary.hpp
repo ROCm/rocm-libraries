@@ -171,21 +171,9 @@ namespace TensileLite
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
-                const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
-                // With uniform summation order off, the filter stays
-                // hardwarePredicate && problemPredicate, plus device-scalar capability.
-                // The extra conjuncts in
-                // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
-                // real filters, so they stay behind the check.
-                const bool swMatch = problem.getParams().uniformSummationOrder() != 0
-                                         ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                                             task,
-                                                             hardware,
-                                                             *solution,
-                                                             problem)
-                                         : (*(solution->problemPredicate))(problem)
-                                               && solution->deviceScalarAlphaSupported(problem);
-                const bool predicateMatch = hwMatch && swMatch;
+                // taskPredicate (WorkspaceCheck) must hold with uniform summation
+                // order off too, or the caller gets solutions it has no workspace for.
+                const bool predicateMatch = selectionPredicate(task, hardware, *solution, problem);
 
                 if(debug)
                 {
