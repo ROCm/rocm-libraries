@@ -11,8 +11,10 @@ PLOT=true
 VS_THEO_MAX=false
 VS_PERF=false
 GBPS=
+VS_ROOFLINE=false
 SIZES=default
 BENCH_EXTRA_ARGS=()
+PLOT_EXTRA_ARGS=()
 TAG_PARENT=false
 A_BLAS_SUBDIR=
 B_BLAS_SUBDIR=
@@ -50,7 +52,7 @@ usage()
     echo "                default: $LEVEL3"
     echo ""
     echo "--theo-max true:  to plot performance / theoretical_maximum_performance,"
-    echo "                  only for BLAS1 and BLAS2, not for BLAS3"
+    echo "                  BLAS3 needs compute peaks (--peak-gflops or --machine-file)"
     echo "                  default: $VS_THEO_MAX"
     echo ""
     echo "--perf_vs_perf true:  to plot performance / performance,"
@@ -59,12 +61,23 @@ usage()
     echo "--gbps <value>:  memory bandwidth in GB/s for theoretical max,"
     echo "                 overrides built-in per-arch value"
     echo ""
+    echo "--roofline true:  plot GFLOP/s against arithmetic intensity under the bandwidth and compute ceilings"
+    echo "                  default: $VS_ROOFLINE"
+    echo ""
     echo "--sizes default|large:  sweep sizes; large uses blasL/large/*.yaml (footprints of about 0.8 GB and up)"
     echo "                        default: $SIZES"
     echo ""
     echo "--flush-mb <MiB>:  hipblas-bench rotates through copies of the operands totalling MiB,"
     echo "                   so they are evicted from cache between calls; use about twice the"
     echo "                   L2 plus last-level cache size (see README)"
+    echo ""
+    echo "Passed through to benchmark.py (see python3 benchmark.py --help):"
+    echo "  --peak-gflops <f32=..,f64=..>  --machine-file <yaml>  --clock-scale <f>  --mclk-scale <f>"
+    echo "  --auto-clock-scale true  --sclk-peak-mhz <MHz>  --mclk-max-mhz <MHz>  --partitions <n>"
+    echo "  --l2-mb <MiB>  --flush-mb <MiB>"
+    echo ""
+    echo "Passed through to plot.py:"
+    echo "  --achievable-bw-frac <f>"
     echo ""
     echo "--tag-parent true:  tag1 CSVs under {tag1}/blasL/ (no NAME subfolder)"
     echo ""
@@ -142,13 +155,30 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --roofline)
+      VS_ROOFLINE="$2"
+      shift
+      shift
+      ;;
     --sizes)
       SIZES="$2"
       shift
       shift
       ;;
-    --flush-mb)
+    --peak-gflops|--machine-file|--clock-scale|--mclk-scale|--sclk-peak-mhz|--mclk-max-mhz|--partitions|--l2-mb|--flush-mb)
       BENCH_EXTRA_ARGS+=("$1" "$2")
+      shift
+      shift
+      ;;
+    --auto-clock-scale)
+      if [ "$2" == "true" ]; then
+        BENCH_EXTRA_ARGS+=("$1")
+      fi
+      shift
+      shift
+      ;;
+    --achievable-bw-frac)
+      PLOT_EXTRA_ARGS+=("$1" "$2")
       shift
       shift
       ;;
@@ -211,6 +241,7 @@ echo "tag1               = $TAG1"
 echo "tag2               = $TAG2"
 echo "theo_max           = $VS_THEO_MAX"
 echo "perf_vs_perf       = $VS_PERF"
+echo "roofline           = $VS_ROOFLINE"
 echo "sizes              = $SIZES"
 echo ""
 echo "benchmark          = $BENCHMARK"
@@ -222,8 +253,14 @@ echo "level 3            = $LEVEL3"
 echo ""
 
 
-if [ "$VS_THEO_MAX" == "true" ] && [ "$VS_PERF" == "true" ]; then
-    echo "select either theo_max or perf_vs_perf but not both"
+MODES=0
+for MODE in "$VS_THEO_MAX" "$VS_PERF" "$VS_ROOFLINE"; do
+    if [ "$MODE" == "true" ]; then
+        MODES=$((MODES + 1))
+    fi
+done
+if [ $MODES -gt 1 ]; then
+    echo "select only one of theo_max, perf_vs_perf, roofline"
     exit 1
 fi
 
@@ -238,6 +275,10 @@ if [ "$VS_PERF" == "true" ]; then
     PERF_VS_PERF="--perf_vs_perf"
 else
     PERF_VS_PERF=""
+fi
+
+if [ "$VS_ROOFLINE" == "true" ]; then
+    PLOT_EXTRA_ARGS+=("--roofline")
 fi
 
 if [ -n "$GBPS" ]; then
@@ -272,7 +313,7 @@ if [ "$LEVEL1" == "true" ]; then
     python3 benchmark.py -l blas1 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f dot -f axpy -f scal -f nrm2
   fi
   if [ "$PLOT" == "true" ]; then
-    python3 plot.py -l blas1 --tag1 $TAG1 --tag2  $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS -f dot -f axpy -f scal -f nrm2
+    python3 plot.py -l blas1 --tag1 $TAG1 --tag2  $TAG2 $THEO_MAX $PERF_VS_PERF "${PLOT_EXTRA_ARGS[@]}" $LAYOUT_ARGS -f dot -f axpy -f scal -f nrm2
   fi
 fi
 
@@ -284,18 +325,17 @@ if [ "$LEVEL2" == "true" ]; then
     python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f trsv -f tbsv -f tpsv
   fi
   if [ "$PLOT" == "true" ]; then
-    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv
-    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemv -f trmv -f tpmv -f tbmv
-    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f ger -f syr -f spr -f syr2 -f spr2
+    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF "${PLOT_EXTRA_ARGS[@]}" $LAYOUT_ARGS --label1 "M" --label2 "N" -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv
+    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF "${PLOT_EXTRA_ARGS[@]}" $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemv -f trmv -f tpmv -f tbmv
+    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF "${PLOT_EXTRA_ARGS[@]}" $LAYOUT_ARGS --label1 "M" --label2 "N" -f ger -f syr -f spr -f syr2 -f spr2
 #   python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f trsv -f tpsv -f tbsv # need to speed up triangle solve initialization
   fi
 fi
 
 if [ "$LEVEL3" == "true" ]; then
   if [ "$THEO_MAX" = "--theo_max" ]; then
-    echo "--theo-max is not for BLAS3, it can only be used with BLAS1 and BLAS2"
-    echo "           for BLAS3 compare performance versus gemm"
-    exit
+    echo "note: --theo_max for BLAS3 needs compute peaks (--peak-gflops or --machine-file);"
+    echo "      functions without a ceiling are skipped"
   fi
 
   if [ "$BENCHMARK" == "true" ]; then
@@ -305,8 +345,8 @@ if [ "$LEVEL3" == "true" ]; then
     python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f hemm -f herk -f herkx -f her2k
   fi
   if [ "$PLOT" == "true" ]; then
-    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f trmm -f symm # missing trsm, need to speed up triangle solve initialization
-    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f syrk -f syrkx -f syr2k
-    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f hemm -f herk -f herkx -f her2k
+    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF "${PLOT_EXTRA_ARGS[@]}" $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f trmm -f symm # missing trsm, need to speed up triangle solve initialization
+    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF "${PLOT_EXTRA_ARGS[@]}" $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f syrk -f syrkx -f syr2k
+    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF "${PLOT_EXTRA_ARGS[@]}" $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f hemm -f herk -f herkx -f her2k
   fi
 fi
