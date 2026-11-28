@@ -427,7 +427,7 @@ TEST(TestHipConvFwdBiasDw2dRdnaBinding, BindsTheOperandsTheBiasAndTheFlops)
     EXPECT_EQ(tryGetBoundInt(*bound, HIP_CONV_FWD_BIAS_DW2D_RDNA.outputToken), Y_UID)
         << "the ADD output, not the virtual convolution output";
     EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd_bias_dw2d.b.uid"), B_UID);
-    // 2 x N x K x (D x H x W out) x (C / groups) x taps; padding 1 keeps the output size.
+    // 2 x N x K x (H x W out) x (C / groups) x taps; padding 1 keeps the output size.
     EXPECT_EQ(tryGetBoundInt(*bound, "conv_fwd_bias_dw2d.flops"),
               int64_t{2} * 2 * 32 * 12 * 14 * 1 * 9);
 }
