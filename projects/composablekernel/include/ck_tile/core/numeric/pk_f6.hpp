@@ -988,7 +988,7 @@ CK_TILE_HOST_DEVICE constexpr pk_fp6_t fp16_to_pk_fp6(const fp16_t& x, float sca
 #endif
 }
 
-CK_TILE_HOST_DEVICE constexpr pk_bf6_t fp16_to_pk_bf6(const bf16_t& x, float scale)
+CK_TILE_HOST_DEVICE constexpr pk_bf6_t fp16_to_pk_bf6(const fp16_t& x, float scale)
 {
 #if CK_TILE_FP6_CVT_DEVICE
     return impl::_to_pk_bf6(x, scale);
