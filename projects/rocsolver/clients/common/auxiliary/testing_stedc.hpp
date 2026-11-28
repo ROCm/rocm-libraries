@@ -406,9 +406,9 @@ void stedc_random_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < n; i++)
                 {
                     if(i == j)
-                        hC[0][i + j * ldc] = 1;
+                        hC[0][i + rocblas_stride(j) * ldc] = 1;
                     else
-                        hC[0][i + j * ldc] = 0;
+                        hC[0][i + rocblas_stride(j) * ldc] = 0;
                 }
             }
         }
@@ -552,9 +552,9 @@ void stedc_default_initData(const rocblas_handle handle,
                 for(rocblas_int i = 0; i < n; i++)
                 {
                     if(i == j)
-                        hC[0][i + j * ldc] = 1;
+                        hC[0][i + rocblas_stride(j) * ldc] = 1;
                     else
-                        hC[0][i + j * ldc] = 0;
+                        hC[0][i + rocblas_stride(j) * ldc] = 0;
                 }
             }
         }
@@ -673,7 +673,7 @@ void stedc_getError(const rocblas_handle handle,
 
     // if eigenvectors were required, prepare matrix A (upper triangular) for implicit tests
     rocblas_int lda = n;
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     host_strided_batch_vector<T> hA(size_A, 1, size_A, 1);
     if(evect != rocblas_evect_none)
     {
@@ -682,11 +682,11 @@ void stedc_getError(const rocblas_handle handle,
             for(rocblas_int j = i; j < n; j++)
             {
                 if(i == j)
-                    hA[0][i + j * lda] = hD[0][i];
+                    hA[0][i + rocblas_stride(j) * lda] = hD[0][i];
                 else if(i + 1 == j)
-                    hA[0][i + j * lda] = hE[0][i];
+                    hA[0][i + rocblas_stride(j) * lda] = hE[0][i];
                 else
-                    hA[0][i + j * lda] = 0;
+                    hA[0][i + rocblas_stride(j) * lda] = 0;
             }
         }
     }
@@ -858,7 +858,7 @@ void testing_stedc(Arguments& argus)
     // determine sizes
     size_t size_D = n;
     size_t size_E = n;
-    size_t size_C = ldc * n;
+    size_t size_C = rocblas_stride(ldc) * n;
     double max_err = 0, max_errv = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_DRes = (argus.unit_check || argus.norm_check) ? size_D : 0;

@@ -87,9 +87,9 @@ void getrf_large_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -99,9 +99,9 @@ void getrf_large_initData(const rocblas_handle handle,
             {
                 for(rocblas_int j = 0; j < n; j++)
                 {
-                    tmp = hA[b][i + j * lda];
-                    hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    tmp = hA[b][i + rocblas_stride(j) * lda];
+                    hA[b][i + rocblas_stride(j) * lda] = hA[b][n - 1 - i + rocblas_stride(j) * lda];
+                    hA[b][n - 1 - i + rocblas_stride(j) * lda] = tmp;
                 }
             }
 
@@ -114,15 +114,15 @@ void getrf_large_initData(const rocblas_handle handle,
                 rocblas_int j = n / 4 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
                 j = n / 2 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
                 j = n - 1 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
             }
         }
     }
@@ -178,9 +178,9 @@ void getrf_large_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += T(400, 400);
+                        hA[b][i + rocblas_stride(j) * lda] += T(400, 400);
                     else
-                        hA[b][i + j * lda] -= T(4, 4);
+                        hA[b][i + rocblas_stride(j) * lda] -= T(4, 4);
                 }
             }
 
@@ -190,9 +190,9 @@ void getrf_large_initData(const rocblas_handle handle,
             {
                 for(rocblas_int j = 0; j < n; j++)
                 {
-                    tmp = hA[b][i + j * lda];
-                    hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    tmp = hA[b][i + rocblas_stride(j) * lda];
+                    hA[b][i + rocblas_stride(j) * lda] = hA[b][n - 1 - i + rocblas_stride(j) * lda];
+                    hA[b][n - 1 - i + rocblas_stride(j) * lda] = tmp;
                 }
             }
 
@@ -205,15 +205,15 @@ void getrf_large_initData(const rocblas_handle handle,
                 rocblas_int j = n / 4 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
                 j = n / 2 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
                 j = n - 1 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
             }
         }
     }
@@ -319,8 +319,8 @@ void testing_getrf_large(Arguments& argus)
     rocblas_int nrhs = argus.get<rocblas_int>("nrhs", n);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldb = argus.get<rocblas_int>("ldb", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nrhs);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n);
 
     rocblas_int bc = argus.batch_count;

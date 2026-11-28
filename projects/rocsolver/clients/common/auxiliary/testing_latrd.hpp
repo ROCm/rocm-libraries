@@ -118,9 +118,9 @@ void latrd_initData(const rocblas_handle handle,
             for(rocblas_int j = 0; j < n; j++)
             {
                 if(i == j || (i == j + 1) || (i == j - 1))
-                    hA[0][i + j * lda] += 400;
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
                 else
-                    hA[0][i + j * lda] -= 4;
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
             }
         }
     }
@@ -149,11 +149,12 @@ void latrd_initData(const rocblas_handle handle,
             for(rocblas_int j = 0; j < n; j++)
             {
                 if(i == j)
-                    hA[0][i + j * lda] = hA[0][i + j * lda].real() + 400;
+                    hA[0][i + rocblas_stride(j) * lda]
+                        = hA[0][i + rocblas_stride(j) * lda].real() + 400;
                 else if((i == j + 1) || (i == j - 1))
-                    hA[0][i + j * lda] += 400;
+                    hA[0][i + rocblas_stride(j) * lda] += 400;
                 else
-                    hA[0][i + j * lda] -= 4;
+                    hA[0][i + rocblas_stride(j) * lda] -= 4;
             }
         }
     }
@@ -237,7 +238,7 @@ void latrd_getPerfData(const rocblas_handle handle,
 
         // cpu-lapack performance
         *cpu_time_used = get_time_us_no_sync();
-        memset(hW[0], 0, ldw * k * sizeof(T));
+        memset(hW[0], 0, rocblas_stride(ldw) * k * sizeof(T));
         cpu_latrd(uplo, n, k, hA[0], lda, hE[0], hTau[0], hW[0], ldw);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
@@ -309,10 +310,10 @@ void testing_latrd(Arguments& argus)
     }
 
     // determine sizes
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     size_t size_E = n;
     size_t size_tau = n;
-    size_t size_W = ldw * k;
+    size_t size_W = rocblas_stride(ldw) * k;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;

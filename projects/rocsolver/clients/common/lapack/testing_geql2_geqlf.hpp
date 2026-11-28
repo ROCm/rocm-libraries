@@ -143,7 +143,7 @@ void geql2_geqlf_initData(const rocblas_handle handle,
             for(rocblas_int b = 0; b < bc; ++b)
                 for(rocblas_int j = 0; j < n; j++)
                     for(rocblas_int i = 0; i < m; i++)
-                        hA[b][i + j * lda] = (i == j ? T(1) : T(0));
+                        hA[b][i + rocblas_stride(j) * lda] = (i == j ? T(1) : T(0));
         }
         else if(matrix == "randint")
         {
@@ -261,12 +261,12 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     {
         // Copy L: lower trapezoid in last min_mn rows,
         // on & below diagonal (n-m), zero elsewhere.
-        std::vector<T> hC(lda * n);
+        std::vector<T> hC(rocblas_stride(lda) * n);
         for(rocblas_int j = 0; j < n; ++j)
         {
             for(rocblas_int i = std::max(0, j + m - n); i < m; ++i)
             {
-                hC[i + j * lda] = hARes[b][i + j * lda];
+                hC[i + rocblas_stride(j) * lda] = hARes[b][i + rocblas_stride(j) * lda];
             }
         }
 
@@ -285,7 +285,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
         // Compute norm( Q*L - A ); hA[b] is still the original A.
         for(rocblas_int j = 0; j < n; ++j)
             for(rocblas_int i = 0; i < m; ++i)
-                hC[i + j * lda] -= hA[b][i + j * lda];
+                hC[i + rocblas_stride(j) * lda] -= hA[b][i + rocblas_stride(j) * lda];
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
         if(m > 0)
@@ -312,9 +312,9 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(dR.memcheck());
 
     // Build identity matrix on host for upload into dR before each gemm.
-    std::vector<T> hR_id(min_mn * min_mn, T(0));
+    std::vector<T> hR_id(rocblas_stride(min_mn) * min_mn, T(0));
     for(rocblas_int i = 0; i < min_mn; ++i)
-        hR_id[i + i * min_mn] = T(1);
+        hR_id[i + rocblas_stride(i) * min_mn] = T(1);
 
     max_errors[1] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
@@ -461,7 +461,7 @@ void testing_geql2_geqlf(Arguments& argus)
     rocblas_int m = argus.get<rocblas_int>("m");
     rocblas_int n = argus.get<rocblas_int>("n", m);
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
     std::string matrix = argus.get<std::string>("matrix", "randint");
 

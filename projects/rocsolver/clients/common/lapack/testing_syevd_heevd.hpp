@@ -182,11 +182,13 @@ void syevd_heevd_default_initData(const rocblas_handle handle,
                 for(I j = i; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 400;
                     else
                     {
-                        hA[b][i + j * lda] -= 4;
-                        hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
+                        hA[b][j + rocblas_stride(i) * lda]
+                            = sconj(hA[b][i + rocblas_stride(j) * lda]);
                     }
                 }
             }
@@ -197,7 +199,8 @@ void syevd_heevd_default_initData(const rocblas_handle handle,
                 for(I i = 0; i < n; i++)
                 {
                     for(I j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -231,7 +234,7 @@ void syevd_heevd_identity_initData(const rocblas_handle handle,
             {
                 for(rocblas_int i = 0; i < n; ++i)
                 {
-                    hA[b][i + j * lda] = (i == j ? T(1) : T(0));
+                    hA[b][i + rocblas_stride(j) * lda] = (i == j ? T(1) : T(0));
                 }
             }
 
@@ -243,7 +246,8 @@ void syevd_heevd_identity_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; ++j)
                 {
                     for(rocblas_int i = 0; i < n; ++i)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -304,7 +308,8 @@ void syevd_heevd_eig7_initData(const rocblas_handle handle,
                 for(I i = 0; i < n; i++)
                 {
                     for(I j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -383,7 +388,8 @@ void syevd_heevd_wilkinson_initData(const rocblas_handle handle,
                 for(I i = 0; i < n; i++)
                 {
                     for(I j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -447,7 +453,8 @@ void syevd_heevd_toeplitz_initData(const rocblas_handle handle,
                 for(I i = 0; i < n; i++)
                 {
                     for(I j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -518,7 +525,8 @@ void syevd_heevd_clement_initData(const rocblas_handle handle,
                 for(I i = 0; i < n; i++)
                 {
                     for(I j = 0; j < n; j++)
-                        A[b * lda * n + i + j * lda] = hA[b][i + j * lda];
+                        A[rocblas_stride(b) * lda * n + i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda];
                 }
             }
         }
@@ -624,7 +632,7 @@ void syevd_heevd_getError(const rocblas_handle handle,
     std::vector<T> work(lwork);
     std::vector<S> hE(sizeE);
     std::vector<int> iwork(liwork);
-    std::vector<T> A(lda * n * bc);
+    std::vector<T> A(rocblas_stride(lda) * n * bc);
 
     // input data initialization
     syevd_heevd_initData<true, true, T, I>(handle, matrix, evect, n, dA, lda, bc, hA, A);
@@ -680,7 +688,8 @@ void syevd_heevd_getError(const rocblas_handle handle,
             {
                 // both eigenvalues and eigenvectors needed; compare with input matrix
                 // Input matrix
-                auto M = HMat::Wrap(A.data() + b * lda * n, lda, n)->block(BDesc().nrows(n).ncols(n));
+                auto M = HMat::Wrap(A.data() + rocblas_stride(b) * lda * n, lda, n)
+                             ->block(BDesc().nrows(n).ncols(n));
 
                 // Computed eigenvectors
                 auto U = HMat::Wrap(hAres[b], lda, n)->block(BDesc().nrows(n).ncols(n));
@@ -814,7 +823,7 @@ void testing_syevd_heevd(Arguments& argus)
     char uploC = argus.get<char>("uplo");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n);
     std::string matrix = argus.get<std::string>("matrix", "randint");

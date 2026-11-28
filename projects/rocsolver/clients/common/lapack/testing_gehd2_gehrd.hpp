@@ -149,11 +149,11 @@ void gehd2_gehrd_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else if(i == j + 1)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
         }
@@ -304,7 +304,7 @@ void testing_gehd2_gehrd(Arguments& argus)
     rocblas_int ilo = argus.get<rocblas_int>("ilo", 1);
     rocblas_int ihi = argus.get<rocblas_int>("ihi", n);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", std::max(n - 1, 0));
 
     rocblas_int bc = argus.batch_count;

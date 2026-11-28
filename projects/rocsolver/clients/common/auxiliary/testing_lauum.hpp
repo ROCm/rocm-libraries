@@ -89,7 +89,7 @@ void lauum_initData(const rocblas_handle handle,
         // LAPACK intends that lauum only be called on matrices with a real diagonal
         for(int i = 0; i < n; i++)
         {
-            hA[0][i + i * lda] = std::real(hA[0][i + i * lda]);
+            hA[0][i + rocblas_stride(i) * lda] = std::real(hA[0][i + rocblas_stride(i) * lda]);
         }
     }
 

@@ -146,7 +146,7 @@ void testing_herand(Arguments& argus)
     {
         for(rocblas_int i = 0; i < n; ++i)
         {
-            T val = A[i + j * lda];
+            T val = A[i + rocblas_stride(j) * lda];
             S re = std::real(val);
             S im = std::imag(val);
 
@@ -179,7 +179,7 @@ void testing_herand(Arguments& argus)
                 else if(uplo == rocblas_fill_full)
                 {
                     // Upper must equal conjugate-transpose of lower: A[i,j] == conj(A[j,i]).
-                    EXPECT_EQ(val, sconj(A[j + i * lda]))
+                    EXPECT_EQ(val, sconj(A[j + rocblas_stride(i) * lda]))
                         << "upper not conj-transpose of lower at (" << i << "," << j << ")";
                 }
                 else // uplo == lower: strictly upper untouched
@@ -192,7 +192,8 @@ void testing_herand(Arguments& argus)
         // padding rows (i >= n) must be untouched
         for(rocblas_int i = n; i < lda; ++i)
         {
-            EXPECT_EQ(A[i + j * lda], flag) << "padding row modified at (" << i << "," << j << ")";
+            EXPECT_EQ(A[i + rocblas_stride(j) * lda], flag)
+                << "padding row modified at (" << i << "," << j << ")";
         }
     }
 
@@ -201,7 +202,8 @@ void testing_herand(Arguments& argus)
     {
         for(rocblas_int i = 0; i < lda; ++i)
         {
-            EXPECT_EQ(A[i + j * lda], flag) << "padding col modified at (" << i << "," << j << ")";
+            EXPECT_EQ(A[i + rocblas_stride(j) * lda], flag)
+                << "padding col modified at (" << i << "," << j << ")";
         }
     }
 

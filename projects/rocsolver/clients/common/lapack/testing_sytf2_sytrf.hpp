@@ -162,9 +162,9 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -174,9 +174,9 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
             {
                 for(rocblas_int j = 0; j < n; j++)
                 {
-                    tmp = hA[b][i + j * lda];
-                    hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    tmp = hA[b][i + rocblas_stride(j) * lda];
+                    hA[b][i + rocblas_stride(j) * lda] = hA[b][n - 1 - i + rocblas_stride(j) * lda];
+                    hA[b][n - 1 - i + rocblas_stride(j) * lda] = tmp;
                 }
             }
 
@@ -190,22 +190,22 @@ void sytf2_sytrf_initData(const rocblas_handle handle,
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
                 {
-                    hA[b][i + j * lda] = 0;
-                    hA[b][j + i * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
+                    hA[b][j + rocblas_stride(i) * lda] = 0;
                 }
                 j = n / 2 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
                 {
-                    hA[b][i + j * lda] = 0;
-                    hA[b][j + i * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
+                    hA[b][j + rocblas_stride(i) * lda] = 0;
                 }
                 j = n - 1 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
                 {
-                    hA[b][i + j * lda] = 0;
-                    hA[b][j + i * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
+                    hA[b][j + rocblas_stride(i) * lda] = 0;
                 }
             }
         }
@@ -382,7 +382,7 @@ void testing_sytf2_sytrf(Arguments& argus)
     char uploC = argus.get<char>("uplo");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n);
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
