@@ -51,6 +51,10 @@ from kernels.common.conv_direct_grouped_wgrad_mfma import (
     GroupedWgradMfmaSpec,
     is_valid_grouped_wgrad_mfma_spec,
 )
+from kernels.common.conv_direct_grouped_wgrad_wmma import (
+    GroupedWgradWmmaSpec,
+    is_valid_grouped_wgrad_wmma_spec,
+)
 from kernels.common.conv_direct_nongrouped import (
     DirectNongroupedConvSpec,
     build_direct_conv_nongrouped,
@@ -227,6 +231,7 @@ class TestChannelTotals(unittest.TestCase):
                 2,
             ),
             (GroupedWgradMfmaSpec, is_valid_grouped_wgrad_mfma_spec, 1 << 28, 8),
+            (GroupedWgradWmmaSpec, is_valid_grouped_wgrad_wmma_spec, 1 << 28, 8),
         ]
         for cls, valid, groups, ch in cases:
             with self.subTest(spec=cls.__name__):

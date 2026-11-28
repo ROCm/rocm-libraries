@@ -1,0 +1,84 @@
+{
+  "aliases": {},
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "conv_direct_wgrad_wmma/gfx1250/fp16_default_copies": {
+          "arch": "gfx1250",
+          "bytes": 246984,
+          "family": "conv_direct_wgrad_wmma",
+          "kernel_name": "direct_wgrad_wmma_f3x3p1s1_w4x2_t2x2_qs1_st3_tb256",
+          "sha256": "9967f330f0759475744aa98cb1cf599d44333cab22f292f1eb8e0219bfcb28cc",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {
+        "conv_direct_wgrad_wmma/gfx1250/bf16_aot_w4x2_tdm": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm20",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "conv_direct_wgrad_wmma/gfx1250/fp16_default_copies": {
+          "arch": "gfx1250",
+          "bytes": 247038,
+          "family": "conv_direct_wgrad_wmma",
+          "kernel_name": "direct_wgrad_wmma_f3x3p1s1_w4x2_t2x2_qs1_st3_tb256",
+          "sha256": "3a34a8cd8357b304bca923fdb671edcff0babb0cbf5b1ebf740c66c2534bf32d",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {
+        "conv_direct_wgrad_wmma/gfx1250/bf16_aot_w4x2_tdm": {
+          "message": "tensor_load_to_lds requires LLVM flavor llvm23, got llvm22",
+          "type": "ValueError"
+        }
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "conv_direct_wgrad_wmma/gfx1250/bf16_aot_w4x2_tdm": {
+          "arch": "gfx1250",
+          "bytes": 528397,
+          "family": "conv_direct_wgrad_wmma",
+          "kernel_name": "direct_wgrad_wmma_f3x3p1s1_w4x2_t2x2_qs1_st4_tb256_pad16_bf16_pf_sched_xcd8_tdm_g2",
+          "sha256": "f2bbfb35ed36a6f7f763be6b73410902b8ad0d2de41c015e17758479df86f9eb",
+          "status": "ok"
+        },
+        "conv_direct_wgrad_wmma/gfx1250/fp16_default_copies": {
+          "arch": "gfx1250",
+          "bytes": 247102,
+          "family": "conv_direct_wgrad_wmma",
+          "kernel_name": "direct_wgrad_wmma_f3x3p1s1_w4x2_t2x2_qs1_st3_tb256",
+          "sha256": "761290e756531b1a917b239335e041be7a6c5e68a1b467be1aca8514d19209d8",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "conv_direct_wgrad_wmma/gfx1250/bf16_aot_w4x2_tdm": {
+          "arch": "gfx1250",
+          "bytes": 528397,
+          "family": "conv_direct_wgrad_wmma",
+          "kernel_name": "direct_wgrad_wmma_f3x3p1s1_w4x2_t2x2_qs1_st4_tb256_pad16_bf16_pf_sched_xcd8_tdm_g2",
+          "sha256": "f2bbfb35ed36a6f7f763be6b73410902b8ad0d2de41c015e17758479df86f9eb",
+          "status": "ok"
+        },
+        "conv_direct_wgrad_wmma/gfx1250/fp16_default_copies": {
+          "arch": "gfx1250",
+          "bytes": 247102,
+          "family": "conv_direct_wgrad_wmma",
+          "kernel_name": "direct_wgrad_wmma_f3x3p1s1_w4x2_t2x2_qs1_st3_tb256",
+          "sha256": "761290e756531b1a917b239335e041be7a6c5e68a1b467be1aca8514d19209d8",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

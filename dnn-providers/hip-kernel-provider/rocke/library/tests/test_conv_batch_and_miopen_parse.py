@@ -83,6 +83,37 @@ def test_direct_parse_keeps_flags_before_mode():
     assert (problem.KH, problem.KW, problem.PAD, problem.stride) == (3, 3, 1, 1)
 
 
+def test_direct_explicit_directions_override_a_zero_forw():
+    """``--run-from-cache --directions wgrad`` with ``-F 0`` still lists the
+    case (under the requested direction); without the override it has none."""
+    from benchmarks.common.benchmark_direct_conv import (
+        _case_direction,
+        parse_miopen_cmd_direct,
+    )
+
+    cmd = "MIOpenDriver convfp16 " + _FLAGS.format(g=64, f=0)
+    _, _, forw = parse_miopen_cmd_direct(cmd, ("wgrad",))
+    assert forw == 0
+    assert _case_direction(forw, None) is None
+    assert _case_direction(forw, ()) is None
+    assert _case_direction(forw, ("wgrad", "fwd")) == "wgrad"
+    assert _case_direction(1, None) == "fwd"
+
+
+def test_direct_run_directions_helper():
+    """One rule for the run directions: the requested ones, else the -F one,
+    else none (the dilation check and both main() branches read it)."""
+    from benchmarks.common.benchmark_direct_conv import _run_directions
+
+    assert _run_directions(0, None) == ()
+    assert _run_directions(0, ()) == ()
+    assert _run_directions(0, ("wgrad",)) == ("wgrad",)
+    assert _run_directions(1, ("wgrad", "fwd")) == ("wgrad", "fwd")
+    assert _run_directions(1, None) == ("fwd",)
+    assert _run_directions(2, None) == ("dgrad",)
+    assert _run_directions(4, []) == ("wgrad",)
+
+
 @pytest.mark.parametrize("kw", ["conv", "convfp32"])
 def test_direct_parse_reads_fp32_from_its_own_keyword(kw):
     from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
@@ -122,6 +153,115 @@ def test_direct_parse_rejects_per_axis_stride_or_padding(geom, what):
             "MIOpenDriver convfp16 -n 2 -c 64 -H 16 -W 16 -k 64 -y 3 -x 3 "
             f"{geom} -g 64 -F 1"
         )
+
+
+# A 1x31 depthwise conv with "same" column padding (the Conformer conv module).
+_DW_1X31 = (
+    "MIOpenDriver convbfp16 -n 2 -c 64 -H 6 -W 80 -k 64 -y 1 -x 31 "
+    "-p 0 -q 15 -u {u} -v {u} -g 64 -F {f}"
+)
+
+
+# -F 6 (dgrad + wgrad) runs wgrad, as -F 4 does.
+@pytest.mark.parametrize("forw", [4, 6])
+def test_direct_parse_takes_column_padding_for_depthwise_wgrad(forw):
+    """A stride-1 depthwise wgrad keeps its column padding (the Toeplitz WMMA
+    kernel computes it)."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    problem, dtype, forw = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=forw))
+    assert dtype == "bf16"
+    assert (problem.KH, problem.KW, problem.PAD, problem.stride) == (1, 31, 0, 1)
+    assert (problem.pad_w, problem.PAD_W) == (15, 15)
+
+
+def test_direct_parse_refuses_column_padding_for_strided_depthwise_wgrad():
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=2, f=4))
+
+
+def test_direct_parse_padding_gate_follows_requested_directions():
+    """--run-from-cache --directions overrides -F, so the per-axis padding
+    gate checks the directions that will run, not the -F one."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # -F 1 (fwd) alone refuses the depthwise 1x31 column padding at stride 1 ...
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=1))
+    # ... a wgrad run of the same command keeps it,
+    problem, _, _ = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=1), ("wgrad",))
+    assert problem.pad_w == 15
+    # and a -F 4 command that is also asked for fwd is refused again.
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4), ("wgrad", "fwd"))
+    # The default (no directions) is unchanged.
+    assert parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=4))[0].pad_w == 15
+
+
+_DILATED = (
+    "MIOpenDriver convfp16 -n 2 -c 64 -H 20 -W 20 -k 64 -y 3 -x 3 "
+    "-p 2 -q 2 -u 1 -v 1 -l 2 -j 2 -g 1 -F {f}"
+)
+
+
+def test_direct_parse_dilation_gate_follows_requested_directions():
+    """--run-from-cache --directions overrides -F, so the dilation gate
+    checks the directions that will run, not the -F one."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    # -F 1 (fwd) is fine, but a wgrad run of the same command is refused,
+    parse_miopen_cmd_direct(_DILATED.format(f=1))
+    with pytest.raises(ValueError, match="dilated convolution only"):
+        parse_miopen_cmd_direct(_DILATED.format(f=1), ("wgrad",))
+    # and a -F 4 command that is asked for fwd only parses.
+    with pytest.raises(ValueError, match="dilated convolution only"):
+        parse_miopen_cmd_direct(_DILATED.format(f=4))
+    parse_miopen_cmd_direct(_DILATED.format(f=4), ("fwd",))
+
+
+def test_per_axis_pad_variants_name_every_per_axis_variant():
+    """The parser's per-axis padding rule comes from per_axis_pad_variants,
+    which states a shape for each PER_AXIS_PAD_VARIANTS entry."""
+    from kernels.conv.direct_variants import (
+        PER_AXIS_PAD_VARIANTS,
+        per_axis_pad_variants,
+    )
+
+    def variants(direction, groups=1, cpg=64, kpg=64, stride=1, KH=3, PAD=1, **kw):
+        return per_axis_pad_variants(
+            direction,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            stride=stride,
+            KH=KH,
+            PAD=PAD,
+            dil_h=kw.get("dil_h", 1),
+            dil_w=kw.get("dil_w", 1),
+            one_d=kw.get("one_d", False),
+        )
+
+    dw = dict(groups=64, cpg=1, kpg=1)
+    assert variants("dgrad", **dw) == ("direct_depthwise_tiled_dgrad",)
+    assert variants("wgrad", **dw) == ("direct_depthwise_wgrad_wmma",)
+    assert variants("wgrad", stride=2, **dw) == ()
+    assert variants("fwd", KH=1, PAD=0) == (
+        "direct_fwd_flex_mfma",
+        "direct_fwd_smallk_wmma",
+        "direct_fwd_smallk_mfma",
+        "direct_fwd_wmma",
+    )
+    assert variants("fwd", stride=2, KH=1, PAD=0, one_d=True) == (
+        "direct_fwd_flex_mfma",
+        "direct_fwd_wmma",
+    )
+    assert variants("fwd", groups=2, cpg=32, kpg=32) == ()
+    assert variants("wgrad") == ()
+    named = set(variants("dgrad", **dw) + variants("wgrad", **dw))
+    named |= set(variants("fwd", KH=1, PAD=0))
+    assert named == set(PER_AXIS_PAD_VARIANTS)
 
 
 # ---------------------------------------------------------------------------

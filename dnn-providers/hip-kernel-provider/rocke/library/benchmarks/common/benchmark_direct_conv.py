@@ -54,9 +54,6 @@ from benchmarks.common.case_results import (
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
 from benchmarks.common.module_cache import add_module_cache_arg
 from benchmarks.common.tf32_verify import rank_verified, tf32_implies_verify
-from builders.common.conv_reference import conv_reference as _conv_reference
-from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
-from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
 
 # ---------------------------------------------------------------------------
 # Swept parameter grids -- one source for this JIT sweep and the AOT cache
@@ -178,11 +175,14 @@ _MIOPEN_DTYPE_MAP = {
 }
 
 
-def parse_miopen_cmd_direct(cmd: str):
+def parse_miopen_cmd_direct(cmd: str, directions: "tuple[str, ...] | None" = None):
     """Parse a MIOpenDriver command string into a ``DirectConvProblem``.
 
     Supports 2-D NHWC forward (F=1), dgrad (F=2) and wgrad (F=4) convolutions.
     Raises ``ValueError`` for unsupported cases (int8, 3-D, NCHW).
+    ``directions`` are the directions a run will actually launch (``--run-from-cache
+    --directions`` overrides the ``-F`` one); the dilation and per-axis padding
+    gates below apply to each of them. The default is the ``-F`` direction.
     Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
     ``"fp32"`` or ``"tf32"`` and ``forw`` is the raw MIOpen ``-F`` value. The
     plain fp32 driver (``conv``/``convfp32``) is ``"fp32"``, or ``"tf32"`` with
@@ -298,7 +298,12 @@ def parse_miopen_cmd_direct(cmd: str):
     # Dilated: direct_nongrouped, direct_fwd_wmma, direct_fwd_tapouter_wmma
     # (forward) and direct_dgrad_wmma compute one; this benchmark takes
     # ungrouped forward and dgrad problems.
-    if dilated and (miopen_args.forw not in (1, 2) or groups != 1):
+    run_dirs = _run_directions(miopen_args.forw, directions)
+    if dilated and (
+        any(d not in ("fwd", "dgrad") for d in run_dirs)
+        or (not directions and miopen_args.forw not in (1, 2))
+        or groups != 1
+    ):
         raise ValueError(
             f"the direct conv benchmark runs a dilated convolution only forward / "
             f"dgrad and ungrouped (got -l {miopen_args.dH} -j {miopen_args.dW}, "
@@ -319,26 +324,26 @@ def parse_miopen_cmd_direct(cmd: str):
             f"direct conv takes one stride for both axes "
             f"(got -u {miopen_args.sH} -v {miopen_args.sW})"
         )
-    # A stride-1 depthwise dgrad (the rotated-filter tiled kernel), an
-    # ungrouped stride-1 forward (the small-K WMMA kernel), an ungrouped 1-D
-    # strided forward (poly_view) and an ungrouped stride-1 1 x R forward,
-    # dilated or not (direct_fwd_wmma), are the problems a direct kernel
-    # computes with per-axis padding: the shapes of PER_AXIS_PAD_VARIANTS
-    # (kernels.conv.direct_variants), which the cache selection checks per
-    # variant. Every other problem keeps one padding for both axes.
-    pad_w_ok = (
-        (miopen_args.forw == 2 and cpg == 1 and kpg == 1 and sH == 1)
-        or (
-            miopen_args.forw == 1 and groups == 1 and (sH == 1 or one_d) and not dilated
+    # Only the PER_AXIS_PAD_VARIANTS (kernels.conv.direct_variants) compute a
+    # column padding of their own, on the shapes per_axis_pad_variants names;
+    # the cache selection checks each variant. Every other problem keeps one
+    # padding for both axes.
+    from kernels.conv.direct_variants import per_axis_pad_variants
+
+    pad_w_ok = bool(run_dirs) and all(
+        per_axis_pad_variants(
+            direction,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            stride=sH,
+            KH=miopen_args.Y,
+            PAD=miopen_args.pH,
+            dil_h=miopen_args.dH,
+            dil_w=miopen_args.dW,
+            one_d=one_d,
         )
-        or (
-            miopen_args.forw == 1
-            and groups == 1
-            and sH == 1
-            and miopen_args.Y == 1
-            and miopen_args.pH == 0
-            and miopen_args.dH == 1
-        )
+        for direction in run_dirs
     )
     if miopen_args.pH != miopen_args.pW and not pad_w_ok:
         raise ValueError(
@@ -630,6 +635,7 @@ def _run_depthwise_sweep(
 ) -> "tuple[int, List[DepthwiseResult]]":
     import torch
 
+    from builders.common.conv_reference import conv_reference as _conv_reference
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -949,6 +955,7 @@ def _run_sweep(
 ) -> "tuple[int, List[Result]]":
     import torch
 
+    from builders.common.conv_reference import conv_reference as _conv_reference
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -1184,6 +1191,7 @@ def _run_nongrouped_sweep(
     """
     import torch
 
+    from builders.common.conv_reference import conv_reference as _conv_reference
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_nongrouped import (
@@ -1414,6 +1422,9 @@ def _run_wgrad_sweep(
     """Benchmark the direct wgrad kernel."""
     import torch
 
+    from builders.common.conv_reference import (
+        wgrad_reference as _wgrad_reference_shared,
+    )
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
@@ -1709,6 +1720,9 @@ def _run_dgrad_sweep(
     """
     import torch
 
+    from builders.common.conv_reference import (
+        dgrad_reference as _dgrad_reference_shared,
+    )
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_direct_grouped import (
@@ -2739,6 +2753,11 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     from benchmarks.common.direct_kernel_sweep import direct_plans
     from benchmarks.common.module_cache import ModuleCache
+    from builders.common.conv_reference import (
+        conv_reference as _conv_reference,
+        dgrad_reference as _dgrad_reference_shared,
+        wgrad_reference as _wgrad_reference_shared,
+    )
     from rocke.runtime.hip_module import Runtime
 
     def _u8(t):
@@ -2961,6 +2980,23 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 def _miopen_forw_to_direction(forw: int) -> "str | None":
     """Map MIOpen -F value to a direction string, or None if unsupported."""
     return _FORW_TO_DIR.get(forw & 7)
+
+
+def _run_directions(forw: int, req_dirs) -> "tuple[str, ...]":
+    """The directions a parsed MIOpen case runs: every explicitly requested
+    ``--directions`` entry (``_run_from_cache`` launches each whatever ``-F``
+    says), else the ``-F`` mapping, else none."""
+    if req_dirs:
+        return tuple(req_dirs)
+    d = _miopen_forw_to_direction(forw)
+    return () if d is None else (d,)
+
+
+def _case_direction(forw: int, req_dirs) -> "str | None":
+    """The direction a parsed MIOpen case is listed under: the first of
+    ``_run_directions``, or None when ``-F`` maps to none."""
+    dirs = _run_directions(forw, req_dirs)
+    return dirs[0] if dirs else None
 
 
 # ---------------------------------------------------------------------------
@@ -3293,6 +3329,13 @@ def main() -> int:
 
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
+    # --run-from-cache --directions launches those directions whatever -F says.
+    try:
+        req_dirs = _cache_directions(args) if args.run_from_cache else None
+    except ValueError as e:
+        print(f"error: --directions: {e}", file=sys.stderr)
+        return 2
+
     # Build list of (problem, dtype) cases.
     cases: list  # List[Tuple[DirectConvProblem, str]]
     if args.miopen_file is not None:
@@ -3304,8 +3347,8 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                prob, dt, forw = parse_miopen_cmd_direct(line)
-                direction = _miopen_forw_to_direction(forw)
+                prob, dt, forw = parse_miopen_cmd_direct(line, req_dirs)
+                direction = _case_direction(forw, req_dirs)
                 if direction is None:
                     print(
                         f"[skip] {path}:{lineno}: -F={forw} maps to no supported direction",
@@ -3320,11 +3363,11 @@ def main() -> int:
             return 2
     elif args.miopen_cmd is not None:
         try:
-            prob, dt, forw = parse_miopen_cmd_direct(args.miopen_cmd)
+            prob, dt, forw = parse_miopen_cmd_direct(args.miopen_cmd, req_dirs)
         except ValueError as e:
             print(f"error: --miopen-cmd: {e}", file=sys.stderr)
             return 2
-        direction = _miopen_forw_to_direction(forw)
+        direction = _case_direction(forw, req_dirs)
         if direction is None:
             print(
                 f"error: --miopen-cmd: -F={forw} maps to no supported direction "
