@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +35,7 @@ using namespace std;
 
 typedef vector<int> stedcj_tuple;
 
-// each size_range vector is a {N, ldc}
+// each size_range vector is a {N, ldc}, or a {N, ldc, glued, pair} (see the close eigenvalues below)
 
 // case when N == 0 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
@@ -51,10 +51,27 @@ const vector<vector<int>> matrix_size_range = {
     // normal (valid) samples
     {12, 12},
     {20, 30},
-    {35, 40}};
+    {35, 40},
+    // deflation of close eigenvalues in the merges: {N, ldc, glued, pair}
+    // - glued Wilkinson matrices: copies of W21+ joined by off-diagonal entries 10^-glued
+    //   (clusters of nearly equal eigenvalues)
+    // - pair: two eigenvalues lambda and lambda + (pair % 100) 1e-15 at the top merge, isolated by
+    //   off-diagonal entries 10^-(pair / 100), with a tiny component of z (in double precision
+    //   they are not deflated without the criterion of LAPACK, and some eigenvalues are wrong; in
+    //   single precision the two eigenvalues are equal)
+    // (see stedcj_initData)
+    {63, 63, 8, 0},
+    {105, 105, 12, 0},
+    {32, 32, 0, 1130},
+    {64, 64, 0, 1040},
+    {100, 100, 0, 1120}};
 
 // for daily_lapack tests
-const vector<vector<int>> large_matrix_size_range = {{192, 192}, {250, 250}, {256, 270}, {300, 300}};
+// (with close eigenvalues as in the checkin_lapack tests)
+const vector<vector<int>> large_matrix_size_range
+    = {{192, 192},          {250, 250},          {256, 270},          {300, 300},
+       {252, 252, 8, 0},    {273, 273, 10, 0},   {128, 128, 0, 1130}, {200, 200, 0, 1120},
+       {250, 250, 0, 1390}, {256, 256, 0, 1040}, {300, 300, 0, 1130}};
 
 Arguments stedcj_setup_arguments(stedcj_tuple tup)
 {
@@ -62,6 +79,10 @@ Arguments stedcj_setup_arguments(stedcj_tuple tup)
 
     arg.set<rocblas_int>("n", tup[0]);
     arg.set<rocblas_int>("ldc", tup[1]);
+    if(tup.size() > 2)
+        arg.set<rocblas_int>("glued", tup[2]);
+    if(tup.size() > 3)
+        arg.set<rocblas_int>("pair", tup[3]);
 
     // case evect = N is not implemented for now.
     // it could be added if stedcj goes to public API
