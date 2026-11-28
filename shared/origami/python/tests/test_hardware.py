@@ -221,6 +221,40 @@ def test_hardware_for_arch_gfx1201():
 
 
 @pytest.mark.integration
+def test_hardware_for_arch_gfx1170():
+    """Test creating hardware object for gfx1170 using get_hardware_for_arch."""
+    clock_khz = 3193000
+    hardware = origami.get_hardware_for_arch(
+        arch=origami.architecture_t.gfx1170,
+        N_CU=8,
+        lds_capacity=64 * 1024,
+        rf_capacity=512 * 1024,
+        L2_capacity=1 * 1024 * 1024,
+        compute_clock_khz=clock_khz
+    )
+
+    # Verify basic properties
+    assert hardware.N_CU == 8
+    assert hardware.lds_capacity == 64 * 1024
+    assert hardware.L2_capacity == 1 * 1024 * 1024
+    assert hardware.compute_clock_ghz == pytest.approx(3.193, rel=1e-6)
+
+    # Verify architecture-specific constants
+    assert hardware.NUM_XCD == 1
+    assert hardware.parallel_mi_cu == 2
+
+    # The perf ratios are the architecture bandwidths (TB/s) divided by the clock;
+    # the memory clock is the compute clock divided by mem_clock_ratio (1.5).
+    clock_ghz = clock_khz / 1e6
+    mem_clock_ghz = clock_ghz / 1.5
+    no_mall = 1.21875121875121875122 * 1000
+    assert hardware.mem1_perf_ratio * clock_ghz / 1e3 == pytest.approx(1.5696, rel=1e-9)
+    assert hardware.mem2_perf_ratio * mem_clock_ghz * 1.5 / 1e3 == pytest.approx(no_mall, rel=1e-9)
+    assert hardware.mem3_perf_ratio * mem_clock_ghz / 1e3 == pytest.approx(0.140156, rel=1e-9)
+    assert hardware.mem_bw_per_wg_coefficients == pytest.approx((0, 0.26025, 0))
+
+
+@pytest.mark.integration
 def test_enumerate_tiles_with_hardware():
     """Test tile enumeration using hardware_t LDS capacity."""
     # Create MI350 hardware configuration

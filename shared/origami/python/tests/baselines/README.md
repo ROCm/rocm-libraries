@@ -11,6 +11,7 @@ baselines/
     ├── gfx942.yaml
     ├── gfx950.yaml
     ├── gfx1100.yaml
+    ├── gfx1170.yaml
     ├── gfx1201.yaml
     └── gfx1250.yaml
 ```
