@@ -851,8 +851,6 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
     const rocke_unified_attention_reduce_tiled_spec_t* reduce_spec,
     const char* arch)
 {
-    const rocke_tile_distribution_encoding_t* enc;
-    const rocke_mfma_atom_t* c_atom;
 
     if(ctx == NULL || b == NULL)
     {
@@ -901,22 +899,8 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
         }
     }
 
-    /* _C16_DIST = make_static_tile_distribution(
-     *                 make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16()))
-     * (Python lines 74-76). The C accumulator layout is dtype/arch independent,
-     * so the f16 atom drives it for both segment and reduce ctx. */
-    c_atom = rocke_mfma_atom("f16", 16, 16, 16);
-    if(c_atom == NULL)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "attn_tiled_3d: no f16 16x16x16 MFMA atom");
-        return false;
-    }
-    enc = rocke_make_c_warp_dstr_encoding(b, c_atom);
-    if(enc == NULL)
-    {
-        return false;
-    }
-    ctx->C16_DIST = rocke_make_static_tile_distribution(b, enc);
+    /* _C16_DIST: shared builder (kernels.common._attention_tiled_shared). */
+    ctx->C16_DIST = rocke_attn_tiled_make_c16_dist(b);
     if(ctx->C16_DIST == NULL)
     {
         return false;

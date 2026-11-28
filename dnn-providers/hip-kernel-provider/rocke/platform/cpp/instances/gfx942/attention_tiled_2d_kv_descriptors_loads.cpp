@@ -38,6 +38,7 @@
  * Lifetime: every emitted node is arena-owned (rocke_ir_builder_t.arena). Nothing
  * is freed individually; the arena bulk-frees the whole graph.
  */
+#include "rocke/instance_attention_tiled_common_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 #include <cstdio>
@@ -441,29 +442,13 @@ void rocke_gfx942_attn2d_fast_paged_kv_blocks(rocke_gfx942_attn2d_build_ctx_t* c
                                               rocke_value_t** out_block0,
                                               rocke_value_t** out_block1)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* seq_base = rocke__seq_base(ctx);
-    rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
-
-    rocke_value_t* logical_block0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, 2));
-    rocke_value_t* logical_block1 = rocke_b_add(b, logical_block0, rocke_b_const_i32(b, 1));
-    rocke_value_t* idx0 = rocke_b_add(b, seq_base, logical_block0);
-    rocke_value_t* idx1 = rocke_b_add(b, seq_base, logical_block1);
-    /* Python evaluates masked_global_load args left-to-right: the cmp_lt mask is
-     * created BEFORE the const(0) default. C arg-eval order is unspecified, so
-     * bind the mask + default in source order to keep the value numbering. */
-    rocke_value_t* mask0 = rocke_b_cmp_lt(b, idx0, max_idx);
-    rocke_value_t* def0 = rocke_b_const_i32(b, 0);
-    rocke_value_t* block0
-        = rocke_b_masked_global_load(b, ctx->block_tables, idx0, mask0, def0, rocke_i32(), 4);
-    rocke_value_t* mask1 = rocke_b_cmp_lt(b, idx1, max_idx);
-    rocke_value_t* def1 = rocke_b_const_i32(b, 0);
-    rocke_value_t* block1
-        = rocke_b_masked_global_load(b, ctx->block_tables, idx1, mask1, def1, rocke_i32(), 4);
-    if(out_block0)
-        *out_block0 = rocke_b_to_sgpr_u32(b, block0);
-    if(out_block1)
-        *out_block1 = rocke_b_to_sgpr_u32(b, block1);
+    rocke_attn_tiled_fast_paged_kv_blocks(ctx->b,
+                                          kv_tile_idx,
+                                          ctx->block_tables,
+                                          rocke__seq_base(ctx),
+                                          rocke__block_table_max_idx(ctx),
+                                          out_block0,
+                                          out_block1);
 }
 
 rocke_value_t* rocke_gfx942_attn2d_fast_paged_kv_voff(rocke_gfx942_attn2d_build_ctx_t* ctx,
@@ -912,7 +897,7 @@ void rocke_gfx942_attn2d_issue_k(rocke_gfx942_attn2d_build_ctx_t* ctx,
     if(ctx->FP8_MFMA_QK)
         rocke_gfx942_attn2d_issue_k_fp8_mfma_async(ctx, tile_idx, buf_idx);
     else if(ctx->KV_FP8)
-        rocke_gfx942_attn2d_issue_fp8_dequant_loads(ctx, tile_idx, buf_idx);
+        rocke_gfx942_attn2d_issue_fp8_dequant_loads(ctx, tile_idx, buf_idx, false);
     else
         rocke_gfx942_attn2d_issue_k_load_runtime(ctx, tile_idx, buf_idx);
 }
@@ -924,7 +909,8 @@ void rocke_gfx942_attn2d_issue_v(rocke_gfx942_attn2d_build_ctx_t* ctx,
     if(ctx->FP8_MFMA_PV)
         rocke_gfx942_attn2d_issue_v_fp8_mfma_stripe(ctx, tile_idx);
     else if(ctx->KV_FP8)
-        rocke_gfx942_attn2d_issue_fp8_dequant_loads(ctx, tile_idx, rocke_b_const_i32(ctx->b, 0));
+        rocke_gfx942_attn2d_issue_fp8_dequant_loads(
+            ctx, tile_idx, rocke_b_const_i32(ctx->b, 0), true);
     else if(ctx->TRANSPOSED_V_STORE)
         rocke_gfx942_attn2d_issue_v_transposed_store(ctx, tile_idx);
     else if(ctx->TRANSPOSED_V)

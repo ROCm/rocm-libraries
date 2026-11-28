@@ -102,6 +102,7 @@ from kernels.common.attention_dense_spec import (
     check_dense_spec_preflight,
     require_fp8_kv_scale,
     require_ocp_fp8_kv,
+    RuntimeShapeSpecMixin,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -116,7 +117,8 @@ from kernels.common.attention_dense_decode import (
     fastdiv_kernargs,
     make_fastdiv,
 )
-from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._attention_dense_shared import emit_o_store
+from kernels.common._attention_tiled_shared import mfma_32x32_c_col, mfma_32x32_c_row
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
     paged_cache_bytes,
@@ -140,7 +142,6 @@ from kernels.common._lse_store import (
     lse_store,
     validate_dense_lse,
     validate_varlen_keys,
-    zero_keyless_row,
 )
 from kernels.common._spec_checks import require_bool
 
@@ -212,7 +213,7 @@ _EMPTY_ROW_MAX_PERSIST = -1e29
 
 
 @dataclass(frozen=True)
-class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
+class Gfx950AttentionDenseSpec(RuntimeShapeSpecMixin, _AttentionDenseSpecBase):
     """gfx950 dense-attention spec and architecture-specific codegen policy."""
 
     lds_v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]
@@ -515,29 +516,6 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             or (self.causal_bottom_right and self.seqlen_q != self.seqlen_kv)
         )
 
-    @property
-    def runtime_param_fields(self) -> tuple[str, ...]:
-        """The shape fields this body reads *only* from its kernel params, and so
-        the fields ``attention_dense_cache_key`` may drop.
-
-        Gated on ``runtime_shape``, not on ``_has_shape_params``: taking a field as
-        a kernarg is necessary but not sufficient: a sub-mode that also bakes the
-        field elsewhere would be a cache collision if it declared it here.
-
-        Kept in sync with the body by hand. A future per-batch specialization would
-        narrow this (bake ``batch``, keep the seqlens runtime) -- the cache key
-        follows automatically, but the symbol name would have to derive from this
-        tuple first. It does not today.
-
-        The head counts ride along: one binary serves every (num_query_heads,
-        num_kv_heads) pair by reading them as kernargs and deriving the token strides
-        and GQA ratio at launch. The grid still takes num_query_heads host-side, which
-        is fine -- that never bakes into the binary.
-        """
-        if not self.runtime_shape:
-            return ()
-        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
-
     def _layout_name_parts(self) -> tuple[str, ...]:
         if self.head_size != 128:
             return ()
@@ -549,14 +527,6 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         if self.lds_v_row_pad != _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"]:
             parts.append(f"vpad{self.lds_v_row_pad}")
         return tuple(parts)
-
-    def _shape_name_parts(self) -> tuple[str, ...]:
-        return () if self.runtime_shape else super()._shape_name_parts()
-
-    def _head_name_parts(self) -> tuple[str, ...]:
-        # One runtime-shape binary serves every head count, so the symbol must not
-        # claim an hq/kv -- mirrors _shape_name_parts dropping sq/sk.
-        return () if self.runtime_shape else super()._head_name_parts()
 
     def _kv_storage_name_parts(self) -> tuple[str, ...]:
         return (f"kv{self.kv_storage_dtype}",) if self.kv_storage_dtype else ()
@@ -1403,7 +1373,7 @@ def build_attention_dense(
         if not causal and not lower:
             return
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
-        query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        query_tok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
         if DIAG_OFF:
             query_tok = b.add(query_tok, b.const_i32(DIAG_OFF))
         # lower bound key: q - W + 1  (keep iff ktok > q - W)
@@ -1413,7 +1383,7 @@ def build_attention_dense(
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
             for i in range(16):
-                ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                 if upper and causal:
                     s_reg[nsub][i] = b.select(
                         b.cmp_le(ktok, up_tok), s_reg[nsub][i], neg_inf
@@ -1433,7 +1403,7 @@ def build_attention_dense(
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
             for i in range(16):
-                ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                 s_reg[nsub][i] = b.select(
                     b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                 )
@@ -1844,7 +1814,7 @@ def build_attention_dense(
     last_vbuf = b.mod(b.add(last_end, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
     o_acc = do_pv(o_acc, p_prev, last_vbuf)
     if KVS > 1:
-        qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        qtok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
         emit_segment_store(
             b,
             segment_params,
@@ -1889,7 +1859,7 @@ def build_attention_dense(
             b.mul(b.mul(bt, seqlen_q_p), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
-    qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+    qtok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
     d_half = b.mul(lane_h, b.const_i32(4))
     # The exact per-row "sees at least one key" predicate. LSE always needs it. A
@@ -1940,7 +1910,7 @@ def build_attention_dense(
     if spec.emit_lse and varlen:
         o_store_ctx = b.scf_if(row_exists)
     with o_store_ctx:
-        _emit_o_store(
+        emit_o_store(
             b,
             o,
             q_row_byte,
@@ -1956,31 +1926,6 @@ def build_attention_dense(
         )
     b.ret()
     return b.kernel
-
-
-def _emit_o_store(
-    b, o, q_row_byte, d_half, o_acc, rcp_l, dtype, d_tiles, width, row_has_key=None
-):
-    """O = acc / l, ``width`` contiguous head-dim elements per global store.
-
-    ``row_has_key`` zeroes rows that see no key (LSE path and runtime_shape window
-    kernels). ``None`` emits the unchanged store sequence.
-    """
-    for dt in range(d_tiles):
-        for g in range(4):
-            for c in range(0, 4, width):
-                d0 = b.add(b.const_i32(dt * 32 + g * 8 + c), d_half)
-                addr = b.add(q_row_byte, d0)
-                vals = [
-                    b.cast_f32_to(
-                        b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
-                    )
-                    for kk in range(c, c + width)
-                ]
-                packed = b.vec_pack(vals, dtype)
-                if row_has_key is not None:
-                    packed = zero_keyless_row(b, packed, row_has_key, dtype, width)
-                b.global_store_vN(o, addr, packed, width, align=2 * width)
 
 
 def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
@@ -2548,13 +2493,13 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             if not causal and not lower:
                 return
             tile_key0 = b.mul(tile_idx, b.const_i32(BN))
-            query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+            query_tok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
             win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
             up_tok = b.add(query_tok, b.const_i32(RIGHT)) if RIGHT else query_tok
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
-                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                     if upper and causal:
                         s_reg[nsub][i] = b.select(
                             b.cmp_le(ktok, up_tok), s_reg[nsub][i], neg_inf
@@ -2572,7 +2517,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
-                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    ktok = b.add(sub_base, mfma_32x32_c_row(b, lane, i))
                     s_reg[nsub][i] = b.select(
                         b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                     )
@@ -3033,7 +2978,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.mul(b.mul(bt_e, _sq()), _stride_q()),
             b.mul(hq_e, b.const_i32(D)),
         )
-        qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        qtok = b.add(q_tok0, mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
         # The exact per-row "sees at least one key" predicate. LSE always needs it. A
@@ -3078,7 +3023,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
         )
         with o_store_ctx:
-            _emit_o_store(
+            emit_o_store(
                 b,
                 o,
                 q_row_byte,

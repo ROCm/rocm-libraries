@@ -34,7 +34,8 @@
 
 #include "rocke/helper_rocke.helpers.layouts.h" /* pv_tr_reader row/col  */
 #include "rocke/helper_rocke.helpers.mfma_attention.h" /* 32x32x16_for_dtype    */
-#include "rocke/instance_gfx950_attention_tiled_2d.h" /* mfma_32x32_c_row/_col */
+#include "rocke/instance_attention_tiled_common_internal.h" /* rocke__mfma_32x32_c_row/_col */
+#include "rocke/instance_gfx950_attention_tiled_2d.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 #include "rocke/instance_lse_store_internal.h" /* rocke_lse_store / row_has_mass */
 
@@ -861,10 +862,8 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 {
                     /* const(n*32) created before _mfma_32x32_c_row (Py arg order). */
                     rocke_value_t* out_col_base = rocke_b_const_i32(b, (int64_t)(n * 32));
-                    rocke_value_t* out_col_t = rocke_b_add(
-                        b,
-                        out_col_base,
-                        rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row(b, ctx->lane, r));
+                    rocke_value_t* out_col_t
+                        = rocke_b_add(b, out_col_base, rocke__mfma_32x32_c_row(b, ctx->lane, r));
                     rocke_value_t* v = rocke_b_vec_extract(b, acc32, r);
                     rocke_value_t* normalized = rocke_b_fmul(b, v, inv_l_t);
                     rocke_value_t* final_h = rocke_b_cast_f32_to(
@@ -974,9 +973,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 for(r = 0; r < ctx->REGS_PER_LANE; ++r)
                 {
                     rocke_value_t* row = rocke_b_add(
-                        b,
-                        ctx->wave_row_base,
-                        rocke_gfx950_attention_tiled_2d_mfma_32x32_c_row(b, ctx->lane, r));
+                        b, ctx->wave_row_base, rocke__mfma_32x32_c_row(b, ctx->lane, r));
                     rocke_value_t* col_in_stripe = ctx->lane_col32_v;
                     rocke_value_t* v = rocke_b_vec_extract(b, acc32, r);
                     rocke_value_t* normalized = rocke_b_fmul(b, v, ctx->rcp_l[r]);

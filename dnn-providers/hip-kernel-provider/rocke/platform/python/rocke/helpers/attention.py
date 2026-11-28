@@ -643,7 +643,7 @@ def mfma_32x32x8_for_dtype(
       - C/D: ``<16 x float>`` (M=32 x N=32 / 64 lanes)
 
     The C output lane layout is **identical** to the 32x32x16 atom (only K
-    per atom differs), so the shared ``_C32_DIST`` / ``_mfma_32x32_c_*``
+    per atom differs), so the shared ``C32_DIST`` / ``mfma_32x32_c_*``
     distribution drives both. Both fp16 and bf16 are gfx942-legal here:
     ``mfma_f32_32x32x8_f16`` and ``mfma_f32_32x32x8_bf16`` (the ``.1k``
     intrinsic) both select on CDNA3. (The wider K=16 bf16 atom

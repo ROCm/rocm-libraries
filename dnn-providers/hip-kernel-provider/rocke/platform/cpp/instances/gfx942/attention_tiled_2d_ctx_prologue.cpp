@@ -36,6 +36,7 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
+#include "rocke/instance_attention_tiled_common_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 /* ---------------------------------------------------------------- helpers */
@@ -763,56 +764,29 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- *  Per-lane row map + bit helpers (lines 2031-2052).
+ *  Per-lane row map, register-P and accumulator-index helpers.
  *
- *  These recompute the per-warp lane decomposition (lane_rg / lane_col / ...)
- *  from ctx->lane, mirroring the Python SSA values the closures captured.
+ *  Thin wrappers over the shared TiledLaneMap helpers in
+ *  instances/common/attention_tiled_common.cpp (one copy for gfx942 and
+ *  gfx950); each fills the lane map from this ctx's cached SSA values.
  * ===================================================================== */
-
-static rocke_value_t* rocke_a2d_lane_rg(rocke_gfx942_attn2d_build_ctx_t* ctx)
-{
-    /* Reuse the cached SSA value (emitted once in emit_loop_bounds_and_inits).
-     * Fall back to a fresh op only if a caller runs before that phase. */
-    if(ctx->lane_rg_v != NULL)
-        return ctx->lane_rg_v;
-    return rocke_b_div(ctx->b, ctx->lane, rocke_b_const_i32(ctx->b, 16));
-}
-
-static rocke_value_t* rocke_a2d_lane_col(rocke_gfx942_attn2d_build_ctx_t* ctx)
-{
-    if(ctx->lane_col_v != NULL)
-        return ctx->lane_col_v;
-    return rocke_b_mod(ctx->b, ctx->lane, rocke_b_const_i32(ctx->b, 16));
-}
 
 rocke_value_t* rocke_gfx942_attn2d_in_warp_row(rocke_gfx942_attn2d_build_ctx_t* ctx, int r)
 {
-    /* atom_idx = r // 4 ; in_atom = r % 4
-     * row = lane_rg*4 + (atom_idx*16 + in_atom) */
-    int atom_idx = r / 4;
-    int in_atom = r % 4;
-    /* Python evaluates b.mul(lane_rg, const(4)) BEFORE the trailing const
-     * (left-to-right arg order). Bind the mul to a temp so C's arg-eval order
-     * does not allocate the trailing const ahead of the mul and shift it. */
-    rocke_value_t* rg4 = rocke_b_mul(ctx->b, rocke_a2d_lane_rg(ctx), rocke_b_const_i32(ctx->b, 4));
-    return rocke_b_add(ctx->b, rg4, rocke_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx942_attn2d_lane_map(ctx);
+    return rocke_attn_tiled_in_warp_row(&lm, r);
 }
 
 rocke_value_t* rocke_gfx942_attn2d_state_row(rocke_gfx942_attn2d_build_ctx_t* ctx, int r)
 {
-    if(ctx->USE_MFMA_32X32 && !ctx->TRANSPOSED_QK_32X32)
-        return rocke__mfma_32x32_c_row(ctx->b, ctx->lane, r);
-    return rocke_gfx942_attn2d_in_warp_row(ctx, r);
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx942_attn2d_lane_map(ctx);
+    return rocke_attn_tiled_state_row(&lm, r);
 }
 
 rocke_value_t*
     rocke_gfx942_attn2d_bit2(rocke_gfx942_attn2d_build_ctx_t* ctx, rocke_value_t* v, int bit)
 {
-    /* Python: land(lshr(v, const(bit)), const(1)) emits the lshr BEFORE the
-     * trailing const(1) (left-to-right). Bind the lshr first so C's right-to-
-     * left arg eval does not allocate const(1) ahead of it and shift numbering. */
-    rocke_value_t* shifted = rocke_b_lshr(ctx->b, v, rocke_b_const_i32(ctx->b, bit));
-    return rocke_b_land(ctx->b, shifted, rocke_b_const_i32(ctx->b, 1));
+    return rocke_attn_tiled_bit2(ctx->b, v, bit);
 }
 
 rocke_value_t* rocke_gfx942_attn2d_select_lane_rg(rocke_gfx942_attn2d_build_ctx_t* ctx,
@@ -821,12 +795,8 @@ rocke_value_t* rocke_gfx942_attn2d_select_lane_rg(rocke_gfx942_attn2d_build_ctx_
                                                   rocke_value_t* v2,
                                                   rocke_value_t* v3)
 {
-    rocke_value_t* lane_rg = rocke_a2d_lane_rg(ctx);
-    rocke_value_t* is0 = rocke_b_cmp_eq(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 0));
-    rocke_value_t* is1 = rocke_b_cmp_eq(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 1));
-    rocke_value_t* is2 = rocke_b_cmp_eq(ctx->b, lane_rg, rocke_b_const_i32(ctx->b, 2));
-    return rocke_b_select(
-        ctx->b, is0, v0, rocke_b_select(ctx->b, is1, v1, rocke_b_select(ctx->b, is2, v2, v3)));
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx942_attn2d_lane_map(ctx);
+    return rocke_attn_tiled_select_lane_rg(&lm, v0, v1, v2, v3);
 }
 
 /* ===================================================================== *
@@ -835,7 +805,7 @@ rocke_value_t* rocke_gfx942_attn2d_select_lane_rg(rocke_gfx942_attn2d_build_ctx_
 
 int rocke_gfx942_attn2d_acc_idx(const rocke_gfx942_attn2d_build_ctx_t* ctx, int n, int atom)
 {
-    return n * ctx->ACC_M_ATOMS + atom;
+    return rocke_attn_tiled_acc_idx(ctx->ACC_M_ATOMS, n, atom);
 }
 
 rocke_value_t* rocke_gfx942_attn2d_acc_get(rocke_gfx942_attn2d_build_ctx_t* ctx, int n, int atom)
@@ -868,78 +838,16 @@ void rocke_gfx942_attn2d_permute_p_c_to_a16(rocke_gfx942_attn2d_build_ctx_t* ctx
                                             rocke_value_t** out,
                                             int* out_n)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    rocke_value_t* lane_col = rocke_a2d_lane_col(ctx); /* lane % 16     */
-    /* Python uses the prologue-cached lane_col_mod4 / lane_col_div4 (one local
-     * each, gfx950 2018-2019); reuse the same SSA values instead of recomputing
-     * the mod/div here (which inserted two extra ops and shifted numbering). */
-    rocke_value_t* lane_col_mod4 = (ctx->lane_col_mod4_v != NULL)
-                                       ? ctx->lane_col_mod4_v
-                                       : rocke_b_mod(b, lane_col, rocke_b_const_i32(b, 4));
-    rocke_value_t* lane_col_div4 = (ctx->lane_col_div4_v != NULL)
-                                       ? ctx->lane_col_div4_v
-                                       : rocke_b_div(b, lane_col, rocke_b_const_i32(b, 4));
-    rocke_value_t* lane_rg = rocke_a2d_lane_rg(ctx); /* lane / 16     */
-
-    /* The transform is defined for a 4-element register quad. */
-    rocke_value_t* vals[4];
-    int i;
-    for(i = 0; i < 4; ++i)
-        vals[i] = (i < n) ? p_regs_f32[i] : NULL;
-
-    /* Two bit-level transposes: swap C (lane_col_mod4) with R (reg index). */
-    for(int bit = 0; bit < 2; ++bit)
-    {
-        rocke_value_t* lane_bit = rocke_gfx942_attn2d_bit2(ctx, lane_col_mod4, bit);
-        int reg_bit = 1 << bit; /* 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle */
-        rocke_value_t* old[4];
-        for(i = 0; i < 4; ++i)
-            old[i] = vals[i];
-        for(int reg = 0; reg < 4; ++reg)
-        {
-            rocke_value_t* partner = rocke_b_warp_shuffle_xor_dpp(b, old[reg ^ reg_bit], reg_bit);
-            rocke_value_t* same_bit
-                = rocke_b_cmp_eq(b, lane_bit, rocke_b_const_i32(b, (reg >> bit) & 1));
-            vals[reg] = rocke_b_select(b, same_bit, old[reg], partner);
-        }
-    }
-
-    /* Lane-field swaps: exchange A (lane_rg) and B (lane_col_div4). */
-    {
-        const int bits[2] = {0, 1};
-        const int lane_xors[2] = {20, 40};
-        for(int j = 0; j < 2; ++j)
-        {
-            int bit = bits[j];
-            int lane_xor = lane_xors[j];
-            rocke_value_t* a_bit = rocke_gfx942_attn2d_bit2(ctx, lane_rg, bit);
-            rocke_value_t* b_bit = rocke_gfx942_attn2d_bit2(ctx, lane_col_div4, bit);
-            rocke_value_t* swap = rocke_b_cmp_ne(b, a_bit, b_bit);
-            for(i = 0; i < 4; ++i)
-                vals[i] = rocke_b_select(
-                    b, swap, rocke_b_warp_shuffle_xor(b, vals[i], lane_xor), vals[i]);
-        }
-    }
-
-    for(i = 0; i < 4; ++i)
-        out[i] = vals[i];
-    if(out_n != NULL)
-        *out_n = 4;
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx942_attn2d_lane_map(ctx);
+    rocke_attn_tiled_permute_p_c_to_a16(&lm, p_regs_f32, n, out, out_n);
 }
 
 rocke_value_t* rocke_gfx942_attn2d_pack_p_a16(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                               rocke_value_t* const* p_regs_f32,
                                               int n)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    const rocke_type_t* dtype = ctx->dtype;
-    rocke_value_t* permuted[4];
-    rocke_value_t* casted[4];
-    int out_n = 0;
-    rocke_gfx942_attn2d_permute_p_c_to_a16(ctx, p_regs_f32, n, permuted, &out_n);
-    for(int i = 0; i < 4; ++i)
-        casted[i] = rocke_b_cast_f32_to(b, permuted[i], dtype);
-    return rocke_b_vec_pack(b, casted, 4, dtype);
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx942_attn2d_lane_map(ctx);
+    return rocke_attn_tiled_pack_p_a16(&lm, p_regs_f32, n);
 }
 
 rocke_value_t* rocke_gfx942_attn2d_pack_p_a32(rocke_gfx942_attn2d_build_ctx_t* ctx,
@@ -947,35 +855,8 @@ rocke_value_t* rocke_gfx942_attn2d_pack_p_a32(rocke_gfx942_attn2d_build_ctx_t* c
                                               rocke_value_t* const* p_regs1_f32,
                                               int n)
 {
-    rocke_ir_builder_t* b = ctx->b;
-    const rocke_type_t* dtype = ctx->dtype;
-    rocke_value_t* vals0[4];
-    rocke_value_t* vals1[4];
-    rocke_value_t* lohi[8];
-    int dummy = 0;
-    rocke_gfx942_attn2d_permute_p_c_to_a16(ctx, p_regs0_f32, n, vals0, &dummy);
-    rocke_gfx942_attn2d_permute_p_c_to_a16(ctx, p_regs1_f32, n, vals1, &dummy);
-    for(int j = 0; j < 4; ++j)
-    {
-        rocke_value_t* v0 = vals0[j];
-        rocke_value_t* v1 = vals1[j];
-        rocke_value_t* v0_x16 = rocke_b_warp_shuffle_xor(b, v0, 16);
-        rocke_value_t* v0_x32 = rocke_b_warp_shuffle_xor(b, v0, 32);
-        rocke_value_t* v0_x48 = rocke_b_warp_shuffle_xor(b, v0, 48);
-        rocke_value_t* v1_x16 = rocke_b_warp_shuffle_xor(b, v1, 16);
-        rocke_value_t* v1_x32 = rocke_b_warp_shuffle_xor(b, v1, 32);
-        rocke_value_t* v1_x48 = rocke_b_warp_shuffle_xor(b, v1, 48);
-        /* lo[j] = select_lane_rg(v0, v0_x48, v1_x32, v1_x16) */
-        lohi[j] = rocke_gfx942_attn2d_select_lane_rg(ctx, v0, v0_x48, v1_x32, v1_x16);
-        /* hi[j] = select_lane_rg(v0_x16, v0_x32, v1_x48, v1) */
-        lohi[4 + j] = rocke_gfx942_attn2d_select_lane_rg(ctx, v0_x16, v0_x32, v1_x48, v1);
-    }
-    {
-        rocke_value_t* casted[8];
-        for(int i = 0; i < 8; ++i)
-            casted[i] = rocke_b_cast_f32_to(b, lohi[i], dtype);
-        return rocke_b_vec_pack(b, casted, 8, dtype);
-    }
+    rocke_attn_tiled_lane_map_t lm = rocke_gfx942_attn2d_lane_map(ctx);
+    return rocke_attn_tiled_pack_p_a32(&lm, p_regs0_f32, p_regs1_f32, n);
 }
 
 /* ===================================================================== *
