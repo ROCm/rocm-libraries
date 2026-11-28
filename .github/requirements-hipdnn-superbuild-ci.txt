@@ -8,6 +8,11 @@
 # jsonschema -- the descriptor-packaging suite validates UHD sidecars against
 #               uhd.schema.json; without it those checks skip.
 # PyYAML, Jinja2 -- the DescriptorGenerator/IngestorGenerator tooling suites (HIPDNN_ENABLE_TOOLING_TESTS).
+# xgboost -- uhd_gen's optional `xgboost` extra (tools/uhd_gen/pyproject.toml), kept out of
+#   its requirements.txt so a plain install does not need it. Without it the XGBoost
+#   model-family tests (uhd_gen/tests/test_model_families.py, the xgboost cases of
+#   TestUhdGenArtifact) skip, and conftest.py lets a required run skip them, so the XGBoost
+#   export would go unchecked. The minimum is the extra's; keep the two in step.
 # clang-format -- IngestorGenerator tests/test_packs_formatting.py, which skips (and a strict
 #   run fails the skip) without one. Pinned to the pre-commit hook's rev, because a formatter
 #   fixed-point check is only meaningful against the formatter that defines the style.
@@ -24,5 +29,6 @@ numpy
 jsonschema
 PyYAML
 Jinja2
+xgboost>=3.4.1
 clang-format==18.1.4
 -r ../projects/hipdnn/tools/uhd_gen/requirements.txt
