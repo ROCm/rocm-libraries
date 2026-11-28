@@ -32,6 +32,7 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedData.hpp>
+#include <Tensile/LongPath.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -78,7 +79,7 @@ namespace Tensile
         {
             hipModule_t             module;
             std::unique_ptr<char[]> buffer;
-            std::ifstream           coFile(path, std::ifstream::binary);
+            std::ifstream           coFile(longPathSafe(path), std::ifstream::binary);
 
             // hipModuleLoad holds the file descriptor/handle which can result in a process
             // running out of descriptors/handles. Use hipModuleLoadData as a workaround

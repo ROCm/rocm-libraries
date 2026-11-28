@@ -45,6 +45,7 @@
 //#include <Tensile/AMDGPU.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#include <Tensile/LongPath.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -807,7 +808,10 @@ namespace
         static bool TestPath(const std::string& path)
         {
 #ifdef WIN32
-            return ((_access(path.c_str(), 4) != -1) || (_access(path.c_str(), 6) != -1));
+            // A path of MAX_PATH characters or more is only reachable in its
+            // \\?\ form, which needs the wide-character API.
+            auto const testPath = Tensile::longPathSafe(path);
+            return ((_waccess(testPath.c_str(), 4) != -1) || (_waccess(testPath.c_str(), 6) != -1));
 #else
             return access(path.c_str(), R_OK) == 0;
 #endif
@@ -849,11 +853,28 @@ namespace
 #ifndef ROCBLAS_STATIC_LIB
 
 #ifdef WIN32
-                std::vector<TCHAR> dll_path(MAX_PATH + 1);
-                if(GetModuleFileNameA(
-                       GetModuleHandleA("rocblas.dll"), dll_path.data(), MAX_PATH + 1))
+                // Grow the buffer until the whole path fits; it can be longer than MAX_PATH
+                HMODULE           rocblas_module = GetModuleHandleA("rocblas.dll");
+                std::vector<char> dll_path(MAX_PATH + 1);
+                DWORD             length = 0;
+                for(;;)
                 {
-                    std::string           tmp(dll_path.begin(), dll_path.end());
+                    length = GetModuleFileNameA(
+                        rocblas_module, dll_path.data(), static_cast<DWORD>(dll_path.size()));
+                    if(length < dll_path.size() - 1)
+                        break;
+                    dll_path.resize(dll_path.size() * 2);
+                }
+                if(length)
+                {
+                    std::string tmp(dll_path.data(), length);
+                    // A module loaded through its \\?\ form reports that form. Strip it so
+                    // the relative "/../" joins below still resolve; the library opens add
+                    // it back where a path needs it.
+                    if(tmp.rfind("\\\\?\\UNC\\", 0) == 0)
+                        tmp = "\\\\" + tmp.substr(8);
+                    else if(tmp.rfind("\\\\?\\", 0) == 0)
+                        tmp = tmp.substr(4);
                     std::filesystem::path exepath = tmp;
                     if(exepath.has_filename())
                     {
@@ -1015,7 +1036,8 @@ namespace
 #endif
                         // Best-effort directory listing
                         std::error_code list_ec;
-                        for(auto& file_name : fs::directory_iterator(path, list_ec))
+                        for(auto& file_name :
+                            fs::directory_iterator(Tensile::longPathSafe(path), list_ec))
                         {
                             // Match by filename prefix.
                             if(rocblas_tensile_is_library_filename(
@@ -1094,13 +1116,16 @@ namespace
                 bool no_match = false;
 #ifdef WIN32
                 std::replace(dir.begin(), dir.end(), '/', '\\');
-                WIN32_FIND_DATAA finddata;
-                HANDLE           hfine = FindFirstFileA(dir.c_str(), &finddata);
+                // Search through the \\?\ form when the library directory is long
+                auto const       searchPattern = Tensile::longPathSafe(dir);
+                WIN32_FIND_DATAW finddata;
+                HANDLE           hfine = FindFirstFileW(searchPattern.c_str(), &finddata);
                 if(hfine != INVALID_HANDLE_VALUE)
                 {
                     do
                     {
-                        std::string codeObjectFile = path + "\\" + finddata.cFileName;
+                        std::string codeObjectFile
+                            = path + "\\" + std::filesystem::path(finddata.cFileName).string();
                         if(!skip_xnack.empty()
                            && codeObjectFile.find(skip_xnack) != std::string::npos)
                             continue;
@@ -1110,7 +1135,7 @@ namespace
                         THROW_IF_HIP_ERROR_MESSAGE(
                             adapter.loadCodeObjectFile(codeObjectFile.c_str()),
                             "loading code object: " + codeObjectFile);
-                    } while(FindNextFileA(hfine, &finddata));
+                    } while(FindNextFileW(hfine, &finddata));
                 }
                 else
                 {
