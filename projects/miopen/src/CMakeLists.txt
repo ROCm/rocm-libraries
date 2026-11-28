@@ -267,6 +267,7 @@ set( MIOpen_Source
     solver/conv/conv_bin_wino3x3U.cpp
     solver/conv/conv_bin_winoRxS.cpp
     solver/conv/conv_direct_depthwise_fwd_2d.cpp
+    solver/conv/conv_hip_implicit_gemm_wmma_bwd_data_1d.cpp
     solver/conv/conv_direct_naive_conv.cpp
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
@@ -628,6 +629,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/MIOpenBatchNormBwdSpatial.cpp
         kernels/MIOpenBatchNormBwdPerAct.cpp
         kernels/MIOpenConvDirUniHip.cpp
+        kernels/MIOpenConvTranspose1dWmmaHip.cpp
         kernels/MIOpenConvDirBatchNormActivHip.cpp
         kernels/MIOpenGLU.cpp
         kernels/MIOpenGroupNorm.cpp
