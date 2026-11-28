@@ -33,7 +33,7 @@ pytestmark = [
 TILE = 16
 
 
-def search_kernel(chunks):
+def search_kernel(chunks, surplusExit):
     init_rocisa()
     writer = object.__new__(KernelWriterAssembly)
     writer.sgprs = {"WorkGroup0": 24, "GSU": 23}
@@ -45,8 +45,14 @@ def search_kernel(chunks):
         "MacroTile0": TILE,
         "MacroTile1": TILE,
         "GlobalSplitU": 1,
+        "GlobalSplitUAlgorithm": "MultipleBuffer",
+        "AdaptiveGemmGSUA": 0,
+        "TileProcessingStrategy": "None",
+        # A cluster launch keeps every workgroup (see groupedSurplusEarlyExit).
+        "ClusterDim": [1, 1] if surplusExit else [2, 1],
         "ProblemType": {"UseScaleAlphaVec": 0},
     }
+    assert writer.groupedSurplusEarlyExit(kernel) is surplusExit
     # s[8:15] are the search temporaries; s[16:19] receive M, N, batch, K.
     search = writer.groupedGemmWaveSearch(
         kernel, 20, ContinuousRegister(8, 8), 16, 21, 22, Label("FOUND", ""), chunks
@@ -116,7 +122,9 @@ def search_cases():
             yield headers, 1
 
 
-def queries_and_expected(headers, gsu):
+def queries_and_expected(headers, gsu, surplusExit):
+    """With surplusExit, IDs beyond all tiles end without writing, so their rows keep the
+    0xFF fill of the output buffer; otherwise they resolve to the last group."""
     wide = headers.astype(np.uint64)
     tiles = (wide[:, 0] + TILE - 1) // TILE * ((wide[:, 1] + TILE - 1) // TILE) * wide[:, 2] * gsu
     prefixes = np.cumsum(tiles)
@@ -130,16 +138,19 @@ def queries_and_expected(headers, gsu):
     expected = np.column_stack(
         (headers[indices], tiles[indices], prefixes[indices], indices + 1, np.zeros(len(indices)))
     ).astype(np.uint32)
+    if surplusExit:
+        expected[np.array(queries) >= prefixes[-1]] = 0xFFFFFFFF
     return np.array(queries, dtype=np.uint32), expected
 
 
+@pytest.mark.parametrize("surplusExit", [True, False])
 @pytest.mark.parametrize("chunks", [1, 6])
-def test_search_matches_tile_intervals(chunks, tmp_path):
-    asm = search_kernel(chunks)
+def test_search_matches_tile_intervals(chunks, surplusExit, tmp_path):
+    asm = search_kernel(chunks, surplusExit)
     co = str(tmp_path / "group_search.co")
     assemble_kernel(asm, co)
     for headers, gsu in search_cases():
-        queries, expected = queries_and_expected(headers, gsu)
+        queries, expected = queries_and_expected(headers, gsu, surplusExit)
         raw = run_on_gpu(
             co,
             expected.nbytes,

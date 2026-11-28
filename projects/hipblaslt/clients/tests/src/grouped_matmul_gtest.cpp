@@ -18,6 +18,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -819,12 +820,14 @@ namespace
             runMX(elemType, elemType, outType, mode, shapes, launchAs);
         }
 
+        // totalColsHint bounds N by the max-total-cols hint instead of the max-cols hint.
         void runMX(hipDataType                                 typeA,
                    hipDataType                                 typeB,
                    hipDataType                                 outType,
                    hipblasLtMatmulMatrixScale_t                mode,
                    const std::vector<GroupShape>&              shapes,
-                   std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
+                   std::optional<hipblasLtMatmulMatrixScale_t> launchAs      = std::nullopt,
+                   bool                                        totalColsHint = false)
         {
             const bool preSwizzled  = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             const MXScaleMode scale = mxScaleMode(mode);
@@ -884,8 +887,12 @@ namespace
             };
             setHint(HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT,
                     *std::max_element(m.begin(), m.end()));
-            setHint(HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT,
-                    *std::max_element(n.begin(), n.end()));
+            if(totalColsHint)
+                setHint(HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_COLS_EXT,
+                        std::accumulate(n.begin(), n.end(), int64_t(0)));
+            else
+                setHint(HIPBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT,
+                        *std::max_element(n.begin(), n.end()));
             setHint(HIPBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM,
                     std::accumulate(k.begin(), k.end(), int64_t(0)) / groups);
 
@@ -1089,6 +1096,56 @@ namespace
         run(tc);
     }
 
+    // Far more groups than columns, as in an MoE layer at decode sizes, so most of the
+    // grid has no tile: the groups with columns sit on both sides of 64- and 384-group
+    // boundaries, and the second call moves every column into the last group.
+    TEST_F(GroupedMatmul, smoke_ManyGroupsFewColumns)
+    {
+        Case tc;
+        tc.opA           = HIPBLAS_OP_T;
+        tc.totalColsHint = true;
+        tc.groups.assign(500, {96, 0, 32});
+        std::vector<GroupShape> lastGroupOnly = tc.groups;
+        const std::pair<int, int64_t> columns[]
+            = {{0, 1}, {63, 7}, {64, 40}, {383, 3}, {384, 70}, {499, 2}};
+        int64_t total = 0;
+        for(auto [g, n] : columns)
+        {
+            tc.groups[g].n = n;
+            total += n;
+        }
+        lastGroupOnly.back().n = total;
+        tc.reruns              = {lastGroupOnly};
+        run(tc);
+    }
+
+    // Every column in a group of its own, each a partial tile: the grid from the
+    // max-total-cols hint has exactly the real tiles when MacroTile1 >= 16, so a smaller
+    // grid would leave groups unwritten.
+    TEST_F(GroupedMatmul, smoke_EveryColumnInItsOwnGroup)
+    {
+        Case tc;
+        tc.opA           = HIPBLAS_OP_T;
+        tc.totalColsHint = true;
+        tc.groups.assign(200, {150, 0, 24});
+        for(int g = 7; g < 200; g += 13)
+            tc.groups[g].n = 1;
+        run(tc);
+    }
+
+    // The same along M, bounded by the max-total-rows hint.
+    TEST_F(GroupedMatmul, smoke_ManyGroupsFewRows)
+    {
+        Case tc;
+        tc.opA           = HIPBLAS_OP_T;
+        tc.totalRowsHint = true;
+        tc.groups.assign(300, {0, 48, 32});
+        for(int g = 2; g < 300; g += 15)
+            tc.groups[g].m = 1 + g % 5;
+        tc.groups.back().m = 3;
+        run(tc);
+    }
+
     // All groups share K: the K side of A and B uses the scalar ROWS/COLS attribute.
     TEST_F(GroupedMatmul, smoke_Fp16TNFixedK)
     {
@@ -1240,6 +1297,22 @@ namespace
               HIP_R_16BF,
               HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
               kMXShapes);
+    }
+
+    // An MoE decode step: 384 experts and 6 tokens, one in the last expert, with N bounded
+    // by the max-total-cols hint; almost none of the grid has a tile.
+    TEST_F(GroupedMatmul, smoke_MXFP4xMXFP8ManyGroupsFewColumns)
+    {
+        std::vector<GroupShape> shapes(384, {128, 0, 256});
+        for(int g : {5, 63, 64, 200, 300, 383})
+            shapes[g].n = 1;
+        runMX(HIP_R_4F_E2M1,
+              HIP_R_8F_E4M3,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              shapes,
+              std::nullopt,
+              true);
     }
 
     // With the same FP8 layouts, the MX scale modes select only MX kernels and the scalar
