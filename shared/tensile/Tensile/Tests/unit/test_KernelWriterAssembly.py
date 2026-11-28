@@ -26,6 +26,7 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.AsmRegisterPool import RegisterPool
 from Tensile.KernelWriter import KernelWriter
 from Tensile.Common import globalParameters
+import ast
 import collections
 import inspect
 from types import SimpleNamespace
@@ -244,6 +245,26 @@ def test_max_regs():
     assert kw.getMaxRegsForOccupancy(512,  24,  1024,  24, True) ==   24
     assert kw.getMaxRegsForOccupancy(512,  48,  1024,   0, True) ==   48
     assert kw.getMaxRegsForOccupancy(512,   3,  1024,  16, True) ==   32
+def test_getOccupancy_callers_pass_vgprs_before_lds_size():
+    # getOccupancy(numThreads, vgprs, ldsSize, ...): an LDS size in bytes passed as the
+    # VGPR count makes the VGPR-limited occupancy 0, whatever the kernel really uses.
+    sourceLines, firstLine = inspect.getsourcelines(KernelWriterAssembly)
+    tree = ast.parse("".join(sourceLines))
+
+    def callsGetLdsSize(node):
+        return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                   and n.func.attr == "getLdsSize" for n in ast.walk(node))
+
+    callers = [n for n in ast.walk(tree)
+               if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr == "getOccupancy" and any(callsGetLdsSize(a) for a in n.args)]
+
+    assert callers
+    for call in callers:
+        line = firstLine + call.lineno - 1
+        assert not callsGetLdsSize(call.args[1]), "line %u passes getLdsSize() as vgprs" % line
+        assert callsGetLdsSize(call.args[2]), "line %u does not pass getLdsSize() as ldsSize" % line
+
 
 # test_occupancy()
 # test_max_regs()

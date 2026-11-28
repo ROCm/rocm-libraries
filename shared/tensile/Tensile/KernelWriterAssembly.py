@@ -12780,10 +12780,10 @@ class KernelWriterAssembly(KernelWriter):
         print("numVgprAvailable=", numVgprAvailable, "minElements=", minElements, "minNeeded=", minNeeded)
       if numVgprAvailable < minNeeded:
         gwvwOrig = gwvw
-        currentOccupancy = self.getOccupancy(kernel["NumThreads"], self.getLdsSize(kernel), \
-            self.vgprPool.size(), self.agprPool.size(), self.doubleVgpr)
-        futureOccupancy = self.getOccupancy(kernel["NumThreads"], self.getLdsSize(kernel), \
-            self.vgprPool.size() - numVgprAvailable + minNeeded, self.agprPool.size(), self.doubleVgpr)
+        currentOccupancy = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), \
+            self.getLdsSize(kernel), self.agprPool.size(), self.doubleVgpr)
+        futureOccupancy = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size() - numVgprAvailable + minNeeded, \
+            self.getLdsSize(kernel), self.agprPool.size(), self.doubleVgpr)
 
         if shrinkDb:
           print("currentOccupancy=%u futureOccupancy=%u VGPRs=%u numVgprAvail=%u vgprPerElem=%u" \
@@ -13018,10 +13018,10 @@ class KernelWriterAssembly(KernelWriter):
       print("numVgprAvailable=", numVgprAvailable, "minElements=", minElements, "minNeeded=", minNeeded)
     if numVgprAvailable < minNeeded:
       gwvwOrig = gwvw
-      currentOccupancy = self.getOccupancy(kernel["NumThreads"], self.getLdsSize(kernel), \
-          self.vgprPool.size(), self.agprPool.size(), self.doubleVgpr)
-      futureOccupancy = self.getOccupancy(kernel["NumThreads"], self.getLdsSize(kernel), \
-          self.vgprPool.size() - numVgprAvailable + minNeeded, self.agprPool.size(), self.doubleVgpr)
+      currentOccupancy = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), \
+          self.getLdsSize(kernel), self.agprPool.size(), self.doubleVgpr)
+      futureOccupancy = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size() - numVgprAvailable + minNeeded, \
+          self.getLdsSize(kernel), self.agprPool.size(), self.doubleVgpr)
 
       if shrinkDb:
         print("currentOccupancy=%u futureOccupancy=%u VGPRs=%u numVgprAvail=%u vgprPerElem=%u" \
@@ -13473,10 +13473,10 @@ class KernelWriterAssembly(KernelWriter):
       print("numVgprAvailable=", numVgprAvailable, "minElements=", minElements, "minNeeded=", minNeeded)
     if numVgprAvailable < minNeeded:
       gwvwOrig = gwvw
-      currentOccupancy = self.getOccupancy(kernel["NumThreads"], self.getLdsSize(kernel), \
-          self.vgprPool.size(), self.agprPool.size(), self.doubleVgpr)
-      futureOccupancy = self.getOccupancy(kernel["NumThreads"], self.getLdsSize(kernel), \
-          self.vgprPool.size() - numVgprAvailable + minNeeded, self.agprPool.size(), self.doubleVgpr)
+      currentOccupancy = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), \
+          self.getLdsSize(kernel), self.agprPool.size(), self.doubleVgpr)
+      futureOccupancy = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size() - numVgprAvailable + minNeeded, \
+          self.getLdsSize(kernel), self.agprPool.size(), self.doubleVgpr)
 
       if shrinkDb:
         print("currentOccupancy=%u futureOccupancy=%u VGPRs=%u numVgprAvail=%u vgprPerElem=%u" \
