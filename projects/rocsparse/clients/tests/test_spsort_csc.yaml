@@ -77,9 +77,27 @@ Tests:
   batch_count_A: [1, 2]
   batch_count_B: [2]
   offsets_batch_stride_zero_A: [false, true]
-  offsets_batch_stride_zero_B: [false, true]
+  offsets_batch_stride_zero_B: [false]
   pad_A: [0, 3]
-  pad_B: [0, 3]
+  pad_B: [0]
+  spsort_alg: [rocsparse_spsort_alg_radix_sort]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+# Keep the B-side stride and padding branches without crossing them against every A-side flag.
+- name: spsort_csc_batched_b_edges
+  category: quick
+  function: spsort_csc
+  indextype: *i64i32
+  precision: *single_double_precisions
+  M: [10]
+  N: [33]
+  batch_count_A: [2]
+  batch_count_B: [2]
+  offsets_batch_stride_zero_A: [false]
+  offsets_batch_stride_zero_B: [true]
+  pad_A: [0]
+  pad_B: [3]
   spsort_alg: [rocsparse_spsort_alg_radix_sort]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]

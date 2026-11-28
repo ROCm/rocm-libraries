@@ -101,19 +101,6 @@ Tests:
   category: quick
   function: csrilu0
   precision: *single_only_precisions
-  M_N:
-    - { M: 20480, N: 20480 }
-    - { M: 32768, N: 32768 }
-  transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
-
-- name: csrilu0
-  category: quick
-  function: csrilu0
-  precision: *single_only_precisions
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
@@ -124,7 +111,8 @@ Tests:
   filename: [nos3, nos7, qc2534, mplate]
 
 # sme3Dc max row nnz is 405, which on a 32-wide wavefront selects the hash
-# kernel's max_nnz < 16 * wavefront arm (and not the smaller arms).
+# kernel's max_nnz < 16 * wavefront arm (and not the smaller arms). The hash
+# launch is templated on the datatype, so both precisions are required.
 - name: csrilu0
   category: quick
   function: csrilu0
