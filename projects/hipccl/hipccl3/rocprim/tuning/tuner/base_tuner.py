@@ -136,6 +136,8 @@ class TunerArgs:
     simulation_mode: bool = False
     seed: int = -1
     arch_name: Optional[str] = None
+    warp_size: int = 64
+    max_threads_per_block: int = 1024
 
     param_overrides: Optional[str] = None
     """JSON object that replaces the values of tune parameters, used to narrow or widen
@@ -174,11 +176,15 @@ class BaseTuner(ABC):
             self.device_properties: hip.hipDeviceProp_t = hip.hipDeviceProp_t()
             (_, self.device_properties) = hip.hipGetDeviceProperties(self.device_id)
             self.arch_name = self.device_properties.gcnArchName.split(":")[0]
+            self.warp_size = self.device_properties.warpSize
+            self.max_threads_per_block = self.device_properties.maxThreadsPerBlock
         else:
             assert (
                 args.arch_name
             ), "Simulation mode requires --arch-name to be specified"
             self.arch_name = args.arch_name
+            self.warp_size = args.warp_size
+            self.max_threads_per_block = args.max_threads_per_block
         self.exclude_default_config = args.exclude_default_config
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
@@ -493,6 +499,11 @@ class BaseTuner(ABC):
         """Return the path of the cache file"""
         return self.output_dir / self._get_cache_file_name(types)
 
+    def _get_upper_bound_param_exceptions(self) -> List[str]:
+        return []
+    def _get_lower_bound_param_exceptions(self) -> List[str]:
+        return []
+
     def _save_output(
         self,
         cache_file: str | pathlib.Path,
@@ -517,11 +528,16 @@ class BaseTuner(ABC):
 
             new_content = "{\n"
             new_content += f'"arch_name": "{self.arch_name}",\n'
+            new_content += f'"warp_size": {self.warp_size},\n'
+            new_content += f'"max_threads_per_block": {self.max_threads_per_block},\n'
             new_content += f'"algo_name": "{self.algo_full_name}",\n'
+            new_content += f'"upper_bound_exceptions": {str(self._get_upper_bound_param_exceptions()).replace("'", '"')},\n'
+            new_content += f'"lower_bound_exceptions": {str(self._get_lower_bound_param_exceptions()).replace("'", '"')},\n'
             for i, (k, v) in enumerate(types.items()):
                 new_content += f'"{k}": "{v}",'
                 if i < len(types) - 1:
                     new_content += "\n"
+
             new_content += content.lstrip()[1:]
 
             with open(cache_file, "w") as f:
