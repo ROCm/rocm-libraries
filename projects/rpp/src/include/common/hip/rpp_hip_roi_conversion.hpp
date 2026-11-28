@@ -93,4 +93,19 @@ SOFTWARE.
     return RPP_SUCCESS;
 }
 
+// LTFRBB to XYZWHD
+
+__device__ __forceinline__ RpptRoiXyzwhd rpp_hip_roi3d_to_xyzwhd(const RpptROI3D* roiPtr,
+                                                                 RpptRoi3DType roiType) {
+    if (roiType == RpptRoi3DType::XYZWHD) return roiPtr->xyzwhdROI;
+
+    const RpptRoiLtfrbb& ltfrbb = roiPtr->ltfrbbROI;
+    RpptRoiXyzwhd xyzwhd;
+    xyzwhd.xyz = ltfrbb.ltf;
+    xyzwhd.roiWidth = ltfrbb.rbb.x - ltfrbb.ltf.x + 1;
+    xyzwhd.roiHeight = ltfrbb.rbb.y - ltfrbb.ltf.y + 1;
+    xyzwhd.roiDepth = ltfrbb.rbb.z - ltfrbb.ltf.z + 1;
+    return xyzwhd;
+}
+
 #endif  // RPP_HIP_ROI_CONVERSION_H

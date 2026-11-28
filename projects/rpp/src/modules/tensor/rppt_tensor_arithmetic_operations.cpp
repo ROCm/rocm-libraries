@@ -78,7 +78,7 @@ RppStatus rppt_fused_multiply_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr src
             srcGenericDescPtr,
             reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
                                       dstGenericDescPtr->offsetInBytes),
-            dstGenericDescPtr, roiGenericPtrSrc, mulTensor, addTensor, handle);
+            dstGenericDescPtr, roiGenericPtrSrc, mulTensor, addTensor, roiType, handle);
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -128,7 +128,7 @@ RppStatus rppt_add_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDescPtr,
             srcGenericDescPtr,
             reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
                                       dstGenericDescPtr->offsetInBytes),
-            dstGenericDescPtr, roiGenericPtrSrc, addTensor, handle);
+            dstGenericDescPtr, roiGenericPtrSrc, addTensor, roiType, handle);
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -179,7 +179,7 @@ RppStatus rppt_subtract_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDes
             srcGenericDescPtr,
             reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
                                       dstGenericDescPtr->offsetInBytes),
-            dstGenericDescPtr, roiGenericPtrSrc, subtractTensor, handle);
+            dstGenericDescPtr, roiGenericPtrSrc, subtractTensor, roiType, handle);
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
@@ -230,7 +230,7 @@ RppStatus rppt_multiply_scalar(RppPtr_t srcPtr, RpptGenericDescPtr srcGenericDes
             srcGenericDescPtr,
             reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) +
                                       dstGenericDescPtr->offsetInBytes),
-            dstGenericDescPtr, roiGenericPtrSrc, mulTensor, handle);
+            dstGenericDescPtr, roiGenericPtrSrc, mulTensor, roiType, handle);
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
