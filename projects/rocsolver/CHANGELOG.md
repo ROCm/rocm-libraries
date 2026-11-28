@@ -3,6 +3,24 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+
+* GECON could return a wrong estimate for n larger than the wavefront size (a race in its LACN2
+  iteration)
+* GECON caused a memory access fault for n > 480 when the handle was in device pointer mode (the mode
+  set by `rocsolver_create_handle`)
+
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
 ### Optimized
