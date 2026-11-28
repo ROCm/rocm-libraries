@@ -138,7 +138,8 @@ namespace TensileLite
              * plus `tiles` tiles cut into `split` parts; grid is the workgroups the
              * dynamic grid policy launches. A part is itersPerWI iterations, and on
              * kernels with uneven parts the first parts take one K unit more (see
-             * partIterRange()).
+             * partIterRange()). parallel (every tile split): PostGSU sums the parts
+             * with gsu = split.
              */
             struct KernelArguments
             {
@@ -148,12 +149,19 @@ namespace TensileLite
                 uint32_t split      = 0;
                 uint32_t itersPerWI = 0;
                 uint32_t grid       = 0;
+                bool     parallel   = false;
 
                 // Workspace partial-tile slots (and, on the flag-protocol kernels, ready
                 // flags) the kernel indexes: one per part of every split tile.
                 size_t partialSlots() const
                 {
                     return size_t{tiles} * split;
+                }
+
+                // The reduction that sums the parts of the split tiles.
+                origami::reduction_t reduction() const
+                {
+                    return parallel ? origami::reduction_t::parallel : origami::reduction_t::tree;
                 }
             };
 
@@ -179,10 +187,18 @@ namespace TensileLite
                 // selection does; 0 leaves them unchecked.
                 size_t threadsPerWorkGroup = 0;
 
-                // Policy. allowSplit false keeps every tile whole unless the debug
-                // overrides ask otherwise; uniform summation order ignores overrides
-                // that split only some tiles (see isRowUniform).
+                // Policy. allowSplit: the kernel can fix split tiles up by last arrival;
+                // allowParallel: it can reduce them in parallel (PostGSU kernel). With
+                // neither, every tile stays whole unless the debug overrides ask
+                // otherwise; uniform summation order ignores overrides that split only
+                // some tiles (see isRowUniform). parallelSelected: the reduction the
+                // static path selects for this problem
+                // (ContractionSolution::getSKReduction()) is parallel; the policy
+                // reduces in parallel only then, the debug overrides whenever
+                // allowParallel holds.
                 bool allowSplit            = true;
+                bool allowParallel         = false;
+                bool parallelSelected      = false;
                 bool uniformSummationOrder = false;
                 // InternalArgsSupport::dynamicUnevenParts: the kernel decodes parts
                 // of unequal length, so a tile splits into exactly the parts asked
@@ -204,12 +220,15 @@ namespace TensileLite
             /**
              * Choose the dynamic StreamK work decomposition.
              *
-             * Fewer tiles than splitCUs are each cut into the largest of
-             * SplitFactors parts with tiles*split <= splitCUs, at least
-             * MinItersPerWI iterations per part, partials that fit flagSlots and
-             * the workspace and a grid within the tree-fixup bounds; otherwise every
-             * tile is whole. The debug overrides replace this rule, within the same
-             * limits.
+             * Fewer tiles than splitCUs are split. With allowParallel and
+             * parallelSelected, each tile is cut into
+             * min(splitCUs / tiles, itersPerTile / MinItersPerWI) parts that fit the
+             * workspace, summed by PostGSU (parallel). Otherwise each tile is cut into
+             * the largest SplitFactors entry with tiles*split <= splitCUs, at least
+             * MinItersPerWI iterations per part, partials that fit flagSlots and the
+             * workspace and a grid within the tree-fixup bounds, or kept whole. Debug
+             * overrides replace the rule within the same limits (parallel only when
+             * they split every tile).
              */
             TENSILELITEHOST_EXPORT static KernelArguments computeSplit(SplitInputs const& in);
 
@@ -245,9 +264,9 @@ namespace TensileLite
             TENSILELITEHOST_EXPORT static size_t maxGrid(AMDGPU const& gpu, int cuOccupancy);
 
             // Whether tiles that all split alike keep uniform summation order. The
-            // fixup adds the parts in part order from the raw accumulator bits;
-            // atomic partials add in arrival order, and 16-bit compute types under
-            // HPA widen the partial.
+            // fixup and PostGSU add the parts in part order from the raw accumulator
+            // bits; atomic partials add in arrival order, and 16-bit compute types
+            // under HPA widen the partial.
             TENSILELITEHOST_EXPORT static bool
                 keepsSummationOrder(ContractionSolution const& solution);
 
@@ -317,6 +336,10 @@ namespace TensileLite
             static constexpr uint32_t MagicAddBit              = 1u << 31; // magicNumberAlg2's "add" indicator
             static constexpr uint32_t HybridModeBit            = 1u << 30; // set: dynamic work queue; clear: static
             static constexpr uint32_t UniformSummationOrderBit = 1u << 29;
+            // Hybrid's dynamic sub-mode: bit 29 selects the parallel reduction. It
+            // shares UniformSummationOrderBit's position because only the static
+            // sub-mode reads that one.
+            static constexpr uint32_t DynamicParallelReductionBit = UniformSummationOrderBit;
 
             static constexpr uint32_t TileReservedMask
                 = MagicAddBit | HybridModeBit | UniformSummationOrderBit;
@@ -486,14 +509,11 @@ namespace TensileLite
             // sizing rules for bias-gradient and amaxD; this snapshot reports the
             // partials buffer only.
             //
-            // Reduction selection still differs: this snapshot and
-            // resolveStreamKSettings() force tree for SK4 and SK5-dynamic, while
-            // requiredWorkspaceSize() always asks getSKReduction(). A fixed-grid
-            // override can preserve that difference; see requiredWorkspaceSize().
-            // Sharing the byte formula does not imply identical decisions in every
-            // mode. Changes to any of these three paths must be checked against the
-            // other two, including the allocate-then-launch flow where the queried
-            // size becomes problem.workspaceSize().
+            // All three start from the same reduction,
+            // ContractionSolution::streamKLaunchReduction(). Changes to any of these
+            // three paths must be checked against the other two, including the
+            // allocate-then-launch flow where the queried size becomes
+            // problem.workspaceSize().
             size_t requiredWorkspaceBytes = 0;
             // recomputed: partials(+work-queue) bytes wanted, before the fit check against
             // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
@@ -620,11 +640,10 @@ namespace TensileLite
         // Both requiredWorkspaceSize() -- the workspace query the caller sizes
         // its allocation from -- and resolveStreamKSettings() -- what solve()
         // launches -- call this on the same (reduction, grid, tiles) triple
-        // immediately after getPersistentGridImpl(). For SK3 and SK5-static, where the
-        // two start from the same getSKReduction() answer, that keeps query and
-        // launch agreed on the reduction and so on the workspace. SK4 and
-        // SK5-dynamic are pinned to tree at the launch sites only; see
-        // requiredWorkspaceSize() for why the resulting divergence is bounded.
+        // immediately after getPersistentGridImpl(). Both start from the same
+        // streamKLaunchReduction() answer, so query and launch agree on the
+        // reduction and so on the workspace. The dynamic-queue path sizes its
+        // partials from its decomposition before reaching this.
         //
         // Unconditional, not uniform-summation-order enforcement: F < 2 is
         // unlaunchable for parallel whatever the mode, and solve() still throws

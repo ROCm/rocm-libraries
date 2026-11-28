@@ -20,6 +20,7 @@ from tensilelite.SolutionStructs.Solution import (
     Solution,
     _supportStreamKArrivalFixup,
     _supportStreamKDynamicUnevenParts,
+    _supportStreamKDynamicParallel,
     _supportStreamKPerTileExtraIters,
 )
 from tensilelite.Toolchain.Component import Assembler
@@ -375,6 +376,27 @@ def test_arrival_fixup_capability(state, hasSAtomic, expected):
 )
 def test_dynamic_uneven_parts_capability(state, expected):
     assert _supportStreamKDynamicUnevenParts(state) is expected
+
+
+_HYBRID = {"TileProcessingStrategy": "StreamK", "WorkAssignment": "Hybrid"}
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        (_HYBRID, True),
+        (dict(_HYBRID, StreamKAtomic=1), False),
+        (dict(_HYBRID, DebugStreamK=1), False),
+        (dict(_HYBRID, _PrefetchAcrossPersistentEnabled=True), False),
+        (dict(_HYBRID, CustomKernel={"name": "handwritten"}), False),
+        (dict(_HYBRID, CustomKernel={"name": "gen", "generated": True}), True),
+        ({"TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid"}, False),
+        ({"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue"}, False),
+        ({}, False),
+    ],
+)
+def test_dynamic_parallel_capability(state, expected):
+    assert _supportStreamKDynamicParallel(state) is expected
 
 
 # --------------------------------------------------------------------------- #

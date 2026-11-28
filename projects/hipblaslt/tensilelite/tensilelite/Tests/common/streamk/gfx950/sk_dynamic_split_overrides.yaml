@@ -5,8 +5,9 @@
 # the debug overrides to split only the first 100 tiles of each problem into
 # 16 parts: whole and split tiles in one launch, partial indices past the whole
 # tiles and across batches, on DynamicWorkQueue and on Hybrid's dynamic
-# sub-mode, both reduced by the arrival fixup. Repeated launches reuse the
-# arrival counters before validation.
+# sub-mode, both reduced by the arrival fixup: a partial split never takes the
+# parallel reduction. Repeated launches reuse the arrival counters before
+# validation.
 # 100 x 16 partials fit the flag region; sk_dynamic_split_overrides_flagcap.yaml
 # covers an override that does not.
 TestParameters:
