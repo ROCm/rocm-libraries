@@ -51,7 +51,7 @@ void local_orgqrlq_ungqrlq_template(rocblas_handle handle,
                                     const rocblas_int n,
                                     const rocblas_int k,
                                     U A,
-                                    const rocblas_int shiftA,
+                                    const rocblas_stride shiftA,
                                     const rocblas_int lda,
                                     const rocblas_stride strideA,
                                     T* ipiv,
@@ -81,7 +81,7 @@ void local_geqrlq_template(rocblas_handle handle,
                            const rocblas_int m,
                            const rocblas_int n,
                            U A,
-                           const rocblas_int shiftA,
+                           const rocblas_stride shiftA,
                            const rocblas_int lda,
                            const rocblas_stride strideA,
                            T* ipiv,
@@ -337,7 +337,7 @@ rocblas_status rocsolver_gesvd_template(rocblas_handle handle,
                                         const rocblas_int m,
                                         const rocblas_int n,
                                         W A,
-                                        const rocblas_int shiftA,
+                                        const rocblas_stride shiftA,
                                         const rocblas_int lda,
                                         const rocblas_stride strideA,
                                         TT* S,
@@ -407,13 +407,13 @@ rocblas_status rocsolver_gesvd_template(rocblas_handle handle,
     // auxiliary sizes and variables
     const rocblas_int k = std::min(m, n);
     const rocblas_int kk = std::max(m, n);
-    const rocblas_int shiftX = 0;
-    const rocblas_int shiftY = 0;
+    const rocblas_stride shiftX = 0;
+    const rocblas_stride shiftY = 0;
     const rocblas_int shiftUV = 0;
-    const rocblas_int shiftT = 0;
-    const rocblas_int shiftC = 0;
-    const rocblas_int shiftU = 0;
-    const rocblas_int shiftV = 0;
+    const rocblas_stride shiftT = 0;
+    const rocblas_stride shiftC = 0;
+    const rocblas_stride shiftU = 0;
+    const rocblas_stride shiftV = 0;
     const rocblas_int ldx = thinSVD ? k : m;
     const rocblas_int ldy = thinSVD ? k : n;
     const rocblas_stride strideX = ldx * GEBRD_BLOCKSIZE;
