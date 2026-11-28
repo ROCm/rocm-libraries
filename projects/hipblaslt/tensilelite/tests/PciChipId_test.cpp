@@ -577,3 +577,82 @@ TEST_F(ChipIdFallbackTest, Scenario4_MI355CpxEq)
     expectSelected(*lib, mi350cpx, "mi350spx_oob");
     expectSelected(*lib, mi355cpx, "mi355cpx_eq");
 }
+
+// gfx950 libraries name 75a3, 75a2 and 75a0. 75a3 and 75a2 are exact devices.
+// Every other gfx950 chip id resolves to 75a0, the default the registry falls
+// back to. No GPU: the devices are mock AMDGPU values.
+TEST(ChipIdRegistryTest, Gfx950ResolvesTo75a0Except75a3And75a2)
+{
+    constexpr int chip75a0 = 0x75a0;
+    constexpr int chip75a2 = 0x75a2;
+    constexpr int chip75a3 = 0x75a3;
+
+    auto lib = buildHwLib({
+        {makeHwPred(AMDGPU::Processor::gfx950, chip75a3), singleLib(makeSolution("75a3", 1))},
+        {makeHwPred(AMDGPU::Processor::gfx950, chip75a2), singleLib(makeSolution("75a2", 2))},
+        {makeHwPred(AMDGPU::Processor::gfx950, chip75a0), singleLib(makeSolution("75a0", 3))},
+    });
+
+    int  gfx950Count = 0;
+    bool saw75a0     = false;
+    bool saw75a2     = false;
+    bool saw75a3     = false;
+    for(auto const& entry : ChipIdRegistry::knownChipIds())
+    {
+        int chipId = entry.first;
+        if(entry.second != AMDGPU::Processor::gfx950)
+            continue;
+        ++gfx950Count;
+        saw75a0 = saw75a0 || chipId == chip75a0;
+        saw75a2 = saw75a2 || chipId == chip75a2;
+        saw75a3 = saw75a3 || chipId == chip75a3;
+
+        AMDGPU      gpu = makeDevice(chipId, 256, "gfx950");
+        std::string selected = selectSolution(*lib, gpu, hexChipId(chipId));
+        if(chipId == chip75a3 || chipId == chip75a2)
+        {
+            EXPECT_EQ(selected, chipId == chip75a3 ? "75a3" : "75a2") << hexChipId(chipId);
+            EXPECT_TRUE(ChipIdRegistry::canUseSolution(chipId, chipId));
+            EXPECT_FALSE(ChipIdRegistry::isFallbackMatch(chipId, chipId));
+        }
+        else
+        {
+            EXPECT_EQ(selected, "75a0") << hexChipId(chipId);
+            EXPECT_TRUE(ChipIdRegistry::canUseSolution(chipId, chip75a0));
+            EXPECT_FALSE(ChipIdRegistry::canUseSolution(chipId, chip75a3));
+            EXPECT_FALSE(ChipIdRegistry::canUseSolution(chipId, chip75a2));
+            if(chipId == chip75a0)
+            {
+                EXPECT_TRUE(ChipIdRegistry::getFallbackChipIds(chipId).empty());
+                EXPECT_FALSE(ChipIdRegistry::isFallbackMatch(chipId, chip75a0));
+            }
+            else
+            {
+                auto fallbacks = ChipIdRegistry::getFallbackChipIds(chipId);
+                ASSERT_EQ(fallbacks.size(), 1u) << hexChipId(chipId);
+                EXPECT_EQ(fallbacks[0], chip75a0);
+                EXPECT_TRUE(ChipIdRegistry::isFallbackMatch(chipId, chip75a0));
+            }
+        }
+    }
+    EXPECT_GT(gfx950Count, 2);
+    EXPECT_TRUE(saw75a0);
+    EXPECT_TRUE(saw75a2);
+    EXPECT_TRUE(saw75a3);
+}
+
+// A library that names only Device 75a0 still matches chip id 0x75a0. That id
+// has no fallback entry, so the match is the exact one.
+TEST(ChipIdRegistryTest, LibraryWithOnlyDevice75a0MatchesChipId75a0)
+{
+    constexpr int chip75a0 = 0x75a0;
+    auto          lib      = buildHwLib({
+        {makeHwPred(AMDGPU::Processor::gfx950, chip75a0), singleLib(makeSolution("only-75a0", 1))},
+    });
+    AMDGPU        gpu      = makeDevice(chip75a0, 256, "mi350");
+
+    EXPECT_EQ(selectSolution(*lib, gpu), "only-75a0");
+    EXPECT_FALSE(lib->rows.front().first.isFallbackMatch(gpu));
+    EXPECT_TRUE(ChipIdRegistry::canUseSolution(chip75a0, chip75a0));
+    EXPECT_FALSE(ChipIdRegistry::isFallbackMatch(chip75a0, chip75a0));
+}

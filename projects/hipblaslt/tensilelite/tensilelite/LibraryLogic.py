@@ -29,8 +29,10 @@ from . import SolutionSelectionLibrary
 from .Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
+from .Common.DataType import DataType
 from .Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
 from .Common.TimingInstrumentation import timing_context
+from .CustomKernels import isRocRollerMXCapture
 from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 from .SolutionStructs.Problem import isFusedA2A
 
@@ -40,23 +42,36 @@ from sys import stdout
 import array
 import csv
 import os
-import re
 import time
 import math
 
 # rocRoller turns workgroup mapping off below this K (solution_selection.cpp).
 _ROCROLLER_WGM_K = 4096
-_CUSTOM_TILE_RE = re.compile(r"WGT_(\d+)x(\d+)x(\d+)")
-_SIX_BIT_PAIR_RE = re.compile(r"(?:FP6|BF6)_(?:FP6|BF6)")
 # Sizes rocRoller distinguishes for these MX tiles. GridBased snaps a query up
 # to the next table M, so each of these must be its own exact row when the
 # winning tile changes.
 _EXACT_CUSTOM_SMALL_MN = (64, 96, 128)
 _EXACT_CUSTOM_LARGE = ((3072, 3072, 16384), (4096, 4096, 16384))
-# MI355X is 75a3; 75a2 is the other gfx950 id this library must name. An
-# unsupported list (gfx942 0049/0050) would otherwise be dropped and the
-# master library would load only through the empty-DeviceNames fallback.
-_GFX950_DEVICE_NAMES = ["Device 75a3", "Device 75a2"]
+# Pure-MX (FP8xFP8 / BF8xBF8 / FP4xFP4) adds two tile families the ladders above
+# cannot reach. Each row is only synthesized when the kernel it points at is in
+# the pool, so the F6 and mixed-MX libraries are unaffected.
+#   - A big non-WGM problem launches 256x128x128, not the 16x16x128 the
+#     m >= 256 and n >= 256 rung returns. Only MN at or above this bound takes
+#     the big tile; 1040x528x1024 stays on 16x16x128 (and 256x128 does not
+#     divide it anyway).
+_EXACT_CUSTOM_BIG_MN = 1024
+_EXACT_CUSTOM_BIG_PLAIN = ((2560, 16384, 2560),)
+#   - A small WGM problem launches 32x32x128, not the 128x128/256x256 duopoly.
+#     K is 4096 here, so _EXACT_CUSTOM_SMALL_MN (which fixes macroK at 128)
+#     cannot express it.
+_EXACT_CUSTOM_WGM_SMALL_MN = 512
+_EXACT_CUSTOM_WGM_SMALL = ((512, 512, 4096),)
+# MI355X is 75a3; 75a2 is the other gfx950 id this library must name. 75a0 is
+# the gfx950 default chip id: every other gfx950 id (75a8, 75b*) falls back to
+# it, so with it the library also loads on MI350X and the rest. An unsupported
+# list (gfx942 0049/0050) would otherwise be dropped and the master library
+# would load only through the empty-DeviceNames fallback.
+_GFX950_DEVICE_NAMES = ["Device 75a3", "Device 75a2", "Device 75a0"]
 
 
 def _solutionField(solution, key, default=None):
@@ -76,26 +91,64 @@ def isCustomKernelSolution(solution) -> bool:
   return isinstance(custom, dict) and bool(custom.get("name") or custom.get("macrotile"))
 
 
-def customKernelTile(solution):
-  """(macroM, macroN, macroK, usesWorkgroupMapping) from a rocRoller custom kernel."""
-  name = _solutionField(solution, "CustomKernelName") or ""
+def isRocRollerCapture(solution) -> bool:
+  """Whether the solution's custom kernel is a rocRoller MX capture.
+
+  Read from its custom.config (CustomKernels.isRocRollerMXCapture): the family
+  Contractions gives tile, batch and buffer-addressing predicates.
+  """
   custom = _solutionField(solution, "CustomKernel")
+  if isinstance(custom, dict) and custom.get("generated", False):
+    return False
+  name = _solutionField(solution, "CustomKernelName")
   if not name and isinstance(custom, dict):
-    name = custom.get("name") or ""
-  match = _CUSTOM_TILE_RE.search(name)
-  if match:
-    macroM, macroN, macroK = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-  elif isinstance(custom, dict) and custom.get("macrotile"):
-    macroM, macroN, macroK = (int(x) for x in custom["macrotile"][:3])
-  else:
+    name = custom.get("name")
+  return isRocRollerMXCapture(name)
+
+
+def customKernelTile(solution):
+  """(macroM, macroN, macroK, usesWorkgroupMapping) from a rocRoller custom kernel.
+
+  Read from its CustomKernel block: the macrotile, and whether the kernel
+  takes an RR_WorkgroupMapping kernarg.
+  """
+  custom = _solutionField(solution, "CustomKernel")
+  if not isinstance(custom, dict) or not custom.get("macrotile"):
     return None
-  return (macroM, macroN, macroK, "_WGM" in name)
+  macroM, macroN, macroK = (int(x) for x in custom["macrotile"][:3])
+  usesWgm = any(
+    isinstance(arg, dict) and arg.get("semantic") == "RR_WorkgroupMapping"
+    for arg in custom.get("args") or [])
+  return (macroM, macroN, macroK, usesWgm)
+
+
+def _isSixBitType(problemType, key) -> bool:
+  value = problemType.get(key)
+  if value is None:
+    value = problemType.get("DataType")
+  if value is None:
+    return False
+  try:
+    return DataType(value).is6bitFloat()
+  except (KeyError, RuntimeError):
+    return False
 
 
 def _sixBitPair(solutions) -> bool:
+  """Whether some solution's ProblemType has FP6 or BF6 on both operands."""
   for solution in solutions:
-    name = _solutionField(solution, "CustomKernelName") or ""
-    if _SIX_BIT_PAIR_RE.search(name):
+    problemType = _solutionField(solution, "ProblemType")
+    if hasattr(problemType, "get") and _isSixBitType(problemType, "DataTypeA") \
+        and _isSixBitType(problemType, "DataTypeB"):
+      return True
+  return False
+
+
+def _hasTile(solutions, macroM, macroN, useWgm) -> bool:
+  """True when some solution is a custom kernel with exactly this tile shape."""
+  for solution in solutions:
+    tile = customKernelTile(solution)
+    if tile is not None and tile[0] == macroM and tile[1] == macroN and tile[3] == useWgm:
       return True
   return False
 
@@ -127,6 +180,12 @@ def preferredExactCustomKernel(m, n, k, solutions):
     return None
 
   if useWgm:
+    # Pure MX at a small MN launches 32x32x128 rather than entering the
+    # 128x128 / 256x256 duopoly below, which has no small-tile rung.
+    if max(m, n) <= _EXACT_CUSTOM_WGM_SMALL_MN:
+      chosen = find(32, 32, 128)
+      if chosen is not None:
+        return chosen
     want256 = m >= 4096 or n >= 4096 or (min(m, n) >= 3072 and _sixBitPair(solutions))
     if want256:
       chosen = find(256, 256)
@@ -143,6 +202,15 @@ def preferredExactCustomKernel(m, n, k, solutions):
       chosen = find(32, 32, 64)
       if chosen is not None:
         return chosen
+    # A big non-WGM problem launches the biggest tile that divides it, not the
+    # 16x16x128 the next rung returns. Requiring divisibility is what the
+    # rocRoller walk does and is also what keeps 1040x528x1024 off 256x128.
+    if min(m, n) >= _EXACT_CUSTOM_BIG_MN:
+      for macroM, macroN in ((256, 256), (256, 128), (128, 128)):
+        if m % macroM == 0 and n % macroN == 0:
+          chosen = find(macroM, macroN)
+          if chosen is not None:
+            return chosen
     if m >= 256 and n >= 256:
       chosen = find(16, 16, 128)
       if chosen is not None:
@@ -155,7 +223,7 @@ def preferredExactCustomKernel(m, n, k, solutions):
 
 
 def libraryDeviceNames(architectureName, deviceNames):
-  """Keep a gfx950 library on 75a3 and 75a2 when the config names no such id."""
+  """Keep a gfx950 library on 75a3, 75a2 and 75a0 when the config names no such id."""
   if architectureName != "gfx950":
     return deviceNames
   from .Common.Architectures import GFX_CHIP_IDS
@@ -751,6 +819,12 @@ class LogicAnalyzer:
     if any((customKernelTile(solution) or (0, 0, 0, False))[3]
            for solution in self.solutions):
       selection.extend(_EXACT_CUSTOM_LARGE)
+    # Gated on the kernel being present so the F6 and mixed-MX libraries, which
+    # have neither tile, do not grow a row that would point at a worse kernel.
+    if _hasTile(self.solutions, 256, 128, False):
+      selection.extend(_EXACT_CUSTOM_BIG_PLAIN)
+    if _hasTile(self.solutions, 32, 32, True):
+      selection.extend(_EXACT_CUSTOM_WGM_SMALL)
 
     seen = set()
     for macroM, macroN, macroK in selection:
@@ -778,13 +852,19 @@ class LogicAnalyzer:
 
 
   def _assignCustomKernelSizePredicates(self):
-    """Limit each exact-size winner to the sizes it won.
+    """Keep each exact-size winner off the sizes below the ones it won.
 
     GridBased can return a neighboring exact row when a benchmark asks for
-    more than one solution. A 32x32 kernel that won 64..128 would then be
-    timed at 256 and replace the 16x16 row. The bounds are strict
-    SizeGreaterThan / SizeLessThan predicates, read back when the library
-    is written.
+    more than one solution. A 16x16 kernel that won only 256 would then be
+    timed at 64 and replace the 32x32 row. The bound is a strict
+    SizeGreaterThan predicate per index, read back when the library is
+    written. There is no upper bound: a kernel stays correct at every larger
+    size its own predicates admit, and a cap would hide it from those sizes.
+
+    A captured rocRoller kernel gets no bound at all. Its tile, batch and
+    buffer predicates (Contractions.py) already say where it is correct, and
+    the rocRoller-off selector picks it by configuration, whatever size it
+    won here.
     """
     wins = {}
     for size, winner in self.exactWinners.items():
@@ -802,22 +882,21 @@ class LogicAnalyzer:
 
     def _bound(index, sizes):
       lo = min(sizes)
-      hi = max(sizes)
       preds = []
       if lo > 0:
         preds.append({"tag": "SizeGreaterThan", "index": index, "value": lo - 1})
-      preds.append({"tag": "SizeLessThan", "index": index, "value": hi + 1})
       return preds
 
     for idx, solution in enumerate(self.solutions):
       chosen = wins.get(idx)
-      if not chosen:
+      if not chosen or isRocRollerCapture(solution):
         continue
       preds = []
       preds += _bound(0, [size[0] for size in chosen])
       preds += _bound(1, [size[1] for size in chosen])
       preds += _bound(k_index, [size[2] for size in chosen])
-      solution["CustomKernelSizePredicate"] = preds
+      if preds:
+        solution["CustomKernelSizePredicate"] = preds
 
 
   ##############################################################################
