@@ -24,7 +24,7 @@ outputs:
     value: "az-linux-scale-rocm-default-prod"
   windows-runner:
     description: "GitHub Actions runner label for Windows jobs"
-    value: "azure-windows-scale-rocm"
+    value: "az-windows-scale-rocm-default-prod"
 
 runs:
   using: "composite"

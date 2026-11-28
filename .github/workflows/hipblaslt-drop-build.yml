@@ -32,7 +32,7 @@ on:
       build_runner:
         description: Runner label for the package build
         type: string
-        default: aws-linux-scale-rocm-prod
+        default: az-linux-scale-rocm-default-prod
       gfx942_runner:
         description: Runner label for a single gfx942 GPU
         type: string
@@ -62,7 +62,7 @@ jobs:
   build-rpms:
     name: Build hipBLASLt and hipSPARSELt RPMs
     if: github.repository == 'ROCm/rocm-libraries'
-    runs-on: ${{ inputs.build_runner || 'aws-linux-scale-rocm-prod' }}
+    runs-on: ${{ inputs.build_runner || 'az-linux-scale-rocm-default-prod' }}
     timeout-minutes: 600
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
