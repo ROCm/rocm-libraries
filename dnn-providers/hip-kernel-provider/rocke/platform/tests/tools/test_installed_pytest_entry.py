@@ -27,6 +27,7 @@ _PIECES = """
 cmake_minimum_required(VERSION 3.16)
 set(_ROCKE_INSTALLED_PYTEST "python -m pytest -p shard")
 set(_ROCKE_INSTALLED_PYTEST_WORKERS "-p workers")
+set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY "-p gpu_policy")
 set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT "--timeout=120 -p gpu_policy")
 set(_ROCKE_INSTALLED_GPU_RESOURCE_LOCK "rocke_gpu")
 """
@@ -69,6 +70,61 @@ def test_an_entry_has_the_shared_command_its_properties_and_quoted_arguments(
         "  RESOURCE_LOCK rocke_gpu",
         "  TIMEOUT 1800)",
     ]
+
+
+def test_an_entry_with_its_own_gpu_test_limit_ends_with_the_gpu_policy_alone(
+    tmp_path,
+):
+    result = _run(
+        "rocke_installed_pytest_entry(entry rocke_x_pytest GPU_OWN_TEST_LIMIT\n"
+        "  PYTEST_CONFIG tests/pytest.ini\n"
+        "  TESTS dir ARGUMENTS --timeout=60 -m gpu\n"
+        "  LABELS ckc gpu ENVIRONMENT PYTHONPATH=lib TIMEOUT 1800\n"
+        "  SKIP_RETURN_CODE 77)",
+        tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.strip("\n").splitlines() == [
+        (
+            'add_test(rocke_x_pytest python -m pytest -p shard -c "tests/pytest.ini" '
+            '"dir" "--timeout=60" "-m" "gpu" -p gpu_policy)'
+        ),
+        "set_tests_properties(rocke_x_pytest PROPERTIES",
+        '  LABELS "ckc;gpu"',
+        '  ENVIRONMENT "PYTHONPATH=lib"',
+        "  SKIP_RETURN_CODE 77",
+        "  RESOURCE_LOCK rocke_gpu",
+        "  TIMEOUT 1800)",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("options", "refusal"),
+    [
+        (
+            "GPU GPU_OWN_TEST_LIMIT ARGUMENTS --timeout=60",
+            "give GPU or GPU_OWN_TEST_LIMIT, not both",
+        ),
+        (
+            "GPU_OWN_TEST_LIMIT ARGUMENTS -v",
+            (
+                "GPU_OWN_TEST_LIMIT needs the entry's --timeout=<seconds> in "
+                "ARGUMENTS; without one, give GPU"
+            ),
+        ),
+    ],
+    ids=["both-gpu-options", "own-limit-without-timeout"],
+)
+def test_a_contradictory_gpu_test_limit_stops_the_configure(tmp_path, options, refusal):
+    result = _run(
+        f"rocke_installed_pytest_entry(entry rocke_x_pytest TESTS a.py {options}\n"
+        "  LABELS ckc ENVIRONMENT A=1 TIMEOUT 9)",
+        tmp_path,
+    )
+    assert result.returncode != 0
+    assert f"rocke_installed_pytest_entry(rocke_x_pytest): {refusal}" in " ".join(
+        result.stderr.split()
+    )
 
 
 def test_the_compiler_options_extend_the_entrys_environment_list(tmp_path):
@@ -124,10 +180,10 @@ def test_an_entry_without_a_required_property_stops_the_configure(tmp_path, miss
 def test_an_unknown_argument_stops_the_configure(tmp_path):
     result = _run(
         "rocke_installed_pytest_entry(entry rocke_x_pytest TESTS a.py "
-        "LABELS ckc ENVIRONMENT A=1 TIMEOUT 9 SKIP_RETURN_CODE 77)",
+        "LABELS ckc ENVIRONMENT A=1 TIMEOUT 9 WILL_FAIL ON)",
         tmp_path,
     )
     assert result.returncode != 0
-    assert "rocke_x_pytest): unknown arguments SKIP_RETURN_CODE;77" in " ".join(
+    assert "rocke_x_pytest): unknown arguments WILL_FAIL;ON" in " ".join(
         result.stderr.split()
     )

@@ -810,7 +810,8 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             configuration = command.index("-c") + 1
             assert command[configuration] == f"{test_ctest_rel}tests/pytest.ini"
             assert command[configuration + 1 : command.index("-v")] == paths, name
-            assert command[-2:] == ["-m", marker_expression], name
+            options = command[command.index("-v") :]
+            assert options[options.index("-m") + 1] == marker_expression, name
         # The backend width check is outside ordinary discovery, so its entry
         # names its one file and the tiling entries above never collect it.
         width_check = next(

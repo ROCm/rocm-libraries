@@ -1968,9 +1968,10 @@ def test_every_test_file_is_assigned_to_a_ci_entry_or_has_a_recorded_reason(
 # The template platform/CMakeLists.txt registers each published operation and
 # architecture's GPU reference entry with, and the test file the entry runs.
 _REFERENCE_ENTRY_TEMPLATE = re.compile(
-    r"add_test\((rocke_\$\{_operation\}_gpu_\$\{_arch\}_pytest) \S+ "
-    r'\\"\$\{ROCKE_TEST_CTEST_REL\}tests/'
-    r'(library/tests/test_\$\{_operation\}_pinned_reference\.py)\\"'
+    r"rocke_installed_pytest_entry\(\S+ "
+    r"(rocke_\$\{_operation\}_gpu_\$\{_arch\}_pytest)\b[^)]*?"
+    r'TESTS "\$\{ROCKE_TEST_CTEST_REL\}tests/'
+    r'(library/tests/test_\$\{_operation\}_pinned_reference\.py)"'
 )
 
 
