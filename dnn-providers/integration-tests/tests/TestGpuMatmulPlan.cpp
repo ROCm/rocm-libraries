@@ -541,7 +541,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& aDims,
 // Plan execution tests
 // ====================
 
-TEST(TestGpuMatmulPlanPureFp32, ExecutePlan)
+TEST(TestGpuMatmulPlanPureDeviceFp32, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -554,7 +554,7 @@ TEST(TestGpuMatmulPlanPureFp32, ExecutePlan)
                                                        matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanPureFp16, ExecutePlan)
+TEST(TestGpuMatmulPlanPureDeviceFp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -567,7 +567,7 @@ TEST(TestGpuMatmulPlanPureFp16, ExecutePlan)
                                                     matmul::getTolerance<half>());
 }
 
-TEST(TestGpuMatmulPlanPureBfp16, ExecutePlan)
+TEST(TestGpuMatmulPlanPureDeviceBfp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -580,7 +580,7 @@ TEST(TestGpuMatmulPlanPureBfp16, ExecutePlan)
                                                                 matmul::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlan)
+TEST(TestGpuMatmulPlanUpcastDeviceFp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -593,7 +593,7 @@ TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlan)
                                                      matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlan)
+TEST(TestGpuMatmulPlanUpcastDeviceBfp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -606,7 +606,7 @@ TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlan)
                                                              matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanPureFp32, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanPureDeviceFp32, ExecutePlanBroadcast)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -619,7 +619,7 @@ TEST(TestGpuMatmulPlanPureFp32, ExecutePlanBroadcast)
                                                        matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanPureFp16, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanPureDeviceFp16, ExecutePlanBroadcast)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -632,7 +632,7 @@ TEST(TestGpuMatmulPlanPureFp16, ExecutePlanBroadcast)
                                                     matmul::getTolerance<half>());
 }
 
-TEST(TestGpuMatmulPlanPureBfp16, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanPureDeviceBfp16, ExecutePlanBroadcast)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -645,7 +645,7 @@ TEST(TestGpuMatmulPlanPureBfp16, ExecutePlanBroadcast)
                                                                 matmul::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanUpcastDeviceFp16, ExecutePlanBroadcast)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -658,7 +658,7 @@ TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlanBroadcast)
                                                      matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanUpcastDeviceBfp16, ExecutePlanBroadcast)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -671,7 +671,7 @@ TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlanBroadcast)
                                                              matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanPureFp32, ExecutePlanUnpacked)
+TEST(TestGpuMatmulPlanPureDeviceFp32, ExecutePlanUnpacked)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -684,7 +684,7 @@ TEST(TestGpuMatmulPlanPureFp32, ExecutePlanUnpacked)
                                                        matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanPureFp16, ExecutePlanUnpacked)
+TEST(TestGpuMatmulPlanPureDeviceFp16, ExecutePlanUnpacked)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -697,7 +697,7 @@ TEST(TestGpuMatmulPlanPureFp16, ExecutePlanUnpacked)
                                                     matmul::getTolerance<half>());
 }
 
-TEST(TestGpuMatmulPlanPureBfp16, ExecutePlanUnpacked)
+TEST(TestGpuMatmulPlanPureDeviceBfp16, ExecutePlanUnpacked)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -710,7 +710,7 @@ TEST(TestGpuMatmulPlanPureBfp16, ExecutePlanUnpacked)
                                                                 matmul::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlanUnpacked)
+TEST(TestGpuMatmulPlanUpcastDeviceFp16, ExecutePlanUnpacked)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -723,7 +723,7 @@ TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlanUnpacked)
                                                      matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlanUnpacked)
+TEST(TestGpuMatmulPlanUpcastDeviceBfp16, ExecutePlanUnpacked)
 {
     SKIP_IF_NO_DEVICES();
 

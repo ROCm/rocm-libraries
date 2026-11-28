@@ -293,7 +293,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& xDims,
 // FP32 plan execution tests
 // ============================================================================
 
-TEST(TestGpuConvolutionFwdPlan, ExecutePlan)
+TEST(TestGpuConvolutionFwdPlanDevice, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -308,7 +308,7 @@ TEST(TestGpuConvolutionFwdPlan, ExecutePlan)
                                                        1e-5f);
 }
 
-TEST(TestGpuConvolutionFwdPlan, ExecutePlanMultiChannel)
+TEST(TestGpuConvolutionFwdPlanDevice, ExecutePlanMultiChannel)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -324,7 +324,7 @@ TEST(TestGpuConvolutionFwdPlan, ExecutePlanMultiChannel)
         1e-5f);
 }
 
-TEST(TestGpuConvolutionFwdPlan, ExecutePlanStride2)
+TEST(TestGpuConvolutionFwdPlanDevice, ExecutePlanStride2)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -344,7 +344,7 @@ TEST(TestGpuConvolutionFwdPlan, ExecutePlanStride2)
 // FP16 plan execution tests (Signatures #2 and #4)
 // ============================================================================
 
-TEST(TestGpuConvolutionFwdPlanFp16, ExecutePlan)
+TEST(TestGpuConvolutionFwdPlanDeviceFp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -365,7 +365,7 @@ TEST(TestGpuConvolutionFwdPlanFp16, ExecutePlan)
                                                     tolerance);
 }
 
-TEST(TestGpuConvolutionFwdPlanFp16, ExecutePlanMixedOutput)
+TEST(TestGpuConvolutionFwdPlanDeviceFp16, ExecutePlanMixedOutput)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -390,7 +390,7 @@ TEST(TestGpuConvolutionFwdPlanFp16, ExecutePlanMixedOutput)
 // BF16 plan execution tests (Signatures #3 and #5)
 // ============================================================================
 
-TEST(TestGpuConvolutionFwdPlanBfp16, ExecutePlan)
+TEST(TestGpuConvolutionFwdPlanDeviceBfp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -411,7 +411,7 @@ TEST(TestGpuConvolutionFwdPlanBfp16, ExecutePlan)
                                                                 tolerance);
 }
 
-TEST(TestGpuConvolutionFwdPlanBfp16, ExecutePlanMixedOutput)
+TEST(TestGpuConvolutionFwdPlanDeviceBfp16, ExecutePlanMixedOutput)
 {
     SKIP_IF_NO_DEVICES();
 

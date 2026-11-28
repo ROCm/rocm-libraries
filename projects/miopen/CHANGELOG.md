@@ -99,8 +99,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   input depth of at least 3 and input width of at least 256 (for example Wan VAE layers). A
   hard-coded rule in `ConvHipImplicitGemm3DGroupFwdXdlops` returned one fixed CK instance for
   these problems ahead of the AI heuristic, and Composable Kernel now accepts that instance for
-  larger problems. The gfx950 rule is removed, so these problems use the AI heuristic. gfx942 is
-  unchanged.
+  larger problems. The gfx950 rule is removed, so these problems use the AI heuristic.
 * [BatchNorm] Fixed wrong `dx`, `dscale` and `dbias` in NCHW backward training without saved
   statistics when H*W is at least 4096 and not a multiple of 4. Also fixed BF16 conversion that
   ignored `MIOPEN_USE_RNE_BFLOAT16=OFF`, unsafe NHWC forward configurations and wave-width choice.
@@ -158,7 +157,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   implicit-GEMM solvers (2D and 3D; forward, backward-data, backward-weights) are refreshed on
   current tuning data. Set `MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB=1` to disable the table
   and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=0`
-  to skip the pre-existing gfx942 3D forward hard-coded kernel picks and use the AI heuristic.
+  to skip the remaining gfx942 3D forward hard-coded kernel pick and use the AI heuristic.
+* [Conv] On gfx942, `ConvHipImplicitGemm3DGroupFwdXdlops` now takes the default kernel for FP16
+  and BF16 3D forward convolutions from the AI heuristic in all but one of the input and output
+  channel ranges that had a hard-coded pick. Only the pick for ungrouped convolutions with at most
+  32 input channels and fewer than 128 output channels remains, and it applies to 1x1 filters with
+  no padding. On the problems the removed picks covered, the AI pick is closer to the tuned kernel
+  more often than the removed pick was.
 * [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
   support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
   improve top-1 accuracy and time-regret across all four architecture/dimension combinations.
@@ -214,6 +219,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   their instance lists, applicability answers and default backward-weights configurations. The
   LGBM perf-config picker remembers its ranking per problem. `MIOPEN_DEBUG_CK_PROBLEM_CACHE=0`
   turns off the per-problem CK caches.
+* [Conv] Skip a naive convolution solver before building and launching it when a run-time lower
+  bound already exceeds its existing find timeout budget. This prevents work that the timeout
+  would abandon from continuing on the GPU and slowing the next call. The bound counts only the
+  filter taps that read inside the input and assumes the naive kernel reaches at most 10 percent of
+  the device's fp32 FMA peak. While the bound is on, Find also leaves a naive solver out of its
+  parallel precompile when another solver is available, and builds it only if it is evaluated. Set
+  ``MIOPEN_NAIVE_BOUND_SKIP=0`` to disable the shortcut and precompile naive solvers as before.
 * [Conv] Creating a convolution or GEMM descriptor no longer draws from `std::random_device`. On
   CPUs where `RDSEED` often reports no entropy available, each draw cost tens of microseconds, so
   applications that create a convolution descriptor per call paid it on every convolution.

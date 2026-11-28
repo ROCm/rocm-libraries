@@ -116,7 +116,7 @@ TEST(TestResolveVerificationMode, NulloptCliWithoutEnvReturnsNullopt)
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(TestParseValidatorDevice, AcceptsTheThreeSpellingsCaseInsensitiveAndNothingElse)
+TEST(TestParseValidatorDeviceOption, AcceptsTheThreeSpellingsCaseInsensitiveAndNothingElse)
 {
     using hipdnn_integration_tests::parseValidatorDevice;
     using hipdnn_integration_tests::ValidatorDevice;
@@ -131,7 +131,7 @@ TEST(TestParseValidatorDevice, AcceptsTheThreeSpellingsCaseInsensitiveAndNothing
 
 // An explicit --validator auto must beat the env var, not fall through to it: "follow
 // the reference" is a choice, not the absence of one.
-TEST(TestResolveValidatorDevice, ExplicitAutoOnTheCliBeatsTheEnv)
+TEST(TestResolveValidatorDeviceOption, ExplicitAutoOnTheCliBeatsTheEnv)
 {
     using hipdnn_integration_tests::resolveValidatorDevice;
     using hipdnn_integration_tests::ValidatorDevice;

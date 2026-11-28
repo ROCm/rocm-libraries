@@ -49,24 +49,44 @@ cmake --install <build_dir> --component tests
 
 **Purpose:** Validate hardware-independent logic without dispatching a GPU kernel.
 
-Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** launch kernels (the exceptions are `plan_lifetime_test`, `plan_cache_lru_test`, `elementwise_broadcast_test`, and `concurrency_test`, noted below). The test binaries are:
+Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_test()` CMake function, which links against `hiptensor::hiptensor` and GoogleTest. Most do **not** launch kernels (the exceptions are `plan_lifetime_test`, `plan_cache_lru_test`, `elementwise_broadcast_test`, `concurrency_test`, and `scalar_alignment_test`, noted below). The test binaries are:
 
 | Binary | What it tests |
 |---|---|
 | `logger_test` | Logger singleton identity, callback registration, log-level filtering, file-sink behavior |
 | `yaml_test` | YAML config parsing and round-trip correctness |
 | `elementwise_op_test` | CPU-side elementwise operator type traits and identity/scale op correctness |
-| `util_test` | Utility helpers (type conversion, scalar reads per compute type, index math, stride and element-space calculation) |
+| `util_test` | Utility helpers (type conversion, scalar reads and writes per compute type, including at unaligned addresses, index math, stride and element-space calculation) |
 | `hiptensor_options_test` | CLI/env option parsing (`--hot_runs`, `--cold_runs`, `-y`, `HIPTENSOR_*` env vars) |
 | `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed. Despite living in `00_unit/`, it allocates device memory and launches a real permute kernel, so it **requires a GPU** and is registered as a device tier test |
 | `plan_cache_lru_test` | Plan cache file round trip and LRU eviction: writing the cache to a file and then destroying the handle, a full cache evicting its least recently used line for a new problem, and updating an existing line without evicting. Also checks that the cache's internal priority queue is move-only. Launches a permute kernel to add a cache line, so it **requires a GPU** and is registered as a device tier test; skipped when `HIPTENSOR_DISABLE_PLAN_CACHE` is set |
+| `plan_cache_key_test` | The plan cache keys: Composable Kernel plans keep the key of earlier versions (so plan cache files written by them still apply), and the other backends' keys separate the operators, alignments, the trinary contraction's output and the backend. CPU only |
+| `backend_seam_test` | Backend selection through the public API for every operation (contraction, trinary contraction, permutation, elementwise binary and trinary, reduction): the Composable Kernel backend serves plans by default and with `HIPTENSOR_BACKEND=ck`; unknown `HIPTENSOR_BACKEND`, `HIPTENSOR_BACKEND_FALLBACK` and `HIPTENSOR_BACKEND_AB` values are refused; a backend that declines a problem (or isn't built) falls back to the Composable Kernel backend, or returns `NOT_SUPPORTED` (or `ARCH_MISMATCH` when the backend has no kernels for the device) with `HIPTENSOR_BACKEND_FALLBACK=0`; `HIPTENSOR_BACKEND_AB` doesn't change the result; executions run on the caller's stream; a plan runs only with a handle of its device; a contraction's workspace estimate needs a plan preference; kernel cache argument checks. Launches kernels, so it **requires a GPU** and is registered as a device tier test. It's skipped only on an unsupported host device, not on `HIPTENSOR_STATUS_ARCH_MISMATCH`, which it prints itself |
 | `batched_contraction_test` | `hiptensorCreateContraction` / `hiptensorCreateContractionTrinary` return `HIPTENSOR_STATUS_NOT_SUPPORTED` for batched modes (a mode shared by both inputs and the output) and accept non-batched ones. No kernel launch |
 | `elementwise_mode_test` | Elementwise mode validation: subset and reordered input modes are accepted; a mode missing from the output or repeated within a tensor returns `NOT_SUPPORTED`; a shared mode with mismatched extents returns `INVALID_VALUE`; a permute or trinary op whose output data type differs from its input's returns `NOT_SUPPORTED`. Allocates small device buffers but launches no kernel |
 | `elementwise_instance_selection_test` | Tuned hyper-parameter lookup for permutation instances: extents above the largest tuned edge of the rank 2 and 3 tables use the last edge's entry instead of reading past the table. No kernel launch |
 | `reduction_mode_test` | CPU reduction reference mode handling: an output mode that the input carries is reduced; an output mode missing from the input returns `INVALID_VALUE`. Creates a hipTensor handle and descriptors but launches no kernel |
+| `compute_descriptor_test` | Every operation descriptor create function (contraction, trinary contraction, permutation, elementwise binary and trinary, reduction) hands back no descriptor for a compute descriptor without a scalar type: it returns `NOT_SUPPORTED` for the integer descriptors (`HIPTENSOR_COMPUTE_DESC_8U`, `_8I`, `_32U`, `_32I`) and `INVALID_VALUE` for `HIPTENSOR_COMPUTE_DESC_NONE` and a value that is not an enumerator. It accepts `HIPTENSOR_COMPUTE_DESC_32F`. Creates a hipTensor handle and descriptors but launches no kernel |
 | `elementwise_broadcast_test` | Elementwise broadcast results for permute, binary, and trinary (inputs carrying a subset of the output modes). Launches kernels, so it **requires a GPU** |
 | `api_attribute_test` | Attribute accessors (`hiptensorOperationDescriptorSetAttribute`/`GetAttribute`, `hiptensorPlanPreferenceSetAttribute`, `hiptensorPlanGetAttribute`): a `NULL` handle or object returns `NOT_INITIALIZED`, a `NULL` buffer or a buffer whose size doesn't match the attribute returns `INVALID_VALUE` and copies nothing, unknown attributes return `NOT_SUPPORTED`; values round-trip, padding takes one `uint32_t` per output mode and one output element for the value, and setting it leaves the other attributes intact. Creates a permutation plan but launches no kernel |
 | `concurrency_test` | Thread safety of execution. Four threads run the same problem at once (scale, bilinear, and trinary contraction; permute; elementwise binary and trinary; reduction), each with its own inputs, output, and stream, with one plan per thread and with one plan shared by all threads. Every result is compared bit for bit with a single-threaded call (integer-valued FP32 inputs keep results exact regardless of accumulation order). `Serial` (calls under one mutex) and `Broken` (thread 1 given thread 0's inputs) controls prove the harness detects a swapped result. Also covers concurrent brute-force plan creation, concurrent workspace estimation, and `HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL` (`ConcurrencyAutotuneTest`): concurrent calls on a shared plan each try a different candidate and the round caches one of them, a call that returns early does not stall its round, interleaved problems are tuned separately, an incremental count of 0 caches the first call or joins an open round, plans of one problem with different counts share a round, and plans with different unary operators do not; these skip under `HIPTENSOR_DISABLE_PLAN_CACHE`. `ConcurrencyPermuteTest` executes a shared permutation plan from several threads with alternating alphas (checked through the kernel ids in the performance trace and the plan cache file). Launches kernels, so it **requires a GPU**; contraction cases skip on architectures without contraction kernels (e.g. gfx12). `HIPTENSOR_CONCURRENCY_ITERS` overrides the 300 calls per thread |
+| `scalar_alignment_test` | Complex FP64 and FP32 bilinear contractions whose alpha and beta are stored at addresses not aligned to the complex scalar type (8 mod 16 for FP64, 4 mod 8 for FP32), checked against a host reference. Launches kernels, so it **requires a GPU** and is registered as a device tier test; each case skips on architectures without the matching complex contraction kernels |
+
+The rocKE backend's tests are built only with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND=ON` (the JIT tests also need `HIPTENSOR_ENABLE_ROCKE_JIT`, the default with the rocKE backend):
+
+| Binary or CTest name | What it tests |
+|---|---|
+| `rocke_backend_test` | The rocKE backend's kernels through the public API (`HIPTENSOR_BACKEND=rocke`, no fallback) for every operation, checked against loop references, without the cases on tensors of 2 GiB and more. Launches kernels, so it **requires a GPU** with a rocKE kernel pack |
+| `rocke_backend_test_large` | `rocke_backend_test`'s cases on tensors of 2 GiB and more (`RockeLargeIndex`, `RockeLargeContraction`, `RockeHugeContraction`, `RockeHugeTensor`, tens of GiB of device and host memory), one test at a time (`RUN_SERIAL`) |
+| `rocke_backend_test_f64_route` | `rocke_backend_test`'s contraction cases with `HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64` (every contraction on the f64 route) |
+| `rocke_select_model_test` | The shipped selection models (`HIPTENSOR_ROCKE_SELECT_MODEL_DIR`) read and walked by the library's model code against the exporter's check vectors (`<class>.check`). CPU only |
+| `rocke_pack_manifest_test` | The C++ pack builder lists the kernels, attributes, routes and JIT classes of rocKE's manifests (`library/builders/hiptensor/manifests` of `HIPTENSOR_ROCKE_SOURCE_DIR`). No GPU, no compile; added only when the builder is built and the manifests exist |
+| `rocke_pack_cross_check_test` | rocKE's cross-check of the pack builder against rocKE's Python writer, byte for byte. Needs a Python with pytest; no GPU, long (every kernel compiles twice) |
+| `rocke_jit_test` | The JIT and the kernel cache (with `HIPTENSOR_ENABLE_ROCKE_JIT`). **Requires a GPU** |
+| `rocke_gett_jit_test` | The contraction JIT (rocKE's tensor GETT planner at plan creation), compared with rocKE's route tables (with `HIPTENSOR_ENABLE_ROCKE_JIT`). **Requires a GPU** |
+| `rocke_backend_test_jit` | Every `rocke_backend_test` case (without the large ones) with every elementwise launch specialized (`HIPTENSOR_ROCKE_TEST_JIT=1`, `HIPTENSOR_ROCKE_JIT=all`; with `HIPTENSOR_ENABLE_ROCKE_JIT`) |
+
+In the installed tests, these run in the `quick` tier (and so in every tier) like the host tests, with the same environment settings: `rocke_backend_test` (without its cases on tensors of 2 GiB and more), `rocke_backend_test_f64_route`, `rocke_select_model_test` (reading the models installed in `bin/hiptensor/rocke_select`; it fails when `HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR` names a missing directory and skips when the directory holds no models), and, with the JIT, `rocke_jit_test`, `rocke_gett_jit_test` and `rocke_backend_test_jit` (also without the large cases). The large cases (`RockeLargeIndex`, `RockeLargeContraction`, `RockeHugeContraction`, `RockeHugeTensor`, which need tens of GiB of device and host memory) run as `rocke_backend_test_large` in the `full` tier, one test at a time (`RUN_SERIAL`). The rocKE tests are skipped only on an unsupported host device: the shared test main reports a device hipTensor doesn't support, and the rocKE device tests report a device that isn't a rocKE target (`HIPTENSOR_ROCKE_SUPPORTED_TARGETS`), where the rocKE backend declines every problem; a missing kernel pack on a rocKE target fails. A failure that prints an expected `HIPTENSOR_STATUS_ARCH_MISMATCH` still counts as a failure, in the build tree too. They have no other installed entries. The pack builder tests run only in the build tree.
 
 > `interface_test` exists in the source tree but is commented out in `test/00_unit/CMakeLists.txt` — it is not currently built.
 
@@ -92,7 +112,6 @@ To run a subset of GoogleTest cases in any hipTensor test binary, pass `--gtest_
 ```bash
 ./bin/concurrency_test --gtest_filter='AllOps/ConcurrencyTest.*/Permute_*'
 ```
-
 
 **What is NOT covered by unit tests:**
 
@@ -151,7 +170,10 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
 | Plan cache — file and LRU | `plan_cache_lru_test` | Write/read of plan cache files, handle destruction after a write, LRU eviction when full (launches a permute kernel) |
 | Plan lifetime | `plan_lifetime_test` | Permute plan reuse after descriptor/preference destruction (launches a kernel) |
+| Scalar alignment | `scalar_alignment_test` | Complex FP64/FP32 contractions with alpha and beta at unaligned host addresses (launches kernels) |
 | Concurrency | `concurrency_test` | Concurrent execution of every op with per-thread and shared plans, concurrent plan creation, concurrent workspace estimation, and incremental autotuning with shared plans; bit-exact against single-threaded results (FP32; launches kernels) |
+| Plan cache — keys | `plan_cache_key_test` | Legacy Composable Kernel keys, and the other backends' keys separating operators, alignments, the trinary output and the backend (CPU only) |
+| Backend selection | `backend_seam_test` | Backend selection, fallback and A/B comparison for every operation (launches kernels) |
 | Contraction mode | `contraction_mode_test` | CPU-side mode validation (host test) |
 | Elementwise — permute | `rank{2-6}_elementwise_permute_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
 | Elementwise — binary op | `rank{2-6}_elementwise_binary_op_test` | FP16/BF16/FP32/FP64; FP16 and BF16 also with an FP32 scalar; ranks 2–6 |
@@ -163,10 +185,6 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
-
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `contraction_padded_strides_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_cache_lru_test`, `plan_lifetime_test`, `concurrency_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`, `elementwise_trinary_op_order_test`.
-
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`, `elementwise_instance_selection_test`). `api_attribute_test`, `batched_contraction_test`, `elementwise_mode_test`, and `reduction_mode_test` launch no kernels but create a hipTensor handle and descriptors (`elementwise_mode_test` also allocates small device buffers).
 
 **Test tiers (CTest labels):**
 
@@ -266,6 +284,9 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 | `plan_lifetime_test` | Trusted gate | Device test (launches a permute kernel); runs on GPU runners |
 | `concurrency_test` | Trusted gate | Device test (launches kernels from four threads); runs on GPU runners. Registered once under `quick` (nesting into the higher tiers) and not in the FFM tiers, where multi-threaded runs are too slow |
 | `plan_cache_lru_test` | Trusted gate | Device test (launches a permute kernel); runs on GPU runners |
+| `plan_cache_key_test` | Trusted gate | CPU-only, reliable |
+| `backend_seam_test` | Trusted gate | Device test (launches small kernels of every operation); runs on GPU runners |
+| `scalar_alignment_test` | Trusted gate | Device test (launches complex contraction kernels); runs on GPU runners |
 | `*standard*` device tests | Trusted gate | Run on dedicated GPU runners |
 | `*comprehensive*` / `*full*` | Informational | Nightly only; not PR gates |
 | `*ffm-quick*` | Trusted gate | On FFM-equipped queues |
@@ -368,7 +389,7 @@ cmake --build build -- -j$(nproc)
 
 ## Known Bugs and Expected Failures
 
-There is currently one suppression mechanism: CTest `SKIP_REGULAR_EXPRESSION`. Any test binary that prints `HIPTENSOR_STATUS_ARCH_MISMATCH` or `unsupported host device` is skipped rather than failed — this is the mechanism for running a single install across multiple GPU architectures without every test failing on incompatible hardware. It is applied uniformly to all test binaries at configure time in `test/CMakeLists.txt`.
+There is currently one suppression mechanism: CTest `SKIP_REGULAR_EXPRESSION`. Any test binary that prints `HIPTENSOR_STATUS_ARCH_MISMATCH` or `unsupported host device` is skipped rather than failed — this is the mechanism for running a single install across multiple GPU architectures without every test failing on incompatible hardware. It is applied at configure time in `test/CMakeLists.txt`, to every test binary except those that print `HIPTENSOR_STATUS_ARCH_MISMATCH` themselves (`backend_seam_test` and the rocKE tests), which are skipped only on `unsupported host device`.
 
 Because the match applies to the whole binary, a test binary that skips only *some* of its cases must not print `HIPTENSOR_STATUS_ARCH_MISMATCH` in its skip messages: CTest would report the whole binary as skipped and hide failures in the cases that did run. `concurrency_test` prints a plain "operation not supported on this device" for that reason, and prints statuses as numbers in its failure messages.
 

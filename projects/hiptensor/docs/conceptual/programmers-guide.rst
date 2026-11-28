@@ -44,6 +44,46 @@ The hipTensor solution layer is divided into functional components, such as cont
 Each component contains a registry of backend instances as potential solution candidates for given input parameters.
 These instances are selected based on API-provided hints and populated with the appropriate arguments for invocation by the API.
 
+Backends
+^^^^^^^^
+
+The solution layer reaches kernels only through a backend interface (``library/src/backends/common``). When a plan is
+created, hipTensor selects the backend that serves the problem and lets that backend prepare the plan. Executing the
+plan launches the prepared kernels of that backend on the caller's stream. Plan-cache entries are keyed by backend.
+
+The Composable Kernel backend (``library/src/backends/ck``) is always built and is the default. The rocKE backend
+(``library/src/backends/rocke``) is optional and not used by default: it is built with
+``-DHIPTENSOR_ENABLE_ROCKE_BACKEND=ON`` and serves plans only when it is selected. These environment variables, read
+at every plan creation and workspace estimate, select the backend:
+
+.. list-table::
+
+    *   -   **Variable**
+        -   **Description**
+    *   -   ``HIPTENSOR_BACKEND``
+        -   ``auto`` (default), ``ck``, or ``rocke``: the backend that serves plans. ``auto`` selects the Composable
+            Kernel backend. Other values make ``hiptensorCreatePlan`` and ``hiptensorEstimateWorkspaceSize`` return
+            ``HIPTENSOR_STATUS_INVALID_VALUE``.
+    *   -   ``HIPTENSOR_BACKEND_FALLBACK``
+        -   ``1`` (default) or ``0``. When the selected backend declines a problem, or isn't built, the Composable
+            Kernel backend serves it. With ``0``, ``hiptensorCreatePlan`` returns the selected backend's status
+            instead: ``HIPTENSOR_STATUS_ARCH_MISMATCH`` when it has no kernels for the device, otherwise
+            ``HIPTENSOR_STATUS_NOT_SUPPORTED``.
+    *   -   ``HIPTENSOR_BACKEND_AB``
+        -   ``<primary>,<shadow>``, for example ``rocke,ck``, for debugging. Every execution runs both backends and
+            logs the difference between their results at the ``HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE`` level. It
+            overrides ``HIPTENSOR_BACKEND``, allocates device memory, and synchronizes the stream.
+
+The selected backend and kernel of every plan are logged at the ``HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE`` level.
+
+The rocKE backend runs kernels from a precompiled kernel pack for the GPU target, chosen when the plan is created by
+a selection model, a ``HIPTENSOR_PLAN_PREFERENCE_KERNEL_RANK`` preference, or timing with
+``HIPTENSOR_ALGO_DEFAULT_PATIENT``. A build with ``-DHIPTENSOR_ENABLE_ROCKE_JIT=ON`` also lets plans created with
+``HIPTENSOR_JIT_MODE_DEFAULT`` compile kernels specialized for the problem; ``hiptensorWriteKernelCacheToFile`` and
+``hiptensorReadKernelCacheFromFile`` save and restore the compiled kernels. On a device without a kernel pack, the
+rocKE backend declines every problem. Its environment variables, kernel selection and supported problems are
+described in ``library/src/backends/rocke/README.rst``.
+
 hipTensor tests and samples are consumers of the hipTensor library and demonstrate the usages of the API in different contexts, such as tensor contractions, permutations and reductions.
 
 --------------------------------
@@ -133,6 +173,9 @@ The ``library`` directory contains the following include and source files:
 - ``library/include/hiptensor/``: C++ include files for the hipTensor API. These files also contain Doxygen comments that document the API.
 - ``library/include/hiptensor/internal``: Include files for utility code and tensor utility generation.
 - ``library/src/``: Source files for logging, device management, and performance functions.
+- ``library/src/backends/common/``: The backend interface: the problem description, backend selection, and plan execution.
+- ``library/src/backends/ck/``: The Composable Kernel backend.
+- ``library/src/backends/rocke/``: The rocKE backend.
 - ``library/src/contraction/``: Source files for core initialization and management of contraction module.
 - ``library/src/contraction/device``: Source files for composable kernel backend bilinear and scale instances.
 - ``library/src/elementwise/``: Source files for core initialization and management of permutation module.

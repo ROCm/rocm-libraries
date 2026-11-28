@@ -330,18 +330,31 @@ endfunction()
 
 # Create unit test executables and deploy
 # Differs from hiptensor_test in that src include directory is linked
+# add_hiptensor_unit_test(<name> [NO_INSTALL_ENTRIES] [DEVICE_SKIP_ONLY] <sources>...
+#                         [TEST_ARGS <args>...])
+#   NO_INSTALL_ENTRIES  the caller writes the test's install-tree entries
+#   DEVICE_SKIP_ONLY    skipped only when the shared main() reports an unsupported host device,
+#                       not on HIPTENSOR_STATUS_ARCH_MISMATCH, which the test prints itself
+#   TEST_ARGS           arguments of the build-tree test
 function(add_hiptensor_unit_test)
     set(BINARY_NAME ${ARGV0})
     message(STATUS "adding hiptensor unit test: ${BINARY_NAME}")
 
     list(REMOVE_AT ARGV 0)
-    add_executable(${BINARY_NAME} ${ARGV})
+    cmake_parse_arguments(ARG "NO_INSTALL_ENTRIES;DEVICE_SKIP_ONLY" "" "TEST_ARGS" ${ARGV})
+    set(SOURCES ${ARG_UNPARSED_ARGUMENTS})
+    if(ARG_DEVICE_SKIP_ONLY)
+        set(SKIP_EXPRESSION "unsupported host device")
+    else()
+        set(SKIP_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device")
+    endif()
+    add_executable(${BINARY_NAME} ${SOURCES})
 
     target_compile_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     # hiptensor only propagates hip::host; tests compile as HIP for their own kernels.
     target_link_libraries(${BINARY_NAME} PRIVATE hip::device)
-    hiptensor_test_set_host_only_sources(${ARGV})
+    hiptensor_test_set_host_only_sources(${SOURCES})
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
@@ -372,8 +385,8 @@ function(add_hiptensor_unit_test)
     add_dependencies(hiptensor_tests ${BINARY_NAME})
 
     # Register with ctest
-    add_test(NAME ${BINARY_NAME} COMMAND ${BINARY_NAME})
-    set_property(TEST ${BINARY_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH" "unsupported host device")
+    add_test(NAME ${BINARY_NAME} COMMAND ${BINARY_NAME} ${ARG_TEST_ARGS})
+    set_property(TEST ${BINARY_NAME} PROPERTY SKIP_REGULAR_EXPRESSION ${SKIP_EXPRESSION})
     # Set working directory to bin/ for proper DLL/resource loading on Windows
     set_property(TEST ${BINARY_NAME} PROPERTY WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
@@ -391,6 +404,10 @@ function(add_hiptensor_unit_test)
     COMPONENT tests
     )
 
+    if(ARG_NO_INSTALL_ENTRIES)
+        return()
+    endif()
+
     # Add to testing manifest
     get_target_property(EXE_NAME ${BINARY_NAME} RUNTIME_OUTPUT_NAME)
     if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
@@ -400,13 +417,13 @@ function(add_hiptensor_unit_test)
         endif()
     endif()
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${BINARY_NAME} \"../${BINARY_NAME}\")\n")
-    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${BINARY_NAME} PROPERTIES SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${BINARY_NAME} PROPERTIES SKIP_REGULAR_EXPRESSION \"${SKIP_EXPRESSION}\")\n")
 
     file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "add_test(\"${BINARY_NAME} smoke\" \"../../${BINARY_NAME}\")\n")
-    file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "set_tests_properties(\"${BINARY_NAME} smoke\" PROPERTIES SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+    file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "set_tests_properties(\"${BINARY_NAME} smoke\" PROPERTIES SKIP_REGULAR_EXPRESSION \"${SKIP_EXPRESSION}\")\n")
 
     file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "add_test(\"${BINARY_NAME} regression\" \"../../${BINARY_NAME}\")\n")
-    file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"${BINARY_NAME} regression\" PROPERTIES SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+    file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"${BINARY_NAME} regression\" PROPERTIES SKIP_REGULAR_EXPRESSION \"${SKIP_EXPRESSION}\")\n")
 
 endfunction()
 
@@ -437,6 +454,11 @@ endfunction()
 # Every test executable links these: pass the objects, not the sources, to the test functions.
 add_hiptensor_test_objects(hiptensor_test_common_objects ${HIPTENSOR_COMMON_TEST_SOURCES})
 set(HIPTENSOR_COMMON_TEST_SOURCES $<TARGET_OBJECTS:hiptensor_test_common_objects>)
+
+# The rocKE suites on tensors of 2 GiB and more (tens of GiB of device and host memory): they run
+# in their own test, one test at a time, and every other rocKE test filters them out.
+set(HIPTENSOR_ROCKE_TEST_LARGE_SUITES
+    "*RockeLargeIndex.*:*RockeLargeContraction.*:*RockeHugeContraction.*:*RockeHugeTensor.*")
 
 add_subdirectory(00_unit)
 add_subdirectory(01_contraction)
@@ -484,6 +506,7 @@ endif()
 set(_HIPTENSOR_HOST_TESTS
   api_attribute_test
   batched_contraction_test
+  compute_descriptor_test
   concurrency_test
   contraction_mode_test
   elementwise_cpu_test
@@ -492,6 +515,7 @@ set(_HIPTENSOR_HOST_TESTS
   elementwise_op_test
   hiptensor_options_test
   logger_test
+  plan_cache_key_test
   reduction_cpu_impl_test
   reduction_mode_test
   util_test
@@ -530,6 +554,8 @@ set(_HIPTENSOR_DEVICE_TESTS
   "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
   "plan_cache_lru_test|NONE"
   "plan_lifetime_test|NONE"
+  "backend_seam_test|NONE"
+  "scalar_alignment_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "trinary_contraction_workspace_test|NONE"
@@ -621,10 +647,19 @@ set(_HIPTENSOR_BENCH_TESTS
 # directory containing this CTestTestfile.cmake fragment, i.e. the installed
 # bin/hiptensor/. So callers spell the executable relative to bin/hiptensor/
 # ("../<binary>") and the -y config relative to it ("configs/<...>").
+# An optional third argument replaces the skip expression.
 function(_hiptensor_emit_test test_name command)
+    set(skip "HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device")
+    if(ARGC GREATER 2)
+        set(skip "${ARGV2}")
+    endif()
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${test_name}\" ${command})\n")
-    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${test_name}\" PROPERTIES SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${test_name}\" PROPERTIES SKIP_REGULAR_EXPRESSION \"${skip}\")\n")
 endfunction()
+
+# Device tests that print HIPTENSOR_STATUS_ARCH_MISMATCH themselves: they skip only when the
+# shared main() reports an unsupported host device, so that no failure is reported as a skip.
+set(_HIPTENSOR_DEVICE_SKIP_ONLY_TESTS backend_seam_test)
 
 # A config yaml is "effectively empty" when it carries no test parameters.
 # This is TRUE when the file:
@@ -702,9 +737,61 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
             endif()
             string(APPEND _hiptensor_cmd " -y configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
         endif()
-        _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
+        if(_hiptensor_dev_bin IN_LIST _HIPTENSOR_DEVICE_SKIP_ONLY_TESTS)
+            _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}"
+                                 "unsupported host device")
+        else()
+            _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
+        endif()
     endforeach()
 endforeach()
+
+# rocKE tests, emitted once under quick like the host tests. They are skipped only on an
+# unsupported host device (the shared main()'s, and rocKE's own on a device that is not a rocKE
+# target): the HIPTENSOR_STATUS_ARCH_MISMATCH that some cases expect, printed with a failure,
+# would otherwise report the failure as a skip. The selection model test reads the models
+# installed next to it (rocke_select). The cases on tensors of 2 GiB and more (tens of GiB of
+# device and host memory, HIPTENSOR_ROCKE_TEST_LARGE_SUITES) run only in full, one test at a
+# time.
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    function(_hiptensor_emit_rocke_test test_name command environment)
+        file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${test_name}\" ${command})\n")
+        file(APPEND "${INSTALL_TEST_FILE}"
+             "set_tests_properties(\"${test_name}\" PROPERTIES SKIP_REGULAR_EXPRESSION \"unsupported host device\")\n")
+        if(NOT environment STREQUAL "")
+            file(APPEND "${INSTALL_TEST_FILE}"
+                 "set_tests_properties(\"${test_name}\" PROPERTIES ENVIRONMENT \"${environment}\")\n")
+        endif()
+    endfunction()
+    set(_hiptensor_rocke_large "${HIPTENSOR_ROCKE_TEST_LARGE_SUITES}")
+    _hiptensor_emit_rocke_test("rocke_backend_test quick"
+                               "\"../rocke_backend_test\" --gtest_filter=-${_hiptensor_rocke_large}" "")
+    _hiptensor_emit_rocke_test("rocke_backend_test_large full"
+                               "\"../rocke_backend_test\" --gtest_filter=${_hiptensor_rocke_large}" "")
+    file(APPEND "${INSTALL_TEST_FILE}"
+         "set_tests_properties(\"rocke_backend_test_large full\" PROPERTIES RUN_SERIAL TRUE)\n")
+    _hiptensor_emit_rocke_test("rocke_select_model_test quick" "\"../rocke_select_model_test\""
+                               "HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR=rocke_select")
+    _hiptensor_emit_rocke_test("rocke_backend_test_f64_route quick"
+                               "\"../rocke_backend_test\" --gtest_filter=*RockeContraction*"
+                               "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64")
+    if(HIPTENSOR_ENABLE_ROCKE_JIT)
+        _hiptensor_emit_rocke_test("rocke_jit_test quick" "\"../rocke_jit_test\"" "")
+        _hiptensor_emit_rocke_test("rocke_gett_jit_test quick" "\"../rocke_gett_jit_test\"" "")
+        _hiptensor_emit_rocke_test("rocke_backend_test_jit quick"
+                                   "\"../rocke_backend_test\" --gtest_filter=-${_hiptensor_rocke_large}"
+                                   "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all")
+    endif()
+    rocm_install(
+        DIRECTORY "${HIPTENSOR_ROCKE_SELECT_MODEL_DIR}/"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/rocke_select"
+        COMPONENT tests
+        FILES_MATCHING
+        PATTERN "*.model"
+        PATTERN "*.check"
+        PATTERN "tools" EXCLUDE
+    )
+endif()
 
 # ffm-quick / ffm-full: device only. ffm-quick uses emulation/quick, ffm-full
 # uses emulation/full (they are now distinct sets, not aliases).
@@ -732,7 +819,12 @@ foreach(_hiptensor_family "ffm-quick|emulation/quick" "ffm-full|emulation/full")
             endif()
             string(APPEND _hiptensor_cmd " -y configs/${_hiptensor_cfgdir}/${_hiptensor_dev_cfg}")
         endif()
-        _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
+        if(_hiptensor_dev_bin IN_LIST _HIPTENSOR_DEVICE_SKIP_ONLY_TESTS)
+            _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}"
+                                 "unsupported host device")
+        else()
+            _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
+        endif()
     endforeach()
 endforeach()
 

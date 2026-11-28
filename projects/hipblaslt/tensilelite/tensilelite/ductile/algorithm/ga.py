@@ -92,7 +92,11 @@ class GeneticAlgorithm:
         self._pop_size = pop_size
         self._decay_type = "none"
         max_sp_sz = max(sz for sz in self.space.sizes.values())
-        if max_sp_sz > pop_size:
+        # Grow the first generations only when the caller lets Ductile size the population.
+        # With auto_pop_size=False the caller pinned pop_size, so a variable with many values
+        # (for example a large MatrixInstruction group) must not multiply the kernels built
+        # and evaluated in the first generations.
+        if max_sp_sz > pop_size and auto_pop_size:
             self.logger.warning(f"Some variables have a larger search space than pop_size. "
                                 f"Increasing pop_size for the first generations.")
             self.decay = lambda sz: int(self._pop_size + (sz - self._pop_size) / 2)

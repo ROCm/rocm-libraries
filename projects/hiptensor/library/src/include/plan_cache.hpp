@@ -31,6 +31,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -213,12 +214,13 @@ namespace hiptensor
         PlanCache();
         ~PlanCache() = default;
 
-        //Get hash ID from peration descriptor pointer
-        //Calculate hash key by: hash({Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes})
-        HashId getHashID(hiptensorOperationDescriptor_t desc);
+        //Get hash ID from operation descriptor pointer, for the solutions of a backend
+        //Composable Kernel plans keep the key of earlier versions (legacyPlanCacheKey), the other
+        //backends' keys take every field of the problem and the backend (fullPlanCacheKey)
+        HashId getHashID(hiptensorOperationDescriptor_t desc, std::string const& backend);
 
-        //Query solution Uid through operation descriptor pointer
-        Uid querySolutionUid(hiptensorOperationDescriptor_t desc);
+        //Query solution Uid of a backend through operation descriptor pointer
+        Uid querySolutionUid(hiptensorOperationDescriptor_t desc, std::string const& backend);
 
         //Add a cache record to the solution table
         //If the table size exceeds the maximum size, then remove one LRU(least-recently-used) record

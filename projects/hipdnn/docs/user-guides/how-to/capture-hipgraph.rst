@@ -16,6 +16,12 @@ hipDNN has no equivalent of the cuDNN ``populate_cuda_graph`` and ``update_cuda_
 In the cuDNN compatibility shim, both calls return ``GRAPH_NOT_SUPPORTED``. Stream capture is
 the only supported way to put hipDNN work in a hipGraph.
 
+hipDNN engines are designed to be capture-capable: they do not allocate memory or synchronize
+outside the variant pack and the workspace. This is a design goal, not a support claim. Check
+the ``SUPPORTS_GRAPH_CAPTURE`` note (see `Check whether an engine supports capture`_) before you
+capture. Engine authors: see `Execution contract for engines
+<https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/PluginDevelopment.md#execution-contract-for-engines>`_.
+
 Supported usage
 ===============
 

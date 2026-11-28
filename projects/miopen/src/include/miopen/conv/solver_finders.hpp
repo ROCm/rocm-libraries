@@ -162,6 +162,9 @@ struct FindCoreResult
     std::vector<Solution> solutions;
     float find_search_best_time = std::numeric_limits<float>::max();
     bool is_optimal;
+    /// Estimated naive run-time floor in ms, or 0 if unavailable. The heuristic is used to skip
+    /// naive evaluation before preparing the invoker when this exceeds the timeout budget.
+    float naive_floor_ms = 0.0f;
 };
 
 std::vector<Solution> EvaluateInvokers(const Handle& handle,
@@ -189,6 +192,15 @@ MIOPEN_INTERNALS_EXPORT bool IsEnoughWorkspace(std::string_view where,
                                                std::size_t required_size,
                                                const miopen::AnyInvokeParams* invokeParams,
                                                bool log_as_warning = true);
+
+/// Estimated lower bound, in ms, for a ConvDirectNaiveConv* solver on \p problem and \p handle.
+/// It counts only the multiply-accumulates the naive kernels perform, that is the filter taps that
+/// read inside the input (taps that read padding cost nothing), and assumes the kernel reaches at
+/// most 10 percent of the device's modeled fp32 FMA peak. The count is the same for forward,
+/// backward data and backward weights. This is a heuristic, not a hardware guarantee. Returns 0 if
+/// the device clock is unavailable or no tap reads inside the input.
+MIOPEN_INTERNALS_EXPORT float NaiveTimeFloorMs(const Handle& handle,
+                                               const ProblemDescription& problem);
 
 struct ConvFindParameters : PrimitiveFindParameters
 {
