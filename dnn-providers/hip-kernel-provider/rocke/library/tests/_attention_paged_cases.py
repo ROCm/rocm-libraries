@@ -15,7 +15,7 @@ only the pages a test reads, and a kernel that reads a wrong page is caught.
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from builders.gfx950.attention.prefill.unified_attention_cases import Scenario
@@ -37,6 +37,11 @@ __all__ = ["PagedInputs", "case_problem", "case_reference", "make_inputs", "run_
 # its problems at, so a case selects the kernels the harness measures.
 _ARCH = "gfx950"
 _HARNESS_NUM_CUS = 120
+# The compile route of every launch: COMGR, which every test environment has.
+# The runner's automatic choice compiles some long prefills with hipcc, which
+# the CI test environment does not have; these cases check the kernels, not
+# the route, whose hipcc side the additive-bias lane covers.
+_COMPILE_BACKEND = "llvm"
 
 
 @dataclass
@@ -190,10 +195,13 @@ def run_case(
     launches it directly, as the parity harness's 2D lane does (so a patched
     ``_tiled_spec_from_problem`` takes effect on every call); any other value is
     the ``backend`` of ``run_unified_attention_torch``. ``problem`` replaces
-    :func:`case_problem`'s. The output starts as NaN, so an element no kernel
-    writes fails the caller's checks.
+    :func:`case_problem`'s. Either way the launch compiles through COMGR: the
+    problem's ``compile_backend`` is set to ``"llvm"``. The output starts as
+    NaN, so an element no kernel writes fails the caller's checks.
     """
-    problem = problem or case_problem(case, inputs)
+    problem = replace(
+        problem or case_problem(case, inputs), compile_backend=_COMPILE_BACKEND
+    )
     rng = np.random.default_rng(inputs.seed + 1)
     cache_shape = (case.num_blocks, case.block_size, case.num_kv_heads, case.head_size)
     out = DeviceArray(
@@ -239,18 +247,15 @@ def run_case(
 
 
 def _launch_production_2d(problem, arrays, qq_stride: int, softcap: float) -> None:
-    """Build, compile and launch the production tiled 2D spec of ``problem``,
-    outside the runner's launcher caches."""
+    """Build, compile (through COMGR) and launch the production tiled 2D spec
+    of ``problem``, outside the runner's launcher caches."""
     from kernels import build_unified_attention_2d_tiled
-    from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
+    from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
     spec = au._tiled_spec_from_problem(problem, _ARCH)
     kernel = build_unified_attention_2d_tiled(spec, arch=_ARCH)
-    if au._select_2d_compile_backend(problem, _ARCH) == "hipcc":
-        artifact = compile_kernel_via_hipcc(kernel)
-    else:
-        artifact = compile_kernel(kernel, arch=_ARCH, capture_ir_text=False)
+    artifact = compile_kernel(kernel, arch=_ARCH, capture_ir_text=False)
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,
