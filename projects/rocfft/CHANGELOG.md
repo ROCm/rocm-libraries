@@ -34,8 +34,14 @@ Documentation for rocFFT is available at
   MPI ranks when a rank owns no brick or several bricks of an input or output field.
 * Fixed failures of single-process transforms without RCCL support when an input or output
   field has several bricks on the same device.
+* Fixed `rocfft_execute` failures for very large batched transforms (for example, 512x512x512 with
+  batch 128) whose Stockham FFT kernel launch exceeded 2^32 work items in one grid dimension.
 
 ### Known issues
+
+* Very large real-to-complex and complex-to-real transforms (for example, a 1D real transform of
+  length 49152 with batch 688297) can still fail in `rocfft_execute`, because some of their
+  internal kernels can exceed 2^32 work items in one grid dimension.
 
 * Some multi-device plans may read their input before the work queued on the streams set with
   `rocfft_execution_info_set_stream` is complete. Synchronize these streams before calling
