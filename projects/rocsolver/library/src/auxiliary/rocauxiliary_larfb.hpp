@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     June 2013
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,12 +39,12 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U>
-ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
-                                const rocblas_int order,
+template <typename T, typename I, typename U>
+ROCSOLVER_KERNEL void copymatA1(const I ldw,
+                                const I order,
                                 U A,
-                                const rocblas_int shiftA,
-                                const rocblas_int lda,
+                                const rocblas_stride shiftA,
+                                const I lda,
                                 const rocblas_stride strideA,
                                 T* tmptr)
 {
@@ -64,12 +64,12 @@ ROCSOLVER_KERNEL void copymatA1(const rocblas_int ldw,
     }
 }
 
-template <typename T, typename U>
-ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
-                               const rocblas_int order,
+template <typename T, typename I, typename U>
+ROCSOLVER_KERNEL void addmatA1(const I ldw,
+                               const I order,
                                U A,
-                               const rocblas_int shiftA,
-                               const rocblas_int lda,
+                               const rocblas_stride shiftA,
+                               const I lda,
                                const rocblas_stride strideA,
                                T* tmptr)
 {
@@ -89,12 +89,12 @@ ROCSOLVER_KERNEL void addmatA1(const rocblas_int ldw,
     }
 }
 
-template <bool BATCHED, typename T>
+template <bool BATCHED, typename T, typename I>
 void rocsolver_larfb_getMemorySize(const rocblas_side side,
-                                   const rocblas_int m,
-                                   const rocblas_int n,
-                                   const rocblas_int k,
-                                   const rocblas_int batch_count,
+                                   const I m,
+                                   const I n,
+                                   const I k,
+                                   const I batch_count,
                                    size_t* size_tmptr,
                                    size_t* size_workArr)
 {
@@ -121,18 +121,18 @@ void rocsolver_larfb_getMemorySize(const rocblas_side side,
         *size_workArr = 0;
 }
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_larfb_argCheck(rocblas_handle handle,
                                         const rocblas_side side,
                                         const rocblas_operation trans,
                                         const rocblas_direct direct,
                                         const rocblas_storev storev,
-                                        const rocblas_int m,
-                                        const rocblas_int n,
-                                        const rocblas_int k,
-                                        const rocblas_int ldv,
-                                        const rocblas_int ldf,
-                                        const rocblas_int lda,
+                                        const I m,
+                                        const I n,
+                                        const I k,
+                                        const I ldv,
+                                        const I ldf,
+                                        const I lda,
                                         T V,
                                         T A,
                                         U F)
@@ -171,28 +171,28 @@ rocblas_status rocsolver_larfb_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_larfb_template(rocblas_handle handle,
                                         const rocblas_side side,
                                         const rocblas_operation trans,
                                         const rocblas_direct direct,
                                         const rocblas_storev storev,
-                                        const rocblas_int m,
-                                        const rocblas_int n,
-                                        const rocblas_int k,
+                                        const I m,
+                                        const I n,
+                                        const I k,
                                         U V,
-                                        const rocblas_int shiftV,
-                                        const rocblas_int ldv,
+                                        const rocblas_stride shiftV,
+                                        const I ldv,
                                         const rocblas_stride strideV,
                                         T* F,
-                                        const rocblas_int shiftF,
-                                        const rocblas_int ldf,
+                                        const rocblas_stride shiftF,
+                                        const I ldf,
                                         const rocblas_stride strideF,
                                         U A,
-                                        const rocblas_int shiftA,
-                                        const rocblas_int lda,
+                                        const rocblas_stride shiftA,
+                                        const I lda,
                                         const rocblas_stride strideA,
-                                        const rocblas_int batch_count,
+                                        const I batch_count,
                                         T* tmptr,
                                         T** workArr)
 {
@@ -226,8 +226,7 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
                                                             : trans);
     rocblas_operation transp;
     rocblas_fill uploV, uploT;
-    rocblas_int order, ldw;
-    rocblas_int shift1, shift2;
+    I order, ldw;
     size_t offsetA1, offsetA2;
     size_t offsetV1, offsetV2;
 
@@ -315,8 +314,8 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
 
     auto const blocksx = ceil(ldw, BS2);
     auto const blocksy = ceil(order, BS2);
-    ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
-                            stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
+    ROCSOLVER_LAUNCH_KERNEL((copymatA1<T, I>), dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2),
+                            0, stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     // compute: V1' * A1
     //   or    A1 * V1
@@ -368,19 +367,19 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
 
     // compute: A1 - V1 * trans(T) * (V1' * A1 + V2' * A2)
     //    or    A1 - (A1 * V1 + A2 * V2) * trans(T) * V1'
-    ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
-                            stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
+    ROCSOLVER_LAUNCH_KERNEL((addmatA1<T, I>), dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2),
+                            0, stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     return rocblas_status_success;
 }
 
-template <bool BATCHED, bool STRIDED, typename T>
+template <bool BATCHED, bool STRIDED, typename T, typename I>
 void rocsolver_larfb_inverse_getMemorySize(const rocblas_side side,
                                            const rocblas_operation trans,
-                                           const rocblas_int m,
-                                           const rocblas_int n,
-                                           const rocblas_int k,
-                                           const rocblas_int batch_count,
+                                           const I m,
+                                           const I n,
+                                           const I k,
+                                           const I batch_count,
                                            size_t* size_tmptr,
                                            size_t* size_work1,
                                            size_t* size_work2,
@@ -407,7 +406,7 @@ void rocsolver_larfb_inverse_getMemorySize(const rocblas_side side,
         = (leftside && trans == rocblas_operation_transpose ? rocblas_operation_conjugate_transpose
                                                             : trans);
 
-    rocblas_int order, ldw;
+    I order, ldw;
     if(leftside)
     {
         order = n;
@@ -438,28 +437,28 @@ void rocsolver_larfb_inverse_getMemorySize(const rocblas_side side,
         *size_workArr = 0;
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename U>
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
                                                 const rocblas_side side,
                                                 const rocblas_operation trans,
                                                 const rocblas_direct direct,
                                                 const rocblas_storev storev,
-                                                const rocblas_int m,
-                                                const rocblas_int n,
-                                                const rocblas_int k,
+                                                const I m,
+                                                const I n,
+                                                const I k,
                                                 U V,
-                                                const rocblas_int shiftV,
-                                                const rocblas_int ldv,
+                                                const rocblas_stride shiftV,
+                                                const I ldv,
                                                 const rocblas_stride strideV,
                                                 T* F,
-                                                const rocblas_int shiftF,
-                                                const rocblas_int ldf,
+                                                const rocblas_stride shiftF,
+                                                const I ldf,
                                                 const rocblas_stride strideF,
                                                 U A,
-                                                const rocblas_int shiftA,
-                                                const rocblas_int lda,
+                                                const rocblas_stride shiftA,
+                                                const I lda,
                                                 const rocblas_stride strideA,
-                                                const rocblas_int batch_count,
+                                                const I batch_count,
                                                 T* tmptr,
                                                 void* work1,
                                                 void* work2,
@@ -499,8 +498,7 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
                                                             : trans);
     rocblas_operation transp;
     rocblas_fill uploV, uploT;
-    rocblas_int order, ldw;
-    rocblas_int shift1, shift2;
+    I order, ldw;
     size_t offsetA1, offsetA2;
     size_t offsetV1, offsetV2;
 
@@ -587,8 +585,8 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
 
     auto const blocksx = ceil(ldw, BS2);
     auto const blocksy = ceil(order, BS2);
-    ROCSOLVER_LAUNCH_KERNEL(copymatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
-                            stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
+    ROCSOLVER_LAUNCH_KERNEL((copymatA1<T, I>), dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2),
+                            0, stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     // compute: V1' * A1
     //   or    A1 * V1
@@ -646,8 +644,8 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
 
     // compute: A1 - V1 * trans(T) * (V1' * A1 + V2' * A2)
     //    or    A1 - (A1 * V1 + A2 * V2) * trans(T) * V1'
-    ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
-                            stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
+    ROCSOLVER_LAUNCH_KERNEL((addmatA1<T, I>), dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2),
+                            0, stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
 
     return rocblas_status_success;
 }

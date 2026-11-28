@@ -36,18 +36,18 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 void lahr2_checkBadArgs(const rocblas_handle handle,
-                        const rocblas_int n,
-                        const rocblas_int k,
-                        const rocblas_int nb,
+                        const I n,
+                        const I k,
+                        const I nb,
                         U dA,
-                        const rocblas_int lda,
+                        const I lda,
                         T* dTau,
                         T* dT,
-                        const rocblas_int ldt,
+                        const I ldt,
                         T* dY,
-                        const rocblas_int ldy)
+                        const I ldy)
 {
     // handle
     EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(nullptr, n, k, nb, dA, lda, dTau, dT, ldt, dY, ldy),
@@ -67,21 +67,21 @@ void lahr2_checkBadArgs(const rocblas_handle handle,
                           rocblas_status_invalid_pointer);
 
     // quick return with invalid pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, 0, k, nb, (U) nullptr, lda, dTau, dT, ldt, dY, ldy),
+    EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, (I)0, k, nb, (U) nullptr, lda, dTau, dT, ldt, dY, ldy),
                           rocblas_status_success);
 }
 
-template <typename T>
+template <typename T, typename I>
 void testing_lahr2_bad_arg()
 {
     // safe arguments
     rocblas_local_handle handle;
-    rocblas_int n = 5;
-    rocblas_int k = 1;
-    rocblas_int nb = 2;
-    rocblas_int lda = 5;
-    rocblas_int ldt = 2;
-    rocblas_int ldy = 5;
+    I n = 5;
+    I k = 1;
+    I nb = 2;
+    I lda = 5;
+    I ldt = 2;
+    I ldy = 5;
 
 #ifdef ROCSOLVER_ENABLE_HESSENBERG
     // memory allocations
@@ -99,18 +99,18 @@ void testing_lahr2_bad_arg()
 #endif
 }
 
-template <bool CPU, bool GPU, typename T, typename Td, typename Th>
+template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Th>
 void lahr2_initData(const rocblas_handle handle,
-                    const rocblas_int n,
-                    const rocblas_int k,
-                    const rocblas_int nb,
+                    const I n,
+                    const I k,
+                    const I nb,
                     Td& dA,
-                    const rocblas_int lda,
+                    const I lda,
                     Td& dTau,
                     Td& dT,
-                    const rocblas_int ldt,
+                    const I ldt,
                     Td& dY,
-                    const rocblas_int ldy,
+                    const I ldy,
                     Th& hA,
                     Th& hTau,
                     Th& hT,
@@ -129,18 +129,18 @@ void lahr2_initData(const rocblas_handle handle,
     }
 }
 
-template <typename T, typename Td, typename Th>
+template <typename T, typename I, typename Td, typename Th>
 void lahr2_getError(const rocblas_handle handle,
-                    const rocblas_int n,
-                    const rocblas_int k,
-                    const rocblas_int nb,
+                    const I n,
+                    const I k,
+                    const I nb,
                     Td& dA,
-                    const rocblas_int lda,
+                    const I lda,
                     Td& dTau,
                     Td& dT,
-                    const rocblas_int ldt,
+                    const I ldt,
                     Td& dY,
-                    const rocblas_int ldy,
+                    const I ldy,
                     Th& hA,
                     Th& hARes,
                     Th& hTau,
@@ -179,18 +179,18 @@ void lahr2_getError(const rocblas_handle handle,
     *max_err = err > *max_err ? err : *max_err;
 }
 
-template <typename T, typename Td, typename Th>
+template <typename T, typename I, typename Td, typename Th>
 void lahr2_getPerfData(const rocblas_handle handle,
-                       const rocblas_int n,
-                       const rocblas_int k,
-                       const rocblas_int nb,
+                       const I n,
+                       const I k,
+                       const I nb,
                        Td& dA,
-                       const rocblas_int lda,
+                       const I lda,
                        Td& dTau,
                        Td& dT,
-                       const rocblas_int ldt,
+                       const I ldt,
                        Td& dY,
-                       const rocblas_int ldy,
+                       const I ldy,
                        Th& hA,
                        Th& hTau,
                        Th& hT,
@@ -254,17 +254,17 @@ void lahr2_getPerfData(const rocblas_handle handle,
     *gpu_time_used = timer.get_combined();
 }
 
-template <typename T>
+template <typename T, typename I>
 void testing_lahr2(Arguments& argus)
 {
     // get arguments
     rocblas_local_handle handle;
-    rocblas_int n = argus.get<rocblas_int>("n");
-    rocblas_int k = argus.get<rocblas_int>("k", 1);
-    rocblas_int nb = argus.get<rocblas_int>("nb", std::max(0, n - k));
-    rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_int ldt = argus.get<rocblas_int>("ldt", nb);
-    rocblas_int ldy = argus.get<rocblas_int>("ldy", n);
+    I n = argus.get<I>("n");
+    I k = argus.get<I>("k", 1);
+    I nb = argus.get<I>("nb", std::max<I>(0, n - k));
+    I lda = argus.get<I>("lda", n);
+    I ldt = argus.get<I>("ldt", nb);
+    I ldy = argus.get<I>("ldy", n);
 
     rocblas_int hot_calls = argus.iters;
 
@@ -299,7 +299,7 @@ void testing_lahr2(Arguments& argus)
 
     // check invalid sizes (n<=1 is quick return, not invalid)
     bool invalid_size = (n < 0 || k < 1 || nb < 0 || (n > 1 && (nb < 1 || k >= n || nb > n - k))
-                         || lda < std::max(1, n) || ldt < nb || ldy < std::max(1, n));
+                         || lda < std::max<I>(1, n) || ldt < nb || ldy < std::max<I>(1, n));
     if(invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(rocsolver_lahr2(handle, n, k, nb, (T*)nullptr, lda, (T*)nullptr,
@@ -412,4 +412,4 @@ void testing_lahr2(Arguments& argus)
 
 #define EXTERN_TESTING_LAHR2(...) extern template void testing_lahr2<__VA_ARGS__>(Arguments&);
 
-INSTANTIATE(EXTERN_TESTING_LAHR2, FOREACH_SCALAR_TYPE, APPLY_STAMP)
+INSTANTIATE(EXTERN_TESTING_LAHR2, FOREACH_SCALAR_TYPE, FOREACH_INT_TYPE, APPLY_STAMP)
