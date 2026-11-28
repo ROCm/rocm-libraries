@@ -73,8 +73,9 @@ set(CMAKE_CXX_COMPILER "${ROCM_LLVM_BIN_DIR}/clang++${_ROCM_COMPILER_EXTENSION}"
 
 # Some Windows components (e.g. hipDNN) embed a VERSIONINFO resource that needs a resource compiler.
 # Prefer llvm-rc from the ROCm LLVM toolchain, then any rc on PATH. If none is found, mark RC as
-# not-required so configuration still succeeds; components guard their .rc sources on a real compiler
-# and warn when version metadata will be omitted.
+# not-required so that enabling RC does not fail. Each component decides what a missing compiler
+# means: some warn and omit version metadata, while those using rocm_libraries_add_version_resource
+# (hipBLASLt, origami) fail configuration unless ROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE is OFF.
 if(WIN32 AND NOT CMAKE_RC_COMPILER)
     find_program(_ROCM_RC_COMPILER NAMES llvm-rc rc HINTS "${ROCM_LLVM_BIN_DIR}")
     if(_ROCM_RC_COMPILER)
