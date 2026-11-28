@@ -490,7 +490,9 @@ class StreamK(TileProcessingStrategy):
         (T = TotalItems). The pop, validity check and counter wrap keep i.
         Emitted only for WorkGroupMappingXCC == -1; taken only when the static
         remap would be the same (runtime WGMXCC == numQueues, chunk <= 1),
-        TotalItems <= the grid and there are no split tiles.
+        TotalItems <= the grid, whatever the split: each part's tile and part
+        index come from the renumbered item, and the fixup sums partials in
+        part order, so neither depends on which queue ran a part.
         """
         module = Module("StreamK contiguousQueueItem")
         partition = self.queuePartition()
@@ -500,12 +502,10 @@ class StreamK(TileProcessingStrategy):
         skDone = Label(writer.labels.getNameInc("SK_ContiguousItemDone"), "")
         sQ = writer.sgprPool.checkOut(1, "contiguousQ")
         sTmp = writer.sgprPool.checkOut(1, "contiguousTmp")
-        # With more than one round or split tiles, the static remap walks
-        # tiles round by round, which the interleaved order already follows.
+        # With more than one round, the static remap walks tiles round by
+        # round, which the interleaved order already follows.
         module.add(SCmpGtU32(src0=sgpr(partition.total_items), src1=sgpr(partition.grid), comment="more items than workgroups?"))
         module.add(SCBranchSCC1(labelName=skDone.getLabelName(), comment="yes: keep the interleaved order"))
-        module.add(SCmpEQU32(src0=sgpr(self.splitTilesSgpr), src1=0, comment="whole tiles?"))
-        module.add(SCBranchSCC0(labelName=skDone.getLabelName(), comment="no: keep the interleaved order"))
         # WGM bits: chunk [21:14], WGMXCC [13:10]. Mask chunk bit 0 so chunk 0 and 1 both match.
         module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr("WGM"), src1=hex(0x3FBC00), comment="WGMXCC, chunk > 1 bits"))
         module.add(SCmpEQU32(src0=sgpr(sTmp), src1=hex(numQueues << 10), comment="static uses the contiguous remap?"))
