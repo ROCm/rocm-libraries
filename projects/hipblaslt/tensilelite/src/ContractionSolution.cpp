@@ -3998,6 +3998,17 @@ namespace TensileLite
                     rv.args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
                     break;
                 }
+                case CustomArgSemantic::AIDPlacementBit:
+                {
+                    auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+                    std::optional<int32_t> const bit
+                        = hipAMDGPU ? hipAMDGPU->aidPlacementBit() : std::nullopt;
+                    if(!bit)
+                        throw std::runtime_error(concatenate(
+                            name(), " needs the die bit, known on amdgpu 6.19 and newer"));
+                    rv.args.template append<int32_t>("AIDPlacementBit", *bit);
+                    break;
+                }
                 case CustomArgSemantic::BatchOffsetD:
                     rv.args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
                     break;
@@ -7287,6 +7298,17 @@ namespace TensileLite
         }
 
         return obstacle.empty();
+    }
+
+    bool ContractionSolution::aidPlacementSupported(Hardware const& hardware) const
+    {
+        auto const& args = customKernel.args;
+        if(std::none_of(args.begin(), args.end(), [](CustomArgDefinition const& arg) {
+               return arg.semantic == CustomArgSemantic::AIDPlacementBit;
+           }))
+            return true;
+        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        return hipAMDGPU && hipAMDGPU->aidPlacementBit().has_value();
     }
 
     bool ContractionSolution::deviceScalarAlphaSupported(Problem const& problem) const

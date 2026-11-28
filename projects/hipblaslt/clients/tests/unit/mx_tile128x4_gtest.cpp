@@ -183,7 +183,7 @@ TEST(HostUnitMXTile128x4, smoke_PartialTilesAreRejected)
                  std::invalid_argument);
 }
 
-// Each tile order permutes the 24576 tile bytes, and P48 and P16 move bytes that
+// Each tile order permutes the 24576 tile bytes, and the 48-byte and 16-byte orders move bytes that
 // HIPBLASLT_ORDER_COL256_R128_EXT keeps in place, and each other's.
 TEST(HostUnitMXTile128x4, smoke_TileOrdersArePermutationsDistinctFromCol256R128)
 {
@@ -244,7 +244,7 @@ TEST(HostUnitMXTile128x4, smoke_TileOrderDataLandsAtItsOffsets)
     }
 }
 
-// Every 3072-byte piece of every tile at every K tile lands at the page24 offset, at a
+// Every 3072-byte piece of every tile at every K tile lands at the near-die offset, at a
 // distinct place inside the buffer; split tiles t and t + 8 share a block in two halves.
 TEST(HostUnitMXTile128x4, smoke_PlacedPiecesFollowThePage24Layout)
 {

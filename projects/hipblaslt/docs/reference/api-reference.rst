@@ -318,7 +318,7 @@ and writes C, which must not overlap. ``HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSA``
   ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Adesc and Cdesc are ``HIP_R_8F_UE8M0`` in
   ``HIPBLASLT_ORDER_COL``, with 2048 rows, 4096 columns, and ``ld = 2048``.
 
-It also places such an operand for the page24 GEMM, writing only the bytes the destination layout places:
+It also places such an operand for the near-die GEMM, writing only the bytes the destination layout places:
 
 * A data: Adesc is ``HIP_R_6F_E2M3`` or ``HIP_R_6F_E3M2`` in ``HIPBLASLT_ORDER_COL256_R128_P48_EXT``, with
   65536 rows, 4096 columns, and ``ld = 65536``. Cdesc is the same in

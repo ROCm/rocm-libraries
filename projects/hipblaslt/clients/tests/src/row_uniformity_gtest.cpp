@@ -55,6 +55,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <ios>
@@ -62,6 +63,7 @@
 #include <map>
 #include <memory>
 #include <random>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1178,7 +1180,23 @@ namespace
         int64_t     k;
         const char* gfx950Pick;
         bool        tiledB;
+        // The order of A, and of B when tiledB is set; B is HIPBLASLT_ORDER_COL otherwise.
+        hipblasLtOrder_t        order     = HIPBLASLT_ORDER_COL256_R128_EXT;
+        mx_tile128x4::TileOrder tileOrder = mx_tile128x4::TileOrder::COL256_R128;
+        // The layout field of the kernel name, right after the shape.
+        const char* layoutToken = "c0c1";
+        // A in order 107 with its scales placed, B in order 108: the 48-byte tiles, placed on the host.
+        bool placed = false;
     };
+
+    // Whether this machine's amdgpu selects the near-die kernels: 6.19 or newer.
+    bool amdgpuHasAidRule()
+    {
+        std::ifstream in("/sys/module/amdgpu/version");
+        std::string   version;
+        std::getline(in, version);
+        return TensileLite::hip::page24RuleHolds(version);
+    }
 
     // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
     bool onMXFp6RegisteredChip()
@@ -1214,7 +1232,7 @@ namespace
     }
 
     // The gfx950 MXFP6 custom kernels on the 128x4 scale layout, with A, and B when
-    // tiledB is set, in the COL256_R128 data layout, declare uniformSummationOrder. They
+    // tiledB is set, in a COL256_R128 order, declare uniformSummationOrder. They
     // need beta == 0, which the C heuristic never assumes, so the case goes through the
     // extension API. Every row of the transposed A
     // holds the same values, but each (row, K block) picks one of two encodings, v at
@@ -1224,7 +1242,9 @@ namespace
     // depends on the summation order, by more than D's bf16 precision.
     // A second run on the same data lowers those two blocks' scales into the small
     // range. Every partial sum is then exact in fp32 in any order, so sampled D must
-    // equal the exact dot product rounded to bf16.
+    // equal the exact dot product rounded to bf16. With placed A, a third run zeroes the
+    // second copy of each of A's placed scales, which half of the column tiles read, and
+    // sampled D must then differ from the exact sum.
     TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
     {
         const MXFp6Case&  c       = GetParam();
@@ -1236,10 +1256,16 @@ namespace
         constexpr int64_t large0  = 0;
         const int64_t     large1  = kBlocks / 2;
         constexpr int     one     = 127;
-        // One kernel per registered K and B order: the pick must be the one built for them.
+        // One kernel per registered K and pair of orders: the pick must be the one built
+        // for them.
         const std::string kTag           = "_4096x4096x" + std::to_string(k) + "_";
         auto              isExpectedPick = [&](const std::string& pick) {
-            return pick.rfind(c.gfx950Pick, 0) == 0 && pick.find(kTag) != std::string::npos
+            const size_t      at = pick.find(kTag);
+            const std::string layout = at == std::string::npos ? "" : pick.substr(at + kTag.size());
+            const std::string token = c.layoutToken;
+            return pick.rfind(c.gfx950Pick, 0) == 0 && at != std::string::npos
+                   && layout.rfind(token, 0) == 0
+                   && (layout.size() == token.size() || layout[token.size()] == '_')
                    && (pick.find("_Acanonical_") == std::string::npos) == c.tiledB;
         };
 
@@ -1247,6 +1273,8 @@ namespace
             GTEST_SKIP() << "No GPU available";
         if(!onMXFp6RegisteredChip())
             GTEST_SKIP() << kMXFp6ChipSkip;
+        if(c.placed && !amdgpuHasAidRule())
+            GTEST_SKIP() << "The near-die kernels are selected on amdgpu 6.19 and newer";
 
         std::mt19937                       rng(0x6d786636u);
         std::uniform_int_distribution<int> valueOf{-4, 4};
@@ -1309,7 +1337,8 @@ namespace
                 mx_tile128x4::tileFp6Data(dataB.data() + (col - blockRow) * rowBytes,
                                           packedBlock.data(),
                                           mx_tile128x4::kTileRows,
-                                          k);
+                                          k,
+                                          c.tileOrder);
         }
 
         // The device sums whole-block products, each exact; only the order in which the
@@ -1366,12 +1395,26 @@ namespace
                 mx_tile128x4::tileFp6Data(tiledA.data() + (row - blockRow) * rowBytes,
                                           packedBlock.data(),
                                           mx_tile128x4::kTileRows,
-                                          k);
+                                          k,
+                                          c.tileOrder);
         }
         packedBlock = {};
 
-        const std::vector<uint8_t> shuffledA = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
+        auto layoutScalesA = [&](const std::vector<uint8_t>& raw) {
+            return c.placed ? mx_tile128x4::placeScales(raw, kBlocks)
+                            : mx_tile128x4::shuffleScales(raw, m, kBlocks);
+        };
+        const std::vector<uint8_t> shuffledA = layoutScalesA(scalesA);
         const std::vector<uint8_t> shuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
+        if(c.placed)
+        {
+            std::vector<uint8_t> placedA(mx_tile128x4::placedFp6Bytes(m, false), 0);
+            mx_tile128x4::placeP48Tiles(placedA.data(), tiledA.data(), m, k, false);
+            tiledA = std::move(placedA);
+            std::vector<uint8_t> placedB(mx_tile128x4::placedFp6Bytes(n, true), 0);
+            mx_tile128x4::placeP48Tiles(placedB.data(), dataB.data(), n, k, true);
+            dataB = std::move(placedB);
+        }
 
         // The exact run: the large blocks at the small range's top scale, so every block
         // product is a multiple of 2^-6 of magnitude at most 512.
@@ -1382,8 +1425,7 @@ namespace
             for(const int64_t kb : {large0, large1})
                 bScale[col * kBlocks + kb] -= 10;
         aScale[large0] = aScale[large1] = one;
-        const std::vector<uint8_t> exactShuffledA
-            = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
+        const std::vector<uint8_t> exactShuffledA = layoutScalesA(scalesA);
         const std::vector<uint8_t> exactShuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
         scalesA.clear();
         scalesA.shrink_to_fit();
@@ -1451,6 +1493,7 @@ namespace
 
         std::vector<uint16_t> hostD(static_cast<size_t>(m * n));
         std::vector<uint16_t> exactD(static_cast<size_t>(m * n));
+        std::vector<uint16_t> brokenD;
         {
             const float alpha = 1.0f;
             const float beta  = 0.0f;
@@ -1462,11 +1505,15 @@ namespace
                                                        HIP_R_16BF,
                                                        HIP_R_16BF,
                                                        HIPBLAS_COMPUTE_32F);
-            problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
-            if(c.tiledB)
-                problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+            problemType.setOrderA(c.order);
+            if(c.placed)
+                problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT);
+            else if(c.tiledB)
+                problemType.setOrderB(c.order);
             hipblaslt_ext::GemmEpilogue epilogue;
-            epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            epilogue.setScalingAType(c.placed
+                                         ? HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT
+                                         : HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
             epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
             hipblaslt_ext::GemmInputs inputs;
             inputs.setA(dA);
@@ -1549,6 +1596,24 @@ namespace
                          exactD.data(), dD, exactD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
                          == hipSuccess;
             EXPECT_TRUE(ranExact || !ran) << pick << " could not be run with the exact scales";
+            if(c.placed && ranExact)
+            {
+                std::vector<uint8_t> broken = exactShuffledA;
+                for(size_t x = 0; x < static_cast<size_t>(m * kBlocks); ++x)
+                    broken[mx_tile128x4::page24ScaleOffset(x, 1)] = 0;
+                brokenD.resize(hostD.size());
+                const bool ranBroken
+                    = hipMemcpy(dScaleA, broken.data(), broken.size(), hipMemcpyHostToDevice)
+                          == hipSuccess
+                      && gemm.run(stream) == HIPBLAS_STATUS_SUCCESS
+                      && hipStreamSynchronize(stream) == hipSuccess
+                      && hipMemcpy(brokenD.data(),
+                                   dD,
+                                   brokenD.size() * sizeof(uint16_t),
+                                   hipMemcpyDeviceToHost)
+                             == hipSuccess;
+                EXPECT_TRUE(ranBroken) << pick << " could not be run with the broken scales";
+            }
         }
         static_cast<void>(hipStreamDestroy(stream));
         hipblasLtDestroy(handle);
@@ -1591,6 +1656,19 @@ namespace
             }
         }
         EXPECT_EQ(mismatches, 0) << "sampled outputs differ from the exact sum";
+
+        if(c.placed)
+        {
+            int brokenMismatches = 0;
+            for(const int64_t col : sampleCols)
+                for(const int64_t row : sampleRows)
+                    brokenMismatches
+                        += brokenD[col * m + row]
+                           != bf16BitsRne(std::ldexp(static_cast<double>(exactSum[col]), -6));
+            EXPECT_GT(brokenMismatches, 0)
+                << "Zeroing the second copy of A's placed scales left every sampled output "
+                   "exact, so this check cannot tell where the kernel reads them";
+        }
     }
 
     // Every kernel in the quick tier, so every pull request on a registered chip runs
@@ -1604,7 +1682,57 @@ namespace
                 "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false},
             MXFp6Case{"E3M2_K65536", HIP_R_6F_E3M2, 65536, "rocke_gemm_mx_e3m2_e3m2_", true},
             MXFp6Case{"E2M3_K131584", HIP_R_6F_E2M3, 131584, "rocke_gemm_mx_e2m3_e2m3_", true},
-            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true}),
+            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{"E2M3_K65536_P48",
+                      HIP_R_6F_E2M3,
+                      65536,
+                      "rocke_gemm_mx_e2m3_e2m3_",
+                      true,
+                      HIPBLASLT_ORDER_COL256_R128_P48_EXT,
+                      mx_tile128x4::TileOrder::P48,
+                      "c0c1p48"},
+            MXFp6Case{"E3M2_K65536_P48",
+                      HIP_R_6F_E3M2,
+                      65536,
+                      "rocke_gemm_mx_e3m2_e3m2_",
+                      true,
+                      HIPBLASLT_ORDER_COL256_R128_P48_EXT,
+                      mx_tile128x4::TileOrder::P48,
+                      "c0c1p48"},
+            MXFp6Case{"E2M3_K65536_P16_CanonicalB",
+                      HIP_R_6F_E2M3,
+                      65536,
+                      "rocke_gemm_mx_e2m3_e2m3_",
+                      false,
+                      HIPBLASLT_ORDER_COL256_R128_P16_EXT,
+                      mx_tile128x4::TileOrder::P16,
+                      "c0c1p"},
+            MXFp6Case{"E3M2_K65536_P16_CanonicalB",
+                      HIP_R_6F_E3M2,
+                      65536,
+                      "rocke_gemm_mx_e3m2_e3m2_",
+                      false,
+                      HIPBLASLT_ORDER_COL256_R128_P16_EXT,
+                      mx_tile128x4::TileOrder::P16,
+                      "c0c1p"},
+            MXFp6Case{"E2M3_K65536_Page24",
+                      HIP_R_6F_E2M3,
+                      65536,
+                      "rocke_gemm_mx_e2m3_e2m3_",
+                      true,
+                      HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT,
+                      mx_tile128x4::TileOrder::P48,
+                      "c0c1p48_ka941ce3864",
+                      true},
+            MXFp6Case{"E3M2_K65536_Page24",
+                      HIP_R_6F_E3M2,
+                      65536,
+                      "rocke_gemm_mx_e3m2_e3m2_",
+                      true,
+                      HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT,
+                      mx_tile128x4::TileOrder::P48,
+                      "c0c1p48_ka941ce3864",
+                      true}),
         [](const ::testing::TestParamInfo<MXFp6Case>& info) {
             return std::string(info.param.name);
         });

@@ -1649,7 +1649,7 @@ hipblasStatus_t
  * leading dimension in Adesc and Cdesc), and its scales to
  * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` (see
  * ``HIPBLASLT_MATRIX_TRANSFORM_DESC_C_SCALE_MODE_EXT``). It also places such an operand for the
- * page24 GEMM: data from ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` to
+ * near-die GEMM: data from ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` to
  * ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT`` (A) or
  * ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT`` (B), and A's scales from
  * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` to
@@ -1657,7 +1657,7 @@ hipblasStatus_t
  * layouts place. A pack reads A and writes C, which must
  * not overlap. It needs ``HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSA`` to be ``HIPBLAS_OP_N`` and B
  * to be NULL, does not read alpha or beta, and returns ``HIPBLAS_STATUS_ARCH_MISMATCH`` on other
- * devices. A page24 placement reads ``/sys/module/amdgpu/version`` and returns
+ * devices. A near-die placement reads ``/sys/module/amdgpu/version`` and returns
  * ``HIPBLAS_STATUS_NOT_SUPPORTED`` without writing C on a driver other than amdgpu 6.19 or 7.1. Any other ``HIPBLASLT_ORDER_COL256_R128_*`` order or
  * block-scale mode, and any other shape, returns ``HIPBLAS_STATUS_INVALID_VALUE``.
  * @param[in]  lightHandle   Pointer to the allocated hipBLASLt handle for the

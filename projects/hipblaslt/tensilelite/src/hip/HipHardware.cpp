@@ -30,6 +30,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -63,7 +64,53 @@ namespace TensileLite
                 std::snprintf(base.gcnArchName, sizeof(base.gcnArchName), "%s", name.c_str());
                 return base;
             }
+
+            std::string const& amdgpuModuleVersion()
+            {
+                static std::string const version = [] {
+                    std::ifstream file("/sys/module/amdgpu/version");
+                    std::string   text;
+                    file >> text;
+                    return text;
+                }();
+                return version;
+            }
+
+            long long readXgmiPhysicalId(hipDeviceProp_t const& prop)
+            {
+                char bdf[32]{};
+                std::snprintf(bdf,
+                              sizeof(bdf),
+                              "%04x:%02x:%02x.0",
+                              static_cast<unsigned>(prop.pciDomainID),
+                              static_cast<unsigned>(prop.pciBusID),
+                              static_cast<unsigned>(prop.pciDeviceID));
+                std::ifstream file(std::string("/sys/bus/pci/devices/") + bdf + "/xgmi_physical_id");
+                long long     id = -1;
+                if(!(file >> id) || id < 0)
+                    return -1;
+                return id;
+            }
         } // namespace
+
+        bool page24RuleHolds(std::string const& amdgpuVersion)
+        {
+            std::istringstream in(amdgpuVersion);
+            int                major = -1, minor = -1;
+            char               dot   = 0;
+            // The die bit is xgmi_physical_id & 1 from amdgpu 6.19 on. Older
+            // drivers, including 6.16, do not provide that bit.
+            return (in >> major >> dot >> minor) && dot == '.' && major >= 0 && minor >= 0
+                   && (major > 6 || (major == 6 && minor >= 19));
+        }
+
+        std::optional<int32_t> aidPlacementBit(std::string const& amdgpuVersion,
+                                               long long          xgmiPhysicalId)
+        {
+            if(!page24RuleHolds(amdgpuVersion) || xgmiPhysicalId < 0)
+                return std::nullopt;
+            return static_cast<int32_t>(xgmiPhysicalId & 1);
+        }
 
         HipAMDGPU::HipAMDGPU(hipDeviceProp_t const& prop,
                              int                    deviceId,
@@ -74,6 +121,8 @@ namespace TensileLite
                      pciChipId)
             , properties(prop)
             , deviceId(deviceId)
+            , amdgpuVersion(amdgpuModuleVersion())
+            , xgmiPhysicalId(readXgmiPhysicalId(prop))
         {
             // Both entry points read gcnArchName out of the properties they are
             // handed, so the same renamed copy has to reach both: renaming only
@@ -104,15 +153,9 @@ namespace TensileLite
             }
         }
 
-        bool page24RuleHolds(std::string const& amdgpuVersion)
+        std::optional<int32_t> HipAMDGPU::aidPlacementBit() const
         {
-            std::istringstream in(amdgpuVersion);
-            int                major = -1, minor = -1;
-            char               dot   = 0;
-            // The die bit is xgmi_physical_id & 1 from amdgpu 6.19 on. Older
-            // drivers, including 6.16, do not provide that bit.
-            return (in >> major >> dot >> minor) && dot == '.' && major >= 0 && minor >= 0
-                   && (major > 6 || (major == 6 && minor >= 19));
+            return hip::aidPlacementBit(amdgpuVersion, xgmiPhysicalId);
         }
 
         std::string HipAMDGPU::archName() const

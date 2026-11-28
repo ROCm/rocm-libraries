@@ -129,10 +129,13 @@ namespace TensileLite
             // Sites that gained this conjunction with the per-tile split mapping
             // reach it through selectionPredicate(), which with USO off falls back
             // to the narrower problemPredicate && taskPredicate it subsumes.
+            // aidPlacementSupported() rejects kernels that need the AID placement
+            // bit on drivers where it is unknown, in both functions.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
                    && solutions.uniformSummationOrderSupported(problem, hardware)
-                   && solutions.deviceScalarAlphaSupported(problem);
+                   && solutions.deviceScalarAlphaSupported(problem)
+                   && solutions.aidPlacementSupported(hardware);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING:
@@ -148,7 +151,8 @@ namespace TensileLite
     }
 
     // With USO off this applies only problemPredicate && taskPredicate &&
-    // hardwarePredicate, plus the independent device-scalar capability check.
+    // hardwarePredicate, plus the independent device-scalar and AID placement
+    // capability checks.
     // With USO on, softwarePredicate() adds
     // streamKDynamicQueueSupported() and uniformSummationOrderSupported(), both
     // live filters on that arm. hardwarePredicate keeps each arm's original
@@ -167,7 +171,8 @@ namespace TensileLite
 
         return (*solution.problemPredicate)(problem) && (*solution.taskPredicate)(task)
                && (*solution.hardwarePredicate)(hardware)
-               && solution.deviceScalarAlphaSupported(problem);
+               && solution.deviceScalarAlphaSupported(problem)
+               && solution.aidPlacementSupported(hardware);
     }
 
     template <typename MySolution>
