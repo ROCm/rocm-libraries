@@ -93,6 +93,8 @@ TEST(RocprimConfigDispatchTests, GetTargetArch)
     ASSERT_TRUE(get_target_arch_from_name("gfx803", 6) == target_arch::gfx803);
     static_assert(get_target_arch_from_name("gfx1250-strict", 14) == target_arch::gfx1250);
     ASSERT_TRUE(get_target_arch_from_name("gfx1250-strict", 14) == target_arch::gfx1250);
+    static_assert(get_target_arch_from_name("gfx1251", 7) == target_arch::gfx1251);
+    ASSERT_TRUE(get_target_arch_from_name("gfx1251", 7) == target_arch::gfx1251);
 }
 
 TEST(RocprimConfigDispatchTests, HostMatchesDevice)
@@ -158,6 +160,7 @@ TEST(RocprimConfigDispatchTests, ParseCommonArches)
     ASSERT_EQ(parse_gcn_arch("gfx1250"), target_arch::gfx1250);
     ASSERT_EQ(parse_gcn_arch("gfx1250-strict"), target_arch::gfx1250);
     ASSERT_EQ(parse_gcn_arch("gfx1250-strict:sramecc+:xnack-"), target_arch::gfx1250);
+    ASSERT_EQ(parse_gcn_arch("gfx1251"), target_arch::gfx1251);
 }
 
 #ifndef _WIN32

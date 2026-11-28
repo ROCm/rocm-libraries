@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.4.0 for ROCm 10.4.0
+
+### Added
+
+* gfx1251 support.
+
 ## rocRAND 5.3.0 for ROCm 10.3.0
 
 ### Changed

@@ -376,7 +376,7 @@ namespace detail
     {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
 #if ROCPRIM_TARGET_CDNA5
-        // CDNA5 (gfx1250) splits waitcnt: wait for all store counts to complete
+        // CDNA5 (gfx1250/gfx1251) splits waitcnt: wait for all store counts to complete
         asm volatile("s_wait_storecnt 0x0" : : : "memory");
 #else
         // Wait until all vmem operations complete (s_waitcnt vmcnt(0))
@@ -396,7 +396,7 @@ namespace detail
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_acquire_order_only()
     {
 #if ROCPRIM_TARGET_CDNA5
-        // CDNA5 (gfx1250) splits waitcnt: wait for all load counts to complete
+        // CDNA5 (gfx1250/gfx1251) splits waitcnt: wait for all load counts to complete
         asm volatile("s_wait_loadcnt 0x0" : : : "memory");
 #else
         __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));

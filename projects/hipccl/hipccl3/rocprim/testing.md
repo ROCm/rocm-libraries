@@ -163,6 +163,7 @@ GPU targets come from the top-level `CMakeLists.txt` default target list (`GPU_T
 | gfx908 / gfx906 | Full | Nightly / Release | |
 | gfx103x / gfx11xx (incl. gfx1151) | Full | PR / Nightly | |
 | gfx120x / gfx1250 | Partial | Nightly | Newer targets in default list |
+| gfx1251 | Build default only | None | In the default target list; no CI target builds or runs it |
 
 **Explicitly not guaranteed:** multi-GPU validation is opportunistic (depends on host GPU count via CTest resource allocation) and not a formal gate; non-listed gfx targets are not validated; specific Windows suites on gfx110X/gfx1151 are explicitly not run.
 
