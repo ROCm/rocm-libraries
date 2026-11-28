@@ -13,6 +13,11 @@ Workflow inputs are passed as -f name=value, as with gh workflow run. They are
 checked against the workflow_dispatch inputs of the workflow file on the
 target branch, so a renamed or removed input fails before dispatching.
 
+status (and dispatch --dry-run, with --pr) warns, read-only, when the PR's own
+CI will not run: a draft without the ci:run-on-draft label, or a merge
+conflict with the base. status and watch report the effective test tier from
+the run's "Configure test matrix (<family>)" jobs.
+
 Examples:
     # Dry-run TheRock CI for integration-tests on gfx94X (current branch)
     python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci \\
@@ -246,6 +251,156 @@ def pr_branch(pr_number):
         )
         sys.exit(1)
     return head["headRefName"]
+
+
+DRAFT_LABEL = "ci:run-on-draft"
+
+
+def pr_ci_blockers(pr_number):
+    """Read-only: reasons the PR's own (pull_request) CI does not run.
+
+    Never changes the PR; adding the label is printed as a command to run only
+    after the user approves it.
+    """
+    state = _json_or_none(
+        _gh_quiet(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--repo",
+                REPO_ARG,
+                "--json",
+                "isDraft,mergeable,mergeStateStatus,labels",
+            ]
+        )
+    )
+    if state is None:
+        return [
+            f"PR #{pr_number}: gh pr view failed or returned invalid JSON; showing "
+            "PR checks without its draft/merge-conflict context"
+        ]
+    blockers = []
+    labels = {label.get("name") for label in state.get("labels") or []}
+    if state.get("isDraft") and DRAFT_LABEL not in labels:
+        blockers.append(
+            f"PR #{pr_number} is a draft without the '{DRAFT_LABEL}' label: TheRock "
+            "Multi-Arch CI skips its builds and tests on draft PRs. Mark it ready, "
+            "or, only after the user approves adding the label: gh api --hostname "
+            f"{HOST} -X POST repos/{REPO}/issues/{pr_number}/labels "
+            f"-f 'labels[]={DRAFT_LABEL}'"
+        )
+    if (
+        state.get("mergeable") == "CONFLICTING"
+        or state.get("mergeStateStatus") == "DIRTY"
+    ):
+        blockers.append(
+            f"PR #{pr_number} has a merge conflict with its base: GitHub runs no "
+            "pull_request workflow until it is resolved (only pull_request_target "
+            "ones such as PR Bot, Auto Label). Rebase or merge the "
+            "base; a dispatch does not fix the PR's checks."
+        )
+    elif state.get("mergeable") == "UNKNOWN":
+        blockers.append(
+            f"PR #{pr_number}: GitHub has not computed mergeability yet; re-check "
+            "for a merge conflict if no pull_request workflow starts"
+        )
+    return blockers
+
+
+def report_pr_ci_blockers(pr_number):
+    for blocker in pr_ci_blockers(pr_number):
+        print(f"warning: {blocker}", file=sys.stderr)
+
+
+TIER_LINE = re.compile(r"Requesting job (.+?) with test_type (\w+)")
+OVERRIDE_LINE = re.compile(r"Overriding test_type from '(\w+)' to '(\w+)'")
+
+
+def _gh_quiet(cmd):
+    """Run a read-only gh query; None instead of exiting when it fails."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        exit_not_found(cmd)
+    return result.stdout if result.returncode == 0 else None
+
+
+def _json_or_none(out):
+    """Parsed JSON of gh output; None when it is empty or not valid JSON."""
+    if not out:
+        return None
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+
+def effective_tiers(run_id):
+    """{configure job name: description} for the run's "Configure test matrix"
+    jobs. Those jobs receive the run's tier from the setup job and can
+    override it per family; the override, when present, shows up in the
+    job's own log alongside the requested tier."""
+    out = _gh_quiet(
+        ["gh", "run", "view", str(run_id), "--repo", REPO_ARG, "--json", "jobs"]
+    )
+    data = _json_or_none(out)
+    if not isinstance(data, dict):
+        return {}
+    tiers = {}
+    for job in data.get("jobs") or []:
+        name = job.get("name", "")
+        if "Configure test matrix (" not in name:
+            continue
+        if job.get("status") != "completed":
+            tiers[name] = f"not known yet ({job.get('status')})"
+            continue
+        # gh run view --job --log returns nothing for jobs of called workflows.
+        log = _gh_quiet(gh_api(f"repos/{REPO}/actions/jobs/{job['databaseId']}/logs"))
+        if log is None:
+            tiers[name] = "unknown (job log unavailable)"
+            continue
+        types = sorted({m.group(2) for m in TIER_LINE.finditer(log)})
+        desc = "/".join(types) if types else "unknown (no 'Requesting job' line)"
+        if "quick" in types:
+            desc += " (quick runs 1 shard per component)"
+        override = OVERRIDE_LINE.search(log)
+        if override:
+            desc += f", overridden from {override.group(1)}"
+        tiers[name] = desc
+    return tiers
+
+
+def report_tiers(run_id):
+    tiers = effective_tiers(run_id)
+    if not tiers:
+        return
+    print(f"\nEffective test tier of run {run_id} (from Configure test matrix):")
+    for name, desc in sorted(tiers.items()):
+        print(f"  {name}: {desc}")
+
+
+def newest_run_id(workflow_file, ref):
+    out = _gh_quiet(
+        [
+            "gh",
+            "run",
+            "list",
+            "--repo",
+            REPO_ARG,
+            "--workflow",
+            workflow_file,
+            "--branch",
+            ref,
+            "--limit",
+            "1",
+            "--json",
+            "databaseId",
+        ]
+    )
+    runs = _json_or_none(out)
+    return runs[0]["databaseId"] if isinstance(runs, list) and runs else None
 
 
 def resolve_branch(args):
@@ -488,6 +643,8 @@ def cmd_dispatch(args):
         )
         sys.exit(1)
     inputs = parse_fields(args.field)
+    if args.pr and args.dry_run:
+        report_pr_ci_blockers(args.pr)
     # Check the inputs against the workflow as it is on the target branch, so a
     # renamed or removed input fails here instead of being ignored by GitHub.
     declared = dispatch_inputs(workflow_text(workflow_file, ref))
@@ -560,6 +717,8 @@ def cmd_dispatch(args):
 
 
 def cmd_status(args):
+    if args.pr:
+        report_pr_ci_blockers(args.pr)
     if args.pr and not args.branch:
         cmd = ["gh", "pr", "checks", str(args.pr), "--repo", REPO_ARG]
         result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
@@ -574,6 +733,20 @@ def cmd_status(args):
             sys.exit(1)
         if stderr:
             print(stderr, file=sys.stderr)
+        head = _gh_quiet(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(args.pr),
+                "--repo",
+                REPO_ARG,
+                "--json",
+                "headRefName,isCrossRepository",
+            ]
+        )
+        head = json.loads(head) if head else {}
+        ref = None if head.get("isCrossRepository") else head.get("headRefName")
     else:
         ref = resolve_branch(args)
         print(f"Recent runs on '{ref}':\n")
@@ -591,6 +764,10 @@ def cmd_status(args):
             ],
             capture=False,
         )
+    if ref:
+        run_id = newest_run_id(WORKFLOWS["multi-arch"], ref)
+        if run_id:
+            report_tiers(run_id)
 
 
 def cmd_watch(args):
@@ -610,19 +787,19 @@ def cmd_watch(args):
         run_id = active["databaseId"]
         print(f"Watching '{active['workflowName']}' (run {run_id}):\n")
 
-    sys.exit(
-        subprocess.run(
-            [
-                "gh",
-                "run",
-                "watch",
-                str(run_id),
-                "--repo",
-                REPO_ARG,
-                "--exit-status",
-            ]
-        ).returncode
-    )
+    returncode = subprocess.run(
+        [
+            "gh",
+            "run",
+            "watch",
+            str(run_id),
+            "--repo",
+            REPO_ARG,
+            "--exit-status",
+        ]
+    ).returncode
+    report_tiers(run_id)
+    sys.exit(returncode)
 
 
 COMMANDS = {
@@ -718,7 +895,12 @@ points to.
         help="Dispatch for real; pass only after the --dry-run command was approved",
     )
 
-    sub.add_parser("status", help="Show CI check status for a PR or branch")
+    sub.add_parser(
+        "status",
+        help="Show CI check status for a PR or branch; with --pr, also why PR CI "
+        "would not run (draft, merge conflict); and the newest multi-arch run's "
+        "effective test tier",
+    )
 
     watch = sub.add_parser("watch", help="Watch an active CI run until it completes")
     watch.add_argument(

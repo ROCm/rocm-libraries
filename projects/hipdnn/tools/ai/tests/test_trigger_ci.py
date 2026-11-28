@@ -55,12 +55,26 @@ class FakeGh:
         self.pr_head = {
             "headRefName": "users/someone/feature",
             "isCrossRepository": False,
+            "isDraft": False,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "labels": [],
         }
         self.last_dispatch_id = 100
+        self.jobs = []
+        self.job_log = ""
+        # Raw stdout of "gh run view --json jobs"; None serves self.jobs.
+        self.run_view_out = None
+        # Raw stdout of the plain "gh run list" newest_run_id makes.
+        self.branch_runs_out = ""
         # Workflow file name -> text served instead of the checkout's copy.
         self.workflows = {}
         self.auth_error = ""
         self.local_head = HEAD_SHA
+        # Non-zero makes "gh run watch" return this exit code instead of 0.
+        self.watch_returncode = 0
+        # True makes "gh pr view" return empty stdout, as on a transient failure.
+        self.pr_view_fails = False
 
     def __call__(self, cmd, capture_output=False, text=False, check=False, **_):
         self.calls.append(cmd)
@@ -72,6 +86,10 @@ class FakeGh:
             )
         if cmd[:2] == ["gh", "api"] and "/contents/.github/workflows/" in cmd[-1]:
             return self._workflow_file(cmd)
+        if cmd[:3] == ["gh", "run", "watch"] and self.watch_returncode:
+            return subprocess.CompletedProcess(
+                cmd, self.watch_returncode, stdout="", stderr=""
+            )
         stdout = self._answer(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
@@ -90,9 +108,13 @@ class FakeGh:
         if cmd[:3] == ["gh", "auth", "status"]:
             return ""
         if cmd[:3] == ["gh", "pr", "view"]:
+            if self.pr_view_fails:
+                return ""
             return json.dumps(self.pr_head)
         if cmd[:2] == ["gh", "api"] and "/commits/" in cmd[4]:
             return HEAD_SHA
+        if cmd[:2] == ["gh", "api"] and "/actions/jobs/" in cmd[4]:
+            return self.job_log
         if cmd[:2] == ["gh", "api"] and "/actions/runs/" in cmd[4]:
             return json.dumps(self.baseline)
         if cmd[:3] == ["gh", "run", "list"] and "--commit" in cmd:
@@ -101,8 +123,14 @@ class FakeGh:
             return json.dumps([{"databaseId": self.last_dispatch_id}])
         if cmd[:3] == ["gh", "run", "list"] and "--status" in cmd:
             return json.dumps([{"databaseId": 7, "workflowName": "CI"}])
-        if cmd[:3] in (["gh", "run", "list"], ["gh", "pr", "checks"]):
+        if cmd[:3] == ["gh", "run", "list"]:
+            return self.branch_runs_out
+        if cmd[:3] == ["gh", "pr", "checks"]:
             return ""
+        if cmd[:3] == ["gh", "run", "view"] and "jobs" in cmd:
+            if self.run_view_out is not None:
+                return self.run_view_out
+            return json.dumps({"jobs": self.jobs})
         if cmd[:3] == ["gh", "run", "watch"]:
             return ""
         if cmd[:3] == ["gh", "workflow", "run"]:
@@ -571,6 +599,133 @@ def test_reuse_build_rejection_blocks_dispatch(trigger_mod, gh, monkeypatch):
     )
     assert code == 1
     assert gh.dispatched == []
+
+
+# --------------------------------------------------------------------------- #
+# Read-only PR CI blockers and the effective test tier
+# --------------------------------------------------------------------------- #
+
+PR_STATUS = ["--pr", "1", "status"]
+PR_DRY_RUN = ["--pr", "1", "dispatch", "-w", "multi-arch", "--dry-run"]
+
+
+def _writes(gh):
+    return [cmd for cmd in gh.calls if "-X" in cmd or cmd[:3] == ["gh", "pr", "edit"]]
+
+
+@pytest.mark.parametrize("argv", [PR_STATUS, PR_DRY_RUN], ids=["status", "dry-run"])
+def test_draft_without_label_warns_and_writes_nothing(
+    trigger_mod, gh, monkeypatch, capsys, argv
+):
+    gh.pr_head["isDraft"] = True
+    _run(trigger_mod, monkeypatch, *argv)
+    err = capsys.readouterr().err
+    assert "is a draft without the 'ci:run-on-draft' label" in err
+    assert "-X POST repos/ROCm/rocm-libraries/issues/1/labels" in err
+    assert _writes(gh) == [] and gh.dispatched == []
+
+
+def test_draft_with_label_does_not_warn(trigger_mod, gh, monkeypatch, capsys):
+    gh.pr_head.update(isDraft=True, labels=[{"name": "ci:run-on-draft"}])
+    _run(trigger_mod, monkeypatch, *PR_STATUS)
+    assert "draft" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "state",
+    [{"mergeable": "CONFLICTING"}, {"mergeStateStatus": "DIRTY"}],
+    ids=["conflicting", "dirty"],
+)
+def test_merge_conflict_warns(trigger_mod, gh, monkeypatch, capsys, state):
+    gh.pr_head.update(state)
+    _run(trigger_mod, monkeypatch, *PR_STATUS)
+    assert "has a merge conflict with its base" in capsys.readouterr().err
+    assert _writes(gh) == []
+
+
+def test_unknown_mergeability_is_noted(trigger_mod, gh, monkeypatch, capsys):
+    gh.pr_head["mergeable"] = "UNKNOWN"
+    _run(trigger_mod, monkeypatch, *PR_STATUS)
+    err = capsys.readouterr().err
+    assert "has not computed mergeability yet" in err
+    assert "merge conflict with its base" not in err
+
+
+def test_effective_tier_comes_from_configure_job_log(trigger_mod, gh):
+    gh.jobs = [
+        {
+            "name": "Configure test matrix (gfx94X)",
+            "status": "completed",
+            "databaseId": 5,
+        },
+        {"name": "Configure test matrix (gfx950)", "status": "in_progress"},
+        {"name": "setup", "status": "completed", "databaseId": 6},
+    ]
+    gh.job_log = (
+        "INFO:root:Requesting job hipdnn with test_type quick\n"
+        "Overriding test_type from 'standard' to 'quick'\n"
+    )
+    assert trigger_mod.effective_tiers(42) == {
+        "Configure test matrix (gfx94X)": "quick (quick runs 1 shard per component)"
+        ", overridden from standard",
+        "Configure test matrix (gfx950)": "not known yet (in_progress)",
+    }
+
+
+def test_effective_tiers_treats_non_json_output_as_unknown(trigger_mod, gh):
+    gh.run_view_out = "<html>502 Bad Gateway</html>"
+    assert trigger_mod.effective_tiers(42) == {}
+
+
+def test_newest_run_id_reads_the_first_run(trigger_mod, gh):
+    gh.branch_runs_out = json.dumps([{"databaseId": 77}])
+    assert trigger_mod.newest_run_id("therock-multi-arch-ci.yml", "main") == 77
+
+
+def test_newest_run_id_treats_non_json_output_as_no_run(trigger_mod, gh):
+    gh.branch_runs_out = "<html>502 Bad Gateway</html>"
+    assert trigger_mod.newest_run_id("therock-multi-arch-ci.yml", "main") is None
+
+
+def test_status_reports_tiers_for_own_pr(trigger_mod, gh, monkeypatch, capsys):
+    gh.branch_runs_out = json.dumps([{"databaseId": 55}])
+    gh.jobs = [
+        {
+            "name": "Configure test matrix (gfx94X)",
+            "status": "completed",
+            "databaseId": 5,
+        }
+    ]
+    gh.job_log = "INFO:root:Requesting job hipdnn with test_type quick\n"
+    _run(trigger_mod, monkeypatch, *PR_STATUS)
+    out = capsys.readouterr().out
+    assert "Configure test matrix (gfx94X)" in out
+    assert "quick" in out
+
+
+def test_status_cross_repo_pr_does_not_query_fork_branch(trigger_mod, gh, monkeypatch):
+    gh.pr_head.update(isCrossRepository=True, headRefName="fork-owner:feature-branch")
+    _run(trigger_mod, monkeypatch, *PR_STATUS)
+    assert not any(
+        cmd[:3] == ["gh", "run", "list"] and "fork-owner:feature-branch" in cmd
+        for cmd in gh.calls
+    )
+
+
+def test_watch_exits_with_gh_run_watchs_returncode(trigger_mod, gh, monkeypatch):
+    gh.watch_returncode = 3
+    code = _exit_code(trigger_mod, monkeypatch, "watch", "--run-id", "55")
+    assert code == 3
+
+
+def test_status_pr_view_failure_warns_but_still_shows_pr_checks(
+    trigger_mod, gh, monkeypatch, capsys
+):
+    gh.pr_view_fails = True
+    _run(trigger_mod, monkeypatch, *PR_STATUS)
+    captured = capsys.readouterr()
+    assert "warning:" in captured.err
+    assert any(cmd[:3] == ["gh", "pr", "checks"] for cmd in gh.calls)
 
 
 # --------------------------------------------------------------------------- #
