@@ -1,0 +1,1409 @@
+{
+  "version": "1.0",
+  "id": "ddef4ab3-bf6a-4d98-992b-ca0600216bdc",
+  "name": "hipkernel:hip_conv_dgrad_fma_1d_rdna",
+  "matchers": [
+    "0636413a-6e82-4d4a-9a0c-fc2d6177b588"
+  ],
+  "engine": "2d6d9d4c-d135-4917-af31-3ac5a9ec4f3d",
+  "dispatch": "24c45c9a-4601-4832-a4f0-cc1d5e2b826e",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "2d6d9d4c-d135-4917-af31-3ac5a9ec4f3d",
+          "kmd_id": "9f5ce9b0-bce4-4989-b85a-3b712416c923",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "kernel_family",
+            "variant",
+            "dtype",
+            "layout",
+            "filter_w",
+            "stride",
+            "channels_per_wave"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "d6c75f3f-710c-44dd-84d7-c46146ad4f43",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k16_s8_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3827099a-be28-4a6d-bc9d-c92af73ab146",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k16_s8_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0c092d16-8945-46b3-b0d4-f7042731e7ad",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k16_s8_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9d637749-fddd-40fd-a222-f7a416a7d3af",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw8",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 8,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 8
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "faabf7de-49e6-42c8-bed7-04308c4c47ca",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c6c3f709-2c5f-4ec4-a488-40b8cd499027",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b39d79e4-e715-4ba6-8e6a-da7b623872ff",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2b4b0a5f-9bf4-47da-b803-d9776b8789bf",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw8",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 8,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 8
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "16865c05-34d9-4b53-8c9b-3570767ef4ca",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8f66f0a5-b423-4f09-a3ff-7edab05ffa93",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "02d9ec8a-280c-4ab0-a10b-7a82ee9aae01",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "41b58bef-2576-4421-a6a4-9e8a848266cb",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k9_s5_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 9,
+            "CT_S": 5,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 9,
+        "stride": 5,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "94804143-2b65-48dc-bcbc-ba777ba9dbdf",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k9_s5_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 9,
+            "CT_S": 5,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 9,
+        "stride": 5,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0a09b400-3d39-4912-8f80-c8ea6f9e7979",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_k9_s5_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 0,
+            "CT_K": 9,
+            "CT_S": 5,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 9,
+        "stride": 5,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "50ec37f5-bd05-4eda-aada-0fc72adb22c7",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_ncl_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradGeneric1d",
+        "build": {
+          "defines": {
+            "CT_GENERIC": 1,
+            "CT_DTYPE": 0,
+            "CT_CHANNELS_LAST": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "generic",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 0,
+        "stride": 0,
+        "channels_per_wave": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3a25d8c5-cf26-49e3-a11a-5b2bd35420d9",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f32_nlc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradGeneric1d",
+        "build": {
+          "defines": {
+            "CT_GENERIC": 1,
+            "CT_DTYPE": 0,
+            "CT_CHANNELS_LAST": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "generic",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "filter_w": 0,
+        "stride": 0,
+        "channels_per_wave": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7a7e8af7-6d1f-4aee-9e8c-ed3648a2d9d6",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k16_s8_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "bf5d9771-cf92-4b72-a025-ebada4cd0d8e",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k16_s8_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "33898d8f-74f3-4262-b719-28eb3338eb77",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k16_s8_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7d297301-025c-4196-9590-90065cc83f8f",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw8",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 8,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 8
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "99b922fc-7830-4ba8-9771-392375461c40",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a8d4fbf8-644c-44d4-8681-c905b92ace42",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c79543a2-2709-46f5-9c3a-336043f54dd1",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "46522611-4a70-44f3-992d-fe66fe9b0c67",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw8",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 8,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 8
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e90bc7b7-5e3d-4aa9-865b-d5ec01072fa1",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5c7c2ce7-0e5a-4a38-a9f5-48f545185c4c",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f2a6f3cf-3e12-43c1-9f01-afcafc65a7b5",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8ec6f323-0cdc-41ea-96e9-1b01665637ca",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k9_s5_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 9,
+            "CT_S": 5,
+            "CT_QR": 4,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 9,
+        "stride": 5,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2e1ca693-dd25-4e6d-aca7-6f447bf9f01c",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_k9_s5_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 1,
+            "CT_K": 9,
+            "CT_S": 5,
+            "CT_QR": 4,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 9,
+        "stride": 5,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "24df8edd-1b36-4c2b-9fb8-54605549fe5d",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_ncl_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradGeneric1d",
+        "build": {
+          "defines": {
+            "CT_GENERIC": 1,
+            "CT_DTYPE": 1,
+            "CT_CHANNELS_LAST": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "generic",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 0,
+        "stride": 0,
+        "channels_per_wave": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "53af0fca-df38-40fc-868c-9f82e7dd23d7",
+      "name": "hip_conv_dgrad_fma_1d_rdna.f16_nlc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradGeneric1d",
+        "build": {
+          "defines": {
+            "CT_GENERIC": 1,
+            "CT_DTYPE": 1,
+            "CT_CHANNELS_LAST": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "generic",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "filter_w": 0,
+        "stride": 0,
+        "channels_per_wave": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1f812c46-2068-4efe-b710-ba51902850db",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k16_s8_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "416070e2-c88f-4d9b-a630-852c913d5e29",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k16_s8_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "97a692a5-abfc-4b23-b263-1266ec4ba420",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k16_s8_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 16,
+            "CT_S": 8,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 16,
+        "stride": 8,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fe01bef0-fcf1-41b3-a7c9-5ad7364d1d48",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw8",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 8,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 8
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3867cb23-b3bc-4c8b-a89b-70abe98cac49",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2f2cfdb2-a515-4754-83b5-8904b66f488e",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b8230e1d-78c9-4bb7-b69e-30ab7987bc62",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 8,
+            "CT_S": 4,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 8,
+        "stride": 4,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7e2057be-e296-4a80-b285-96fe2683c00f",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw8",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 8,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 8
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cb738307-c17d-4d76-8906-c8b506bcd667",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 4,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "28ad0aef-3e83-4947-996b-1dc786e24b98",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "70f5f561-770a-418c-bafe-8d99b3c800eb",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 4,
+            "CT_S": 2,
+            "CT_QR": 2,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 4,
+        "stride": 2,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "457637be-e9db-4f42-9c5f-a756dafc588b",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k9_s5_cw2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 9,
+            "CT_S": 5,
+            "CT_QR": 4,
+            "CT_CO_W": 2,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 9,
+        "stride": 5,
+        "channels_per_wave": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "abe62029-683d-4fde-824e-888b4fa72121",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k9_s5_cw1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradFma1d",
+        "build": {
+          "defines": {
+            "CT_DTYPE": 2,
+            "CT_K": 9,
+            "CT_S": 5,
+            "CT_QR": 4,
+            "CT_CO_W": 1,
+            "CT_WS": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 9,
+        "stride": 5,
+        "channels_per_wave": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ec8b7a10-e9a9-4f47-8532-c71169e62e46",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_ncl_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradGeneric1d",
+        "build": {
+          "defines": {
+            "CT_GENERIC": 1,
+            "CT_DTYPE": 2,
+            "CT_CHANNELS_LAST": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "generic",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 0,
+        "stride": 0,
+        "channels_per_wave": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "65389b9b-6b78-4821-8e43-95f8845faa00",
+      "name": "hip_conv_dgrad_fma_1d_rdna.bf16_nlc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradFma1d.cpp",
+        "entry": "ConvDgradGeneric1d",
+        "build": {
+          "defines": {
+            "CT_GENERIC": 1,
+            "CT_DTYPE": 2,
+            "CT_CHANNELS_LAST": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_fma_1d",
+        "variant": "generic",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "filter_w": 0,
+        "stride": 0,
+        "channels_per_wave": 0
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
+  ]
+}

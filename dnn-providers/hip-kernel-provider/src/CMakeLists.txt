@@ -800,6 +800,51 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "Created ${_target} target")
     endforeach()
 
+    # hipkernel:hip_conv_dgrad_fma_1d_rdna against the shared ConvolutionBwd sweeps, one entry per
+    # RDNA arch the product pack ships it for: the shape of the gfx950 attention entries
+    # above -- routed into the arch's shard, GTEST_FILTER and ENVIRONMENT kept out of the
+    # categorization-only argument list.
+    foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
+                           gfx1200 gfx1201)
+        set(_hkp_hip_conv_dgrad_fma_1d_rdna FALSE)
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+            hkp_product_ships_engine_for_arch(_hkp_hip_conv_dgrad_fma_1d_rdna
+                                              "hipkernel:hip_conv_dgrad_fma_1d_rdna" ${_arch})
+        endif()
+        if(NOT _hkp_hip_conv_dgrad_fma_1d_rdna OR NOT TARGET hipdnn_integration_tests)
+            continue()
+        endif()
+        set(_target ${PROJECT_NAME}-${_arch}-hip-conv-dgrad-fma-1d-rdna-external-integration-check)
+        _hkp_census_external_test_file(_shard_ctest ${_arch})
+        set(_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+           AND DEFINED HIPKERNELPROVIDER_HIP_CONV_DGRAD_FMA_1D_RDNA_INTEGRATION_CATEGORIES_YAML)
+            list(APPEND _category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_HIP_CONV_DGRAD_FMA_1D_RDNA_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-${_arch}-hip-conv-dgrad-fma-1d-rdna-external-integration
+            )
+        endif()
+        # The TOML goes to the reservation as well as TEST_CONFIG; hkp_reserve_census_shard()
+        # says why.
+        set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_hip_conv_dgrad_fma_1d_rdna.toml")
+        hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_config}")
+        add_external_integration_test_target(
+            TARGET_NAME    ${_target}
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:hip_conv_dgrad_fma_1d_rdna"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_${_arch}
+            TEST_CONFIG    ${_config}
+            GTEST_FILTER   "quick_ConvolutionBwd_Default.*:standard_ConvolutionBwd_Default.*:comprehensive_ConvolutionBwd_Default.*:full_ConvolutionBwd_Default.*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_category_args}
+        )
+        message(STATUS "Created ${_target} target")
+    endforeach()
+
     # The FlyDSL SDPA backward engines, hipkernel:flydsl_sdpa_bwd_split and
     # hipkernel:flydsl_sdpa_bwd_merged. Split ships gfx950, gfx942 and gfx90a content and gfx11-generic
     # content, which the pack expands to every gfx11 member this build targets; merged
