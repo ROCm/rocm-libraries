@@ -31,6 +31,7 @@
 #include "auxiliary/rocauxiliary_stebz.hpp"
 #include "auxiliary/rocauxiliary_stedc.hpp"
 #include "auxiliary/rocauxiliary_stein.hpp"
+#include "checked_arithmetic.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
@@ -194,7 +195,7 @@ void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
                                                  size_tmpz, size_splits, size_workArr);
 
     // extra requirements for partial decomposition
-    *size_tmpT = sizeof(T) * (n * n) * batch_count;
+    *size_tmpT = rocsolver_saturating_mul<size_t>(sizeof(T), n, n, batch_count);
 }
 
 //--------------------------------------------------------------------------------------//

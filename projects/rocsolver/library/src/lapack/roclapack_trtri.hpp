@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "checked_arithmetic.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
@@ -124,7 +125,7 @@ void rocsolver_trtri_getMemorySize(rocblas_handle handle,
     if(diag == rocblas_diagonal_unit && blk > 0)
         *size_tmpcopy = 0;
     else
-        *size_tmpcopy = n * n * sizeof(T) * batch_count;
+        *size_tmpcopy = rocsolver_saturating_mul<size_t>(n, n, sizeof(T), batch_count);
 
     // size of array of pointers (batched cases)
     if(BATCHED)
