@@ -402,6 +402,7 @@ add_executable( rocfft_aot_helper
 )
 
 add_executable( rocfft_kernel_config_search
+  enum_printer.cpp
   rocfft_kernel_config_search.cpp
   rocfft_stub.cpp
 )
