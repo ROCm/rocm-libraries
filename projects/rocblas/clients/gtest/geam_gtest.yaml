@@ -117,6 +117,23 @@ Tests:
   gpu_arch: ['90a','942','950']
   os_flags: LINUX
 
+# ROCM-34873: rocblas_geam_launcher computes `int size = m * n` in the alpha == 0
+# contiguous (lda == ldb == ldc == m, transB == N) vector path, which overflows int32.
+#   M = N = 46341 : m * n = 2147488281 wraps negative, giving a bogus grid size.
+- name: geam_int_overflow_size
+  category: pre_checkin # stress
+  function: geam
+  precision: *single_precision
+  arguments:
+    - { transA: N, transB: N, M: 46341, N: 46341, lda: 46341, ldb: 46341, ldc: 46341 }
+  alpha_beta:
+    - { alpha:  0.0, beta:  2.0 } # alpha == 0 selects the B, C contiguous vector path
+  stride_scale: [ 1 ]
+  batch_count: [ 1 ]
+  pointer_mode_device: false # alpha == 0 special case is host pointer mode only
+  gpu_arch: ['942','950']
+  os_flags: LINUX
+
 - name: geam_NaN
   category: quick
   function: geam
