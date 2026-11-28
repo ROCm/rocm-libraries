@@ -75,6 +75,12 @@ const static vector<geqlf_tuple> very_large_problem_range = {
     {{220, 220}, 16384},
 };
 
+const vector<vector<int>> large_batch_matrix_size_range = {
+    {15, 15},
+    {129, 129},
+};
+const vector<int> large_batch_n_size_range = {15, 129};
+
 Arguments geqlf_setup_arguments(geqlf_tuple tup)
 {
     vector<int> matrix_size = std::get<0>(tup);
@@ -93,7 +99,7 @@ Arguments geqlf_setup_arguments(geqlf_tuple tup)
     return arg;
 }
 
-template <bool BLOCKED>
+template <bool BLOCKED, int BATCH_COUNT = 3>
 class GEQL2_GEQLF : public ::TestWithParam<geqlf_tuple>
 {
 protected:
@@ -110,7 +116,7 @@ protected:
         if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 0)
             testing_geql2_geqlf_bad_arg<BATCHED, STRIDED, BLOCKED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_geql2_geqlf<BATCHED, STRIDED, BLOCKED, T>(arg);
     }
 };
@@ -120,6 +126,16 @@ class GEQL2 : public GEQL2_GEQLF<false>
 };
 
 class GEQLF : public GEQL2_GEQLF<true>
+{
+};
+
+int constexpr BCOUNT = (64 * 1024 + 1);
+
+class GEQL2_LARGE_BATCH : public GEQL2_GEQLF<false, BCOUNT>
+{
+};
+
+class GEQLF_LARGE_BATCH : public GEQL2_GEQLF<true, BCOUNT>
 {
 };
 
@@ -207,6 +223,48 @@ TEST_P(GEQLF, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batch count
+
+TEST_P(GEQL2_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GEQL2_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GEQL2_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GEQL2_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 // strided_batched cases
 
 TEST_P(GEQL2, strided_batched__float)
@@ -249,6 +307,48 @@ TEST_P(GEQLF, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large batch count
+
+TEST_P(GEQL2_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GEQL2_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GEQL2_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GEQL2_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GEQLF_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(weekly_lapack,
 //                          GEQL2,
 //                          ValuesIn(very_large_problem_range));
@@ -270,3 +370,14 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GEQLF,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(n_size_range)));
+// large batch count
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GEQL2_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_matrix_size_range),
+                                 ValuesIn(large_batch_n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         GEQLF_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_matrix_size_range),
+                                 ValuesIn(large_batch_n_size_range)));

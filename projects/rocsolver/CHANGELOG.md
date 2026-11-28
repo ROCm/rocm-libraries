@@ -11,6 +11,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Resolved issues
 
+* Fixed failure of large batch count > 64 * 1024 for solving linear least squares problems, GELS, GEQRF, GEQR2, GELQF, GELQ2.
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 * Fixed a race condition in SYEVJ GPU kernel.
 

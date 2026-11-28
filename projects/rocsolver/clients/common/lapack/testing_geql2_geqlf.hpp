@@ -101,8 +101,8 @@ void testing_geql2_geqlf_bad_arg()
         // memory allocations
         device_batch_vector<T> dA(1, 1, 1);
         device_strided_batch_vector<T> dIpiv(1, 1, 1, 1);
-        CHECK_HIP_ERROR(dA.memcheck());
-        CHECK_HIP_ERROR(dIpiv.memcheck());
+        CHECK_DEVICE_ALLOCATION(dA.memcheck());
+        CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check bad arguments
         geql2_geqlf_checkBadArgs<STRIDED, GEQLF>(handle, m, n, dA.data(), lda, stA, dIpiv.data(),
@@ -113,8 +113,8 @@ void testing_geql2_geqlf_bad_arg()
         // memory allocations
         device_strided_batch_vector<T> dA(1, 1, 1, 1);
         device_strided_batch_vector<T> dIpiv(1, 1, 1, 1);
-        CHECK_HIP_ERROR(dA.memcheck());
-        CHECK_HIP_ERROR(dIpiv.memcheck());
+        CHECK_DEVICE_ALLOCATION(dA.memcheck());
+        CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check bad arguments
         geql2_geqlf_checkBadArgs<STRIDED, GEQLF>(handle, m, n, dA.data(), lda, stA, dIpiv.data(),
@@ -202,22 +202,22 @@ void geql2_geqlf_getError(const rocblas_handle handle,
 
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
-    CHECK_HIP_ERROR(dnorm.memcheck());
+    CHECK_DEVICE_ALLOCATION(dnorm.memcheck());
     host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
 
     // Compute norm( A ) on GPU before geqlf overwrites dA.
     std::vector<S> A_norms(bc);
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        CHECK_ROCBLAS_ERROR(
+        CHECK_ROCBLAS_ALLOCATION(
             rocsolver_lange(handle, rocsolver_norm_type_one, m, n, dA[b], lda, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
         A_norms[b] = hnorm[0][0];
     }
 
     // GPU lapack
-    CHECK_ROCBLAS_ERROR(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA,
-                                              dIpiv.data(), stP, bc));
+    CHECK_ROCBLAS_ALLOCATION(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda,
+                                                   stA, dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
 
@@ -254,7 +254,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     // Allocate GPU work buffer for one matrix (m x n), reused per batch element.
     size_t size_C = size_t(lda) * n;
     device_strided_batch_vector<T> dC(size_C, 1, size_C, 1);
-    CHECK_HIP_ERROR(dC.memcheck());
+    CHECK_DEVICE_ALLOCATION(dC.memcheck());
 
     max_errors[0] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
@@ -275,7 +275,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
 
         // Compute Q*L on GPU using unmql (side=left, trans=none).
         // unmql expects A to point to the last k=min_mn columns of the GEQLF output.
-        CHECK_ROCBLAS_ERROR(
+        CHECK_ROCBLAS_ALLOCATION(
             rocsolver_ormxl_unmxl(GEQLF, handle, rocblas_side_left, rocblas_operation_none, m, n,
                                   min_mn, dA[b] + lda * (n - min_mn), lda, dIpiv[b], dC[0], lda));
 
@@ -304,12 +304,12 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     // GPU work buffer for Q (m x min_mn, leading dim lda).
     size_t size_Q = size_t(lda) * min_mn;
     device_strided_batch_vector<T> dQ(size_Q, 1, size_Q, 1);
-    CHECK_HIP_ERROR(dQ.memcheck());
+    CHECK_DEVICE_ALLOCATION(dQ.memcheck());
 
     // GPU work buffer for I - Q^H * Q (min_mn x min_mn, leading dim min_mn).
     size_t size_R = size_t(min_mn) * min_mn;
     device_strided_batch_vector<T> dR(size_R, 1, size_R, 1);
-    CHECK_HIP_ERROR(dR.memcheck());
+    CHECK_DEVICE_ALLOCATION(dR.memcheck());
 
     // Build identity matrix on host for upload into dR before each gemm.
     std::vector<T> hR_id(min_mn * min_mn, T(0));
@@ -326,7 +326,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
                                   hipMemcpyDeviceToDevice));
 
         // Generate explicit Q (m x min_mn) via ungql.
-        CHECK_ROCBLAS_ERROR(
+        CHECK_ROCBLAS_ALLOCATION(
             rocsolver_orgxl_ungxl(GEQLF, handle, m, min_mn, min_mn, dQ[0], lda, dIpiv[b]));
 
         // Set dR = I (min_mn x min_mn).
@@ -334,16 +334,16 @@ void geql2_geqlf_getError(const rocblas_handle handle,
             hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
 
         // Compute dR = I - Q^H * Q.
-        CHECK_ROCBLAS_ERROR(rocsolver_gemm(false, handle, rocblas_operation_conjugate_transpose,
-                                           rocblas_operation_none, min_mn, min_mn, m, // opts
-                                           &negone, dQ[0], lda, 0, // Q^H
-                                           dQ[0], lda, 0, // Q
-                                           &one, dR[0], min_mn, 0, // R
-                                           1));
+        CHECK_ROCBLAS_ALLOCATION(rocsolver_gemm(false, handle, rocblas_operation_conjugate_transpose,
+                                                rocblas_operation_none, min_mn, min_mn, m, // opts
+                                                &negone, dQ[0], lda, 0, // Q^H
+                                                dQ[0], lda, 0, // Q
+                                                &one, dR[0], min_mn, 0, // R
+                                                1));
 
         // Compute norm( I - Q^H * Q ).
-        CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, rocsolver_norm_type_one, min_mn, min_mn, dR[0],
-                                            min_mn, dnorm[0]));
+        CHECK_ROCBLAS_ALLOCATION(rocsolver_lange(handle, rocsolver_norm_type_one, min_mn, min_mn,
+                                                 dR[0], min_mn, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
 
         double err = hnorm[0][0];
@@ -421,8 +421,8 @@ void geql2_geqlf_getPerfData(const rocblas_handle handle,
         geql2_geqlf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                              hIpiv);
 
-        CHECK_ROCBLAS_ERROR(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA,
-                                                  dIpiv.data(), stP, bc));
+        CHECK_ROCBLAS_ALLOCATION(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda,
+                                                       stA, dIpiv.data(), stP, bc));
     }
 
     // gpu-lapack performance
@@ -446,8 +446,8 @@ void geql2_geqlf_getPerfData(const rocblas_handle handle,
                                              hIpiv);
 
         timer.start(stream);
-        rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
-                              bc);
+        CHECK_ROCBLAS_ALLOCATION(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda,
+                                                       stA, dIpiv.data(), stP, bc));
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
@@ -527,9 +527,9 @@ void testing_geql2_geqlf(Arguments& argus)
         device_batch_vector<T> dA(size_A, 1, bc);
         device_strided_batch_vector<T> dIpiv(size_P, 1, stP, bc);
         if(size_A)
-            CHECK_HIP_ERROR(dA.memcheck());
+            CHECK_DEVICE_ALLOCATION(dA.memcheck());
         if(size_P)
-            CHECK_HIP_ERROR(dIpiv.memcheck());
+            CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check quick return
         if(m == 0 || n == 0 || bc == 0)
@@ -564,9 +564,9 @@ void testing_geql2_geqlf(Arguments& argus)
         device_strided_batch_vector<T> dA(size_A, 1, stA, bc);
         device_strided_batch_vector<T> dIpiv(size_P, 1, stP, bc);
         if(size_A)
-            CHECK_HIP_ERROR(dA.memcheck());
+            CHECK_DEVICE_ALLOCATION(dA.memcheck());
         if(size_P)
-            CHECK_HIP_ERROR(dIpiv.memcheck());
+            CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check quick return
         if(m == 0 || n == 0 || bc == 0)

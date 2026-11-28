@@ -156,7 +156,8 @@ inline void rocblas_expect_status(rocblas_status status, rocblas_status expect)
         }                                                                                             \
     } while(0)
 
-#define CHECK_DEVICE_ALLOCATION CHECK_HIP_ERROR
+#define CHECK_DEVICE_ALLOCATION(ERROR) CHECK_HIP_ERROR(ERROR)
+#define CHECK_ROCBLAS_ALLOCATION(ERROR) CHECK_ROCBLAS_ERROR(ERROR)
 
 #define EXPECT_ROCBLAS_STATUS rocblas_expect_status
 
