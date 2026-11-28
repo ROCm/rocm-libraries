@@ -3,6 +3,26 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+### Changed
+### Removed
+### Optimized
+
+* Improved performance of LANGE (the infinity-norm reads the matrix by columns).
+
+### Resolved issues
+
+* Fixed LANGE, which did not set the norm to zero when m = 0 or n = 0, could overflow or underflow
+  in the Frobenius norm (now accumulated with scaling), and ignored complex elements with a NaN
+  real part.
+
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
 ### Optimized
