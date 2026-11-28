@@ -378,7 +378,7 @@ def _launch_3d(arch, problem, q, k, v, out, cu, seq_lens, table, scale):
         "num_seqs": problem.num_seqs,
         "block_table_stride": table.stride(0),
         "qq_bias_stride0": 0,
-        **au._runtime_kernarg_values(problem),
+        **au.runtime_kernarg_values(problem),
     }
     red_vals = {
         "output_ptr": out,
@@ -386,7 +386,7 @@ def _launch_3d(arch, problem, q, k, v, out, cu, seq_lens, table, scale):
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seq_lens,
-        **au._runtime_kernarg_values(problem),
+        **au.runtime_kernarg_values(problem),
     }
     au._launch_3d_pipeline(prepared, seg_vals, red_vals, stream=0, capturing=False)
 

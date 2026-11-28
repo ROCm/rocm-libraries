@@ -226,7 +226,7 @@ def test_runtime_values_cover_every_declared_field(arch):
     so a launcher never raises on a runtime kernarg."""
     segment_cls, reduce_cls, _, _, _ = au._tiled_3d_impl(arch)
     spec_2d_cls, _, _ = au._tiled_2d_impl(arch)
-    values = au._runtime_kernarg_values(_prefill())
+    values = au.runtime_kernarg_values(_prefill())
     for cls in (spec_2d_cls, segment_cls, reduce_cls):
         missing = set(au._runtime_kernarg_fields(cls)) - set(values)
         assert not missing, (cls.__name__, missing)

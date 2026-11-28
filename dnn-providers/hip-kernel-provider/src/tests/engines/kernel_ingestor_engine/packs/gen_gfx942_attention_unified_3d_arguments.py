@@ -10,7 +10,7 @@ the segment kernel's full ordered argument list rocKE would pass for it:
   .tiled_3d_signatures("gfx942", dtype, strided_kv=True)`` (the segment half, with
   the spec class's runtime fields num_query_heads, num_kv_heads, sliding_window);
 * the runtime head counts and sliding_window (0):
-  ``_runtime_kernarg_values(problem)``;
+  ``runtime_kernarg_values(problem)``;
 * the 8 strided K/V values: ``kernels.common.attention_kv_cache
   .StridedKvCacheLayout(KvTensorLayout(...), KvTensorLayout(...)).arguments()``
   (constructing the layouts also runs rocKE's admission checks);
@@ -38,7 +38,7 @@ from types import SimpleNamespace
 
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
 from kernels.common.attention_unified import (
-    _runtime_kernarg_values,
+    runtime_kernarg_values,
     tiled_3d_signatures,
 )
 
@@ -207,7 +207,7 @@ def arguments(batch, hq, hkv, scale, k_layout, v_layout):
         "num_seqs": batch,
         "block_table_stride": 0,
         "qq_bias_stride0": 0,
-        **_runtime_kernarg_values(problem),
+        **runtime_kernarg_values(problem),
         **kv,
     }
     segment, _ = _signatures()

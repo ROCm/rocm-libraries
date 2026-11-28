@@ -93,6 +93,7 @@ __all__ = [
     "kv_cache_needs_i64_addr",
     "prepare_unified_attention_torch",
     "run_unified_attention_torch",
+    "runtime_kernarg_values",
     "select_auto_path",
     "supports_native_unified_attention",
     "supports_native_unified_attention_3d_tiled",
@@ -4396,7 +4397,7 @@ def _window_key(problem: UnifiedAttentionProblem, arch: str, path: str):
     return problem.sliding_window
 
 
-def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:
+def runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict[str, int]:
     """Every runtime shape kernarg a tiled body can declare. The launcher packs
     only the ones its signature names."""
     return {
@@ -4627,7 +4628,7 @@ def _attn_values(
         "out_scale": float(out_scale),
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
-        **_runtime_kernarg_values(problem),
+        **runtime_kernarg_values(problem),
     }
     if include_bt_stride:
         vals["block_table_stride"] = int(bt_stride)
@@ -5011,7 +5012,7 @@ def _run_3d_tiled_on_stream(
         "additive_bias_batch_stride": int(additive_bias_batch_stride),
         "additive_bias_head_stride": int(additive_bias_head_stride),
         "additive_bias_sq_stride": int(additive_bias_sq_stride),
-        **_runtime_kernarg_values(problem),
+        **runtime_kernarg_values(problem),
     }
     if kv_cache_layout is not None:
         seg_vals.update(kv_cache_layout.arguments())
@@ -5021,7 +5022,7 @@ def _run_3d_tiled_on_stream(
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
-        **_runtime_kernarg_values(problem),
+        **runtime_kernarg_values(problem),
     }
     if problem.emit_lse:
         red_vals["lse_ptr"] = lse
