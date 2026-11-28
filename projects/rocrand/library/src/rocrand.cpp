@@ -25,6 +25,7 @@
 #include "rng/generator_type.hpp"
 #include "rng/generator_types.hpp"
 
+#include <cmath>
 #include <new>
 #include <rocrand/rocrand.h>
 
@@ -368,7 +369,7 @@ rocrand_status ROCRANDAPI rocrand_generate_poisson(rocrand_generator generator,
     {
         return ROCRAND_STATUS_NOT_CREATED;
     }
-    if(lambda <= 0.0)
+    if(!std::isfinite(lambda) || lambda <= 0.0)
     {
         return ROCRAND_STATUS_OUT_OF_RANGE;
     }
@@ -467,7 +468,7 @@ rocrand_status ROCRANDAPI rocrand_create_poisson_distribution(
     {
         return ROCRAND_STATUS_OUT_OF_RANGE;
     }
-    if(lambda <= 0.0)
+    if(!std::isfinite(lambda) || lambda <= 0.0)
     {
         return ROCRAND_STATUS_OUT_OF_RANGE;
     }
@@ -516,7 +517,24 @@ rocrand_status ROCRANDAPI
     {
         return ROCRAND_STATUS_OUT_OF_RANGE;
     }
+    if(probabilities == NULL)
+    {
+        return ROCRAND_STATUS_OUT_OF_RANGE;
+    }
     if(size == 0)
+    {
+        return ROCRAND_STATUS_OUT_OF_RANGE;
+    }
+    double sum = 0.0;
+    for(unsigned int i = 0; i < size; i++)
+    {
+        if(!std::isfinite(probabilities[i]) || probabilities[i] < 0.0)
+        {
+            return ROCRAND_STATUS_OUT_OF_RANGE;
+        }
+        sum += probabilities[i];
+    }
+    if(!std::isfinite(sum) || sum <= 0.0)
     {
         return ROCRAND_STATUS_OUT_OF_RANGE;
     }

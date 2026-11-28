@@ -26,11 +26,20 @@
 #include "test_common.hpp"
 #include "test_rocrand_common.hpp"
 
+#include <cstring>
+#include <limits>
 #include <random>
 #include <vector>
 
 class rocrand_generate_poisson_tests : public ::testing::TestWithParam<rocrand_rng_type>
 {};
+
+const double invalid_lambdas[] = {0.0,
+                                  -0.0,
+                                  -1.0,
+                                  -std::numeric_limits<double>::infinity(),
+                                  std::numeric_limits<double>::infinity(),
+                                  std::numeric_limits<double>::quiet_NaN()};
 
 template<typename T, typename GenerateFunc>
 void test_generate(GenerateFunc generate_func)
@@ -78,13 +87,24 @@ void test_out_of_range(GenerateFunc generate_func)
     rocrand_generator generator;
     ROCRAND_CHECK(rocrand_create_generator(&generator, rng_type));
 
-    const size_t size   = 256;
-    double       lambda = 0.0;
+    const size_t size = 256;
     T*           data;
     HIP_CHECK(hipMallocHelper(&data, size * sizeof(T)));
+    HIP_CHECK(hipMemset(data, 0xAB, size * sizeof(T)));
     HIP_CHECK(hipDeviceSynchronize());
 
-    EXPECT_EQ(generate_func(generator, data, size, lambda), ROCRAND_STATUS_OUT_OF_RANGE);
+    for(const double lambda : invalid_lambdas)
+    {
+        SCOPED_TRACE(testing::Message() << "with lambda = " << lambda);
+        EXPECT_EQ(generate_func(generator, data, size, lambda), ROCRAND_STATUS_OUT_OF_RANGE);
+    }
+
+    // The output must be left untouched
+    std::vector<T> h_data(size);
+    HIP_CHECK(hipMemcpy(h_data.data(), data, size * sizeof(T), hipMemcpyDeviceToHost));
+    std::vector<T> expected(size);
+    std::memset(expected.data(), 0xAB, size * sizeof(T));
+    EXPECT_EQ(h_data, expected);
 
     HIP_CHECK(hipFree(data));
     ROCRAND_CHECK(rocrand_destroy_generator(generator));
@@ -247,6 +267,61 @@ TEST(rocrand_generate_poisson_tests, neg_test)
 
     EXPECT_EQ(rocrand_generate_poisson(generator, static_cast<unsigned int*>(data), size, lambda),
               ROCRAND_STATUS_NOT_CREATED);
+}
+
+TEST(rocrand_generate_poisson_tests, create_poisson_distribution_out_of_range_test)
+{
+    EXPECT_EQ(rocrand_create_poisson_distribution(100.0, nullptr), ROCRAND_STATUS_OUT_OF_RANGE);
+
+    for(const double lambda : invalid_lambdas)
+    {
+        SCOPED_TRACE(testing::Message() << "with lambda = " << lambda);
+        rocrand_discrete_distribution distribution = nullptr;
+        EXPECT_EQ(rocrand_create_poisson_distribution(lambda, &distribution),
+                  ROCRAND_STATUS_OUT_OF_RANGE);
+    }
+}
+
+TEST(rocrand_generate_poisson_tests, create_discrete_distribution_out_of_range_test)
+{
+    const double probabilities[] = {0.1, 0.2, 0.3, 0.4};
+
+    rocrand_discrete_distribution distribution = nullptr;
+    EXPECT_EQ(rocrand_create_discrete_distribution(nullptr, 4, 0, &distribution),
+              ROCRAND_STATUS_OUT_OF_RANGE);
+    EXPECT_EQ(rocrand_create_discrete_distribution(probabilities, 0, 0, &distribution),
+              ROCRAND_STATUS_OUT_OF_RANGE);
+    EXPECT_EQ(rocrand_create_discrete_distribution(probabilities, 4, 0, nullptr),
+              ROCRAND_STATUS_OUT_OF_RANGE);
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    const double max = std::numeric_limits<double>::max();
+
+    const std::vector<std::vector<double>> invalid_probabilities = {
+        {0.0, 0.0, 0.0, 0.0},
+        {0.1, -0.2, 0.3, 0.4},
+        {0.1, nan, 0.3, 0.4},
+        {0.1, inf, 0.3, 0.4},
+        {0.1, -inf, 0.3, 0.4},
+        {max, max},
+    };
+    for(const std::vector<double>& p : invalid_probabilities)
+    {
+        SCOPED_TRACE(testing::PrintToString(p));
+        EXPECT_EQ(rocrand_create_discrete_distribution(p.data(), p.size(), 0, &distribution),
+                  ROCRAND_STATUS_OUT_OF_RANGE);
+    }
+}
+
+TEST(rocrand_generate_poisson_tests, create_discrete_distribution_zero_probability_test)
+{
+    const double probabilities[] = {0.0, 0.5, 0.0, 0.5};
+
+    rocrand_discrete_distribution distribution = nullptr;
+    ASSERT_EQ(rocrand_create_discrete_distribution(probabilities, 4, 0, &distribution),
+              ROCRAND_STATUS_SUCCESS);
+    EXPECT_EQ(rocrand_destroy_discrete_distribution(distribution), ROCRAND_STATUS_SUCCESS);
 }
 
 TEST_P(rocrand_generate_poisson_tests, out_of_range_test)
