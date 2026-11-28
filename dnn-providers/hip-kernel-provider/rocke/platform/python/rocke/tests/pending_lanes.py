@@ -1534,18 +1534,6 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting_tests(
         _SCHEDULED_TIERS,
-        "it checks a column alias or an all-negative aliased declare, which no "
-        "committed column has yet; it is kept on purpose until the committed data "
-        "has one",
-        _PLATFORM,
-        "platform/tests/core/test_arch_domain_lane.py",
-        "test_a_borrowing_lane_refuses_at_its_source",
-        "test_a_waived_alias_does_not_turn_its_sibling_into_a_refusal",
-        "test_an_aliased_declare_no_alias_accounts_for_is_a_refusal",
-        "test_the_post_pass_reports_every_key_an_aliased_declare_could_be",
-    ),
-    *_waiting_tests(
-        _SCHEDULED_TIERS,
         "its native-engine cases of a concrete MMA op do not run (native LLVM lowers "
         "the neutral tile.mma only); they are kept on purpose until the engine "
         "supports them",
