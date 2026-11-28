@@ -178,7 +178,8 @@ rocsparse_status rocsparse::bsrmm_template_dispatch(rocsparse_handle    handle,
                                                                      batch_stride_C,
                                                                      order_C,
                                                                      nullptr,
-                                                                     false));
+                                                                     false,
+                                                                     static_cast<int64_t>(0)));
         return rocsparse_status_success;
     }
 

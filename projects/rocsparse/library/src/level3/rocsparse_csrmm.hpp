@@ -104,7 +104,8 @@ namespace rocsparse
                                              int64_t                   batch_stride_C,
                                              rocsparse_order           order_C,
                                              void*                     temp_buffer,
-                                             bool                      force_conj_A);
+                                             bool                      force_conj_A,
+                                             int64_t                   max_row_nnz);
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template(rocsparse_handle          handle,
@@ -135,7 +136,8 @@ namespace rocsparse
                                     int64_t                   batch_stride_C,
                                     rocsparse_order           order_C,
                                     void*                     temp_buffer,
-                                    bool                      force_conj_A);
+                                    bool                      force_conj_A,
+                                    int64_t                   max_row_nnz);
 
     rocsparse_status csrmm_buffer_size(rocsparse_handle          handle,
                                        rocsparse_operation       trans_A,

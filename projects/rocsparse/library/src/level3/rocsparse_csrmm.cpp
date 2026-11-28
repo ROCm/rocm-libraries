@@ -59,7 +59,8 @@ namespace rocsparse
                                         int64_t                   batch_stride_C,
                                         rocsparse_order           order_C,
                                         void*                     temp_buffer,
-                                        bool                      force_conj_A);
+                                        bool                      force_conj_A,
+                                        int64_t                   max_row_nnz);
 
     using csrmm_tuple = std::tuple<rocsparse_datatype,
                                    rocsparse_indextype,
@@ -394,6 +395,13 @@ rocsparse_status rocsparse::csrmm(rocsparse_handle          handle,
                                                 alg));
     }
 
+    // Longest row, or 0 when no profile was cached. The 1-16 column
+    // row-split kernels use it to widen a narrow wavefront on a small grid.
+    const int64_t max_row_nnz
+        = (alg_info != nullptr && alg_info->profile != nullptr && alg_info->profile->known)
+              ? alg_info->profile->max
+              : static_cast<int64_t>(0);
+
     rocsparse::csrmm_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_find(&f,
                                                     alpha_datatype,
@@ -431,7 +439,8 @@ rocsparse_status rocsparse::csrmm(rocsparse_handle          handle,
                                 batch_stride_C,
                                 order_C,
                                 temp_buffer,
-                                force_conj_A));
+                                force_conj_A,
+                                max_row_nnz));
 
     return rocsparse_status_success;
 }

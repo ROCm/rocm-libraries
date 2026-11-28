@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,4 +23,4 @@
  * ************************************************************************ */
 #include "kernel_definitions.h"
 
-INSTANTIATE_KERNELS(CSRMMNT_ROW_SPLIT_SHARED_REMAINDER_256_16_16);
+INSTANTIATE_KERNELS(CSRMMNN_ROW_SPLIT_GENERAL_256_8_14);

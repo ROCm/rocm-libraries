@@ -39,8 +39,8 @@
 // nested in the panel loop takes more than one step on both axes:
 //
 //   kernel                                  algorithm, operations        panels
-//   csrmmnn_row_split_shared_kernel         csr_row_split, A n, n <= 32  4 at n = 30
-//   csrmmnn_row_split_kernel                csr_row_split, A n, n > 32   10 + 3 at n = 83
+//   csrmmnn_row_split_general_kernel        csr_row_split, A n, n <= 40  1 at n = 30
+//   csrmmnn_row_split_kernel                csr_row_split, A n, n > 40   10 + 3 at n = 83
 //   csrmmnt_row_split_* (batch on grid.y)   csr_row_split, A n, B t      n = 16, 30, 70
 //   csrmmtn_row_split_kernel                csr_row_split, A t, B n      8 at n = 30
 //   csrmmtt_row_split_kernel                csr_row_split, A t, B t      8 at n = 30
@@ -707,7 +707,7 @@ namespace
 // csrmm row_split
 // ---------------------------------------------------------------------------
 
-// csrmmnn_row_split_shared_kernel: n <= 32, ceil(30 / 8) = 4 panels of 8 columns.
+// csrmmnn_row_split_general_kernel: n <= 40 is one launch, batch on grid.y.
 TEST_F(MmGridY, csrmm_row_split_nn_shared)
 {
     check_all(handle, {Format::csr, csr_rs, op_n, op_n, 30});
@@ -718,7 +718,7 @@ TEST_F(MmGridY, csrmm_row_split_nn_shared_row_order)
     check_all(handle, {Format::csr, csr_rs, op_n, op_n, 30, row_ord});
 }
 
-// csrmmnn_row_split_kernel: n > 32, 80 / 8 = 10 panels of 8 columns in the main
+// csrmmnn_row_split_kernel: n > 40, 80 / 8 = 10 panels of 8 columns in the main
 // launch and 3 one-column panels in the remainder launch.
 TEST_F(MmGridY, csrmm_row_split_nn_main_and_remainder)
 {

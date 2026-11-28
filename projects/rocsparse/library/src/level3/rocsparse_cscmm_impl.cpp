@@ -215,7 +215,8 @@ rocsparse_status rocsparse::cscmm_template(rocsparse_handle          handle,
                                                          batch_stride_C,
                                                          order_C,
                                                          temp_buffer,
-                                                         false)));
+                                                         false,
+                                                         static_cast<int64_t>(0))));
         return rocsparse_status_success;
     }
     case rocsparse_operation_transpose:
@@ -249,7 +250,8 @@ rocsparse_status rocsparse::cscmm_template(rocsparse_handle          handle,
                                                          batch_stride_C,
                                                          order_C,
                                                          temp_buffer,
-                                                         false)));
+                                                         false,
+                                                         static_cast<int64_t>(0))));
         return rocsparse_status_success;
     }
     case rocsparse_operation_conjugate_transpose:
@@ -283,7 +285,8 @@ rocsparse_status rocsparse::cscmm_template(rocsparse_handle          handle,
                                                          batch_stride_C,
                                                          order_C,
                                                          temp_buffer,
-                                                         true)));
+                                                         true,
+                                                         static_cast<int64_t>(0))));
         return rocsparse_status_success;
     }
     }

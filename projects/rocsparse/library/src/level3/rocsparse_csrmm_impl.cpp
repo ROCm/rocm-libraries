@@ -59,7 +59,8 @@ namespace rocsparse
                                               J                         batch_count_C,
                                               int64_t                   batch_stride_C,
                                               rocsparse_order           order_C,
-                                              bool                      force_conj_A);
+                                              bool                      force_conj_A,
+                                              int64_t                   max_row_nnz);
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template_nnz_split(rocsparse_handle    handle,
@@ -144,7 +145,8 @@ namespace rocsparse
                                              int64_t                   batch_stride_C,
                                              rocsparse_order           order_C,
                                              void*                     temp_buffer,
-                                             bool                      force_conj_A)
+                                             bool                      force_conj_A,
+                                             int64_t                   max_row_nnz)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -180,7 +182,8 @@ namespace rocsparse
                                                     batch_count_C,
                                                     batch_stride_C,
                                                     order_C,
-                                                    force_conj_A));
+                                                    force_conj_A,
+                                                    max_row_nnz));
             return rocsparse_status_success;
         }
 
@@ -249,7 +252,8 @@ namespace rocsparse
                                                         batch_count_C,
                                                         batch_stride_C,
                                                         order_C,
-                                                        force_conj_A));
+                                                        force_conj_A,
+                                                        max_row_nnz));
                 return rocsparse_status_success;
             }
             }
@@ -319,7 +323,8 @@ namespace rocsparse
                                                         batch_count_C,
                                                         batch_stride_C,
                                                         order_C,
-                                                        force_conj_A));
+                                                        force_conj_A,
+                                                        max_row_nnz));
                 return rocsparse_status_success;
             }
             }
@@ -355,7 +360,8 @@ namespace rocsparse
                                        int64_t                   batch_stride_C,
                                        rocsparse_order           order_C,
                                        void*                     temp_buffer,
-                                       bool                      force_conj_A)
+                                       bool                      force_conj_A,
+                                       int64_t                   max_row_nnz)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -397,7 +403,8 @@ namespace rocsparse
                                                                      batch_stride_C,
                                                                      order_C,
                                                                      temp_buffer,
-                                                                     force_conj_A));
+                                                                     force_conj_A,
+                                                                     max_row_nnz));
         return rocsparse_status_success;
     }
 
@@ -638,7 +645,8 @@ rocsparse_status rocsparse::csrmm_template(rocsparse_handle          handle,
                                            int64_t                   batch_stride_C,
                                            rocsparse_order           order_C,
                                            void*                     temp_buffer,
-                                           bool                      force_conj_A)
+                                           bool                      force_conj_A,
+                                           int64_t                   max_row_nnz)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -698,7 +706,8 @@ rocsparse_status rocsparse::csrmm_template(rocsparse_handle          handle,
                                                  batch_stride_C,
                                                  order_C,
                                                  temp_buffer,
-                                                 force_conj_A)));
+                                                 force_conj_A,
+                                                 max_row_nnz)));
     return rocsparse_status_success;
 }
 namespace rocsparse
@@ -808,7 +817,8 @@ namespace rocsparse
                                                         batch_stride_C,
                                                         order_C,
                                                         temp_buffer,
-                                                        force_conj_A));
+                                                        force_conj_A,
+                                                        static_cast<int64_t>(0)));
         return rocsparse_status_success;
     }
 }
@@ -842,7 +852,8 @@ namespace rocsparse
         int64_t                   batch_stride_C,                          \
         rocsparse_order           order_C,                                 \
         void*                     temp_buffer,                             \
-        bool                      force_conj_A);
+        bool                      force_conj_A,                            \
+        int64_t                   max_row_nnz);
 
 // Uniform precisions
 INSTANTIATE(float, int32_t, int32_t, float, float, float);

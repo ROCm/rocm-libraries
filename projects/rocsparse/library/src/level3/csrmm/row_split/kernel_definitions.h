@@ -180,7 +180,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
-              uint32_t SUB_WF_SIZE,
+              uint32_t COL,
               typename T,
               typename I,
               typename J,
@@ -188,30 +188,27 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
-        void csrmmnt_row_split_shared_remainder_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T,
-                                                                                           alpha),
-                                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                                                       bool     is_host_mode,
-                                                       bool     conj_A,
-                                                       bool     conj_B,
-                                                       J        col_start,
-                                                       J        col_end,
-                                                       J        m,
-                                                       J        n,
-                                                       int64_t  batch_count,
-                                                       int64_t  offsets_batch_stride_A,
-                                                       int64_t  columns_values_batch_stride_A,
-                                                       const I* csr_row_ptr,
-                                                       const J* csr_col_ind,
-                                                       const A* csr_val,
-                                                       const B* dense_B,
-                                                       int64_t  ldb,
-                                                       int64_t  batch_stride_B,
-                                                       C*       dense_C,
-                                                       int64_t  ldc,
-                                                       int64_t  batch_stride_C,
-                                                       rocsparse_order      order_C,
-                                                       rocsparse_index_base idx_base)
+        void csrmmnt_row_split_general_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                              bool                 is_host_mode,
+                                              bool                 conj_A,
+                                              bool                 conj_B,
+                                              J                    col_start,
+                                              J                    m,
+                                              int64_t              batch_count,
+                                              int64_t              offsets_batch_stride_A,
+                                              int64_t              columns_values_batch_stride_A,
+                                              const I*             csr_row_ptr,
+                                              const J*             csr_col_ind,
+                                              const A*             csr_val,
+                                              const B*             dense_B,
+                                              int64_t              ldb,
+                                              int64_t              batch_stride_B,
+                                              C*                   dense_C,
+                                              int64_t              ldc,
+                                              int64_t              batch_stride_C,
+                                              rocsparse_order      order_C,
+                                              rocsparse_index_base idx_base)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
@@ -223,15 +220,74 @@ namespace rocsparse
         // Grid-stride loop over the batch dimension (grid y).
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::csrmmnt_row_split_shared_remainder_device<BLOCKSIZE, WF_SIZE, SUB_WF_SIZE>(
+            rocsparse::csrmmnt_row_split_general_device<BLOCKSIZE, WF_SIZE, COL>(
                 alpha,
                 beta,
                 conj_A,
                 conj_B,
                 col_start,
-                col_end,
                 m,
-                n,
+                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C,
+                idx_base);
+        }
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              uint32_t COL,
+              typename T,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void csrmmnn_row_split_general_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                              bool                 is_host_mode,
+                                              bool                 conj_A,
+                                              bool                 conj_B,
+                                              J                    col_start,
+                                              J                    m,
+                                              int64_t              batch_count,
+                                              int64_t              offsets_batch_stride_A,
+                                              int64_t              columns_values_batch_stride_A,
+                                              const I*             csr_row_ptr,
+                                              const J*             csr_col_ind,
+                                              const A*             csr_val,
+                                              const B*             dense_B,
+                                              int64_t              ldb,
+                                              int64_t              batch_stride_B,
+                                              C*                   dense_C,
+                                              int64_t              ldc,
+                                              int64_t              batch_stride_C,
+                                              rocsparse_order      order_C,
+                                              rocsparse_index_base idx_base)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(alpha == 0 && beta == 1)
+        {
+            return;
+        }
+
+        // Grid-stride loop over the batch dimension (grid y).
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmmnn_row_split_general_device<BLOCKSIZE, WF_SIZE, COL>(
+                alpha,
+                beta,
+                conj_A,
+                conj_B,
+                col_start,
+                m,
                 load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
                 load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
                 load_pointer(csr_val, batch, columns_values_batch_stride_A),
@@ -544,7 +600,7 @@ namespace rocsparse
             int64_t              batch_count,                                                   \
             int64_t              offsets_batch_stride_A,                                        \
             int64_t              columns_values_batch_stride_A,                                 \
-            int64_t              ldb,                                                           \
+            int64_t              ldb,                                                         \
             int64_t              batch_stride_B,                                                \
             int64_t              ldc,                                                           \
             int64_t              batch_stride_C,                                                \
@@ -580,7 +636,7 @@ namespace rocsparse
             const J*             csr_col_ind,                                             \
             const A*             csr_val,                                                 \
             const B*             dense_B,                                                 \
-            int64_t              ldb,                                                     \
+            int64_t              ldb,                                                   \
             int64_t              batch_stride_B,                                          \
             C*                   dense_C,                                                 \
             int64_t              ldc,                                                     \
@@ -613,7 +669,7 @@ namespace rocsparse
             const J*             csr_col_ind,                                             \
             const A*             csr_val,                                                 \
             const B*             dense_B,                                                 \
-            int64_t              ldb,                                                     \
+            int64_t              ldb,                                                   \
             int64_t              batch_stride_B,                                          \
             C*                   dense_C,                                                 \
             int64_t              ldc,                                                     \
@@ -647,7 +703,7 @@ namespace rocsparse
             const J*             csr_col_ind,                                             \
             const A*             csr_val,                                                 \
             const B*             dense_B,                                                 \
-            int64_t              ldb,                                                     \
+            int64_t              ldb,                                                   \
             int64_t              batch_stride_B,                                          \
             C*                   dense_C,                                                 \
             int64_t              ldc,                                                     \
@@ -657,32 +713,6 @@ namespace rocsparse
             bool                 conj_A,                                                  \
             bool                 conj_B);
 
-#define CSRMMNT_ROW_SPLIT_SHARED_REMAINDER_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE, SUBWFSIZE) \
-    template __launch_bounds__(BLOCKSIZE) __global__ void                                         \
-        rocsparse::csrmmnt_row_split_shared_remainder_kernel<BLOCKSIZE, WFSIZE, SUBWFSIZE>(       \
-            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                                        \
-            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                                         \
-            bool                 is_host_mode,                                                    \
-            bool                 conj_A,                                                          \
-            bool                 conj_B,                                                          \
-            J                    col_start,                                                       \
-            J                    col_end,                                                         \
-            J                    m,                                                               \
-            J                    n,                                                               \
-            int64_t              batch_count,                                                     \
-            int64_t              offsets_batch_stride_A,                                          \
-            int64_t              columns_values_batch_stride_A,                                   \
-            const I*             csr_row_ptr,                                                     \
-            const J*             csr_col_ind,                                                     \
-            const A*             csr_val,                                                         \
-            const B*             dense_B,                                                         \
-            int64_t              ldb,                                                             \
-            int64_t              batch_stride_B,                                                  \
-            C*                   dense_C,                                                         \
-            int64_t              ldc,                                                             \
-            int64_t              batch_stride_C,                                                  \
-            rocsparse_order      order_C,                                                         \
-            rocsparse_index_base idx_base);
 
 #define CSRMMNN_ROW_SPLIT_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE, LOOPS) \
     template __launch_bounds__(BLOCKSIZE) __global__ void                    \
@@ -762,8 +792,6 @@ namespace rocsparse
             rocsparse_order      order_C,                             \
             rocsparse_index_base idx_base);
 
-#define CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_COLUMNS_256_16_8_1(T, I, J, A, B, C) \
-    CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_COLUMNS_KERNEL(T, I, J, A, B, C, 256, 16, 8, 1)
 #define CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_COLUMNS_256_16_8_2(T, I, J, A, B, C) \
     CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_COLUMNS_KERNEL(T, I, J, A, B, C, 256, 16, 8, 2)
 #define CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_COLUMNS_256_16_8_3(T, I, J, A, B, C) \
@@ -896,10 +924,119 @@ namespace rocsparse
     CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWF1_SWF2_SWF3_COLUMNS_KERNEL(               \
         T, I, J, A, B, C, 256, 16, 8, 7, 4, 2, 1)
 
-#define CSRMMNT_ROW_SPLIT_SHARED_REMAINDER_256_8_8(T, I, J, A, B, C) \
-    CSRMMNT_ROW_SPLIT_SHARED_REMAINDER_KERNEL(T, I, J, A, B, C, 256, 8, 8)
-#define CSRMMNT_ROW_SPLIT_SHARED_REMAINDER_256_16_16(T, I, J, A, B, C) \
-    CSRMMNT_ROW_SPLIT_SHARED_REMAINDER_KERNEL(T, I, J, A, B, C, 256, 16, 16)
+
+#define CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE, COL) \
+    template __launch_bounds__(BLOCKSIZE) __global__ void                          \
+        rocsparse::csrmmnt_row_split_general_kernel<BLOCKSIZE, WFSIZE, COL>(       \
+            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                         \
+            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                          \
+            bool                 is_host_mode,                                     \
+            bool                 conj_A,                                           \
+            bool                 conj_B,                                           \
+            J                    col_start,                                        \
+            J                    m,                                                \
+            int64_t              batch_count,                                      \
+            int64_t              offsets_batch_stride_A,                           \
+            int64_t              columns_values_batch_stride_A,                    \
+            const I*             csr_row_ptr,                                      \
+            const J*             csr_col_ind,                                      \
+            const A*             csr_val,                                          \
+            const B*             dense_B,                                          \
+            int64_t              ldb,                                            \
+            int64_t              batch_stride_B,                                   \
+            C*                   dense_C,                                          \
+            int64_t              ldc,                                              \
+            int64_t              batch_stride_C,                                   \
+            rocsparse_order      order_C,                                          \
+            rocsparse_index_base idx_base);
+
+
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_1(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 1)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_2(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 2)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_3(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 3)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_4(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 4)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_5(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 5)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_6(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 6)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_7(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 7)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_8(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 8)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_9(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 9)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_10(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 10)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_11(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 11)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_12(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 12)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_13(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 13)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_14(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 14)
+#define CSRMMNT_ROW_SPLIT_GENERAL_256_8_15(T, I, J, A, B, C) \
+    CSRMMNT_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 15)
+
+#define CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE, COL) \
+    template __launch_bounds__(BLOCKSIZE) __global__ void                          \
+        rocsparse::csrmmnn_row_split_general_kernel<BLOCKSIZE, WFSIZE, COL>(       \
+            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                         \
+            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                          \
+            bool                 is_host_mode,                                     \
+            bool                 conj_A,                                           \
+            bool                 conj_B,                                           \
+            J                    col_start,                                        \
+            J                    m,                                                \
+            int64_t              batch_count,                                      \
+            int64_t              offsets_batch_stride_A,                           \
+            int64_t              columns_values_batch_stride_A,                    \
+            const I*             csr_row_ptr,                                      \
+            const J*             csr_col_ind,                                      \
+            const A*             csr_val,                                          \
+            const B*             dense_B,                                          \
+            int64_t              ldb,                                              \
+            int64_t              batch_stride_B,                                   \
+            C*                   dense_C,                                          \
+            int64_t              ldc,                                              \
+            int64_t              batch_stride_C,                                   \
+            rocsparse_order      order_C,                                          \
+            rocsparse_index_base idx_base);
+
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_1(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 1)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_2(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 2)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_3(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 3)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_4(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 4)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_5(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 5)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_6(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 6)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_7(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 7)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_8(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 8)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_9(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 9)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_10(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 10)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_11(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 11)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_12(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 12)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_13(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 13)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_14(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 14)
+#define CSRMMNN_ROW_SPLIT_GENERAL_256_8_15(T, I, J, A, B, C) \
+    CSRMMNN_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 15)
 
 #define CSRMMNN_ROW_SPLIT_256_8_1(T, I, J, A, B, C) \
     CSRMMNN_ROW_SPLIT_KERNEL(T, I, J, A, B, C, 256, 8, 1)
@@ -909,3 +1046,6 @@ namespace rocsparse
 #define CSRMMTN_ROW_SPLIT_256_4(T, I, J, A, B, C) CSRMMTN_ROW_SPLIT_KERNEL(T, I, J, A, B, C, 256, 4)
 
 #define CSRMMTT_ROW_SPLIT_256_4(T, I, J, A, B, C) CSRMMTT_ROW_SPLIT_KERNEL(T, I, J, A, B, C, 256, 4)
+
+
+

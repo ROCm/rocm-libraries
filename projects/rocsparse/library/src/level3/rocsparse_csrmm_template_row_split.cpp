@@ -24,6 +24,8 @@
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <map>
+
 #include "csrmm/row_split/kernel_declarations.h"
 #include "csrmm_device_row_split.h"
 #include "rocsparse_common.h"
@@ -101,36 +103,249 @@ namespace rocsparse
         conj_A,                                                                                \
         conj_B);
 
-#define LAUNCH_CSRMMNT_ROW_SPLIT_REMAINDER(CSRMMNT_DIM, WFSIZE, SUBWFSIZE)                      \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                         \
-        (rocsparse::csrmmnt_row_split_shared_remainder_kernel<CSRMMNT_DIM, WFSIZE, SUBWFSIZE>), \
-        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1, get_grid_size_y<J>(handle, batch_count_C)),  \
-        dim3(CSRMMNT_DIM),                                                                      \
-        0,                                                                                      \
-        handle->stream,                                                                         \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                            \
-        handle->pointer_mode == rocsparse_pointer_mode_host,                                    \
-        conj_A,                                                                                 \
-        conj_B,                                                                                 \
-        start,                                                                                  \
-        end,                                                                                    \
-        m,                                                                                      \
-        n,                                                                                      \
-        batch_count_C,                                                                          \
-        offsets_batch_stride_A,                                                                 \
-        columns_values_batch_stride_A,                                                          \
-        csr_row_ptr,                                                                            \
-        csr_col_ind,                                                                            \
-        csr_val,                                                                                \
-        dense_B,                                                                                \
-        ldb,                                                                                    \
-        batch_stride_B,                                                                         \
-        dense_C,                                                                                \
-        ldc,                                                                                    \
-        batch_stride_C,                                                                         \
-        order_C,                                                                                \
+
+#define LAUNCH_CSRMMNT_ROW_SPLIT_GENERAL(CSRMMNT_DIM, WFSIZE, COL)                             \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                        \
+        (rocsparse::csrmmnt_row_split_general_kernel<CSRMMNT_DIM, WFSIZE, COL>),               \
+        dim3((m - 1) / (CSRMMNT_DIM / WFSIZE) + 1, get_grid_size_y<J>(handle, batch_count_C)), \
+        dim3(CSRMMNT_DIM),                                                                     \
+        0,                                                                                     \
+        handle->stream,                                                                        \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                           \
+        handle->pointer_mode == rocsparse_pointer_mode_host,                                   \
+        conj_A,                                                                                \
+        conj_B,                                                                                \
+        start,                                                                                 \
+        m,                                                                                     \
+        batch_count_C,                                                                         \
+        offsets_batch_stride_A,                                                                \
+        columns_values_batch_stride_A,                                                         \
+        csr_row_ptr,                                                                           \
+        csr_col_ind,                                                                           \
+        csr_val,                                                                               \
+        dense_B,                                                                               \
+        ldb,                                                                                   \
+        batch_stride_B,                                                                        \
+        dense_C,                                                                               \
+        ldc,                                                                                   \
+        batch_stride_C,                                                                        \
+        order_C,                                                                               \
         descr->base);
+
+#define ROCSPARSE_CSRMM_TEMPLATE_ROW_SPLIT_IMPL(NAME) \
+    NAME(handle,                                      \
+         conj_A,                                      \
+         conj_B,                                      \
+         m,                                           \
+         n,                                           \
+         k,                                           \
+         nnz,                                         \
+         batch_count_A,                               \
+         offsets_batch_stride_A,                      \
+         columns_values_batch_stride_A,               \
+         alpha_device_host,                           \
+         descr,                                       \
+         csr_val,                                     \
+         csr_row_ptr,                                 \
+         csr_col_ind,                                 \
+         dense_B,                                     \
+         ldb,                                         \
+         batch_count_B,                               \
+         batch_stride_B,                              \
+         beta_device_host,                            \
+         dense_C,                                     \
+         ldc,                                         \
+         batch_count_C,                               \
+         batch_stride_C,                              \
+         order_C,                                     \
+         max_row_nnz);
+
+// Same arguments as ROCSPARSE_CSRMM_TEMPLATE_ROW_SPLIT_IMPL, then the column
+// range [start, end). The callee sets end to the first column it did not cover.
+#define ROCSPARSE_CSRMMNT_ROW_SPLIT_RANGE(NAME) \
+    NAME(handle,                                \
+         conj_A,                                \
+         conj_B,                                \
+         m,                                     \
+         n,                                     \
+         k,                                     \
+         nnz,                                   \
+         batch_count_A,                         \
+         offsets_batch_stride_A,                \
+         columns_values_batch_stride_A,         \
+         alpha_device_host,                     \
+         descr,                                 \
+         csr_val,                               \
+         csr_row_ptr,                           \
+         csr_col_ind,                           \
+         dense_B,                               \
+         ldb,                                   \
+         batch_count_B,                         \
+         batch_stride_B,                        \
+         beta_device_host,                      \
+         dense_C,                               \
+         ldc,                                   \
+         batch_count_C,                         \
+         batch_stride_C,                        \
+         order_C,                               \
+         start,                                 \
+         end)
+
+#define LAUNCH_CSRMMNN_ROW_SPLIT_GENERAL(CSRMMNN_DIM, WFSIZE, COL)                             \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                        \
+        (rocsparse::csrmmnn_row_split_general_kernel<CSRMMNN_DIM, WFSIZE, COL>),               \
+        dim3((m - 1) / (CSRMMNN_DIM / WFSIZE) + 1, get_grid_size_y<J>(handle, batch_count_C)), \
+        dim3(CSRMMNN_DIM),                                                                     \
+        0,                                                                                     \
+        handle->stream,                                                                        \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                           \
+        handle->pointer_mode == rocsparse_pointer_mode_host,                                   \
+        conj_A,                                                                                \
+        conj_B,                                                                                \
+        start,                                                                                 \
+        m,                                                                                     \
+        batch_count_C,                                                                         \
+        offsets_batch_stride_A,                                                                \
+        columns_values_batch_stride_A,                                                         \
+        csr_row_ptr,                                                                           \
+        csr_col_ind,                                                                           \
+        csr_val,                                                                               \
+        dense_B,                                                                               \
+        ldb,                                                                                   \
+        batch_stride_B,                                                                        \
+        dense_C,                                                                               \
+        ldc,                                                                                   \
+        batch_stride_C,                                                                        \
+        order_C,                                                                               \
+        descr->base);
+
+#define CSRMMNN_GENERAL_ENTRY(COL) {COL, csrmmnn_launch_general<I, J, A, B, C, T, COL>}
+
+    // One exact column count of the NN general kernel. Block 256, wavefront 8.
+    template <typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C,
+              typename T,
+              uint32_t COL>
+    rocsparse_status csrmmnn_launch_general(rocsparse_handle          handle,
+                                            const T*                  alpha_device_host,
+                                            const T*                  beta_device_host,
+                                            J                         start,
+                                            J                         m,
+                                            J                         batch_count_C,
+                                            int64_t                   offsets_batch_stride_A,
+                                            int64_t                   columns_values_batch_stride_A,
+                                            int64_t                   ldb,
+                                            int64_t                   batch_stride_B,
+                                            int64_t                   ldc,
+                                            int64_t                   batch_stride_C,
+                                            const I*                  csr_row_ptr,
+                                            const J*                  csr_col_ind,
+                                            const A*                  csr_val,
+                                            const B*                  dense_B,
+                                            C*                        dense_C,
+                                            rocsparse_order           order_C,
+                                            const rocsparse_mat_descr descr,
+                                            bool                      conj_A,
+                                            bool                      conj_B)
+    {
+        LAUNCH_CSRMMNN_ROW_SPLIT_GENERAL(256, 8, COL);
+        return rocsparse_status_success;
+    }
+
+    // NN, trans_A == none. One launch of the NN general kernel covers all n columns,
+    // so n must be one of the widths in the dispatch table.
+    template <typename I, typename J, typename A, typename B, typename C, typename T>
+    rocsparse_status csrmmnn_template_row_split_general(rocsparse_handle          handle,
+                                                        bool                      conj_A,
+                                                        bool                      conj_B,
+                                                        J                         m,
+                                                        J                         n,
+                                                        J                         batch_count_C,
+                                                        int64_t                   offsets_batch_stride_A,
+                                                        int64_t                   columns_values_batch_stride_A,
+                                                        const T*                  alpha_device_host,
+                                                        const rocsparse_mat_descr descr,
+                                                        const A*                  csr_val,
+                                                        const I*                  csr_row_ptr,
+                                                        const J*                  csr_col_ind,
+                                                        const B*                  dense_B,
+                                                        int64_t                   ldb,
+                                                        int64_t                   batch_stride_B,
+                                                        const T*                  beta_device_host,
+                                                        C*                        dense_C,
+                                                        int64_t                   ldc,
+                                                        int64_t                   batch_stride_C,
+                                                        rocsparse_order           order_C)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        using launch_t = rocsparse_status (*)(rocsparse_handle,
+                                              const T*,
+                                              const T*,
+                                              J,
+                                              J,
+                                              J,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              const I*,
+                                              const J*,
+                                              const A*,
+                                              const B*,
+                                              C*,
+                                              rocsparse_order,
+                                              const rocsparse_mat_descr,
+                                              bool,
+                                              bool);
+
+        static const std::map<int, launch_t> s_general_dispatch = {
+            CSRMMNN_GENERAL_ENTRY(1),  CSRMMNN_GENERAL_ENTRY(2),  CSRMMNN_GENERAL_ENTRY(3),
+            CSRMMNN_GENERAL_ENTRY(4),  CSRMMNN_GENERAL_ENTRY(5),  CSRMMNN_GENERAL_ENTRY(6),
+            CSRMMNN_GENERAL_ENTRY(7),  CSRMMNN_GENERAL_ENTRY(8),  CSRMMNN_GENERAL_ENTRY(9),
+            CSRMMNN_GENERAL_ENTRY(10), CSRMMNN_GENERAL_ENTRY(11), CSRMMNN_GENERAL_ENTRY(12),
+            CSRMMNN_GENERAL_ENTRY(13), CSRMMNN_GENERAL_ENTRY(14), CSRMMNN_GENERAL_ENTRY(15)};
+
+        const auto it = s_general_dispatch.find(static_cast<int>(n));
+        if(it == s_general_dispatch.end())
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        }
+
+        RETURN_IF_ROCSPARSE_ERROR(it->second(handle,
+                                             alpha_device_host,
+                                             beta_device_host,
+                                             0,
+                                             m,
+                                             batch_count_C,
+                                             offsets_batch_stride_A,
+                                             columns_values_batch_stride_A,
+                                             ldb,
+                                             batch_stride_B,
+                                             ldc,
+                                             batch_stride_C,
+                                             csr_row_ptr,
+                                             csr_col_ind,
+                                             csr_val,
+                                             dense_B,
+                                             dense_C,
+                                             order_C,
+                                             descr,
+                                             conj_A,
+                                             conj_B));
+
+        return rocsparse_status_success;
+    }
+
+#undef CSRMMNN_GENERAL_ENTRY
+#undef LAUNCH_CSRMMNN_ROW_SPLIT_GENERAL
 
     template <typename I, typename J, typename A, typename B, typename C, typename T>
     rocsparse_status csrmmnn_template_row_split(rocsparse_handle handle,
@@ -157,9 +372,35 @@ namespace rocsparse
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
                                                 int64_t                   batch_stride_C,
-                                                rocsparse_order           order_C)
+                                                rocsparse_order           order_C,
+                                                int64_t                   max_row_nnz)
     {
         ROCSPARSE_ROUTINE_TRACE;
+
+        if(n <= 15)
+        {
+            return csrmmnn_template_row_split_general(handle,
+                                                      conj_A,
+                                                      conj_B,
+                                                      m,
+                                                      n,
+                                                      batch_count_C,
+                                                      offsets_batch_stride_A,
+                                                      columns_values_batch_stride_A,
+                                                      alpha_device_host,
+                                                      descr,
+                                                      csr_val,
+                                                      csr_row_ptr,
+                                                      csr_col_ind,
+                                                      dense_B,
+                                                      ldb,
+                                                      batch_stride_B,
+                                                      beta_device_host,
+                                                      dense_C,
+                                                      ldc,
+                                                      batch_stride_C,
+                                                      order_C);
+        }
 
         if(n <= 32)
         {
@@ -281,6 +522,363 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    // Width, then the sub-wavefront loop count and any 4/2/1 tail groups.
+#define CSRMMNT_PANEL_ENTRY(WIDTH, ...) \
+    {WIDTH, csrmmnt_launch_panel<I, J, A, B, C, T, __VA_ARGS__>}
+
+    template <typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C,
+              typename T,
+              uint32_t LOOPS,
+              uint32_t... TAIL>
+    rocsparse_status csrmmnt_launch_panel(rocsparse_handle          handle,
+                                          const T*                  alpha_device_host,
+                                          const T*                  beta_device_host,
+                                          J                         start,
+                                          J                         end,
+                                          J                         m,
+                                          J                         n,
+                                          J                         batch_count_C,
+                                          int64_t                   offsets_batch_stride_A,
+                                          int64_t                   columns_values_batch_stride_A,
+                                          int64_t                   ldb,
+                                          int64_t                   batch_stride_B,
+                                          int64_t                   ldc,
+                                          int64_t                   batch_stride_C,
+                                          const I*                  csr_row_ptr,
+                                          const J*                  csr_col_ind,
+                                          const A*                  csr_val,
+                                          const B*                  dense_B,
+                                          C*                        dense_C,
+                                          rocsparse_order           order_C,
+                                          const rocsparse_mat_descr descr,
+                                          bool                      conj_A,
+                                          bool                      conj_B)
+    {
+        if constexpr(sizeof...(TAIL) == 0)
+        {
+            LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, LOOPS);
+        }
+        else
+        {
+            LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(
+                256, 16, 8, LOOPS, TAIL...);
+        }
+
+        return rocsparse_status_success;
+    }
+
+    // Columns 1-15 are the general kernel.
+    template <uint32_t WF_SIZE,
+              uint32_t COL,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C,
+              typename T>
+    rocsparse_status csrmmnt_launch_cols(rocsparse_handle          handle,
+                                         const T*                  alpha_device_host,
+                                         const T*                  beta_device_host,
+                                         J                         start,
+                                         J                         end,
+                                         J                         m,
+                                         J                         n,
+                                         J                         batch_count_C,
+                                         int64_t                   offsets_batch_stride_A,
+                                         int64_t                   columns_values_batch_stride_A,
+                                         int64_t                   ldb,
+                                         int64_t                   batch_stride_B,
+                                         int64_t                   ldc,
+                                         int64_t                   batch_stride_C,
+                                         const I*                  csr_row_ptr,
+                                         const J*                  csr_col_ind,
+                                         const A*                  csr_val,
+                                         const B*                  dense_B,
+                                         C*                        dense_C,
+                                         rocsparse_order           order_C,
+                                         const rocsparse_mat_descr descr,
+                                         bool                      conj_A,
+                                         bool                      conj_B)
+    {
+        LAUNCH_CSRMMNT_ROW_SPLIT_GENERAL(256, WF_SIZE, COL);
+        return rocsparse_status_success;
+    }
+
+#define CSRMMNT_COLS_ENTRY(COL) {COL, csrmmnt_launch_cols<WF_SIZE, COL, I, J, A, B, C, T>}
+
+    // One panel of 16 or more columns. The wavefront is fixed at 16.
+    // On return, end is the first column this panel does not cover.
+    template <typename I, typename J, typename A, typename B, typename C, typename T>
+    rocsparse_status csrmmnt_template_row_split_columns_ge16(rocsparse_handle handle,
+                                                       bool             conj_A,
+                                                       bool             conj_B,
+                                                       J                m,
+                                                       J                n,
+                                                       J                k,
+                                                       I                nnz,
+                                                       J                batch_count_A,
+                                                       int64_t          offsets_batch_stride_A,
+                                                       int64_t  columns_values_batch_stride_A,
+                                                       const T* alpha_device_host,
+                                                       const rocsparse_mat_descr descr,
+                                                       const A*                  csr_val,
+                                                       const I*                  csr_row_ptr,
+                                                       const J*                  csr_col_ind,
+                                                       const B*                  dense_B,
+                                                       int64_t                   ldb,
+                                                       J                         batch_count_B,
+                                                       int64_t                   batch_stride_B,
+                                                       const T*                  beta_device_host,
+                                                       C*                        dense_C,
+                                                       int64_t                   ldc,
+                                                       J                         batch_count_C,
+                                                       int64_t                   batch_stride_C,
+                                                       rocsparse_order           order_C,
+                                                       J                         start,
+                                                       J&                        end)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        using launch_t = rocsparse_status (*)(rocsparse_handle          handle,
+                                              const T*                  alpha_device_host,
+                                              const T*                  beta_device_host,
+                                              J                         start,
+                                              J                         end,
+                                              J                         m,
+                                              J                         n,
+                                              J        batch_count_C,
+                                              int64_t  offsets_batch_stride_A,
+                                              int64_t  columns_values_batch_stride_A,
+                                              int64_t                   ldb,
+                                              int64_t                   batch_stride_B,
+                                              int64_t                   ldc,
+                                              int64_t                   batch_stride_C,
+                                              const I*                  csr_row_ptr,
+                                              const J*                  csr_col_ind,
+                                              const A*                  csr_val,
+                                              const B*                  dense_B,
+                                              C*                        dense_C,
+                                              rocsparse_order           order_C,
+                                              const rocsparse_mat_descr descr,
+                                              bool                      conj_A,
+                                              bool                      conj_B);
+
+        // Kernel dispatch table for panels of 16 or more columns.
+        // A pure multiple of 8 has no tail. Any other width adds 4, 2, and 1.
+        static const std::map<int, launch_t> s_panel_dispatch = {
+            CSRMMNT_PANEL_ENTRY(64, 8),
+            CSRMMNT_PANEL_ENTRY(63, 7, 4, 2, 1),
+            CSRMMNT_PANEL_ENTRY(62, 7, 4, 2),
+            CSRMMNT_PANEL_ENTRY(61, 7, 4, 1),
+            CSRMMNT_PANEL_ENTRY(60, 7, 4),
+            CSRMMNT_PANEL_ENTRY(59, 7, 2, 1),
+            CSRMMNT_PANEL_ENTRY(58, 7, 2),
+            CSRMMNT_PANEL_ENTRY(57, 7, 1),
+            CSRMMNT_PANEL_ENTRY(56, 7),
+            CSRMMNT_PANEL_ENTRY(55, 6, 4, 2, 1),
+            CSRMMNT_PANEL_ENTRY(54, 6, 4, 2),
+            CSRMMNT_PANEL_ENTRY(53, 6, 4, 1),
+            CSRMMNT_PANEL_ENTRY(52, 6, 4),
+            CSRMMNT_PANEL_ENTRY(51, 6, 2, 1),
+            CSRMMNT_PANEL_ENTRY(50, 6, 2),
+            CSRMMNT_PANEL_ENTRY(49, 6, 1),
+            CSRMMNT_PANEL_ENTRY(48, 6),
+            CSRMMNT_PANEL_ENTRY(47, 5, 4, 2, 1),
+            CSRMMNT_PANEL_ENTRY(46, 5, 4, 2),
+            CSRMMNT_PANEL_ENTRY(45, 5, 4, 1),
+            CSRMMNT_PANEL_ENTRY(44, 5, 4),
+            CSRMMNT_PANEL_ENTRY(43, 5, 2, 1),
+            CSRMMNT_PANEL_ENTRY(42, 5, 2),
+            CSRMMNT_PANEL_ENTRY(41, 5, 1),
+            CSRMMNT_PANEL_ENTRY(40, 5),
+            CSRMMNT_PANEL_ENTRY(39, 4, 4, 2, 1),
+            CSRMMNT_PANEL_ENTRY(38, 4, 4, 2),
+            CSRMMNT_PANEL_ENTRY(37, 4, 4, 1),
+            CSRMMNT_PANEL_ENTRY(36, 4, 4),
+            CSRMMNT_PANEL_ENTRY(35, 4, 2, 1),
+            CSRMMNT_PANEL_ENTRY(34, 4, 2),
+            CSRMMNT_PANEL_ENTRY(33, 4, 1),
+            CSRMMNT_PANEL_ENTRY(32, 4),
+            CSRMMNT_PANEL_ENTRY(31, 3, 4, 2, 1),
+            CSRMMNT_PANEL_ENTRY(30, 3, 4, 2),
+            CSRMMNT_PANEL_ENTRY(29, 3, 4, 1),
+            CSRMMNT_PANEL_ENTRY(28, 3, 4),
+            CSRMMNT_PANEL_ENTRY(27, 3, 2, 1),
+            CSRMMNT_PANEL_ENTRY(26, 3, 2),
+            CSRMMNT_PANEL_ENTRY(25, 3, 1),
+            CSRMMNT_PANEL_ENTRY(24, 3),
+            CSRMMNT_PANEL_ENTRY(23, 2, 4, 2, 1),
+            CSRMMNT_PANEL_ENTRY(22, 2, 4, 2),
+            CSRMMNT_PANEL_ENTRY(21, 2, 4, 1),
+            CSRMMNT_PANEL_ENTRY(20, 2, 4),
+            CSRMMNT_PANEL_ENTRY(19, 2, 2, 1),
+            CSRMMNT_PANEL_ENTRY(18, 2, 2),
+            CSRMMNT_PANEL_ENTRY(17, 2, 1),
+            CSRMMNT_PANEL_ENTRY(16, 2)};
+
+        const J   num_cols = end - start;
+        const int width    = (num_cols >= 64) ? 64 : static_cast<int>(num_cols);
+        const auto it = s_panel_dispatch.find(width);
+
+        if(it == s_panel_dispatch.end())
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        }
+
+        end = start + (num_cols - (num_cols % static_cast<J>(width)));
+        RETURN_IF_ROCSPARSE_ERROR(it->second(handle,
+                                             alpha_device_host,
+                                             beta_device_host,
+                                             start,
+                                             end,
+                                             m,
+                                             n,
+                                             batch_count_C,
+                                             offsets_batch_stride_A,
+                                             columns_values_batch_stride_A,
+                                             ldb,
+                                             batch_stride_B,
+                                             ldc,
+                                             batch_stride_C,
+                                             csr_row_ptr,
+                                             csr_col_ind,
+                                             csr_val,
+                                             dense_B,
+                                             dense_C,
+                                             order_C,
+                                             descr,
+                                             conj_A,
+                                             conj_B));
+
+        return rocsparse_status_success;
+    }
+
+
+    // One panel of 1-15 columns. WF_SIZE is the row-length wavefront.
+    // On return, end is the first column this panel does not cover.
+    template <uint32_t WF_SIZE,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C,
+              typename T>
+    rocsparse_status csrmmnt_template_row_split_columns_le15(rocsparse_handle handle,
+                                                       bool             conj_A,
+                                                       bool             conj_B,
+                                                       J                m,
+                                                       J                n,
+                                                       J                k,
+                                                       I                nnz,
+                                                       J                batch_count_A,
+                                                       int64_t          offsets_batch_stride_A,
+                                                       int64_t  columns_values_batch_stride_A,
+                                                       const T* alpha_device_host,
+                                                       const rocsparse_mat_descr descr,
+                                                       const A*                  csr_val,
+                                                       const I*                  csr_row_ptr,
+                                                       const J*                  csr_col_ind,
+                                                       const B*                  dense_B,
+                                                       int64_t                   ldb,
+                                                       J                         batch_count_B,
+                                                       int64_t                   batch_stride_B,
+                                                       const T*                  beta_device_host,
+                                                       C*                        dense_C,
+                                                       int64_t                   ldc,
+                                                       J                         batch_count_C,
+                                                       int64_t                   batch_stride_C,
+                                                       rocsparse_order           order_C,
+                                                       J                         start,
+                                                       J&                        end)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        using launch_t = rocsparse_status (*)(rocsparse_handle          handle,
+                                              const T*                  alpha_device_host,
+                                              const T*                  beta_device_host,
+                                              J                         start,
+                                              J                         end,
+                                              J                         m,
+                                              J                         n,
+                                              J        batch_count_C,
+                                              int64_t  offsets_batch_stride_A,
+                                              int64_t  columns_values_batch_stride_A,
+                                              int64_t                   ldb,
+                                              int64_t                   batch_stride_B,
+                                              int64_t                   ldc,
+                                              int64_t                   batch_stride_C,
+                                              const I*                  csr_row_ptr,
+                                              const J*                  csr_col_ind,
+                                              const A*                  csr_val,
+                                              const B*                  dense_B,
+                                              C*                        dense_C,
+                                              rocsparse_order           order_C,
+                                              const rocsparse_mat_descr descr,
+                                              bool                      conj_A,
+                                              bool                      conj_B);
+
+        // Kernel dispatch table for the remaining 1-15 columns.
+        static const std::map<int, launch_t> s_cols_dispatch = {CSRMMNT_COLS_ENTRY(15),
+                                                                     CSRMMNT_COLS_ENTRY(14),
+                                                                     CSRMMNT_COLS_ENTRY(13),
+                                                                     CSRMMNT_COLS_ENTRY(12),
+                                                                     CSRMMNT_COLS_ENTRY(11),
+                                                                     CSRMMNT_COLS_ENTRY(10),
+                                                                     CSRMMNT_COLS_ENTRY(9),
+                                                                     CSRMMNT_COLS_ENTRY(8),
+                                                                     CSRMMNT_COLS_ENTRY(7),
+                                                                     CSRMMNT_COLS_ENTRY(6),
+                                                                     CSRMMNT_COLS_ENTRY(5),
+                                                                     CSRMMNT_COLS_ENTRY(4),
+                                                                     CSRMMNT_COLS_ENTRY(3),
+                                                                     CSRMMNT_COLS_ENTRY(2),
+                                                                     CSRMMNT_COLS_ENTRY(1)};
+
+        const J   num_cols = end - start;
+        const int width    = static_cast<int>(num_cols);
+        const auto it = s_cols_dispatch.find(width);
+
+        if(it == s_cols_dispatch.end())
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        }
+
+        end = start + (num_cols - (num_cols % static_cast<J>(width)));
+        RETURN_IF_ROCSPARSE_ERROR(it->second(handle,
+                                             alpha_device_host,
+                                             beta_device_host,
+                                             start,
+                                             end,
+                                             m,
+                                             n,
+                                             batch_count_C,
+                                             offsets_batch_stride_A,
+                                             columns_values_batch_stride_A,
+                                             ldb,
+                                             batch_stride_B,
+                                             ldc,
+                                             batch_stride_C,
+                                             csr_row_ptr,
+                                             csr_col_ind,
+                                             csr_val,
+                                             dense_B,
+                                             dense_C,
+                                             order_C,
+                                             descr,
+                                             conj_A,
+                                             conj_B));
+
+        return rocsparse_status_success;
+    }
+
+
+#undef CSRMMNT_COLS_ENTRY
+#undef CSRMMNT_PANEL_ENTRY
+
     template <typename I, typename J, typename A, typename B, typename C, typename T>
     rocsparse_status csrmmnt_template_row_split(rocsparse_handle handle,
                                                 bool             conj_A,
@@ -306,284 +904,29 @@ namespace rocsparse
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
                                                 int64_t                   batch_stride_C,
-                                                rocsparse_order           order_C)
+                                                rocsparse_order           order_C,
+                                                int64_t                   max_row_nnz)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
         J start = 0;
         J end   = n;
 
-        while((end - start) >= 16)
+        while((end - start) > 0)
         {
-            J num_cols = (end - start);
-
-            // Launch appropriate kernel depending on row nnz of A
-            if(num_cols >= 64)
+            if((end - start) > 15)
             {
-                end = start + (num_cols - (num_cols % (8 * 8)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, 8);
+                RETURN_IF_ROCSPARSE_ERROR(ROCSPARSE_CSRMMNT_ROW_SPLIT_RANGE(
+                    rocsparse::csrmmnt_template_row_split_columns_ge16));
             }
-            else if(num_cols >= 63)
+            else
             {
-                end = start + (num_cols - (num_cols % (8 * 7 + 4 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 7, 4, 2, 1);
-            }
-            else if(num_cols >= 62)
-            {
-                end = start + (num_cols - (num_cols % (8 * 7 + 4 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 7, 4, 2);
-            }
-            else if(num_cols >= 61)
-            {
-                end = start + (num_cols - (num_cols % (8 * 7 + 4 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 7, 4, 1);
-            }
-            else if(num_cols >= 60)
-            {
-                end = start + (num_cols - (num_cols % (8 * 7 + 4)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 7, 4);
-            }
-            else if(num_cols >= 59)
-            {
-                end = start + (num_cols - (num_cols % (8 * 7 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 7, 2, 1);
-            }
-            else if(num_cols >= 58)
-            {
-                end = start + (num_cols - (num_cols % (8 * 7 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 7, 2);
-            }
-            else if(num_cols >= 57)
-            {
-                end = start + (num_cols - (num_cols % (8 * 7 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 7, 1);
-            }
-            else if(num_cols >= 56)
-            {
-                end = start + (num_cols - (num_cols % (8 * 7)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, 7);
-            }
-
-            else if(num_cols >= 55)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6 + 4 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 6, 4, 2, 1);
-            }
-            else if(num_cols >= 54)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6 + 4 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 6, 4, 2);
-            }
-            else if(num_cols >= 53)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6 + 4 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 6, 4, 1);
-            }
-            else if(num_cols >= 52)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6 + 4)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 6, 4);
-            }
-            else if(num_cols >= 51)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 6, 2, 1);
-            }
-            else if(num_cols >= 50)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 6, 2);
-            }
-            else if(num_cols >= 49)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 6, 1);
-            }
-            else if(num_cols >= 48)
-            {
-                end = start + (num_cols - (num_cols % (8 * 6)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, 6);
-            }
-
-            else if(num_cols >= 47)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5 + 4 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 5, 4, 2, 1);
-            }
-            else if(num_cols >= 46)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5 + 4 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 5, 4, 2);
-            }
-            else if(num_cols >= 45)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5 + 4 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 5, 4, 1);
-            }
-            else if(num_cols >= 44)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5 + 4)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 5, 4);
-            }
-            else if(num_cols >= 43)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 5, 2, 1);
-            }
-            else if(num_cols >= 42)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 5, 2);
-            }
-            else if(num_cols >= 41)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 5, 1);
-            }
-            else if(num_cols >= 40)
-            {
-                end = start + (num_cols - (num_cols % (8 * 5)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, 5);
-            }
-
-            else if(num_cols >= 39)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4 + 4 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 4, 4, 2, 1);
-            }
-            else if(num_cols >= 38)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4 + 4 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 4, 4, 2);
-            }
-            else if(num_cols >= 37)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4 + 4 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 4, 4, 1);
-            }
-            else if(num_cols >= 36)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4 + 4)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 4, 4);
-            }
-            else if(num_cols >= 35)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 4, 2, 1);
-            }
-            else if(num_cols >= 34)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 4, 2);
-            }
-            else if(num_cols >= 33)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 4, 1);
-            }
-            else if(num_cols >= 32)
-            {
-                end = start + (num_cols - (num_cols % (8 * 4)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, 4);
-            }
-
-            else if(num_cols >= 31)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3 + 4 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 3, 4, 2, 1);
-            }
-            else if(num_cols >= 30)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3 + 4 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 3, 4, 2);
-            }
-            else if(num_cols >= 29)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3 + 4 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 3, 4, 1);
-            }
-            else if(num_cols >= 28)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3 + 4)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 3, 4);
-            }
-            else if(num_cols >= 27)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 3, 2, 1);
-            }
-            else if(num_cols >= 26)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 3, 2);
-            }
-            else if(num_cols >= 25)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 3, 1);
-            }
-            else if(num_cols >= 24)
-            {
-                end = start + (num_cols - (num_cols % (8 * 3)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, 3);
-            }
-
-            else if(num_cols >= 23)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2 + 4 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 2, 4, 2, 1);
-            }
-            else if(num_cols >= 22)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2 + 4 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 2, 4, 2);
-            }
-            else if(num_cols >= 21)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2 + 4 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 2, 4, 1);
-            }
-            else if(num_cols >= 20)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2 + 4)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 2, 4);
-            }
-            else if(num_cols >= 19)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2 + 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 2, 2, 1);
-            }
-            else if(num_cols >= 18)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2 + 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 2, 2);
-            }
-            else if(num_cols >= 17)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2 + 1)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SUBWFSIZE_X_LOOP_PLUS_SWFS_COLUMNS(256, 16, 8, 2, 1);
-            }
-            else if(num_cols >= 16)
-            {
-                end = start + (num_cols - (num_cols % (8 * 2)));
-                LAUNCH_CSRMMNT_ROW_SPLIT_SHARED_SUBWFSIZE_X_LOOP_COLUMNS(256, 16, 8, 2);
+                RETURN_IF_ROCSPARSE_ERROR(ROCSPARSE_CSRMMNT_ROW_SPLIT_RANGE(
+                    rocsparse::csrmmnt_template_row_split_columns_le15<8>));
             }
 
             start = end;
             end   = n;
-        }
-
-        // Process remainder
-        if((end - start) > 0)
-        {
-            if((end - start) <= 8)
-            {
-                LAUNCH_CSRMMNT_ROW_SPLIT_REMAINDER(256, 8, 8);
-            }
-            else if((end - start) <= 16)
-            {
-                LAUNCH_CSRMMNT_ROW_SPLIT_REMAINDER(256, 16, 16);
-            }
         }
 
         return rocsparse_status_success;
@@ -614,7 +957,8 @@ namespace rocsparse
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
                                                 int64_t                   batch_stride_C,
-                                                rocsparse_order           order_C)
+                                                rocsparse_order           order_C,
+                                                int64_t                   max_row_nnz)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -686,7 +1030,8 @@ namespace rocsparse
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
                                                 int64_t                   batch_stride_C,
-                                                rocsparse_order           order_C)
+                                                rocsparse_order           order_C,
+                                                int64_t                   max_row_nnz)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -732,33 +1077,6 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-#define ROCSPARSE_CSRMM_TEMPLATE_ROW_SPLIT_IMPL(NAME) \
-    NAME(handle,                                      \
-         conj_A,                                      \
-         conj_B,                                      \
-         m,                                           \
-         n,                                           \
-         k,                                           \
-         nnz,                                         \
-         batch_count_A,                               \
-         offsets_batch_stride_A,                      \
-         columns_values_batch_stride_A,               \
-         alpha_device_host,                           \
-         descr,                                       \
-         csr_val,                                     \
-         csr_row_ptr,                                 \
-         csr_col_ind,                                 \
-         dense_B,                                     \
-         ldb,                                         \
-         batch_count_B,                               \
-         batch_stride_B,                              \
-         beta_device_host,                            \
-         dense_C,                                     \
-         ldc,                                         \
-         batch_count_C,                               \
-         batch_stride_C,                              \
-         order_C);
-
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template_row_split(rocsparse_handle    handle,
                                               rocsparse_operation trans_A,
@@ -786,7 +1104,8 @@ namespace rocsparse
                                               J                         batch_count_C,
                                               int64_t                   batch_stride_C,
                                               rocsparse_order           order_C,
-                                              bool                      force_conj_A)
+                                              bool                      force_conj_A,
+                                              int64_t                   max_row_nnz)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -862,7 +1181,8 @@ namespace rocsparse
         JTYPE                     batch_count_C,                   \
         int64_t                   batch_stride_C,                  \
         rocsparse_order           order_C,                         \
-        bool                      force_conj_A)
+        bool                      force_conj_A,                    \
+        int64_t                   max_row_nnz)
 
 // Uniform precisions
 INSTANTIATE(float, int32_t, int32_t, float, float, float);
