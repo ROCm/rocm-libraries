@@ -36,7 +36,7 @@ accumulation.
 
 - **Decode (host-checked tables)**: rocKE has no fp4 decoder.
   The 6-bit table `_FP6_CODEBOOK`
-  ([helpers/i4_dequant.py:163-181](../../python/rocke/helpers/i4_dequant.py))
+  ([helpers/i4_dequant.py](../../python/rocke/helpers/i4_dequant.py))
   is **e3m2** (bf6) and correct for every
   code, signed zeros and unflushed subnormals included; there is no e2m3
   table. The entry point `unpack_fp6_bytes_to_quad_f32` has width and naming

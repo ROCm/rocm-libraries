@@ -38,7 +38,7 @@ Which target uses which: [per-target table](./README.md#encoding-per-target-fp8-
 
 The builders mirror fp8e4m3: `cvt_f32_to_bf8`, `cvt_pk_bf8_f32x4`,
 `cvt_bf8_to_f32`, `cvt_pk_f32_bf8x4` and, on gfx950 only,
-`cvt_scalef32_pk_f32_bf8x4` ([core/ir.py:3381-3604](../../python/rocke/core/ir.py)).
+`cvt_scalef32_pk_f32_bf8x4` ([core/ir.py](../../python/rocke/core/ir.py)).
 Decoding is exact. The f32 -> bf8 conversion does not saturate (MODE.FP16_OVFL
 is 0):
 
@@ -57,7 +57,7 @@ the CDNA3 ISA's format table (section 7.2, Table 30) gives `0x80` as the BF8
 "INF" code, the same code as NaN, so the gfx942 conversion gives NaN where the
 conversion table lists +-inf. Measured on gfx942: +-inf and values from 61440
 give `0x80`; 57344 to 61439 give `0x7f`. The `cvt_f32_to_bf8` docstring
-states the same ([core/ir.py:3568-3586](../../python/rocke/core/ir.py)).
+states the same ([core/ir.py](../../python/rocke/core/ir.py)).
 
 ## Policy
 

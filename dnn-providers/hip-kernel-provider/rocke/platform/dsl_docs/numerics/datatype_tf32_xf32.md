@@ -25,7 +25,7 @@ generic tf32 arithmetic is refused. Constants are in the
 | `cvt_f32_to_tf32(v)` | rounds the f32 to 10 mantissa bits in integer arithmetic and zeroes the low 13 bits | RNE | +-inf and signed zero kept; NaN quieted, upper payload kept; finite values that round past the tf32 max become +-inf |
 | `bitcast(v, TF32)` | wraps the f32 bits unchanged | none here; the instruction ignores the low bits | as the instruction treats them, see below |
 
-Source: [core/ir.py:3269-3310](../../python/rocke/core/ir.py).
+Source: `cvt_f32_to_tf32` in [core/ir.py](../../python/rocke/core/ir.py).
 
 **Raw bits are truncated, not rounded.** On gfx942, both native XF32 shapes
 accepted raw f32 payloads, and in the measured corpus their results matched
@@ -44,7 +44,7 @@ RNE inputs or NaN must stay NaN. The evidence and corpus are recorded in the
   finite bf16, so that rounding near the f32 max cannot create
   `inf * 0 = NaN` in the cross terms; an infinity or NaN in an operand still
   makes every output it feeds non-finite
-  ([core/lower_llvm.py:4059-4091](../../python/rocke/core/lower_llvm.py)).
+  (`_split_f32_to_bf16` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)).
   Magnitudes at or below 2^-134 split to zero, so the smallest subnormals are
   lost. The precision contract is in
   [xf32_bf16x3_emulation.md](../architecture/xf32_bf16x3_emulation.md).

@@ -40,17 +40,17 @@ type's -128, so `-q` never overflows. The bound comes from
 
 `cvt_f32_to_i8_sat` and `cvt_pk_i8_f32x4` lower to `llvm.rint`, `fptosi` to
 i32, then `smax` / `smin` to -128 .. 127
-([core/lower_llvm.py:3224-3323](../../python/rocke/core/lower_llvm.py)).
+(`_op_arith_cvt_f32_to_i8_sat` and `_op_arith_cvt_pk_i8_f32x4` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)).
 LLVM's `fptosi` is **poison** for NaN and for values that do not fit in i32
 (LLVM Language Reference), so the "saturation" only covers values within the
 i32 range. Clamp in f32 first, as `quantize_scalar_f32` does; `pack_quant_chunk_f32`
-([helpers/io.py:285-322](../../python/rocke/helpers/io.py)) leaves that clamp to
+([helpers/io.py](../../python/rocke/helpers/io.py)) leaves that clamp to
 its caller.
 
 ## u8
 
 `cvt_f32_to_u8_sat` lowers to `rint`, `maxnum(r, 0)`, `minnum(r, 255)`,
-`fptoui` ([core/lower_llvm.py:3325-3360](../../python/rocke/core/lower_llvm.py)):
+`fptoui` (`_op_arith_cvt_f32_to_u8_sat` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)):
 NaN gives 0 (the `maxnum` rule), `-inf` 0, `+inf` 255, RNE in between. It is
 defined for every input because the clamp is in f32. `uitofp_f32` is exact.
 
@@ -58,11 +58,11 @@ defined for every input because the clamp is in f32. `uitofp_f32` is exact.
 
 - Signed `add`, `sub` and `mul` carry LLVM's `nsw` flag: a signed overflow is
   poison, as in C. Do not rely on wrap-around for signed values
-  ([core/lower_llvm.py:2614-2639](../../python/rocke/core/lower_llvm.py)).
+  (`_wrapping_binop` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)).
 - Unsigned (`u8`) arithmetic wraps modulo 256 and uses the unsigned forms of
   division, remainder and compares ([dtype_support.md, section 1](../reference/dtype_support.md#1-the-canonical-dtype-set)).
 - Integer matrix accumulation wraps on overflow. rocKE passes `clamp = false`
-  to the integer WMMA ([core/isa/matrix_calls.py:271-272](../../python/rocke/core/isa/matrix_calls.py)).
+  to the integer WMMA (`_INTEGER_WMMA_ARGS` in [core/isa/matrix_calls.py](../../python/rocke/core/isa/matrix_calls.py)).
   For the CDNA `V_MFMA_I32_*_I8`, the CDNA4 ISA ties the clamp to
   MODE.FP16_OVFL: "If set, I32 Result is clamped to +/-MAX on
   overflow/underflow, otherwise the carry out bits are dropped". The bit is

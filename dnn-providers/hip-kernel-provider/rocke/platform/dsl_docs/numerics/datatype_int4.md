@@ -21,7 +21,7 @@ are in the [Quick values](./README.md#integer-formats) table.
 `unpack_i4_byte_to_pair_i32` reads one byte as two signed nibbles, **low
 nibble first** (bits 0-3 are the first element), and sign-extends each to
 -8 .. 7 with a mask and a conditional subtract
-([helpers/i4_dequant.py:49-94](../../python/rocke/helpers/i4_dequant.py)).
+([helpers/i4_dequant.py](../../python/rocke/helpers/i4_dequant.py)).
 This matches CK Tile's i4 weight packer.
 
 ## Conversions

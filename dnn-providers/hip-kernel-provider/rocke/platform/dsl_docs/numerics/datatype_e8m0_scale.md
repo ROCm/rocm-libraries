@@ -25,7 +25,7 @@ which rocKE does by default ([README](./README.md#subnormals)). Code 127 is
 1.0.
 
 `e5m3` is a different 8-bit scale format that the dtype table recognizes
-([core/dtypes.py:86-121](../../python/rocke/core/dtypes.py)); its numerics are
+(`_DTYPE_INFO` in [core/dtypes.py](../../python/rocke/core/dtypes.py)); its numerics are
 not documented here yet.
 
 ## Decoding and applying scales
@@ -37,8 +37,8 @@ not documented here yet.
 | `largest_safe_mx_scale_code(a_fmt, b_fmt, products)` | the largest code both scales may have so that a scaled MFMA's partial sums stay at most `2^127` | uses each element format's max ([Quick values](./README.md#quick-values)) |
 | `cvt_scalef32_pk_f32_fp8x4` / `_bf8x4` (gfx950) | fp8 / bf8 decode times a scale | reads only the exponent bits of the f32 scale, so it applies an E8M0 scale, not an arbitrary f32 |
 
-Sources: [helpers/mx_scale.py:98-223](../../python/rocke/helpers/mx_scale.py),
-[core/ir.py:3443-3500](../../python/rocke/core/ir.py).
+Sources: [helpers/mx_scale.py](../../python/rocke/helpers/mx_scale.py),
+`cvt_scalef32_pk_f32_fp8x4` in [core/ir.py](../../python/rocke/core/ir.py).
 
 **Why the safe code exists.** The gfx950 scaled MFMA multiplies every product
 by `2^(ea + eb - 254)` before summing. With large codes two products of

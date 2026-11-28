@@ -13,10 +13,8 @@ stored is in [dtype_storage_packing.md](../architecture/dtype_storage_packing.md
 test tolerances are in the
 [optimization runbook, section 1.4](../optimization/optimization_runbook.md#14-dtypes-and-numerics).
 
-**Basis.** File and line anchors refer to `develop` at
-[4f60c1a74e0](https://github.com/ROCm/rocm-libraries/commit/4f60c1a74e0ca0d5f355386905fc59b5eded703d)
-(2026-11-19). `helpers/quant.py` and `instances/common/mx_gemm.py` changed
-after that commit, so links into them name the function instead of lines.
+**Anchors.** A link into the code names the function, class or constant it
+points at, never a line number, so it stays true as the file changes.
 Behaviour that exists only on an open branch is marked **pending** and listed
 once, in [Pending changes](#pending-changes).
 
@@ -58,12 +56,12 @@ libraries" before Tests where there are any. The dispatch table is the union of 
 ## Dispatch table
 
 Spellings are those accepted by `normalize_dtype`
-([core/dtypes.py:17-57](../../python/rocke/core/dtypes.py)), the IR type names
-([core/ir.py:72-91](../../python/rocke/core/ir.py)), the quantization aliases
+(`_DTYPE_ALIASES` in [core/dtypes.py](../../python/rocke/core/dtypes.py)), the IR type names
+(the `Type` constants such as `F32` and `I8` in [core/ir.py](../../python/rocke/core/ir.py)), the quantization aliases
 (`_QUANT_TYPE_ALIAS` in [helpers/quant.py](../../python/rocke/helpers/quant.py)), the SDPA
 dispatch dtypes and hipDNN names
-([library/dispatch/sdpa/common.py:61-80](../../../library/dispatch/sdpa/common.py),
-[library/dispatch/sdpa/hipdnn.py:32-52](../../../library/dispatch/sdpa/hipdnn.py)),
+(`Dtype` in [library/dispatch/sdpa/common.py](../../../library/dispatch/sdpa/common.py),
+`HIPDNN_DTYPES` in [library/dispatch/sdpa/hipdnn.py](../../../library/dispatch/sdpa/hipdnn.py)),
 and the PyTorch / ml_dtypes names these docs use. Look names up
 case-insensitively here (the Python constants are the upper-case names, such
 as `FP8E4M3`), but note that only `normalize_dtype` ignores case: the
@@ -85,7 +83,7 @@ quantization helpers match their aliases exactly.
 | `i1`, `bool`, `boolean` | [datatype_i1_bool.md](./datatype_i1_bool.md) |
 
 `e4m3` is an alias of `fp8e4m3`, but `e5m3` is a different 8-bit format, not
-an alias of `bf8e5m2` ([core/dtypes.py:124-133](../../python/rocke/core/dtypes.py)).
+an alias of `bf8e5m2` (`dtype_info` in [core/dtypes.py](../../python/rocke/core/dtypes.py)).
 
 ## Quick values
 
@@ -196,7 +194,7 @@ whose rocKE bound is the symmetric 127.
 
 The hardware decides some of this per wave through the MODE register. rocKE
 emits no `denormal-fp-math` or other floating-point function attribute
-([core/lower_llvm.py:7568-7599](../../python/rocke/core/lower_llvm.py)), so the
+(the function attributes `finalize` writes in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)), so the
 compiler's defaults apply. Compiling a rocKE kernel (llvm20 flavor, ROCm 7.1
 `llc`) for gfx942 and gfx950 gives the values below, and the MODE register
 read at kernel entry on gfx942 agrees (`0x3f0`):
@@ -214,7 +212,7 @@ sets this descriptor bit (`COMPUTE_PGM_RSRC1` bit 26): only the assembler
 directive `.amdhsa_fp16_overflow` can, there is no IR attribute for it
 (llvm-project `SIProgramInfo.cpp`, `getComputePGMRSrc1Reg`), and rocKE never
 writes MODE on gfx942 or gfx950: its only `s_setreg` builder is refused there
-([core/lower_llvm.py:5176-5183](../../python/rocke/core/lower_llvm.py)). So the
+(`_op_tile_s_setreg` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)). So the
 f32 -> fp8 / bf8 conversion instructions are **non-saturating**, f16 overflow
 gives +-inf, and rocKE saturates in software, with a clamp before the
 conversion.
@@ -252,10 +250,10 @@ Operations that do **not** propagate NaN:
 
 | operation | NaN behaviour | source |
 |---|---|---|
-| `fmax(a, b)`, `fmin(a, b)` | `llvm.maxnum` / `llvm.minnum`: if one operand is a quiet NaN the other is returned (results of arithmetic are always quiet NaNs; the backend quiets inputs first) | [core/lower_llvm.py:2792-2840](../../python/rocke/core/lower_llvm.py) |
-| `fmax3`, `fmin3` | two nested `maxnum` / `minnum` | [core/lower_llvm.py:2724-2775](../../python/rocke/core/lower_llvm.py) |
-| `clamp_f32(v, lo, hi)` | `fmin(hi, fmax(lo, v))`: a NaN `v` becomes `lo` | [core/ir.py:3656-3663](../../python/rocke/core/ir.py) |
-| `fcmp` with an ordered predicate (`olt`, `ole`, `ogt`, `oge`, `oeq`, `one`) | false when either operand is NaN | [core/ir.py:3096-3101](../../python/rocke/core/ir.py) |
+| `fmax(a, b)`, `fmin(a, b)` | `llvm.maxnum` / `llvm.minnum`: if one operand is a quiet NaN the other is returned (results of arithmetic are always quiet NaNs; the backend quiets inputs first) | `_op_arith_fmax`, `_op_arith_fmin` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py) |
+| `fmax3`, `fmin3` | two nested `maxnum` / `minnum` | `_op_arith_fmax3`, `_op_arith_fmin3` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py) |
+| `clamp_f32(v, lo, hi)` | `fmin(hi, fmax(lo, v))`: a NaN `v` becomes `lo` | `clamp_f32` in [core/ir.py](../../python/rocke/core/ir.py) |
+| `fcmp` with an ordered predicate (`olt`, `ole`, `ogt`, `oge`, `oeq`, `one`) | false when either operand is NaN | `fcmp` in [core/ir.py](../../python/rocke/core/ir.py) |
 
 So a reduction built on `fmax` drops NaN, and a clamp turns NaN into the lower
 bound. To keep a NaN, test it explicitly and select:
@@ -273,7 +271,7 @@ inputs do not flush either (CDNA3 only). `exp2_fast` (`v_exp_f32`) flushes
 subnormals ([f32](./datatype_f32.md)), and the gfx950 tf32 emulation loses
 the smallest values ([tf32](./datatype_tf32_xf32.md)). The f32 atomic
 add rocKE emits carries `!amdgpu.ignore.denormal.mode`
-([core/lower_llvm.py:3660-3677](../../python/rocke/core/lower_llvm.py)), which
+(`_op_memref_global_atomic_add` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)), which
 allows the hardware atomic to flush subnormals.
 
 ### Signed zero

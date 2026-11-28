@@ -47,9 +47,9 @@ encoding a buffer holds.
   `quant_max_abs` and `mx_gemm_element_format` read.
 - The attention kernels guard the encoding themselves: `FmhaFwdFp8Spec` refuses
   OCP-quantized K/V on gfx942 unless `fp8_fnuz=True`
-  ([fmha_fwd_fp8.py:92-151](../../../library/kernels/common/fmha_fwd_fp8.py)),
+  (`is_valid_spec` in [fmha_fwd_fp8.py](../../../library/kernels/common/fmha_fwd_fp8.py)),
   and unified attention refuses a `fp8_fnuz` flag that does not match the
-  target ([attention_unified.py:508-523](../../../library/kernels/common/attention_unified.py)).
+  target (`_reject_fp8_format_arch_mismatch` in [attention_unified.py](../../../library/kernels/common/attention_unified.py)).
 
 ## Conversions
 
@@ -59,8 +59,8 @@ encoding a buffer holds.
 | `cvt_fp8_to_f32`, `cvt_pk_f32_fp8x4` | `llvm.amdgcn.cvt.f32.fp8`, `llvm.amdgcn.cvt.pk.f32.fp8` | exact | NaN codes give NaN |
 | `cvt_scalef32_pk_f32_fp8x4` (gfx950 only) | `llvm.amdgcn.cvt.scalef32.pk.f32.fp8` | exact decode, then scale | uses only the exponent of the f32 scale |
 
-Sources: builders [core/ir.py:3366-3540](../../python/rocke/core/ir.py),
-lowerings [core/lower_llvm.py:2983-3185](../../python/rocke/core/lower_llvm.py).
+Sources: the builders in [core/ir.py](../../python/rocke/core/ir.py) and
+their `_op_arith_*` lowerings in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py).
 
 **The f32 -> fp8 conversion does not saturate.** MODE.FP16_OVFL is clear in
 rocKE kernels ([README](./README.md#the-mode-register)), and with it clear
@@ -78,7 +78,7 @@ Measured on gfx950 ([README](./README.md#the-mode-register)): NaN, +-inf,
 10000 and -10000, 57344, 61440 and 1e30 give NaN; 447, 449 and 464 give 448
 (464 is the tie and rounds down); 247 gives 240 and 248 gives 256. Finite
 inputs between 464 and 10000 were not measured. The `cvt_f32_to_fp8`
-docstring states the same rule ([core/ir.py:3521-3540](../../python/rocke/core/ir.py)).
+docstring states the same rule ([core/ir.py](../../python/rocke/core/ir.py)).
 
 **Decoding is exact**: every fp8 value, subnormals included, is an f32 value,
 and rocKE keeps subnormals ([README](./README.md#subnormals)). On FNUZ, `0x80`
@@ -87,7 +87,7 @@ decodes to NaN; on OCP, `0x80` is -0 and `0x7f` / `0xff` are NaN.
 **The scaled decode is not a multiply by an f32.** `v_cvt_scalef32_pk_f32_fp8`
 reads the scale's exponent bits only; for an arbitrary f32 scale, decode with
 `cvt_pk_f32_fp8x4` and multiply
-([core/ir.py:3443-3500](../../python/rocke/core/ir.py)).
+(`cvt_scalef32_pk_f32_fp8x4` in [core/ir.py](../../python/rocke/core/ir.py)).
 
 ## Policy
 
@@ -120,7 +120,7 @@ These routes apply no clamp, so they give the bare conversion's results for
 `pack_quant_chunk_local_f32` in
 [helpers/quant.py](../../python/rocke/helpers/quant.py), the 4-wide packed one
 and the per-element one for 2-wide chunks, and `pack_quant_chunk_f32`
-([helpers/io.py:285-322](../../python/rocke/helpers/io.py)). The caller's
+([helpers/io.py](../../python/rocke/helpers/io.py)). The caller's
 scale must keep every finite value within the target's bound; the quantizing
 instances build it as `amax / quant_max_abs`.
 
@@ -150,7 +150,7 @@ f32.
 
 The fp8 MFMA and WMMA instructions read the bytes in the target's encoding;
 `core/mma_operand.py` only reinterprets operand bits, it never converts them
-([core/mma_operand.py:1-20](../../python/rocke/core/mma_operand.py)). So a
+(the module docstring of [core/mma_operand.py](../../python/rocke/core/mma_operand.py)). So a
 buffer quantized for one encoding must not feed another target's matrix
 cores. Mixed atoms (`fp8_bf8`, `bf8_fp8`) read each operand in its own
 format, and accumulate in f32.

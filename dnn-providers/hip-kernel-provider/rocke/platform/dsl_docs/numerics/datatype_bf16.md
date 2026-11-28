@@ -23,10 +23,10 @@ range with 7 stored mantissa bits. Constants are in the
 | `cast_f32_to(v, BF16)`, `trunc_f32_to_bf16` | `fptrunc float to bfloat` | RNE | quiet NaN | +-inf | +-inf for f32 bit patterns from `0x7f7f8000` up |
 | `cast_to_f32` | `fpext bfloat to float` | exact (shift left 16) | NaN | +-inf | - |
 
-Sources: [core/ir.py:3239-3325](../../python/rocke/core/ir.py),
-[core/lower_llvm.py:2929-2951](../../python/rocke/core/lower_llvm.py); the
-overflow threshold is the one stated for the bf16 split in
-[core/lower_llvm.py:4072-4078](../../python/rocke/core/lower_llvm.py).
+Sources: the builders in [core/ir.py](../../python/rocke/core/ir.py) and
+their `_op_arith_*` lowerings in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py); the
+overflow threshold is the one the `_split_f32_to_bf16` docstring states in
+[core/lower_llvm.py](../../python/rocke/core/lower_llvm.py).
 
 What `fptrunc` becomes depends on the target:
 

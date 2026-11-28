@@ -17,12 +17,12 @@ rocKE has no separate `bool` type in its IR; comparisons produce `i1`, and
 The SDPA dispatch dtype `bool` (hipDNN `BOOLEAN`) is different: it names a
 mask tensor stored one byte per element, which a kernel loads as bytes, not
 an `i1` value
-([library/dispatch/sdpa/common.py:61-80](../../../library/dispatch/sdpa/common.py)).
+(`Dtype` in [library/dispatch/sdpa/common.py](../../../library/dispatch/sdpa/common.py)).
 
 ## Float comparisons
 
 `fcmp(pred, a, b)` accepts `olt`, `ole`, `ogt`, `oge`, `oeq`, `one`, `ord`
-and `uno` ([core/ir.py:3096-3101](../../python/rocke/core/ir.py)). The ordered
+and `uno` ([core/ir.py](../../python/rocke/core/ir.py)). The ordered
 predicates are false when either operand is NaN; `uno` is true when either
 is NaN, `ord` when neither is. There are no unordered relational predicates
 (`ult`, `ugt` ...), so "x is not greater than y, or NaN" is spelled
@@ -31,15 +31,15 @@ is NaN, `ord` when neither is. There are no unordered relational predicates
 ## Negation
 
 `lnot` lowers to `xor i1 %x, true` in LLVM IR
-([core/lower_llvm.py:2863-2873](../../python/rocke/core/lower_llvm.py)), so
+(`_op_arith_not` in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py)), so
 `lnot(fcmp("oeq", l, 0))` is true for a NaN `l`. Attention's "row has mass"
 test wants exactly that (a NaN row keeps NaN instead of being treated as
 empty), and builds it as `fcmp("one", l, 0) OR fcmp("uno", l, 0)` because of
 the HIP lowering below
-([_lse_store.py:138-145](../../../library/kernels/common/_lse_store.py)).
+(`lse_row_has_mass` in [_lse_store.py](../../../library/kernels/common/_lse_store.py)).
 
 The HIP debugging lowering emits `bool r = ~x;` for `lnot`
-([core/lower_hip.py:2247-2250](../../python/rocke/core/lower_hip.py)); `~` on a
+(`_op_arith_not` in [core/lower_hip.py](../../python/rocke/core/lower_hip.py)); `~` on a
 `bool` promotes to `int`, so the result is true for both inputs. Avoid `lnot`
 on `i1` in code that is also lowered to HIP; use the complementary predicate.
 

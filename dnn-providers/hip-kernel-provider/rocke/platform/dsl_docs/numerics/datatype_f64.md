@@ -23,8 +23,8 @@ and kernel families accept f64 is in
 | `cvt_f32_to_f64` | `fpext float to double` | exact | NaN, +-inf, -0 and subnormals kept |
 | `cvt_f64_to_f32` | `fptrunc double to float` | RNE | NaN kept; beyond the f32 range gives +-inf; below half the smallest f32 subnormal gives +-0 |
 
-Sources: [core/ir.py:3344-3364](../../python/rocke/core/ir.py),
-[core/lower_llvm.py:2953-2964](../../python/rocke/core/lower_llvm.py).
+Sources: the builders in [core/ir.py](../../python/rocke/core/ir.py) and
+their `_op_arith_*` lowerings in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py).
 `cast_to_f32` and `cast_f32_to` refuse f64, so a double is never narrowed by
 accident; there is no direct f64 <-> f16 or bf16 conversion.
 

@@ -22,8 +22,8 @@ IEEE 754 binary16, a storage and matrix-operand type. Constants are in the
 | `cast_f32_to(v, F16)`, `trunc_f32_to_f16` | `fptrunc float to half` (`v_cvt_f16_f32`) | RNE | NaN | +-inf | +-inf (from 65520, half a step above 65504) |
 | `cast_to_f32` | `fpext half to float` | exact | NaN | +-inf | - |
 
-Sources: [core/ir.py:3239-3325](../../python/rocke/core/ir.py),
-[core/lower_llvm.py:2929-2951](../../python/rocke/core/lower_llvm.py).
+Sources: the builders in [core/ir.py](../../python/rocke/core/ir.py) and
+their `_op_arith_*` lowerings in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py).
 
 The conversion does not saturate: rocKE leaves MODE.FP16_OVFL clear
 ([README](./README.md#the-mode-register)), so f16 overflow, in a conversion or

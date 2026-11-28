@@ -31,7 +31,7 @@ is specific to f32 arithmetic.
 | `log2`, `sqrt` | `llvm.log2.f32`, `llvm.sqrt.f32` | the compiler's | libm semantics: `log2(+0) = -inf`, negative input gives NaN |
 | `tanh` | `1 - 2 / (exp2(2 x log2 e) + 1)` with `rcp_fast`, and OCML's polynomial below 0.625 | about 1 f32 epsilon absolute on [-20, 20] | `tanh(+-inf) = +-1`; NaN gives NaN |
 
-Sources: [core/lower_llvm.py:3364-3497](../../python/rocke/core/lower_llvm.py);
+Sources: the `_op_math_*` lowerings in [core/lower_llvm.py](../../python/rocke/core/lower_llvm.py);
 the `tanh` bound is the one pinned by
 [tests/core/test_tanh_lowering.py](../../tests/core/test_tanh_lowering.py).
 
@@ -51,13 +51,13 @@ code; know which one a kernel uses before changing its mask.
 
 | convention | where | what it needs |
 |---|---|---|
-| finite sentinel `-1e30` | for example the warp-level FMHA body ([_fmha_warp_body.py:178](../../../library/kernels/common/_fmha_warp_body.py)), the dense kernels, the split-KV decode, the 4-warp GQA bodies | a fully masked row has max `-1e30`, so every `exp2(score - max)` is `exp2(0) = 1`: the epilogue must test whether the max ever rose above the sentinel and write `O = 0` ([_sdpa_padding_mask.py:24-34](../../../library/kernels/common/_sdpa_padding_mask.py)). A large softmax scale can push a visible score below `-1e30` or past the f32 max, which is why the dense kernels bound the scale ([attention_dense_spec.py:50-70](../../../library/kernels/common/attention_dense_spec.py)). |
-| true `-inf` | unified attention segment kernels ([attention_unified.py:7013-7020](../../../library/kernels/common/attention_unified.py)) | `exp2(-inf - -inf)` is NaN, so the exponent reference is `select(fcmp("ogt", m, -inf), m, 0)` while the raw max is carried; a segment that saw no key stores max `-inf` and sum 0 ([attention_unified.py:7283-7290](../../../library/kernels/common/attention_unified.py)) |
+| finite sentinel `-1e30` | for example the warp-level FMHA body (`fmha_warp_fwd_inner_body` in [_fmha_warp_body.py](../../../library/kernels/common/_fmha_warp_body.py)), the dense kernels, the split-KV decode, the 4-warp GQA bodies | a fully masked row has max `-1e30`, so every `exp2(score - max)` is `exp2(0) = 1`: the epilogue must test whether the max ever rose above the sentinel and write `O = 0` (the module docstring of [_sdpa_padding_mask.py](../../../library/kernels/common/_sdpa_padding_mask.py)). A large softmax scale can push a visible score below `-1e30` or past the f32 max, which is why the dense kernels bound the scale (`check_dense_scale` in [attention_dense_spec.py](../../../library/kernels/common/attention_dense_spec.py)). |
+| true `-inf` | unified attention segment kernels (`build_unified_attention_2d` and `build_unified_attention_3d` in [attention_unified.py](../../../library/kernels/common/attention_unified.py)) | `exp2(-inf - -inf)` is NaN, so the exponent reference is `select(fcmp("ogt", m, -inf), m, 0)` while the raw max is carried; a segment that saw no key stores max `-inf` and sum 0 (`build_unified_attention_reduce` in [attention_unified.py](../../../library/kernels/common/attention_unified.py)) |
 
 The output contract for a row with no visible key, in both conventions:
 `O = 0` and log-sum-exp `-inf`. A row whose sum is NaN keeps NaN: the
 "has mass" predicate is `fcmp one OR uno` rather than a negated `oeq`
-([_lse_store.py:125-145](../../../library/kernels/common/_lse_store.py)), so a NaN
+(`lse_row_has_mass` in [_lse_store.py](../../../library/kernels/common/_lse_store.py)), so a NaN
 input row is not hidden as an empty one.
 
 ## Integer conversions
