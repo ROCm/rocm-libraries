@@ -58,6 +58,11 @@ rocblas_atomics_mode
 
 .. doxygenenum:: rocblas_atomics_mode
 
+rocblas_emulation_strategy
+--------------------------
+
+.. doxygenenum:: rocblas_emulation_strategy
+
 
 rocblas_layer_mode
 ------------------

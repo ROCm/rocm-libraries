@@ -806,6 +806,22 @@ std::string rocblas_internal_get_arch_name(int device);
 // for internal use during testing, fetch arch name
 ROCBLAS_INTERNAL_EXPORT std::string rocblas_internal_get_arch_name();
 
+// for internal use during testing: whether this rocBLAS was built with hipBLASLt fixed-point
+// emulation support
+ROCBLAS_INTERNAL_EXPORT bool rocblas_internal_fp_emulation_supported();
+
+// for internal use during testing: the workspace hipBLASLt asks for to emulate an m x n x k GEMM
+// of type (f64_r or f32_r) with the given strategy on the handle's device; 0 where it does not
+// emulate (no emulation support, hipBLASLt backend off, or a device it has no emulation data for)
+ROCBLAS_INTERNAL_EXPORT rocblas_status
+    rocblas_internal_fp_emulation_workspace_size(rocblas_handle             handle,
+                                                 rocblas_datatype           type,
+                                                 int64_t                    m,
+                                                 int64_t                    n,
+                                                 int64_t                    k,
+                                                 rocblas_emulation_strategy strategy,
+                                                 size_t*                    size);
+
 // for internal use, fetch xnack mode
 std::string rocblas_internal_get_xnack_mode();
 

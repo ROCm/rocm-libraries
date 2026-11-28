@@ -158,6 +158,11 @@ struct Arguments
 
     int use_hipblaslt;
 
+    // 0 (default): no request, ROCBLAS_EMULATE_* left as they are; 1: set both to 1 for the handle.
+    int emulation;
+    // rocblas_emulation_strategy value; 0 (default) does not call rocblas_set_emulation_strategy.
+    int emulation_strategy;
+
     // 16 bit
     uint16_t threads;
     uint16_t streams;
@@ -254,6 +259,8 @@ struct Arguments
     OPER(flush_batch_count) SEP      \
     OPER(flush_memory_size) SEP      \
     OPER(use_hipblaslt) SEP          \
+    OPER(emulation) SEP              \
+    OPER(emulation_strategy) SEP     \
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \

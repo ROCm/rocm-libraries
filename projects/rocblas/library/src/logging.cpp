@@ -364,6 +364,13 @@ void rocblas_internal_log_kernel_select(rocblas_handle                       han
           << int32_t(p.algo) << " --solution_index " << p.solution_index << " --flags " << p.flags;
     if(handle->atomics_mode == rocblas_atomics_allowed)
         bench << " --atomics_allowed";
+    if(handle->emulation_strategy != rocblas_emulation_strategy_default)
+        bench << " --emulation_strategy " << int(handle->emulation_strategy);
+    // rocblas-bench --emulation 1 requests both precisions; this call uses only one of them
+    if(p.input_type == p.output_type && p.input_type == p.compute_type
+       && ((p.compute_type == rocblas_datatype_f64_r && handle->emulate_double_precision)
+           || (p.compute_type == rocblas_datatype_f32_r && handle->emulate_single_precision)))
+        bench << " --emulation 1";
 
     rocblas_internal_ostream meta;
     meta << "# source=" << source;

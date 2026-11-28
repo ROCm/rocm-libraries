@@ -20,6 +20,7 @@ target_sources(
           "${_CMAKE_CURRENT_SOURCE_DIR}/../host_alloc_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../set_get_pointer_mode_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../set_get_atomics_mode_gtest.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/../set_get_emulation_strategy_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../set_get_alpha_beta_stride_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../logging_mode_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../ostream_threadsafety_gtest.cpp"
