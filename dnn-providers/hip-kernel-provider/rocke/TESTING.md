@@ -860,12 +860,15 @@ entry, measured with `--durations`.
 a build that installs the shared C++ engine beside the package appends
 `-p rocke.tests.require_cpp_engine` (the `ROCKE_REQUIRE_CPP_ENGINE` row of
 [`platform/AGENTS.md`](platform/AGENTS.md)'s environment table says what it does).
-Every installed rocKE pytest entry starts its command with this variable,
-except the explicit gates. Use it for each new installed pytest entry. The
-configure stops with an error when an installed entry that runs pytest (its
-command runs `-m pytest`, or its program is `pytest`) does not start with the
-variable, or when an explicit gate loads the plugin. Without the variable, the
-entry would run all its items on every CI shard. The explicit gates are listed
+Every installed rocKE pytest entry except the explicit gates is registered
+through `rocke_installed_pytest_entry`
+([`platform/tests/cmake/InstalledPytestEntry.cmake`](platform/tests/cmake/InstalledPytestEntry.cmake)),
+which starts its command with this variable; register each new installed
+pytest entry through it. The configure stops with an error when an installed
+entry that runs pytest (its command runs `-m pytest`, or its program is
+`pytest`) does not start with the variable, or when an explicit gate loads
+the plugin. Without the variable, the entry would run all its items on every
+CI shard. The explicit gates are listed
 in `_ROCKE_EXPLICIT_PYTEST_GATES` in `library/tests/ctest_lists.cmake`; a new
 gate goes there too.
 The plugin takes the shard from the first source that applies:
@@ -931,33 +934,33 @@ these lines. It runs all its items on every CI shard.
 The plugin never sets exit code 77. Some entries use 77 as their CTest skip
 code when they cannot run on this machine.
 
-**Worker processes within a CI shard.** CTest runs a CI shard's entries one at
-a time, so one pytest entry runs on one CPU of the shard's machine. A pytest
-entry that takes more than a few seconds of a shard and launches kernels in few
-or none of its tests follows `_ROCKE_INSTALLED_PYTEST` with
-`_ROCKE_INSTALLED_PYTEST_WORKERS` (`-p rocke.tests.ctest_workers
---rocke-workers 4`, `platform/CMakeLists.txt`). The entry's process then starts
-up to four pytest workers on its own command line, each with an equal share of
-the CPUs the process may use (its own block of them on Linux, and
-`OMP_NUM_THREADS` and the like lowered to the share), and exits with their
-combined status. Each worker keeps the same items the CI shard keeps, then its
-own part of them: the costed keys heaviest first, the others by a hash salted
-apart from the shard's. Each item runs in exactly one worker. The entry's log
-shows each worker's output as it comes, every line prefixed with `[w<index>]`.
-The few GPU tests of such an entry (the platform pytest parts have some) share
-the shard's GPU among the workers. `rocke_library_gpu_pytest` takes workers
-too, its workers sharing the shard's GPU: its tests compile their kernels on
-the CPU before they launch them. Mark a test `rocke_run_alone` when another
-process using the device at the same time can change its result, as when it
-needs most of the device's memory or reads the free memory. No worker runs
-it: when the CI shard selects such tests, the entry runs them one after
-another in one more pytest process, started once every worker has exited, so
-no other process of this entry exists meanwhile; its lines are prefixed with
-`[alone]`. A run with `--collect-only`, `-x`, `--maxfail`, `--junitxml` or
-another option that needs one process runs in one process. The workers of
-entries that a parallel `ctest -j` runs at once take their CPU blocks from a
-rotation the entry picks from its process id, so they mostly land apart.
-Why this plugin and not pytest-xdist:
+**Worker processes within a CI shard.** CTest runs a CI shard's entries one at a
+time, so one pytest entry runs on one CPU of the shard's machine. A pytest entry
+that takes more than a few seconds of a shard and launches kernels in few or
+none of its tests gives `WORKERS` to `rocke_installed_pytest_entry`, which
+follows `_ROCKE_INSTALLED_PYTEST` with `_ROCKE_INSTALLED_PYTEST_WORKERS` (`-p
+rocke.tests.ctest_workers --rocke-workers 4`, `platform/CMakeLists.txt`). The
+entry's process then starts up to four pytest workers on its own command line,
+each with an equal share of the CPUs the process may use (its own block of them
+on Linux, and `OMP_NUM_THREADS` and the like lowered to the share), and exits
+with their combined status. Each worker keeps the same items the CI shard keeps,
+then its own part of them: the costed keys heaviest first, the others by a hash
+salted apart from the shard's. Each item runs in exactly one worker. The entry's
+log shows each worker's output as it comes, every line prefixed with
+`[w<index>]`. The few GPU tests of such an entry (the platform pytest parts have
+some) share the shard's GPU among the workers. `rocke_library_gpu_pytest` takes
+workers too, its workers sharing the shard's GPU: its tests compile their
+kernels on the CPU before they launch them. Mark a test `rocke_run_alone` when
+another process using the device at the same time can change its result, as when
+it needs most of the device's memory or reads the free memory. No worker runs
+it: when the CI shard selects such tests, the entry runs them one after another
+in one more pytest process, started once every worker has exited, so no other
+process of this entry exists meanwhile; its lines are prefixed with `[alone]`. A
+run with `--collect-only`, `-x`, `--maxfail`, `--junitxml` or another option
+that needs one process runs in one process. The workers of entries that a
+parallel `ctest -j` runs at once take their CPU blocks from a rotation the entry
+picks from its process id, so they mostly land apart. Why this plugin and not
+pytest-xdist:
 [`platform/tests/worker_processes_decision.md`](platform/tests/worker_processes_decision.md).
 
 **The explicit gates are never sharded.** `rocke_library_counted_structural_gate`
@@ -1226,7 +1229,8 @@ A test that needs an entry of its own, such as one that starts child pytest or
 CTest processes, gets a standard entry modeled on `rocke_ctest_shard_pytest` in
 `platform/CMakeLists.txt`:
 
-- start its command as [§5.0.2](#502-ci-shards-and-rocke-item-sharding) requires;
+- register it through `rocke_installed_pytest_entry`, as
+  [§5.0.2](#502-ci-shards-and-rocke-item-sharding) requires;
 - list it under `python-standard` in `ROCKE_ENGINE_test_categories_external.yaml`,
   which gives it the labels of standard and every later tier; leave the
   name patterns of the pinned reference lanes (`*_reference_unit_pytest`,
@@ -1260,9 +1264,12 @@ adds at most Q3 to quick.
    which says what each class covers and why the limit is not tuned per entry;
    `platform/tests/test_engine_linkage.py` fails an entry with no `TIMEOUT` or
    with any value that file does not set. Set the entry's pytest `--timeout`
-   from measured time with the headroom of S2. A GPU pytest entry ends its
-   command with `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`, or with a lower
-   `--timeout` plus the thread method (`platform/CMakeLists.txt` says why).
+   from measured time with the headroom of S2. A GPU pytest entry gives
+   `rocke_installed_pytest_entry` the `GPU` option, which ends its command
+   with `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`, or, with a lower
+   `--timeout=<seconds>` of its own in `ARGUMENTS`, `GPU_OWN_TEST_LIMIT`, which
+   ends it with the GPU test policy alone (`platform/CMakeLists.txt` says why);
+   either takes the GPU resource lock.
 
 **Keep a slow test inside its limits.** The budgets below and the limits of
 every lane that runs a test (pytest `--timeout`, CTest `TIMEOUT`, any
@@ -1307,7 +1314,7 @@ log.
 | A typed refusal of an invalid spec of a shipped family, well under a second | The family's existing entry, which runs in standard. |
 | An IR check of every tile of a family, tens of seconds in total | One case per tile, in a standard entry; never quick. |
 | A test that starts child pytest or CTest processes | Its own standard entry, as `rocke_ctest_shard_pytest`. |
-| Anti-example: an AOT packaging entry registered as plain `python -m pytest`, listed in quick, with items of up to a minute or more | It runs whole on every CI shard and in every quick run. Start it with `_ROCKE_INSTALLED_PYTEST`, split the heavy items, tier it standard. |
+| Anti-example: an AOT packaging entry registered as plain `python -m pytest`, listed in quick, with items of up to a minute or more | It runs whole on every CI shard and in every quick run. Register it through `rocke_installed_pytest_entry`, split the heavy items, tier it standard. |
 | Anti-example: one item that compiles every tile of a family | One key that one shard carries whole. Parameterize per tile. |
 
 #### Budgets
