@@ -391,6 +391,16 @@ class TestKernelIdentityPrefetchAddr(unittest.TestCase):
         del fields["dy_halo_setprio"], fields["dy_halo_kouter_pad"]
         del fields["split_k_cluster"]  # cluster split-K forward, off
         del fields["streamk"], fields["streamk_reduction"]  # stream-K, off
+        # The RDNA4 wgrad knobs, off (regt_prefetch is shared with the
+        # forward conv).
+        for name in (
+            "reg_transpose",
+            "regt_prefetch",
+            "regt_addr_step",
+            "wmma_atomic_pair",
+            "x_run",
+        ):
+            fields.pop(name, None)
         legacy = hashlib.sha1(
             json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

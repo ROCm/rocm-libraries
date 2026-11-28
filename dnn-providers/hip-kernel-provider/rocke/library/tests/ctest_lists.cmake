@@ -42,6 +42,8 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_wgrad_cached_candidate_filter.py"
     "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
     "tests/library/tests/test_conv_wgrad_prefetch_global_regs.py"
+    "tests/library/tests/test_conv_reg_transpose.py"
+    "tests/library/tests/test_conv_reg_transpose_cross_engine.py"
     "tests/library/tests/test_conv_dgrad_spec_policy.py"
     "tests/library/tests/test_streamk_sweep_launch.py"
     "tests/library/tests/test_conv_build_signatures.py"

@@ -231,6 +231,47 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * existing aggregate initialisers keep their layout.
      * Default false: every existing config emits byte-identical IR. */
     bool prefetch_global_regs; /* default false */
+    /* reg_transpose: fill the M-outer A (dY) and B (X) LDS tiles with the
+     * register-transpose loader (rocke_reg_transpose_tile_loader_t): micro-tiles
+     * of 8 K positions x v free-axis elements read with v-wide global loads and
+     * written with one 16-byte LDS store per free-axis row. WMMA (wave32)
+     * targets only; rejected with lds_k_outer, async_dma, prefetch_addr,
+     * prefetch_global_regs and non-16-bit A/B. vector_size_a / vector_size_b
+     * set v exactly when given. Mirrors WgradConvSpec.reg_transpose.
+     * Default false: every existing config emits byte-identical IR. */
+    bool reg_transpose; /* default false */
+    /* regt_prefetch: the register-prefetch K loop of the reg_transpose loaders
+     * (kernel-name flag rtp<N>). Each K step issues the next tile's global
+     * loads into registers, runs the current tile's MMAs out of LDS, then
+     * transposes and stores the prefetched tile. 0 off; 3 LDS-only barriers,
+     * the prefetch pinned ahead of the MMAs with sched_barrier and guarded
+     * reads of a partially loading tile (the only mode built). Needs
+     * reg_transpose; rejected with unroll_k and stream-K, and off gfx12 RDNA.
+     * Mirrors WgradConvSpec.regt_prefetch. Default 0: byte-identical IR. */
+    int regt_prefetch; /* default 0 */
+    /* regt_addr_step: reg_transpose only. Decode each micro-tile's first K
+     * position (n, ho, wo) once and step the other 7 (one embed and a bounds
+     * check per column) instead of a magic-number decode per column, behind a
+     * wave-uniform branch on Wo % 8 == 0 and an 8-aligned slice start that
+     * falls back to the per-column decode. 2-D, the plain regt loop and
+     * regt_prefetch mode 3 only. Mirrors WgradConvSpec.regt_addr_step.
+     * Default false: byte-identical IR. */
+    bool regt_addr_step; /* default false */
+    /* wmma_atomic_pair: the 16-bit WMMA split-K atomic epilogue pairs the two
+     * lanes holding adjacent dW columns (lane l and l ^ 1) with one DPP swap,
+     * so each lane issues one full packed atomic per two accumulator rows
+     * instead of one zero-partner packed atomic per element. Needs split_k > 1
+     * (not two-stage, not stream-K), wave32, the default epilogue and an fp16 /
+     * bf16 dW. Mirrors WgradConvSpec.wmma_atomic_pair. Default false:
+     * byte-identical IR. */
+    bool wmma_atomic_pair; /* default false */
+    /* x_run: the X (operand B) free-axis vector spans the (x, c) run of one
+     * filter row (X * cpg elements, contiguous in NHWC for an ungrouped 2-D
+     * problem without W padding or W dilation) instead of one channel run.
+     * Refused with async_dma, lds_k_outer, group_merge, stream-K and 3-D, and
+     * on problems that do not meet those conditions. Mirrors
+     * WgradConvSpec.x_run. Default false: byte-identical IR. */
+    bool x_run; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

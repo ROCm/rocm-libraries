@@ -39,14 +39,14 @@ Four epilogue paths are supported, selected automatically based on `spec.epilogu
 | CShuffleEpilogue | `epilogue="cshuffle"`, `split_k=1` | LDS-staged vectorised store |
 | Split-K direct atomic | `epilogue="default"`, `split_k > 1`, `dtype_d="fp32"` | `global_atomic_add` per MFMA-lane directly from accumulators |
 | Split-K cshuffle atomic | `epilogue="cshuffle"`, `split_k > 1` | LDS scatter + `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` from LDS |
-| Split-K WMMA atomic | wave32 with `memory.has_global_float_atomic_add` (gfx1250), `epilogue="default"`, `split_k > 1` | One atomic per WMMA accumulator element: scalar `global_atomic_add` (fp32), or a packed `<2 x dtype>` atomic with a zero partner (bf16/fp16) |
+| Split-K WMMA atomic | wave32 with `memory.has_global_float_atomic_add` (gfx1250, gfx12 RDNA), `epilogue="default"`, `split_k > 1` | One atomic per WMMA accumulator element: scalar `global_atomic_add` (fp32), or a packed `<2 x dtype>` atomic with a zero partner (bf16/fp16) |
 
 On MFMA targets, `epilogue="cshuffle"` is **required** for bf16/fp16 output when
 `split_k > 1`. The direct-atomic path emits zero-filled packed atomics at the
 scattered MFMA layout; the cshuffle path produces genuinely contiguous adjacent
 pairs after the LDS shuffle, which is necessary for correct `<2 x dtype>` packed
 atomics. On WMMA arches whose `ArchTarget` sets
-`memory.has_global_float_atomic_add` (gfx1250) the `default` split-K epilogue
+`memory.has_global_float_atomic_add` (gfx1250 and the gfx12 RDNA targets) the `default` split-K epilogue
 places each value in its half of the pair itself, and `cshuffle` pairs through
 LDS from the WMMA fragment; the two-stage path decodes the WMMA fragment
 through `op.dst_layout()`. Other wave32 arches keep `split_k=1` and have no
@@ -55,6 +55,66 @@ two-stage path.
 ---
 
 ## Changelog
+
+### Register-transpose operand loads on RDNA4 (`reg_transpose`)
+
+The RDNA WMMA targets have no LDS transpose read, so `lds_k_outer` does not
+apply there and the M-outer A / B tiles were filled with one 16-bit LDS store
+per element. Every knob below is default-off, mirrored in the C++ engine and
+tagged in the kernel name and `KernelIdentity`.
+
+- `reg_transpose` (tag `regt`): both tiles load through
+  `RegTransposeTileLoader`, 8 K x `v` free-axis micro-tiles with `v`-wide
+  global reads and one 16-byte LDS store per row. The LDS tile and the
+  fragment reads are unchanged. `wgrad_reg_transpose_vecs` picks `v` (an
+  explicit `vector_size_a` / `vector_size_b` is taken exactly). WMMA only;
+  rejected with `lds_k_outer`, `async_dma`, `prefetch_addr`,
+  `prefetch_global_regs` and non-16-bit A/B.
+- `regt_prefetch` (tag `rtp<N>`, gfx12 RDNA only): the register-prefetch K
+  loop of the `reg_transpose` loaders. Each K step issues the next tile's
+  global reads into registers, runs the current tile's MMAs out of LDS, then
+  transposes and stores the prefetched tile. Mode 3 makes both in-loop barriers
+  LDS-only (`rocke.helpers.asm.lds_barrier_keep_vmem`; on gfx12 RDNA
+  `sync_lds_only` may still drain the loads, depending on the compiler), pins the prefetch ahead of the MMAs
+  with `sched_barrier` and branches the reads of a partially loading tile
+  (`guard`). The last step's prefetch is masked to the out-of-range sentinel.
+  Accepted values: 0 (off) and 3. Rejected with `unroll_k` and stream-K. Not
+  `register_prefetch` (`rpf`) and not `prefetch_global_regs` (`pgr`), both
+  refused with `reg_transpose`.
+- `regt_addr_step` (tag `ras`): each micro-tile decodes its first K position
+  `(n, ho, wo)` once and steps `wo` for the other 7 columns (the run
+  descriptor of `RegTransposeTileLoader.load_global`), behind a wave-uniform
+  branch on `Wo % 8 == 0` and an 8-aligned slice start that falls back to the
+  per-column decode. 2-D only, with the plain regt loop or `regt_prefetch=3`.
+- WMMA split-K on gfx12 RDNA: `gfx12-generic` (and so gfx1200 / gfx1201) sets
+  `memory.has_global_float_atomic_add` in both arch tables, which admits the
+  WMMA split-K atomic and two-stage paths there exactly as on gfx1250.
+- `wmma_atomic_pair` (tag `apr`): the 16-bit WMMA split-K atomic epilogue
+  pairs lane `l` with lane `l ^ 1` (the adjacent dW column) through one DPP
+  swap per two accumulator rows, so each lane issues one full packed atomic
+  instead of one zero-partner packed atomic per element. Needs `split_k > 1`
+  (not two-stage, not stream-K), wave32, the `default` epilogue and an fp16 /
+  bf16 dW; independent of `reg_transpose`.
+- `x_run` (tag `xrun`): the X (operand B) free-axis vector spans the
+  `X * cpg` elements of one filter row (`WgradConvSpec.b_run`) instead of one
+  channel run. For an ungrouped 2-D problem without W padding or W dilation
+  they are contiguous in NHWC, so small-C stems (C = 3, stride == filter) get
+  wide X loads. `wgrad_x_run_problem_reason` states the problem conditions;
+  `is_valid_wgrad_spec` and `identity_supports_problem` enforce them. Refused
+  with `async_dma`, `lds_k_outer`, `group_merge`, stream-K and 3-D.
+- Split-K degree on gfx12 RDNA: a `WgradSplitPolicy` entry per target (CK
+  formula, two CTAs per CU, no slice-depth floor) that fills a launch of
+  fewer than `num_cus / 4` tiles to one CTA per CU (`small_grid_tiles` /
+  `small_grid_target_ctas`) and keeps the grouped CK formula for grouped
+  launches (`grouped_ck_formula`), under the common 16-bit atomic caps.
+- AOT grid (`kernels/conv/aot_jobs.py`, `CACHE_RDNA4_ARCHS` only): the
+  register-transpose kernels on every default-epilogue M-outer geometry at
+  widths 2 / 4 / 8 with their `ras`, `rtp3`, `apr` and `xrun` twins
+  (`CACHE_REGT_*`, `CACHE_WGRAD_ATOMIC_PAIR_ARCHS`, `CACHE_WGRAD_XRUN_*`),
+  built only where the configuration is listed in `CACHE_WGRAD_REGT_KERNELS`
+  (`kernels/conv/rdna4_wgrad_regt_kernels.py`);
+  packed-atomic split-K there is register-transpose only. Other targets'
+  grids are unchanged.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 

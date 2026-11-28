@@ -456,5 +456,56 @@ class TestGfx1250Policy(unittest.TestCase):
                 )
 
 
+class TestGfx12RdnaWgradPolicy(unittest.TestCase):
+    """gfx12 RDNA wgrad degree: the CK formula, one CTA per CU on small
+    ungrouped grids, the grouped CK formula, and the 16-bit atomic caps."""
+
+    KW = dict(wg_M=128, wg_N=288, wg_K=25088, tile_m=64, tile_n=64, tile_k=128)
+
+    def test_one_block_per_cu_on_small_ungrouped_grids(self):
+        # base grid 2 x 5 = 10 tiles on 64 CUs: floor(64 / 10).
+        d = select_split_k_wgrad(arch="gfx1201", dtype_d="fp16", **self.KW)
+        self.assertEqual(d.split_k, 6)
+        self.assertIn("wgrad policy", d.reason)
+        # dgrad (no dW dtype) and gfx11 keep the CK formula: floor(128 / 10).
+        self.assertEqual(select_split_k_wgrad(arch="gfx1201", **self.KW).split_k, 12)
+        self.assertEqual(
+            select_split_k_wgrad(arch="gfx1151", dtype_d="fp16", **self.KW).split_k,
+            12,
+        )
+        # From 16 base tiles up the CK formula's two per CU: 4 x 5 = 20 -> 6.
+        wide = dict(self.KW, wg_M=256)
+        self.assertEqual(
+            select_split_k_wgrad(arch="gfx1201", dtype_d="fp16", **wide).split_k, 6
+        )
+        # gfx1200 has 32 CUs: below 8 tiles one per CU.
+        small = dict(self.KW, wg_N=192)  # 2 x 3 = 6 tiles
+        self.assertEqual(
+            select_split_k_wgrad(arch="gfx1200", dtype_d="fp16", **small).split_k, 5
+        )
+
+    def test_16bit_atomic_caps(self):
+        from kernels.common.conv_split_k import atomic_rounding_degree_cap
+
+        tiny = dict(self.KW, wg_M=16, wg_N=16, tile_m=16, tile_n=16)  # 1 tile
+        bf16 = select_split_k_wgrad(arch="gfx1201", dtype_d="bf16", **tiny)
+        self.assertEqual(bf16.split_k, atomic_rounding_degree_cap(7))
+        fp32 = select_split_k_wgrad(arch="gfx1201", dtype_d="fp32", **tiny)
+        self.assertEqual(fp32.split_k, 64)
+
+    def test_grouped_keeps_the_grouped_ck_formula_under_the_cap(self):
+        kw = dict(wg_M=16, wg_N=144, wg_K=1 << 20, tile_m=16, tile_n=16, tile_k=32)
+        for dtype in ("fp32", "fp16"):
+            got = select_split_k_wgrad(
+                arch="gfx1201", groups=4, block_size=64, dtype_d=dtype, **kw
+            )
+            ck = select_split_k_wgrad(arch="gfx1201", groups=4, block_size=64, **kw)
+            self.assertEqual(got.split_k, ck.split_k)
+        bf16 = select_split_k_wgrad(
+            arch="gfx1201", groups=4, block_size=64, dtype_d="bf16", **kw
+        )
+        self.assertEqual(bf16.split_k, min(ck.split_k, 12))
+
+
 if __name__ == "__main__":
     unittest.main()

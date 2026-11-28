@@ -10,8 +10,12 @@
  */
 #include "rocke/helper_rocke.helpers.loads.h"
 
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "rocke/arena.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ============================================================================
@@ -931,6 +935,616 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
         rocke_b_smem_store_vN_f16(b, smem_dst, idx, 2, zero, self->load_vec);
         rocke_b_region_leave(b);
     }
+}
+
+/* ============================================================================
+ * RegTransposeTileLoader
+ *
+ * Mirror of Python RegTransposeTileLoader. Every builder call below is its
+ * own statement in Python's left-to-right evaluation order: C leaves the
+ * order of call arguments unspecified, and each call takes the next SSA id.
+ * ========================================================================== */
+
+static const int REGT_VECS[4] = {8, 4, 2, 1};
+
+static void regt_why(char* why, size_t why_cap, const char* fmt, ...)
+{
+    if(why == NULL || why_cap == 0)
+        return;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(why, why_cap, fmt, ap);
+    va_end(ap);
+}
+
+rocke_status_t rocke_reg_transpose_tile_loader_plan(int tile_rows,
+                                                    int tile_cols,
+                                                    int block_size,
+                                                    int wave_size,
+                                                    int vec,
+                                                    int* out_units,
+                                                    int* out_active,
+                                                    char* why,
+                                                    size_t why_cap)
+{
+    bool known = false;
+    for(int i = 0; i < 4; ++i)
+        known = known || REGT_VECS[i] == vec;
+    if(!known)
+    {
+        regt_why(why, why_cap, "vec %d not in (8, 4, 2, 1)", vec);
+        return ROCKE_ERR_VALUE;
+    }
+    if(tile_cols % ROCKE_REGT_K_RUN)
+    {
+        regt_why(
+            why, why_cap, "tile K extent %d is not a multiple of %d", tile_cols, ROCKE_REGT_K_RUN);
+        return ROCKE_ERR_VALUE;
+    }
+    if(tile_rows % vec)
+    {
+        regt_why(why, why_cap, "tile free extent %d not divisible by vec %d", tile_rows, vec);
+        return ROCKE_ERR_VALUE;
+    }
+    const int units = (tile_rows / vec) * (tile_cols / ROCKE_REGT_K_RUN);
+    int active = 0;
+    if(block_size > 0 && units % block_size == 0)
+        active = block_size;
+    else if(units < block_size && wave_size > 0 && units % wave_size == 0)
+        active = units;
+    else
+    {
+        regt_why(why,
+                 why_cap,
+                 "%d micro-tiles (%dx%d at %dx%d) neither divide over %d threads nor fill whole "
+                 "waves of %d",
+                 units,
+                 tile_rows,
+                 tile_cols,
+                 vec,
+                 ROCKE_REGT_K_RUN,
+                 block_size,
+                 wave_size);
+        return ROCKE_ERR_VALUE;
+    }
+    if(out_units != NULL)
+        *out_units = units;
+    if(out_active != NULL)
+        *out_active = active;
+    if(why != NULL && why_cap != 0)
+        why[0] = '\0';
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_reg_transpose_tile_loader_choose_vec(
+    int tile_rows, int tile_cols, int block_size, int wave_size, int max_vec, int* out_vec)
+{
+    for(int i = 0; i < 4; ++i)
+    {
+        const int v = REGT_VECS[i];
+        if(v > max_vec)
+            continue;
+        if(rocke_reg_transpose_tile_loader_plan(
+               tile_rows, tile_cols, block_size, wave_size, v, NULL, NULL, NULL, 0)
+           == ROCKE_OK)
+        {
+            if(out_vec != NULL)
+                *out_vec = v;
+            return ROCKE_OK;
+        }
+    }
+    return ROCKE_ERR_VALUE;
+}
+
+rocke_status_t rocke_reg_transpose_tile_loader_init(rocke_reg_transpose_tile_loader_t* self,
+                                                    int tile_rows,
+                                                    int tile_cols,
+                                                    int block_size,
+                                                    int wave_size,
+                                                    int vec,
+                                                    const rocke_type_t* elem_dtype,
+                                                    char* why,
+                                                    size_t why_cap)
+{
+    if(self == NULL)
+        return ROCKE_ERR_VALUE;
+    memset(self, 0, sizeof(*self));
+    self->tile_rows = tile_rows;
+    self->tile_cols = tile_cols;
+    self->block_size = block_size;
+    self->wave_size = wave_size;
+    self->vec = vec;
+    self->elem_dtype = elem_dtype;
+    self->oob_sentinel = 2147483647;
+    if(loads_elem_bytes(elem_dtype) != 2)
+    {
+        regt_why(why,
+                 why_cap,
+                 "RegTransposeTileLoader: 16-bit element types only (one 16-byte LDS store is "
+                 "%d elements); got '%s'",
+                 ROCKE_REGT_K_RUN,
+                 elem_dtype != NULL ? elem_dtype->name : "f16");
+        return ROCKE_ERR_VALUE;
+    }
+    char plan_why[256];
+    if(rocke_reg_transpose_tile_loader_plan(
+           tile_rows, tile_cols, block_size, wave_size, vec, NULL, NULL, plan_why, sizeof plan_why)
+       != ROCKE_OK)
+    {
+        regt_why(why, why_cap, "RegTransposeTileLoader: %s", plan_why);
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
+}
+
+/* The plan of a loader that passed init (its plan is usable). */
+static int regt_active_threads(const rocke_reg_transpose_tile_loader_t* self)
+{
+    int active = 0;
+    rocke_reg_transpose_tile_loader_plan(self->tile_rows,
+                                         self->tile_cols,
+                                         self->block_size,
+                                         self->wave_size,
+                                         self->vec,
+                                         NULL,
+                                         &active,
+                                         NULL,
+                                         0);
+    return active;
+}
+
+static int regt_micro_tiles(const rocke_reg_transpose_tile_loader_t* self)
+{
+    return (self->tile_rows / self->vec) * (self->tile_cols / ROCKE_REGT_K_RUN);
+}
+
+bool rocke_reg_transpose_tile_loader_partial(const rocke_reg_transpose_tile_loader_t* self)
+{
+    return self != NULL && regt_active_threads(self) < self->block_size;
+}
+
+bool rocke_reg_transpose_tile_loader_guard_applies(const rocke_reg_transpose_tile_loader_t* self)
+{
+    return rocke_reg_transpose_tile_loader_partial(self) && self->vec > 1;
+}
+
+static const rocke_type_t* regt_elem(const rocke_reg_transpose_tile_loader_t* self)
+{
+    return self->elem_dtype != NULL ? self->elem_dtype : rocke_f16();
+}
+
+/* Python _active: the wave-uniform "this wave carries a micro-tile" predicate. */
+static rocke_value_t* regt_active(rocke_ir_builder_t* b,
+                                  const rocke_reg_transpose_tile_loader_t* self,
+                                  rocke_value_t* tid)
+{
+    rocke_value_t* c_wave = rocke_b_const_i32(b, self->wave_size);
+    rocke_value_t* q = rocke_b_div(b, tid, c_wave);
+    rocke_value_t* wave = rocke_b_to_sgpr_u32(b, q);
+    rocke_value_t* c_waves = rocke_b_const_i32(b, regt_active_threads(self) / self->wave_size);
+    return rocke_b_cmp_lt(b, wave, c_waves);
+}
+
+/* The per-unit (row, col) decode both read paths share. */
+static void regt_unit_row_col(rocke_ir_builder_t* b,
+                              const rocke_reg_transpose_tile_loader_t* self,
+                              rocke_value_t* tid,
+                              int e,
+                              bool clamp,
+                              rocke_value_t* c_kc,
+                              rocke_value_t* c_vec,
+                              rocke_value_t* c_k_run,
+                              rocke_value_t** out_row,
+                              rocke_value_t** out_col)
+{
+    const int mt = regt_micro_tiles(self);
+    rocke_value_t* c_e = rocke_b_const_i32(b, e);
+    rocke_value_t* c_at = rocke_b_const_i32(b, regt_active_threads(self));
+    rocke_value_t* m = rocke_b_mul(b, c_e, c_at);
+    rocke_value_t* u = rocke_b_add(b, m, tid);
+    if(clamp)
+    {
+        /* Idle waves decode a clamped unit so every address stays in the tile. */
+        rocke_value_t* c_mt = rocke_b_const_i32(b, mt);
+        rocke_value_t* in_range = rocke_b_cmp_lt(b, u, c_mt);
+        rocke_value_t* c_last = rocke_b_const_i32(b, mt - 1);
+        u = rocke_b_select(b, in_range, u, c_last);
+    }
+    rocke_value_t* q = rocke_b_div(b, u, c_kc);
+    *out_row = rocke_b_mul(b, q, c_vec);
+    rocke_value_t* r = rocke_b_mod(b, u, c_kc);
+    *out_col = rocke_b_mul(b, r, c_k_run);
+}
+
+/* (offset, valid) of K column j of a unit: the run descriptor's, or the
+ * per-column descriptor at col + j. */
+static rocke_value_t* regt_column(rocke_ir_builder_t* b,
+                                  rocke_value_t* row,
+                                  rocke_value_t* col,
+                                  int j,
+                                  rocke_value_t* const* run_off,
+                                  rocke_value_t* const* run_valid,
+                                  rocke_loads_descriptor_fn descriptor,
+                                  void* descriptor_user,
+                                  rocke_value_t** out_valid)
+{
+    if(run_off != NULL)
+    {
+        *out_valid = run_valid[j];
+        return run_off[j];
+    }
+    rocke_value_t* cj = col;
+    if(j != 0)
+    {
+        rocke_value_t* c_j = rocke_b_const_i32(b, j);
+        cj = rocke_b_add(b, col, c_j);
+    }
+    *out_valid = NULL;
+    return descriptor(b, row, cj, out_valid, descriptor_user);
+}
+
+static bool regt_check_units(rocke_ir_builder_t* b, int n)
+{
+    if(n > ROCKE_REGT_MAX_UNITS)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "RegTransposeTileLoader: %d micro-tiles per thread > "
+                        "ROCKE_REGT_MAX_UNITS %d",
+                        n,
+                        ROCKE_REGT_MAX_UNITS);
+        return false;
+    }
+    return true;
+}
+
+/* Python _load_global_guarded: the addresses in the enclosing block, only the
+ * reads in an if/else on `active` (idle waves yield undef). */
+static void regt_load_global_guarded(rocke_ir_builder_t* b,
+                                     const rocke_reg_transpose_tile_loader_t* self,
+                                     rocke_value_t* tid,
+                                     rocke_loads_descriptor_fn descriptor,
+                                     void* descriptor_user,
+                                     rocke_value_t* rsrc,
+                                     rocke_value_t* active,
+                                     rocke_loads_run_descriptor_fn run_fn,
+                                     void* run_user,
+                                     rocke_regt_staged_t* staged)
+{
+    const rocke_type_t* et = regt_elem(self);
+    const int kc = self->tile_cols / ROCKE_REGT_K_RUN;
+    rocke_value_t* c_kc = rocke_b_const_i32(b, kc);
+    rocke_value_t* c_vec = rocke_b_const_i32(b, self->vec);
+    rocke_value_t* c_k_run = rocke_b_const_i32(b, ROCKE_REGT_K_RUN);
+    rocke_value_t* c_elem_bytes = rocke_b_const_i32(b, loads_elem_bytes(self->elem_dtype));
+    rocke_value_t* c_oob = rocke_b_const_i32(b, self->oob_sentinel);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+
+    const int upt = regt_micro_tiles(self) / regt_active_threads(self);
+    if(!regt_check_units(b, upt))
+        return;
+    /* offs[unit * 8 + j] */
+    rocke_value_t** offs = (rocke_value_t**)rocke_arena_alloc(
+        &b->arena, sizeof(rocke_value_t*) * (size_t)upt * ROCKE_REGT_K_RUN);
+    if(offs == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "RegTransposeTileLoader: arena alloc failed");
+        return;
+    }
+    for(int e = 0; e < upt; ++e)
+    {
+        rocke_value_t* row;
+        rocke_value_t* col;
+        regt_unit_row_col(b, self, tid, e, true, c_kc, c_vec, c_k_run, &row, &col);
+        rocke_value_t* run_off[ROCKE_REGT_K_RUN];
+        rocke_value_t* run_valid[ROCKE_REGT_K_RUN];
+        if(run_fn != NULL)
+            run_fn(b, row, col, run_off, run_valid, run_user);
+        for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+        {
+            rocke_value_t* valid;
+            rocke_value_t* off_elems = regt_column(b,
+                                                   row,
+                                                   col,
+                                                   j,
+                                                   run_fn != NULL ? run_off : NULL,
+                                                   run_valid,
+                                                   descriptor,
+                                                   descriptor_user,
+                                                   &valid);
+            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
+            offs[e * ROCKE_REGT_K_RUN + j]
+                = valid == NULL ? off_bytes : rocke_b_select(b, valid, off_bytes, c_oob);
+        }
+        staged->units[e].row = row;
+        staged->units[e].col = col;
+    }
+    const int n = upt * ROCKE_REGT_K_RUN;
+    const rocke_type_t* vt = rocke_vector_type(b, et, self->vec);
+    const rocke_type_t** types
+        = (const rocke_type_t**)rocke_arena_alloc(&b->arena, sizeof(rocke_type_t*) * (size_t)n);
+    rocke_value_t** vals
+        = (rocke_value_t**)rocke_arena_alloc(&b->arena, sizeof(rocke_value_t*) * (size_t)n);
+    if(types == NULL || vals == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "RegTransposeTileLoader: arena alloc failed");
+        return;
+    }
+    for(int i = 0; i < n; ++i)
+        types[i] = vt;
+    rocke_if_else_t branch = rocke_b_scf_if_else_results(b, active, types, n);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    rocke_b_region_enter(b, branch.then_region);
+    for(int i = 0; i < n; ++i)
+        vals[i] = rocke_b_buffer_load_vN(b, rsrc, offs[i], c0, et, self->vec);
+    rocke_b_scf_yield(b, vals, n);
+    rocke_b_region_leave(b);
+    rocke_b_region_enter(b, branch.else_region);
+    rocke_value_t* idle = rocke_b_undef_vec(b, et, self->vec);
+    for(int i = 0; i < n; ++i)
+        vals[i] = idle;
+    rocke_b_scf_yield(b, vals, n);
+    rocke_b_region_leave(b);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    for(int e = 0; e < upt; ++e)
+        for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+            staged->units[e].vs[j] = branch.op->results[e * ROCKE_REGT_K_RUN + j];
+    staged->count = upt;
+    staged->active = active;
+}
+
+void rocke_reg_transpose_tile_loader_load_global(rocke_ir_builder_t* b,
+                                                 const rocke_reg_transpose_tile_loader_t* self,
+                                                 rocke_value_t* tid,
+                                                 rocke_loads_descriptor_fn descriptor,
+                                                 void* descriptor_user,
+                                                 rocke_value_t* rsrc,
+                                                 bool masked,
+                                                 rocke_loads_run_descriptor_fn run_fn,
+                                                 void* run_user,
+                                                 bool guard,
+                                                 rocke_regt_staged_t* staged)
+{
+    if(staged != NULL)
+    {
+        staged->count = 0;
+        staged->active = NULL;
+    }
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || staged == NULL || rsrc == NULL || (descriptor == NULL && run_fn == NULL))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "RegTransposeTileLoader.load_global: NULL argument");
+        return;
+    }
+    const rocke_type_t* et = regt_elem(self);
+    const int kc = self->tile_cols / ROCKE_REGT_K_RUN;
+    rocke_value_t* c_kc = rocke_b_const_i32(b, kc);
+    rocke_value_t* c_vec = rocke_b_const_i32(b, self->vec);
+    rocke_value_t* c_k_run = rocke_b_const_i32(b, ROCKE_REGT_K_RUN);
+    rocke_value_t* c_elem_bytes = rocke_b_const_i32(b, loads_elem_bytes(self->elem_dtype));
+    rocke_value_t* c_oob = rocke_b_const_i32(b, self->oob_sentinel);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    const bool partial = rocke_reg_transpose_tile_loader_partial(self);
+    if(guard && !(rocke_reg_transpose_tile_loader_guard_applies(self) && masked))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "RegTransposeTileLoader.load_global: guard needs partial "
+                        "participation, masked reads and vec > 1");
+        return;
+    }
+    rocke_value_t* active = NULL;
+    if(partial && masked)
+        active = regt_active(b, self, tid);
+    if(active != NULL && guard)
+    {
+        regt_load_global_guarded(
+            b, self, tid, descriptor, descriptor_user, rsrc, active, run_fn, run_user, staged);
+        return;
+    }
+    staged->active = active;
+    const int upt = regt_micro_tiles(self) / regt_active_threads(self);
+    if(!regt_check_units(b, upt))
+        return;
+    for(int e = 0; e < upt; ++e)
+    {
+        rocke_value_t* row;
+        rocke_value_t* col;
+        regt_unit_row_col(b, self, tid, e, partial, c_kc, c_vec, c_k_run, &row, &col);
+        rocke_value_t* run_off[ROCKE_REGT_K_RUN];
+        rocke_value_t* run_valid[ROCKE_REGT_K_RUN];
+        if(run_fn != NULL)
+            run_fn(b, row, col, run_off, run_valid, run_user);
+        for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+        {
+            rocke_value_t* valid;
+            rocke_value_t* off_elems = regt_column(b,
+                                                   row,
+                                                   col,
+                                                   j,
+                                                   run_fn != NULL ? run_off : NULL,
+                                                   run_valid,
+                                                   descriptor,
+                                                   descriptor_user,
+                                                   &valid);
+            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
+            if(active != NULL)
+                valid = valid == NULL ? active : rocke_b_land(b, valid, active);
+            rocke_value_t* safe
+                = valid == NULL ? off_bytes : rocke_b_select(b, valid, off_bytes, c_oob);
+            staged->units[e].vs[j] = self->vec == 1
+                                         ? rocke_b_buffer_load(b, rsrc, safe, c0, et)
+                                         : rocke_b_buffer_load_vN(b, rsrc, safe, c0, et, self->vec);
+        }
+        staged->units[e].row = row;
+        staged->units[e].col = col;
+    }
+    staged->count = upt;
+}
+
+/* LDS column of a 16-byte unit store (Python: col if swz is None else swz(...)). */
+static rocke_value_t* regt_store_col(rocke_ir_builder_t* b,
+                                     const rocke_reg_transpose_tile_loader_t* self,
+                                     rocke_value_t* row,
+                                     rocke_value_t* col)
+{
+    if(self->col_swizzle == NULL)
+        return col;
+    return self->col_swizzle(b, row, col, self->col_swizzle_user);
+}
+
+/* Python _store_unit: regroup one unit's 8 x vec registers and write vec rows. */
+static void regt_store_unit(rocke_ir_builder_t* b,
+                            const rocke_reg_transpose_tile_loader_t* self,
+                            rocke_value_t* smem_dst,
+                            const rocke_regt_staged_unit_t* u)
+{
+    const rocke_type_t* et = regt_elem(self);
+    rocke_value_t* idx[2];
+    if(self->vec == 1)
+    {
+        rocke_value_t* packed = rocke_b_vec_pack(b, u->vs, ROCKE_REGT_K_RUN, et);
+        idx[0] = u->row;
+        idx[1] = regt_store_col(b, self, u->row, u->col);
+        rocke_b_smem_store_vN(b, smem_dst, idx, 2, packed, ROCKE_REGT_K_RUN);
+        return;
+    }
+    const int n_dw = self->vec / 2;
+    rocke_value_t* words[ROCKE_REGT_K_RUN][4];
+    for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+    {
+        if(n_dw == 1)
+        {
+            words[j][0] = rocke_b_vec_bitcast(b, u->vs[j], rocke_i32());
+            continue;
+        }
+        rocke_value_t* w
+            = rocke_b_vec_bitcast(b, u->vs[j], rocke_vector_type(b, rocke_i32(), n_dw));
+        for(int d = 0; d < n_dw; ++d)
+            words[j][d] = rocke_b_vec_extract(b, w, d);
+    }
+    const rocke_type_t* out_t = rocke_vector_type(b, et, ROCKE_REGT_K_RUN);
+    for(int i = 0; i < self->vec; ++i)
+    {
+        const int d = i / 2;
+        const int64_t sel = (i % 2) ? 0x07060302 : 0x05040100;
+        rocke_value_t* dwords[ROCKE_REGT_K_RUN / 2];
+        for(int p = 0; p < ROCKE_REGT_K_RUN / 2; ++p)
+            dwords[p] = rocke_b_byte_perm(b, words[2 * p + 1][d], words[2 * p][d], sel);
+        rocke_value_t* pk = rocke_b_vec_pack(b, dwords, ROCKE_REGT_K_RUN / 2, rocke_i32());
+        rocke_value_t* packed = rocke_b_vec_bitcast(b, pk, out_t);
+        rocke_value_t* r = u->row;
+        if(i != 0)
+        {
+            rocke_value_t* c_i = rocke_b_const_i32(b, i);
+            r = rocke_b_add(b, u->row, c_i);
+        }
+        idx[0] = r;
+        idx[1] = regt_store_col(b, self, r, u->col);
+        rocke_b_smem_store_vN(b, smem_dst, idx, 2, packed, ROCKE_REGT_K_RUN);
+    }
+}
+
+void rocke_reg_transpose_tile_loader_store_lds(rocke_ir_builder_t* b,
+                                               const rocke_reg_transpose_tile_loader_t* self,
+                                               rocke_value_t* smem_dst,
+                                               const rocke_regt_staged_t* staged)
+{
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || staged == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "RegTransposeTileLoader.store_lds: NULL argument");
+        return;
+    }
+    if(rocke_reg_transpose_tile_loader_partial(self))
+    {
+        if(staged->active == NULL)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "RegTransposeTileLoader.store_lds: partial participation needs the "
+                            "staged list of a masked load_global");
+            return;
+        }
+        rocke_if_t g = rocke_b_scf_if(b, staged->active);
+        if(!rocke_ir_builder_ok(b))
+            return;
+        rocke_b_region_enter(b, g.then_region);
+        for(int e = 0; e < staged->count; ++e)
+            regt_store_unit(b, self, smem_dst, &staged->units[e]);
+        rocke_b_region_leave(b);
+        return;
+    }
+    for(int e = 0; e < staged->count; ++e)
+        regt_store_unit(b, self, smem_dst, &staged->units[e]);
+}
+
+void rocke_reg_transpose_tile_loader_load(rocke_ir_builder_t* b,
+                                          const rocke_reg_transpose_tile_loader_t* self,
+                                          rocke_value_t* tid,
+                                          rocke_value_t* smem_dst,
+                                          rocke_loads_descriptor_fn descriptor,
+                                          void* descriptor_user,
+                                          rocke_value_t* rsrc,
+                                          rocke_loads_run_descriptor_fn run_fn,
+                                          void* run_user)
+{
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "RegTransposeTileLoader.load: NULL loader");
+        return;
+    }
+    /* Heap, not stack: ROCKE_REGT_MAX_UNITS units of ten pointers each. */
+    rocke_regt_staged_t* staged = (rocke_regt_staged_t*)malloc(sizeof(rocke_regt_staged_t));
+    if(staged == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "RegTransposeTileLoader.load: out of memory");
+        return;
+    }
+    if(rocke_reg_transpose_tile_loader_partial(self))
+    {
+        rocke_value_t* act = regt_active(b, self, tid);
+        rocke_if_t g = rocke_b_scf_if(b, act);
+        if(rocke_ir_builder_ok(b))
+        {
+            rocke_b_region_enter(b, g.then_region);
+            rocke_reg_transpose_tile_loader_load_global(b,
+                                                        self,
+                                                        tid,
+                                                        descriptor,
+                                                        descriptor_user,
+                                                        rsrc,
+                                                        /*masked=*/false,
+                                                        run_fn,
+                                                        run_user,
+                                                        /*guard=*/false,
+                                                        staged);
+            for(int e = 0; e < staged->count; ++e)
+                regt_store_unit(b, self, smem_dst, &staged->units[e]);
+            rocke_b_region_leave(b);
+        }
+        free(staged);
+        return;
+    }
+    rocke_reg_transpose_tile_loader_load_global(b,
+                                                self,
+                                                tid,
+                                                descriptor,
+                                                descriptor_user,
+                                                rsrc,
+                                                /*masked=*/true,
+                                                run_fn,
+                                                run_user,
+                                                /*guard=*/false,
+                                                staged);
+    rocke_reg_transpose_tile_loader_store_lds(b, self, smem_dst, staged);
+    free(staged);
 }
 
 /* ============================================================================

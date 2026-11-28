@@ -89,18 +89,25 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from rocke.core.ir import (
     F16,
     F32,
+    I1,
     I32,
     IRBuilder,
     KernelDef,
     PtrType,
     Type,
     Value,
+    VectorType,
 )
+from rocke.helpers.asm import lds_barrier_keep_vmem
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
-from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.loads import (
+    AsyncTileLoader,
+    CoalescedTileLoader,
+    RegTransposeTileLoader,
+)
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
@@ -575,8 +582,9 @@ class WgradConvSpec:
     # offsets: tile k+1's global reads are issued right after the barrier that
     # publishes tile k, stay in VGPRs under tile k's MFMAs, and are written to
     # LDS at the top of the next iteration. Both barriers of that loop are
-    # LDS-only: a full barrier would also drain the outstanding global reads
-    # and serialise them with the MFMAs again. The read issued in the last
+    # LDS-only: a full barrier may also wait for the outstanding global reads
+    # (on gfx12 RDNA, depending on the compiler) and serialise them with the
+    # MFMAs again. The read issued in the last
     # iteration is never stored. async_dma, unroll_k, prefetch_addr and
     # stream-K have their own K loops and reject it. Not the same loop as
     # ``register_prefetch`` above (tag ``rpf``, the compv3 + prefetch_addr
@@ -585,6 +593,96 @@ class WgradConvSpec:
     # Default False: strictly additive, so every existing config emits
     # byte-identical IR and keeps its kernel name.
     prefetch_global_regs: bool = False
+
+    # Register-transpose operand load for the M-outer tile (both A and B):
+    # each thread reads a micro-tile of 8 K positions x ``v`` free-axis
+    # elements with ``v``-wide global loads (one per K position, along the
+    # stride-1 free axis), regroups it in registers into ``v`` runs of 8
+    # K-contiguous elements and writes each with one 16-byte LDS store
+    # (rocke.helpers.loads.RegTransposeTileLoader). The LDS tile and the
+    # fragment reads are those of the default M-outer path.
+    #
+    # Why: the K-outer tile (lds_k_outer) removes the per-element
+    # transpose-on-store only where an LDS transpose read exists. The RDNA
+    # WMMA targets have none, so their M-outer tile was filled with one 16-bit
+    # LDS store per element, and with scalar global loads wherever a thread's
+    # share of a K tile was under one vector. This moves the transpose into
+    # VALU byte permutes.
+    #
+    # ``vector_size_a`` / ``vector_size_b`` set the free-axis width ``v``
+    # exactly when given (a width the tile cannot be split into at 8 x ``v``
+    # per thread is rejected, not narrowed); left None, the widest usable
+    # width the channel run allows is taken. See wgrad_reg_transpose_vecs.
+    #
+    # Default False: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    reg_transpose: bool = False
+
+    # Register-prefetch K loop for the reg_transpose path (tag "rtp<mode>").
+    # Each K step issues the NEXT tile's global loads into registers (the
+    # loaders' load_global) and runs the current tile's MMAs out of LDS while
+    # they are in flight; only then is the prefetched tile transposed and
+    # stored (store_lds), so the global latency hides behind the MMAs.
+    #   0 -- off (the plain load / barrier / MMA / barrier loop).
+    #   3 -- the two in-loop barriers emitted LDS-only (rocke.helpers.asm.
+    #        lds_barrier_keep_vmem: sync_lds_only may still drain the loads
+    #        on gfx12 RDNA, depending on the compiler), the prefetch pinned ahead of the MMAs with
+    #        sched_barrier (the machine scheduler otherwise sinks the loads
+    #        behind most of them), and the reads of a partially loading tile
+    #        in their own branch (RegTransposeTileLoader guard).
+    # (Modes 1 / 2 / 4 are not built; mode 3 keeps its number so the tag
+    # stays stable.)
+    # The prefetch issued on the last step of the FINAL slice lies at or past
+    # the total K end; it is masked to the buffer resource's out-of-range
+    # sentinel and reads zero. For non-final slices the last prefetch lands
+    # on the next slice's first tile, which is still below total K and is
+    # therefore in-bounds; it is never stored (the loop exits), so no dW
+    # corruption results.
+    #
+    # Not ``register_prefetch`` (tag "rpf": the compv3 + prefetch_addr loop
+    # with carried offsets on the CoalescedTileLoader slots) and not
+    # ``prefetch_global_regs`` (tag "pgr": the loads of tile k+1 carried as
+    # loop values into the next iteration's store); both are refused with
+    # reg_transpose.
+    #
+    # Default 0: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    regt_prefetch: int = 0
+
+    # reg_transpose only: decode each micro-tile's first K_wg position
+    # (n, ho, wo) once and step the other 7 instead of running the magic-
+    # number decode for every one of the 8 K columns (A and B). When Wo is a
+    # multiple of 8 AND the slice's first K column (k0 = slice_start) satisfies
+    # k0 % 8 == 0, the 8 positions of a micro-tile share (n, ho) and only wo
+    # moves, so the per-column cost is one embed and a bounds check. The
+    # 8-alignment of slice_start is guaranteed because wg_K_padded (see
+    # :meth:`wg_K_padded`) rounds K_wg up to a multiple of tile_k * split_k
+    # before launch, so each slice is tile_k elements deep, and tile_k >= 8 is
+    # a prerequisite of this knob; thus slice_start = slice_index * tile_k
+    # satisfies slice_start % 8 == 0. Otherwise a wave-uniform branch takes the
+    # per-column decode, so every problem stays correct. Tag "ras". Default
+    # False: byte-identical when off.
+    regt_addr_step: bool = False
+
+    # WMMA split-K atomic epilogue (16-bit dW) only: pair the two lanes that
+    # hold adjacent dW columns (lane l and l ^ 1 of the C fragment) with one
+    # DPP swap so each lane issues ONE full packed atomic per two accumulator
+    # rows, instead of one packed atomic per element with a zero partner.
+    # Halves the atomic count, and no two lanes of one atomic instruction hit
+    # the same dword any more (the zero-partner form sends lanes l and l ^ 1
+    # to the same address, which the L2 serializes).
+    # Tag "apr". Default False: byte-identical when off.
+    wmma_atomic_pair: bool = False
+
+    # The X (operand B) free-axis vector spans the (x, c) run of one filter row
+    # instead of one channel run: for N_wg = (y, x, c) the X*cpg elements of a
+    # fixed (k_wg, y) are contiguous in NHWC whenever the problem is ungrouped
+    # with no W padding and no W dilation (wi = wo*sW + x), so the width is
+    # bounded by X*C instead of C. Built for the small-C patch stems (C = 3,
+    # stride == filter), where the per-channel run forces scalar X loads. The
+    # problem conditions are checked at launch (identity_supports_problem) and
+    # in is_valid_wgrad_spec. Tag "xrun". Default False: byte-identical when off.
+    x_run: bool = False
 
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
@@ -716,6 +814,13 @@ class WgradConvSpec:
     # two are equal, which is what keeps the default path byte-identical.
 
     @property
+    def b_run(self) -> int:
+        """Contiguous extent the X (B) free-axis vector may span: cpg, or the
+        X*cpg filter-row run under ``x_run``."""
+        p = self.merged_problem
+        return p.X * p.cpg if self.x_run else p.cpg
+
+    @property
     def merged_problem(self) -> ConvProblem:
         """``problem`` with Gm groups folded into one.
 
@@ -771,6 +876,15 @@ class WgradConvSpec:
             flags={
                 "async": self.async_dma,
                 "kouter": self.lds_k_outer,
+                # A different load/store body; only tagged when set.
+                "regt": self.reg_transpose,
+                # A different K-loop body; only tagged when set.
+                f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
+                "ras": self.regt_addr_step,
+                # A different split-K epilogue; only tagged when set.
+                "apr": self.wmma_atomic_pair,
+                # A different B vector width rule; only tagged when set.
+                "xrun": self.x_run,
                 # An explicit lds_k_pad changes the LDS row stride and so the
                 # emitted code, but nothing else in the name reflects it. Two
                 # pads would otherwise collide on one symbol and the compile
@@ -1012,6 +1126,33 @@ class WgradConvSpec:
         _pgr_why = _prefetch_global_regs_conflict(self)
         if _pgr_why:
             raise ValueError(_pgr_why)
+        _regt_why = _reg_transpose_conflict(self)
+        if _regt_why:
+            raise ValueError(_regt_why)
+        if self.wmma_atomic_pair and (
+            self.split_k == 1
+            or self.two_stage
+            or self.streamk != "off"
+            or self.wave_size != 32
+            or self.epilogue != "default"
+            or self.data.dtype_d not in ("fp16", "bf16")
+        ):
+            raise ValueError(
+                "wmma_atomic_pair is the 16-bit WMMA split-K atomic epilogue: it "
+                "needs split_k > 1 (not two-stage, not stream-K), wave32, the "
+                "default epilogue and an fp16 / bf16 dW"
+            )
+        if self.x_run and (
+            self.async_dma
+            or self.lds_k_outer
+            or self.group_merge != 1
+            or self.streamk != "off"
+            or self.problem.is_3d
+        ):
+            raise ValueError(
+                "x_run widens the sync X loader's free-axis run; it does not "
+                "combine with async_dma, lds_k_outer, group_merge, stream-K or 3-D"
+            )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1387,6 +1528,131 @@ def _prefetch_global_regs_conflict(spec: "WgradConvSpec") -> str:
     return ""
 
 
+# WgradConvSpec.regt_prefetch modes that are built (see the field).
+_REGT_PREFETCH_MODES = (0, 3)
+
+# Target families whose register-prefetch loop has been measured; the
+# LDS-only barrier of mode 3 is written for them (see the field).
+_REGT_PREFETCH_TARGET_FAMILIES = ("gfx12_rdna",)
+
+
+def _reg_transpose_conflict(spec: "WgradConvSpec") -> str:
+    """Why ``spec.reg_transpose`` cannot be honoured, or ``""`` if it can.
+
+    Arch-free half of the gate (is_valid_wgrad_spec adds the arch family).
+    Shared by ``validate`` and ``is_valid_wgrad_spec`` so the two cannot drift.
+    """
+    if spec.regt_addr_step and not spec.reg_transpose:
+        return "regt_addr_step applies to the reg_transpose path only"
+    if spec.regt_addr_step and (spec.problem.is_3d or spec.streamk != "off"):
+        return (
+            "regt_addr_step is written for the plain 2-D regt K loop and "
+            "regt_prefetch mode 3 (not 3-D, not stream-K)"
+        )
+    if spec.regt_prefetch not in _REGT_PREFETCH_MODES:
+        return (
+            f"regt_prefetch must be one of {_REGT_PREFETCH_MODES} "
+            f"(got {spec.regt_prefetch})"
+        )
+    if spec.regt_prefetch and not spec.reg_transpose:
+        return "regt_prefetch is the reg_transpose K loop; set reg_transpose=True"
+    if not spec.reg_transpose:
+        return ""
+    if spec.regt_prefetch and (spec.unroll_k or spec.streamk != "off"):
+        return (
+            "regt_prefetch is its own K loop; it does not combine with "
+            "unroll_k or stream-K"
+        )
+    if spec.data.dtype_a not in ("bf16", "fp16") or spec.data.dtype_b not in (
+        "bf16",
+        "fp16",
+    ):
+        return (
+            "reg_transpose requires 16-bit A/B dtypes (one 16-byte LDS store "
+            f"carries 8 elements); got dtype_a={spec.data.dtype_a!r} "
+            f"dtype_b={spec.data.dtype_b!r}"
+        )
+    if spec.lds_k_outer:
+        return (
+            "reg_transpose fills the M-outer tile; lds_k_outer stores K-outer "
+            "and needs no transpose at all"
+        )
+    if spec.async_dma:
+        return (
+            "reg_transpose is not supported with async_dma: the direct "
+            "global->LDS load has no register stage to transpose in"
+        )
+    if spec.prefetch_addr:
+        return (
+            "reg_transpose is not supported with prefetch_addr: the carried "
+            "offsets are the CoalescedTileLoader slot plan"
+        )
+    if spec.prefetch_global_regs:
+        return (
+            "reg_transpose is not supported with prefetch_global_regs: that "
+            "K loop stages the CoalescedTileLoader chunks"
+        )
+    _, _, why = wgrad_reg_transpose_vecs(spec)
+    return why
+
+
+def wgrad_reg_transpose_vecs(spec: "WgradConvSpec") -> Tuple[int, int, str]:
+    """``(vec_a, vec_b, reason)``: the register-transpose free-axis widths.
+
+    An explicit ``vector_size_a`` / ``vector_size_b`` is taken exactly (each
+    width is its own binary in the AOT cache, so silently narrowing one would
+    build a duplicate under another name); ``None`` takes the widest width
+    the stride-1 run (kpg for dY, cpg for X, over the merged problem) allows
+    and the tile can be split into. ``reason`` is ``""`` when both are usable.
+    """
+    p = spec.merged_problem
+    out = []
+    for side, rows, chan, override in (
+        ("A", spec.tile_m, p.kpg, spec.vector_size_a),
+        ("B", spec.tile_n, spec.b_run, spec.vector_size_b),
+    ):
+        if override is not None:
+            if chan % override:
+                return (
+                    0,
+                    0,
+                    (
+                        f"reg_transpose {side} width {override} does not divide "
+                        f"the stride-1 channel run {chan}"
+                    ),
+                )
+            _, _, why = RegTransposeTileLoader.plan(
+                tile_rows=rows,
+                tile_cols=spec.tile_k,
+                block_size=spec.block_size,
+                wave_size=spec.wave_size,
+                vec=override,
+            )
+            if why:
+                return 0, 0, f"reg_transpose {side}: {why}"
+            out.append(override)
+            continue
+        cap = next(v for v in (8, 4, 2, 1) if chan % v == 0)
+        v = RegTransposeTileLoader.choose_vec(
+            tile_rows=rows,
+            tile_cols=spec.tile_k,
+            block_size=spec.block_size,
+            wave_size=spec.wave_size,
+            max_vec=cap,
+        )
+        if v is None:
+            return (
+                0,
+                0,
+                (
+                    f"reg_transpose {side}: no width <= {cap} splits the "
+                    f"{rows}x{spec.tile_k} tile over {spec.block_size} threads"
+                ),
+            )
+        out.append(v)
+    return out[0], out[1], ""
+
+
 # The register-prefetch loop carries every global load of the next tile as a
 # loop value. The C++ engine stages them in ROCKE_CTL_MAX_VECS_PER_THREAD slots
 # per operand (helper_rocke.helpers.loads.h); both engines refuse more.
@@ -1406,7 +1672,11 @@ def _sync_staged_chunks(spec: "WgradConvSpec") -> Optional[Tuple[int, int]]:
     threads = spec.block_size
     caps = (
         _wgrad_free_axis_vec(p.kpg, spec.data.dtype_a, spec.vector_size_a),
-        _wgrad_free_axis_vec(p.cpg, spec.data.dtype_b, spec.vector_size_b),
+        _wgrad_free_axis_vec(
+            spec.b_run if spec.x_run else p.cpg,
+            spec.data.dtype_b,
+            spec.vector_size_b,
+        ),
     )
     chunks = []
     for free, cap in zip((spec.tile_m, spec.tile_n), caps):
@@ -2026,6 +2296,19 @@ def wgrad_group_merge_available(
     return True, "ok"
 
 
+def wgrad_x_run_problem_reason(p) -> Optional[str]:
+    """Why ``p`` cannot run an ``x_run`` kernel (None if it can): the (x, c)
+    run of a filter row is contiguous and in bounds only for an ungrouped 2-D
+    problem without W padding or W dilation."""
+    if int(getattr(p, "groups", 1)) != 1:
+        return "x_run needs an ungrouped problem (the x step is C, not cpg)"
+    if bool(getattr(p, "is_3d", False)) or bool(getattr(p, "is_pointwise", False)):
+        return "x_run needs a 2-D, non-pointwise problem"
+    if int(getattr(p, "pW", 0)) != 0 or int(getattr(p, "dW", 1)) != 1:
+        return "x_run needs pW == 0 and dW == 1 (contiguous, in-bounds filter row)"
+    return None
+
+
 def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``.
 
@@ -2039,6 +2322,10 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
+    if spec.x_run:
+        _xr = wgrad_x_run_problem_reason(spec.problem)
+        if _xr:
+            return False, _xr
 
     # First: a TF32 spelling mix-up would otherwise be sized as a 2-byte dtype
     # by the vector-width and LDS gates below.
@@ -2225,7 +2512,11 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
 
     for _nm, _v, _chan in (
         ("vector_size_a", spec.vector_size_a, spec.problem.kpg),
-        ("vector_size_b", spec.vector_size_b, spec.problem.cpg),
+        (
+            "vector_size_b",
+            spec.vector_size_b,
+            spec.b_run if spec.x_run else spec.problem.cpg,
+        ),
     ):
         if _v is None:
             continue
@@ -2258,6 +2549,25 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _pgr_why = _prefetch_global_regs_conflict(spec)
     if _pgr_why:
         return False, _pgr_why
+    if spec.reg_transpose and family != "wmma":
+        # Written for (and measured on) the RDNA WMMA targets, which lack the
+        # LDS transpose read lds_k_outer relies on. The loader itself is
+        # wave-size agnostic; MFMA targets keep their own operand paths until
+        # it is measured there.
+        return False, (
+            f"reg_transpose is enabled only on WMMA (wave32) targets; got {arch}"
+        )
+    _regt_why = _reg_transpose_conflict(spec)
+    if _regt_why:
+        return False, _regt_why
+    if (
+        spec.regt_prefetch
+        and target.target_family not in _REGT_PREFETCH_TARGET_FAMILIES
+    ):
+        return False, (
+            f"regt_prefetch is enabled only on {_REGT_PREFETCH_TARGET_FAMILIES} "
+            f"targets; got {arch} ({target.target_family})"
+        )
     # The wgrad builder has no load/math wave split, so a "wavelet" spec built
     # silently as "mem" under another name. Reject it instead of benchmarking
     # one kernel twice.
@@ -2817,7 +3127,8 @@ def build_implicit_gemm_conv_wgrad(
     # synchronous K-outer loaders for the slot partition and the descriptors,
     # and only swaps the global->register->LDS hop for one async copy.
     _wmma_async = spec.async_dma and op.family == "wmma"
-    if not spec.async_dma:
+    # reg_transpose takes its widths from wgrad_reg_transpose_vecs instead.
+    if not spec.async_dma and not spec.reg_transpose:
 
         va = CoalescedTileLoader.choose_vec(
             tile_rows=block_m,
@@ -2833,7 +3144,9 @@ def build_implicit_gemm_conv_wgrad(
             tile_cols=block_k,
             block_size=threads,
             max_vec=_wgrad_free_axis_vec(
-                p_load.cpg, spec.data.dtype_b, spec.vector_size_b
+                spec.b_run if spec.x_run else p_load.cpg,
+                spec.data.dtype_b,
+                spec.vector_size_b,
             ),
             vector_axis="row",
         )
@@ -2920,6 +3233,102 @@ def build_implicit_gemm_conv_wgrad(
             return X_desc.offset(b_, m=m_val, k=k_val, group=group_v)
         return X_desc.offset(b_, m=m_val, k=k_val)
 
+    # regt_addr_step: per-unit run descriptors for the register-transpose
+    # loaders (see the spec field). The pointwise path's flat addressing has
+    # no decode to save, so it keeps the per-column descriptors.
+    a_run_desc = b_run_desc = None
+    if spec.regt_addr_step and not p.is_pointwise:
+        from rocke.helpers.loads import REGT_K_RUN
+        from rocke.helpers.transforms import CoordVar
+
+        _k_unmerge = spatial_unmerge_dynamic(
+            params, upper="k_wg", prefix="k_", is_3d=False
+        )
+        dY_desc_nm = DynamicTensorDescriptor.create(
+            "dY_nhwk",
+            coord_names=["n", "ho", "wo", "k_out"],
+            strides=[
+                params["p_dY_stride_n"],
+                params["p_dY_stride_ho"],
+                params["p_dY_stride_wo"],
+                b.const_i32(1),
+            ],
+        )
+        X_desc_nm = make_a_descriptor_dynamic(
+            b,
+            x_params,
+            is_3d=False,
+            grouped=_grouped,
+            decompose_m=False,
+            spatial_prefix="k_",
+            channel_prefix="n_",
+            stride_prefix="p_X_stride_",
+            name="X_nhwc",
+        )
+        _c8 = b.const_i32(REGT_K_RUN)
+        # Wave-uniform: every run of 8 starts at a multiple of 8 (k_lo and
+        # the tile_k steps are) and stays inside one output row.
+        _step_ok = b.land(
+            b.cmp_eq(b.mod(p_Wo, _c8), c0), b.cmp_eq(b.mod(k_lo, _c8), c0)
+        )
+        _true = b.cmp_eq(c0, c0)
+
+        def _run_desc(stepped, per_col):
+            def run(b_, row, col):
+                branch = b_.scf_if_else(
+                    _step_ok, result_types=[I32] * REGT_K_RUN + [I1] * REGT_K_RUN
+                )
+                with branch as (then_ctx, else_ctx):
+                    with then_ctx:
+                        k0 = b_.add(k_off_capture[0], col)
+                        nhw = _k_unmerge.apply(b_, {"k_wg": CoordVar("k_wg", k0)})
+                        pairs = [
+                            stepped(
+                                b_,
+                                row,
+                                nhw["n"].value,
+                                nhw["ho"].value,
+                                (
+                                    b_.add(nhw["wo"].value, b_.const_i32(j))
+                                    if j
+                                    else nhw["wo"].value
+                                ),
+                            )
+                            for j in range(REGT_K_RUN)
+                        ]
+                        b_.scf_yield(
+                            *[o for o, _ in pairs],
+                            *[_true if v is None else v for _, v in pairs],
+                        )
+                    with else_ctx:
+                        pairs = [
+                            per_col(b_, row, b_.add(col, b_.const_i32(j)) if j else col)
+                            for j in range(REGT_K_RUN)
+                        ]
+                        b_.scf_yield(
+                            *[o for o, _ in pairs],
+                            *[_true if v is None else v for _, v in pairs],
+                        )
+                res = list(branch.results)
+                return list(zip(res[:REGT_K_RUN], res[REGT_K_RUN:]))
+
+            return run
+
+        def _dy_stepped(b_, row, n, ho, wo):
+            k_out = b_.add(block_m_off_v, row)
+            if grouped:
+                k_out = b_.add(k_out, b_.mul(group_v, c_kpg))
+            return dY_desc_nm.offset(b_, n=n, ho=ho, wo=wo, k_out=k_out)
+
+        def _x_stepped(b_, row, n, ho, wo):
+            k_val = b_.add(block_n_off_v, row)
+            if grouped:
+                return X_desc_nm.offset(b_, n=n, ho=ho, wo=wo, k=k_val, group=group_v)
+            return X_desc_nm.offset(b_, n=n, ho=ho, wo=wo, k=k_val)
+
+        a_run_desc = _run_desc(_dy_stepped, dy_descriptor)
+        b_run_desc = _run_desc(_x_stepped, x_descriptor)
+
     if spec.async_dma and not _wmma_async:
         # K-outer: rows are K_wg, columns are the free axis. A chunk is then a
         # run along the free axis at one k_wg, which is contiguous in global for
@@ -2991,22 +3400,48 @@ def build_implicit_gemm_conv_wgrad(
             a_axis, b_axis = axis_a, axis_b
             a_vec, b_vec = load_vec_a, load_vec_b
 
-        a_sync_loader = CoalescedTileLoader(
-            tile_rows=a_tile_rows,
-            tile_cols=a_tile_cols,
-            block_size=threads,
-            load_vec=a_vec,
-            elem_dtype=ir_dtype_a,
-            vector_axis=a_axis,
-        )
-        b_sync_loader = CoalescedTileLoader(
-            tile_rows=b_tile_rows,
-            tile_cols=b_tile_cols,
-            block_size=threads,
-            load_vec=b_vec,
-            elem_dtype=ir_dtype_b,
-            vector_axis=b_axis,
-        )
+        if spec.reg_transpose:
+            # Register transpose (reg_transpose): the same M-outer tile, filled
+            # by 8(K) x v(free) micro-tiles with one 16-byte LDS store per
+            # free-axis row instead of one 16-bit store per element. The widths
+            # come from the validator's own helper, so a spec it accepted
+            # cannot build with other ones.
+            _rt_va, _rt_vb, _rt_why = wgrad_reg_transpose_vecs(spec)
+            if _rt_why:
+                raise ValueError(_rt_why)
+            a_sync_loader = RegTransposeTileLoader(
+                tile_rows=block_m,
+                tile_cols=block_k,
+                block_size=threads,
+                wave_size=spec.wave_size,
+                vec=_rt_va,
+                elem_dtype=ir_dtype_a,
+            )
+            b_sync_loader = RegTransposeTileLoader(
+                tile_rows=block_n,
+                tile_cols=block_k,
+                block_size=threads,
+                wave_size=spec.wave_size,
+                vec=_rt_vb,
+                elem_dtype=ir_dtype_b,
+            )
+        else:
+            a_sync_loader = CoalescedTileLoader(
+                tile_rows=a_tile_rows,
+                tile_cols=a_tile_cols,
+                block_size=threads,
+                load_vec=a_vec,
+                elem_dtype=ir_dtype_a,
+                vector_axis=a_axis,
+            )
+            b_sync_loader = CoalescedTileLoader(
+                tile_rows=b_tile_rows,
+                tile_cols=b_tile_cols,
+                block_size=threads,
+                load_vec=b_vec,
+                elem_dtype=ir_dtype_b,
+                vector_axis=b_axis,
+            )
 
     # The gfx1250 async loop keeps the plain pipeline's (hint-free) policy; the
     # MFMA async loop keeps its own.
@@ -3069,6 +3504,26 @@ def build_implicit_gemm_conv_wgrad(
             )
             return
 
+        if a_run_desc is not None:
+            # regt_addr_step: the register-transpose loaders take the per-unit
+            # run descriptors (M-outer tile, so no coordinate swap).
+            a_sync_loader.load(
+                b,
+                tid=tid,
+                smem_dst=A_dst,
+                descriptor=a_desc_fn,
+                rsrc=dy_rsrc,
+                run_descriptor=a_run_desc,
+            )
+            b_sync_loader.load(
+                b,
+                tid=tid,
+                smem_dst=B_dst,
+                descriptor=b_desc_fn,
+                rsrc=x_rsrc,
+                run_descriptor=b_run_desc,
+            )
+            return
         a_sync_loader.load(
             b, tid=tid, smem_dst=A_dst, descriptor=a_desc_fn, rsrc=dy_rsrc
         )
@@ -3629,6 +4084,101 @@ def build_implicit_gemm_conv_wgrad(
 
             b.scf_yield(*accs_b)
         final_accs = list(for_op_uk.results)
+    elif spec.regt_prefetch:
+        # Register-prefetch K loop of the reg_transpose loaders
+        # (regt_prefetch, see the spec field):
+        #   prologue: tile k_lo -> LDS; barrier
+        #   per tile: regs <- tile k+1; MMA(LDS); barrier; LDS <- regs; barrier
+        # The prefetch of the last step lies at or past _k_upper and is masked
+        # to the out-of-range sentinel, so it reads zero and adds nothing.
+        # Mode 3 (the only mode built): LDS-only in-loop barriers, the
+        # prefetch pinned ahead of the MMAs, and guarded reads.
+        _a_fn, _b_fn = _split_desc_fns()
+
+        def _masked(fn, tile_ok):
+            def desc(b_, row, col):
+                off, ok = fn(b_, row, col)
+                return off, (tile_ok if ok is None else b_.land(ok, tile_ok))
+
+            return desc
+
+        def _masked_run(fn, tile_ok):
+            def run(b_, row, col):
+                return [
+                    (off, tile_ok if ok is None else b_.land(ok, tile_ok))
+                    for off, ok in fn(b_, row, col)
+                ]
+
+            return run
+
+        def _fetch(k_tile):
+            k_off_capture[0] = k_tile
+            tile_ok = b.cmp_lt(k_tile, _k_upper)
+            # The reads of a partially loading tile are branched
+            # (RegTransposeTileLoader guard) so they are not sunk behind the
+            # MMAs into the store's branch.
+            # regt_addr_step (mode 3 only): the run descriptors, masked the
+            # same way.
+            _ra = (
+                {}
+                if a_run_desc is None
+                else {"run_descriptor": _masked_run(a_run_desc, tile_ok)}
+            )
+            _rb = (
+                {}
+                if b_run_desc is None
+                else {"run_descriptor": _masked_run(b_run_desc, tile_ok)}
+            )
+            return (
+                a_sync_loader.load_global(
+                    b,
+                    tid=tid,
+                    descriptor=_masked(_a_fn, tile_ok),
+                    rsrc=dy_rsrc,
+                    guard=a_sync_loader.guard_applies,
+                    **_ra,
+                ),
+                b_sync_loader.load_global(
+                    b,
+                    tid=tid,
+                    descriptor=_masked(_b_fn, tile_ok),
+                    rsrc=x_rsrc,
+                    guard=b_sync_loader.guard_applies,
+                    **_rb,
+                ),
+            )
+
+        def _store(staged):
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=staged[0])
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=staged[1])
+
+        _store(_fetch(k_lo))
+        b.sync()
+        for_op_rp = b.scf_for_iter(
+            k_lo,
+            _k_upper,
+            c_block_k,
+            accs,
+            iv_name="k_rpf",
+            elide_trailing_barrier=False,
+        )
+        with for_op_rp as (k_rp, iter_accs):
+            _st = _fetch(b.add(k_rp, c_block_k))
+            # The prefetch pinned ahead of the MMAs ...
+            b.sched_barrier(0)
+            k_off_capture[0] = k_rp
+            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
+            # ... and the transposes of the prefetched tile behind them.
+            b.sched_barrier(0)
+            # sync_lds_only may still drain the prefetch on gfx12 RDNA, where the
+            # wait-count pass can wait for every counter in front of an
+            # s_barrier it emits (compiler-dependent); the helper emits the
+            # barrier itself there.
+            lds_barrier_keep_vmem(b, arch)
+            _store(_st)
+            lds_barrier_keep_vmem(b, arch)
+            b.scf_yield(*new_accs)
+        final_accs = list(for_op_rp.results)
     elif spec.prefetch_global_regs:
         # Register-prefetch K loop. The prologue issues tile k_lo's global
         # reads into VGPRs. Each iteration writes the tile it carries to LDS,
@@ -4205,6 +4755,23 @@ def _emit_wgrad_split_k_epilogue_wmma(
             else:
                 b.global_atomic_add_pk_f16(dw_ptr, c_off_even, vec)
 
+    if spec.wmma_atomic_pair and dtype_d in ("fp16", "bf16"):
+        _emit_wgrad_split_k_pair_atomics(
+            b,
+            spec,
+            op,
+            accs,
+            lane,
+            block_warp_m_off,
+            block_warp_n_off,
+            dw_ptr,
+            wg_M_v,
+            wg_N_v,
+            _row_addr,
+            _to_dtype,
+        )
+        return
+
     flat = 0
     for mi in range(mfmas_m):
         atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
@@ -4224,6 +4791,78 @@ def _emit_wgrad_split_k_epilogue_wmma(
                         b.global_atomic_add(dw_ptr, c_off, b.vec_extract(acc, i))
                 else:
                     _emit_single_packed_atomic(c_m, c_n, b.vec_extract(acc, i))
+
+
+def _emit_wgrad_split_k_pair_atomics(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    op,
+    accs: Sequence[Value],
+    lane: Value,
+    block_warp_m_off: Value,
+    block_warp_n_off: Value,
+    dw_ptr: Value,
+    wg_M_v: Value,
+    wg_N_v: Value,
+    row_addr,
+    to_dtype,
+) -> None:
+    """``wmma_atomic_pair``: one full packed atomic per lane per two C rows.
+
+    In the WMMA result fragment every slot of a lane shares one column, and
+    the adjacent column lives in lane ``l ^ 1`` (the column is ``l % 16`` plus
+    a multiple of 16). For each slot pair ``(i, i + 1)`` a lane packs its two
+    16-bit values into one dword and swaps that dword with lane ``l ^ 1`` (one
+    DPP ``row_xmask:1``). The even-column lane then owns row ``i`` -- (its
+    value, its neighbour's) -- and the odd-column lane row ``i + 1`` -- (its
+    neighbour's value, its own) -- each stored with one packed atomic at the
+    even column. Rows come from the result layout map (``op.dst_layout()``),
+    so the row of slot ``i + 1`` is not assumed.
+
+    ``wg_N`` is even (``is_valid_wgrad_spec`` requires an even dW row), so an
+    in-range even column always has its odd partner in range: the column test
+    is the same one the zero-partner path makes.
+    """
+    dtype_d = spec.data.dtype_d
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+    c_map = op.dst_layout()
+    frag_len = op.dst.frag_len
+    if frag_len % 2:
+        raise ValueError("wmma_atomic_pair needs an even result fragment length")
+    c1 = b.const_i32(1)
+    odd = b.cmp_ne(b.land(lane, c1), b.const_i32(0))
+    flat = 0
+    for mi in range(mfmas_m):
+        atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+            for i in range(0, frag_len, 2):
+                row0, col = c_map.coord(b, lane, i)
+                row1, _ = c_map.coord(b, lane, i + 1)
+                v0 = to_dtype(b.vec_extract(acc, i))
+                v1 = to_dtype(b.vec_extract(acc, i + 1))
+                own = b.vec_pack([v0, v1], v0.type)
+                own_i = b.vec_extract(b.vec_bitcast(own, VectorType(I32, 1)), 0)
+                nbr_i = b.warp_shuffle_xor_dpp(own_i, 1)
+                nbr = b.vec_bitcast(b.vec_pack([nbr_i], I32), own.type)
+                n0 = b.vec_extract(nbr, 0)
+                n1 = b.vec_extract(nbr, 1)
+                # even column: (own[i], nbr[i]) at row i; odd: (nbr[i+1], own[i+1]).
+                lo = b.select(odd, n1, v0)
+                hi = b.select(odd, v1, n0)
+                c_m = b.add(atom_m_base, b.select(odd, row1, row0))
+                c_n = b.sub(b.add(atom_n_base, col), b.land(lane, c1))
+                ok = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                with b.scf_if(ok):
+                    c_off = b.add(b.mul(row_addr(c_m), wg_N_v), c_n)
+                    vec = b.vec_pack([lo, hi], v0.type)
+                    if dtype_d == "bf16":
+                        b.global_atomic_add_pk_bf16(dw_ptr, c_off, vec)
+                    else:
+                        b.global_atomic_add_pk_f16(dw_ptr, c_off, vec)
 
 
 def _cshuffle_epilogue(op, atom, grid, kwargs: dict) -> CShuffleEpilogue:

@@ -15,6 +15,12 @@
  *     .col_xor     (field check)     rocke_coalesced_tile_loader_set_col_xor()
  *   lds_col_xor_params (function)   rocke_lds_col_xor_params()
  *   swizzle_lds_col    (function)   rocke_swizzle_lds_col()
+ *   RegTransposeTileLoader (frozen) rocke_reg_transpose_tile_loader_t
+ *     .plan        (staticmethod)    rocke_reg_transpose_tile_loader_plan()
+ *     .choose_vec  (classmethod)     rocke_reg_transpose_tile_loader_choose_vec()
+ *     __post_init__                  rocke_reg_transpose_tile_loader_init()
+ *     .load_global / .store_lds      rocke_reg_transpose_tile_loader_load_global() / _store_lds()
+ *     .load        (method)          rocke_reg_transpose_tile_loader_load()
  *   AsyncTileLoader (frozen dc)     rocke_async_tile_loader_t
  *     .choose_dwords (classmethod)    rocke_async_tile_loader_choose_dwords()
  *     .from_tile     (classmethod)    rocke_async_tile_loader_from_tile()
@@ -323,6 +329,150 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
                                                    rocke_value_t* ptr,
                                                    rocke_value_t* num_bytes,
                                                    int coherency);
+
+/* ============================================================================
+ * RegTransposeTileLoader
+ * ========================================================================== */
+
+/* Python REGT_K_RUN: K elements of one register-transposed micro-tile (16
+ * bytes of 16-bit data, one 16-byte LDS store per free-axis row). */
+#define ROCKE_REGT_K_RUN 8
+
+/* Most micro-tiles one thread loads per call (the staging capacity). A plan
+ * that needs more is refused with a builder error; the conv tiles need at most
+ * a few dozen. */
+#define ROCKE_REGT_MAX_UNITS 256
+
+/* Python RunDescriptorFn: (row, first K column) -> the (offset, valid) pairs of
+ * the ROCKE_REGT_K_RUN consecutive K columns of a unit. Writes the offsets to
+ * out_off[0..7] and the predicates to out_valid[0..7] (NULL = Python None). */
+typedef void (*rocke_loads_run_descriptor_fn)(rocke_ir_builder_t* b,
+                                              rocke_value_t* row,
+                                              rocke_value_t* col,
+                                              rocke_value_t** out_off,
+                                              rocke_value_t** out_valid,
+                                              void* user);
+
+/* Python col_swizzle: (row, col) -> the LDS column a 16-byte unit starting at
+ * (row, col) is written to. */
+typedef rocke_value_t* (*rocke_loads_col_swizzle_fn)(rocke_ir_builder_t* b,
+                                                     rocke_value_t* row,
+                                                     rocke_value_t* col,
+                                                     void* user);
+
+/* Value type mirroring rocke.helpers.loads.RegTransposeTileLoader (frozen
+ * dataclass): a sync global -> LDS load of an M-outer (free axis x K) tile
+ * whose free axis is contiguous in global memory. Each thread loads micro-tiles
+ * of vec free-axis rows x ROCKE_REGT_K_RUN K columns with vec-wide reads,
+ * regroups them with byte permutes and writes each free-axis row with one
+ * 16-byte LDS store. Build it with rocke_reg_transpose_tile_loader_init, which
+ * makes Python's __post_init__ checks. */
+typedef struct rocke_reg_transpose_tile_loader
+{
+    int tile_rows;
+    int tile_cols;
+    int block_size;
+    int wave_size;
+    int vec; /* free-axis load width, one of 8, 4, 2, 1 */
+    const rocke_type_t* elem_dtype; /* NULL = F16 (Python default); 16-bit only */
+    int oob_sentinel; /* Python default (1 << 31) - 1 */
+    /* Python `col_swizzle: Optional[Callable] = None`; NULL is None (the
+     * unswizzled IR). The consumer must read through the same map. */
+    rocke_loads_col_swizzle_fn col_swizzle;
+    void* col_swizzle_user;
+} rocke_reg_transpose_tile_loader_t;
+
+/* One staged micro-tile: Python (row, col, [v_0 .. v_7]). */
+typedef struct rocke_regt_staged_unit
+{
+    rocke_value_t* row;
+    rocke_value_t* col;
+    rocke_value_t* vs[ROCKE_REGT_K_RUN];
+} rocke_regt_staged_unit_t;
+
+/* Python _RegTransposeStaged: the units of one load_global call plus the
+ * wave-uniform participation predicate (NULL = every thread loads). */
+typedef struct rocke_regt_staged
+{
+    rocke_regt_staged_unit_t units[ROCKE_REGT_MAX_UNITS];
+    int count;
+    rocke_value_t* active;
+} rocke_regt_staged_t;
+
+/* RegTransposeTileLoader.plan: the work split for one width. Returns ROCKE_OK
+ * with *out_units / *out_active set (either may be NULL), or ROCKE_ERR_VALUE
+ * with Python's reason in `why` (may be NULL) when the width is unusable. */
+rocke_status_t rocke_reg_transpose_tile_loader_plan(int tile_rows,
+                                                    int tile_cols,
+                                                    int block_size,
+                                                    int wave_size,
+                                                    int vec,
+                                                    int* out_units,
+                                                    int* out_active,
+                                                    char* why,
+                                                    size_t why_cap);
+
+/* RegTransposeTileLoader.choose_vec: the widest usable width <= max_vec
+ * (Python default 8). ROCKE_ERR_VALUE where Python returns None. */
+rocke_status_t rocke_reg_transpose_tile_loader_choose_vec(
+    int tile_rows, int tile_cols, int block_size, int wave_size, int max_vec, int* out_vec);
+
+/* RegTransposeTileLoader(...) with __post_init__: fills *self (oob_sentinel at
+ * the Python default, no col_swizzle) and returns ROCKE_OK, or ROCKE_ERR_VALUE
+ * with Python's ValueError text in `why` for a non-16-bit elem_dtype or an
+ * unusable plan. */
+rocke_status_t rocke_reg_transpose_tile_loader_init(rocke_reg_transpose_tile_loader_t* self,
+                                                    int tile_rows,
+                                                    int tile_cols,
+                                                    int block_size,
+                                                    int wave_size,
+                                                    int vec,
+                                                    const rocke_type_t* elem_dtype,
+                                                    char* why,
+                                                    size_t why_cap);
+
+/* RegTransposeTileLoader.partial: only the first active_threads threads load. */
+bool rocke_reg_transpose_tile_loader_partial(const rocke_reg_transpose_tile_loader_t* self);
+
+/* RegTransposeTileLoader.guard_applies: whether load_global can take
+ * guard=true (partial participation and vec > 1). */
+bool rocke_reg_transpose_tile_loader_guard_applies(const rocke_reg_transpose_tile_loader_t* self);
+
+/* RegTransposeTileLoader.load_global: emit the global reads into `staged`.
+ * `masked` (Python default true) and `guard` (default false) as in Python;
+ * `guard` without partial participation, `masked` and vec > 1 records
+ * ROCKE_ERR_VALUE (Python raises ValueError). `run_fn` NULL is
+ * run_descriptor=None. No-op if `b` is in error. */
+void rocke_reg_transpose_tile_loader_load_global(rocke_ir_builder_t* b,
+                                                 const rocke_reg_transpose_tile_loader_t* self,
+                                                 rocke_value_t* tid,
+                                                 rocke_loads_descriptor_fn descriptor,
+                                                 void* descriptor_user,
+                                                 rocke_value_t* rsrc,
+                                                 bool masked,
+                                                 rocke_loads_run_descriptor_fn run_fn,
+                                                 void* run_user,
+                                                 bool guard,
+                                                 rocke_regt_staged_t* staged);
+
+/* RegTransposeTileLoader.store_lds: transpose and write the staged units;
+ * under partial participation the stores sit behind staged->active. */
+void rocke_reg_transpose_tile_loader_store_lds(rocke_ir_builder_t* b,
+                                               const rocke_reg_transpose_tile_loader_t* self,
+                                               rocke_value_t* smem_dst,
+                                               const rocke_regt_staged_t* staged);
+
+/* RegTransposeTileLoader.load: read, transpose and write one tile; under
+ * partial participation the idle waves skip the whole body. */
+void rocke_reg_transpose_tile_loader_load(rocke_ir_builder_t* b,
+                                          const rocke_reg_transpose_tile_loader_t* self,
+                                          rocke_value_t* tid,
+                                          rocke_value_t* smem_dst,
+                                          rocke_loads_descriptor_fn descriptor,
+                                          void* descriptor_user,
+                                          rocke_value_t* rsrc,
+                                          rocke_loads_run_descriptor_fn run_fn,
+                                          void* run_user);
 
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot

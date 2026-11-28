@@ -781,7 +781,7 @@ def test_wmma_fp16_atomic_degree_is_capped_for_accuracy():
     assert (ws.split_k, ws.two_stage) == (128, True)
 
 
-@pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
+@pytest.mark.parametrize("arch", ["gfx1151", "gfx11-generic"])
 def test_wmma_auto_without_float_atomics_runs_unsplit(arch):
     # A wave32 arch whose catalog has no has_global_float_atomic_add: the dW
     # row is even (the layout admits the packed pair), but the target cannot

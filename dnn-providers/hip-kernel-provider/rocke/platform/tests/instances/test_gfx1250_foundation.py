@@ -77,9 +77,12 @@ class TestGfx1250Arch(unittest.TestCase):
             "gfx1152": MemoryCapabilities(**none),
             "gfx1153": MemoryCapabilities(**none),
             "gfx1154": MemoryCapabilities(**none),
-            "gfx12-generic": MemoryCapabilities(**none),
-            "gfx1200": MemoryCapabilities(**none),
-            "gfx1201": MemoryCapabilities(**none),
+            # gfx12 RDNA: the float global atomics of the WMMA split-K wgrad.
+            "gfx12-generic": MemoryCapabilities(
+                **none, has_global_float_atomic_add=True
+            ),
+            "gfx1200": MemoryCapabilities(**none, has_global_float_atomic_add=True),
+            "gfx1201": MemoryCapabilities(**none, has_global_float_atomic_add=True),
             "gfx1250": MemoryCapabilities(
                 **dict(none, has_async_global_lds=True, has_tdm=True),
                 has_scalar_data_prefetch=True,

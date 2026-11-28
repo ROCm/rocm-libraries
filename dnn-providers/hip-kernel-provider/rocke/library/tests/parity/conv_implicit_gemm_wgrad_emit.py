@@ -52,10 +52,10 @@
 #   49 -- gfx1250 WMMA split-K=4, bf16 dW (zero-fill packed bf16 atomic), M-outer
 #   50 -- gfx1250 WMMA split-K=4, fp32 dW (scalar atomic), K-outer
 #   51 -- gfx1250 WMMA split-K=2, fp16 dW, C=24 (partial N tiles)
-#   52-54 -- WMMA split-K: gfx1201 bf16 dW (arch not enabled) and gfx1151 fp32
-#         dW (arch not enabled, any dtype), which both engines must reject, and
-#         gfx1250 bf16 dW with the cshuffle epilogue (M-outer), which both admit
-#         since the WMMA cshuffle epilogue
+#   52-54 -- WMMA split-K: gfx1201 bf16 dW (admitted since gfx12 RDNA has float
+#         global atomics), gfx1151 fp32 dW (arch not enabled, any dtype), which
+#         both engines must reject, and gfx1250 bf16 dW with the cshuffle
+#         epilogue (M-outer), which both admit since the WMMA cshuffle epilogue
 #   55 -- gfx1250 async_dma (global_load_async_to_lds ping-pong), K-outer,
 #         split-K=2 fp32 dW, C=24 (partial N tiles: zero-filled chunks) and odd
 #         slices (zero-fill redirect)
@@ -65,8 +65,8 @@
 #   58-60 -- gfx1250 cshuffle (WMMA fragment through LDS): direct fp16 dW,
 #         split-K bf16 dW (genuine paired atomics), and with async_dma under
 #         split-K at C=24 (partial N tiles)
-#   61 -- both engines must reject: cshuffle split-K on gfx1201 (WMMA split-K
-#         is enabled only on gfx1250)
+#   61 -- cshuffle split-K on gfx1201, which both engines admit since gfx12
+#         RDNA has float global atomics
 #   62 -- both engines must reject: gfx1250 cshuffle split-K fp16 dW whose
 #         store vector is odd (C=3 with a 2x2 filter: wg_N=12 is even, but
 #         the LDS pairing has no partner)
@@ -114,6 +114,25 @@
 #   108 -- the same base at split_k = 1 with vector_size_c = 2: the cshuffle
 #         store epilogue must honour the explicit dW width (C = 64 alone
 #         would pick 8) in both engines.
+#   109-113 -- reg_transpose (the register-transpose loader) on the gfx1201
+#         WMMA base (config 6; see _REGT_CFGS): the auto widths (8 x 8, partial
+#         participation), bf16 at widths 4 / 2, scalar loads, the zero-partner
+#         split-K atomic on gfx1200, and gfx950 (wave64), which both engines
+#         must reject.
+#   114-116 -- regt_prefetch (the register-prefetch K loop of the
+#         register-transpose loaders, see _REGT_CFGS): mode 3 (guarded reads
+#         under partial participation), mode 3 in bf16 at width 2 on
+#         gfx12-generic; mode 2, which both engines must reject.
+#   117-118 -- regt_addr_step (the stepped micro-tile address decode) on a
+#         stride-2 problem with Wo = 8: the plain register-transpose loop and
+#         regt_prefetch mode 3.
+#   119-121 -- wmma_atomic_pair (the paired-lane split-K atomic epilogue):
+#         fp16 dW over the register-transpose loader, bf16 dW over the default
+#         loader, and two-stage, which both engines must reject.
+#   122-124 -- x_run (the X loads along the filter-row run) on the ungrouped
+#         stem probe N1 16x16 C8 K64 4x4 stride 4 (X * C = 32): the
+#         register-prefetch regt loop, bf16 on the default loader, and a W
+#         padded problem, which both engines must reject.
 #   (Grouped wgrad reaches the C++ engine only through stream-K. The
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -129,7 +148,7 @@
 #   207 -- streamk with unroll_k (must raise ValueError)
 #   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-108, so run_diff.py stops at the shared END before reaching 200+; these
+# 0-124, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -226,6 +245,86 @@ _PGR_BASES = {
 }
 
 
+# A stride-2 problem whose Wo (8) takes the stepped regt_addr_step decode.
+_P_S2 = ConvProblem(N=2, Hi=16, Wi=16, C=32, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1)
+# An ungrouped stem (stride == filter, no padding) for x_run: X * C = 32.
+_P_XR = ConvProblem(N=1, Hi=16, Wi=16, C=8, K=64, Y=4, X=4, sH=4, sW=4)
+
+# The register-transpose knobs on the gfx1201 WMMA base (config 6): index ->
+# (extra overrides, arch). dtype_* keys replace the base's data. Keep in
+# lockstep with make_regt_cfg() in conv_implicit_gemm_wgrad_emit.c.
+_REGT_CFGS = {
+    109: (dict(reg_transpose=True), "gfx1201"),
+    110: (
+        dict(
+            reg_transpose=True,
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+            vector_size_a=4,
+            vector_size_b=2,
+        ),
+        "gfx1201",
+    ),
+    111: (dict(reg_transpose=True, vector_size_a=1, vector_size_b=1), "gfx1201"),
+    112: (dict(reg_transpose=True, split_k=2), "gfx1200"),
+    # rejected: a wave64 target
+    113: (
+        dict(reg_transpose=True, wave_size=64, warp_tile_m=32, warp_tile_n=32),
+        "gfx950",
+    ),
+    114: (dict(reg_transpose=True, regt_prefetch=3), "gfx1201"),
+    115: (
+        dict(
+            reg_transpose=True,
+            regt_prefetch=3,
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+            vector_size_a=2,
+            vector_size_b=2,
+        ),
+        "gfx12-generic",
+    ),
+    # rejected: no mode 2
+    116: (dict(reg_transpose=True, regt_prefetch=2), "gfx1201"),
+    117: (dict(reg_transpose=True, regt_addr_step=True, problem=_P_S2), "gfx1201"),
+    118: (
+        dict(reg_transpose=True, regt_addr_step=True, regt_prefetch=3, problem=_P_S2),
+        "gfx1201",
+    ),
+    119: (dict(reg_transpose=True, split_k=2, wmma_atomic_pair=True), "gfx1201"),
+    120: (dict(split_k=2, wmma_atomic_pair=True, dtype_d="bf16"), "gfx1201"),
+    # rejected: the two-stage scratch has no packed atomics
+    121: (dict(split_k=2, two_stage=True, wmma_atomic_pair=True), "gfx1201"),
+    122: (
+        dict(reg_transpose=True, regt_prefetch=3, x_run=True, problem=_P_XR),
+        "gfx1201",
+    ),
+    123: (
+        dict(
+            x_run=True,
+            problem=_P_XR,
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+        ),
+        "gfx1201",
+    ),
+    # rejected: W padding (the filter-row run leaves the image)
+    124: (
+        dict(
+            reg_transpose=True,
+            x_run=True,
+            problem=ConvProblem(
+                N=1, Hi=16, Wi=16, C=8, K=64, Y=4, X=4, sH=4, sW=4, pH=1, pW=1
+            ),
+        ),
+        "gfx1201",
+    ),
+}
+
+
 # dW width 2 (vector_size_c = 2): index -> (base, extra overrides).
 _ATOMIC_VEC_C_BASES = {
     106: (11, {"split_k": 2, "vector_size_c": 2}),  # packed atomic, fp16 dW
@@ -242,6 +341,19 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _REGT_CFGS:
+        from dataclasses import replace
+
+        extra, arch = _REGT_CFGS[idx]
+        spec, _ = _spec(6)
+        extra = dict(extra)
+        dtypes = {
+            k: extra.pop(k) for k in ("dtype_a", "dtype_b", "dtype_d") if k in extra
+        }
+        if dtypes:
+            extra["data"] = replace(spec.data, **dtypes)
+        return replace(spec, **extra), arch
+
     if idx in _ATOMIC_VEC_C_BASES:
         from dataclasses import replace
 
@@ -816,7 +928,7 @@ def _spec(idx: int):
         )
 
     if 52 <= idx <= 54:
-        # WMMA split-K specs both engines must reject.
+        # WMMA split-K: gfx1201 and gfx1250 admitted, gfx1151 rejected.
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         arch, dtype_d, epilogue, warp_tile_k = {

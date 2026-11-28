@@ -295,6 +295,10 @@ absolute `k_out`. With `groups == 1` the group terms vanish (`cpg == C`,
 
 **Why this is faster:** With `Y=X=1`, `sH=sW=1`, `pH=pW=0` the embed transforms reduce to identity (`hi=ho`, `wi=wo`), the filter-unmerge produces `y=x=0` trivially, and the pad guards are always true. The implicit descriptor computes the same values but still emits the full VALU sequence (magic divisions, multiplications, bounds comparisons). Flat arithmetic emits one `mul` and one `add` per operand (plus the group-base `add` when `groups > 1`) — zero dead instructions.
 
+### RDNA4 forward knobs (gfx1200 / gfx1201)
+
+- The RDNA4 AOT grid adds a tile_k 128 axis after the base geometries (wgrad register-transpose rows only; forward and dgrad keep their base grid); other arches are unchanged.
+
 ---
 
 ## Next steps
