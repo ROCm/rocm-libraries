@@ -142,6 +142,7 @@ public:
                                           rocsparse_fill_mode    fill_mode,
                                           rocsparse::trm_info_t* trm_info);
 
+    rocsparse_cscsv_info   get_cscsv_info();
     rocsparse_ellsv_info   get_ellsv_info();
     rocsparse::trm_info_t* get_ellsv_info(rocsparse_operation operation,
                                           rocsparse_fill_mode fill_mode);

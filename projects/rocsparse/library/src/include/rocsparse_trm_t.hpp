@@ -28,6 +28,7 @@
 #include "rocsparse_bsrilu0_info.hpp"
 #include "rocsparse_bsrsm_info.hpp"
 #include "rocsparse_bsrsv_info.hpp"
+#include "rocsparse_cscsv_info.hpp"
 #include "rocsparse_csric0_info.hpp"
 #include "rocsparse_csrildlt0_info.hpp"
 #include "rocsparse_csrilu0_info.hpp"
@@ -52,6 +53,7 @@ namespace rocsparse
         std::shared_ptr<_rocsparse_bsrilu0_info>   m_bsrilu0_info;
         std::shared_ptr<_rocsparse_bsric0_info>    m_bsric0_info;
         std::shared_ptr<_rocsparse_ellsv_info>     m_ellsv_info;
+        std::shared_ptr<_rocsparse_cscsv_info>     m_cscsv_info;
 
         void destroy_csrsv_info();
         void destroy_csrsm_info();
@@ -77,6 +79,7 @@ namespace rocsparse
         rocsparse_bsrilu0_info   create_bsrilu0_info();
         rocsparse_bsric0_info    create_bsric0_info();
         rocsparse_ellsv_info     create_ellsv_info();
+        rocsparse_cscsv_info     create_cscsv_info();
 
         std::shared_ptr<_rocsparse_csrsv_info>     get_shared_csrsv_info();
         std::shared_ptr<_rocsparse_csrsm_info>     get_shared_csrsm_info();

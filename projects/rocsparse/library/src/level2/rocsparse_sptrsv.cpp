@@ -331,11 +331,11 @@ try
 
         case rocsparse_format_csc:
         {
-            auto csrsv_info = sptrsv_descr->get_csrsv_info();
-            if(csrsv_info != nullptr)
+            auto cscsv_info = sptrsv_descr->get_cscsv_info();
+            if(cscsv_info != nullptr)
             {
-                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsv_info);
-                exact_pivot    = csrsv_info->get_singularity_numeric_exact();
+                symbolic_pivot = cscsv_info->get_symbolic_pivot();
+                exact_pivot    = cscsv_info->get_exact_pivot();
             }
             break;
         }
@@ -393,9 +393,14 @@ try
         rocsparse_status status{};
         switch(sptrsv_descr->get_format())
         {
+        case rocsparse_format_csc:
+        {
+            status = rocsparse::cscsv_zero_pivot(
+                handle, sptrsv_descr->get_cscsv_info(), rocsparse_indextype_i64, data);
+            break;
+        }
         case rocsparse_format_csr:
         case rocsparse_format_coo:
-        case rocsparse_format_csc:
         {
             auto csrsv_info = sptrsv_descr->get_csrsv_info();
             status = rocsparse::csrsv_zero_pivot(handle, csrsv_info, rocsparse_indextype_i64, data);
@@ -745,43 +750,16 @@ namespace rocsparse
             }
             case rocsparse_format_csc:
             {
-                rocsparse_csrsv_info csrsv_info{};
-                switch(analysis_policy)
-                {
-                case rocsparse_analysis_policy_reuse:
-                {
-                    sptrsv_descr->set_shared_csrsv_info(A->info->get_shared_csrsv_info());
-                    csrsv_info = sptrsv_descr->get_csrsv_info();
-                    break;
-                }
-                case rocsparse_analysis_policy_force:
-                {
-                    csrsv_info = nullptr;
-                    break;
-                }
-                }
-
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscsv_analysis(handle,
-                                                                     operation,
-                                                                     A,
-                                                                     analysis_policy,
-                                                                     rocsparse_solve_policy_auto,
-                                                                     &csrsv_info,
-                                                                     buffer)));
+                sptrsv_descr->set_cscsv_info(new _rocsparse_cscsv_info());
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis(handle,
+                                                                    operation,
+                                                                    A,
+                                                                    analysis_policy,
+                                                                    rocsparse_solve_policy_auto,
+                                                                    sptrsv_descr->get_cscsv_info(),
+                                                                    buffer_size_in_bytes,
+                                                                    buffer));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
-                switch(analysis_policy)
-                {
-                case rocsparse_analysis_policy_reuse:
-                {
-                    break;
-                }
-                case rocsparse_analysis_policy_force:
-                {
-                    sptrsv_descr->set_csrsv_info(csrsv_info);
-                    break;
-                }
-                }
-
                 return rocsparse_status_success;
             }
             case rocsparse_format_ell:
@@ -892,23 +870,14 @@ namespace rocsparse
                 case rocsparse_format_csc:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
-                        rocsparse::diagonal_solve_csc(handle,
-                                                      operation,
-                                                      modifier,
-                                                      alpha,
-                                                      A,
-                                                      sptrsv_descr->get_csrsv_info(),
-                                                      static_cast<int64_t>(1),
-                                                      dnvec_descr_x->const_values,
-                                                      dnvec_descr_x->inc,
-                                                      static_cast<int64_t>(0),
-                                                      dnvec_descr_x->batch_stride,
-                                                      dnvec_descr_y->values,
-                                                      dnvec_descr_y->inc,
-                                                      static_cast<int64_t>(0),
-                                                      dnvec_descr_y->batch_stride,
-                                                      batch_count,
-                                                      false));
+                        rocsparse::cscsv_diagonal_solve(handle,
+                                                        operation,
+                                                        modifier,
+                                                        alpha,
+                                                        A,
+                                                        dnvec_descr_x,
+                                                        dnvec_descr_y,
+                                                        sptrsv_descr->get_cscsv_info()));
                     sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                     return rocsparse_status_success;
                 }
@@ -973,7 +942,8 @@ namespace rocsparse
                                                                  dnvec_descr_x,
                                                                  dnvec_descr_y,
                                                                  rocsparse_solve_policy_auto,
-                                                                 sptrsv_descr->get_csrsv_info(),
+                                                                 sptrsv_descr->get_cscsv_info(),
+                                                                 buffer_size_in_bytes,
                                                                  buffer));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                 return rocsparse_status_success;
