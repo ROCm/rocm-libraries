@@ -408,7 +408,7 @@ void GetPerfDbVals(const fs::path& filename,
     if(perf_db_map.find(key) != perf_db_map.end())
     {
         bool duplicate = false;
-        std::istringstream pdb_line{perf_db_map.at(key).content};
+        std::istringstream pdb_line{std::string{perf_db_map.at(key).content}};
         char fragment[1024];
         while(pdb_line.getline(fragment, 1024, ';'))
         {
@@ -862,7 +862,7 @@ void CheckFDBEntry(size_t thread_index,
             << "Failed to parse FDB key:" << kidx << ":Parsed Key: " << ss.str();
 
         std::vector<miopen::FDBVal> fdb_vals;
-        miopen::ParseFDBbVal(kinder.second.content, fdb_vals);
+        miopen::ParseFDBbVal(std::string{kinder.second.content}, fdb_vals);
 
         std::unordered_map<std::string, std::string> pdb_vals;
         std::string pdb_select_query;
