@@ -1,0 +1,78 @@
+# Integration test configuration for hipkernel:hip_conv_fwd_fma_igemm_rdna
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# The engine serves forward cross-correlation on the gfx11 and gfx12 RDNA targets: 2D and 3D
+# (1D as NCHW with H = 1), packed NC(D)HW or N(D)HWC, fp32 / fp16 / bf16, any stride,
+# dilation and padding, and groups with at least 16 output channels each, with fp32
+# compute. It declines depthwise and narrower groups and other compute types, and the
+# harness skips a declined case.
+#
+# No [[test_skips]] entry: the engine's pack ships only for RDNA targets, so another device
+# declines through the ordinary path. An entry cannot express "skip everywhere except
+# RDNA" -- the schema has no negation, and an empty `archs` list means EVERY arch
+# (TestSettings.hpp: `entry.archs.empty() || ...`).
+
+# -- Tolerance Overrides --
+# The fp32 conv-forward classes of MIOPEN_ENGINE.toml, for the same reason: this engine and
+# the GPU reference accumulate a long fp32 reduction in different orders, so the absolute
+# error grows with the accumulation length (C / groups x filter volume) and the default 1e-5
+# atol falls below it for outputs near zero. Each class keeps rtol at the 1e-5 default.
+# Temporary, like those classes: removed when the dynamic conv-fwd tolerance
+# (ROCm/rocm-libraries#15481) grades fp32 conv forward.
+[[tolerance_overrides]]
+filters = ["*_ConvolutionFwd_Default.*_3d_*_fp32_*"]
+atol = 5e-5
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.l*_fp32_*",
+    "*_ConvolutionFwd*.m*_fp32_*",
+    "*_ConvolutionFwd*.h*_fp32_*",
+    "*_ConvolutionFwd*.x*_fp32_*",
+    "*_ConvolutionFwd*.s31_*_fp32_*",
+    "*_ConvolutionFwd*.s59_*_fp32_*",
+    "*_ConvolutionFwd*.r029_*_fp32_*",
+    "*_ConvolutionFwd*.r061_*_fp32_*",
+    "*_ConvolutionFwd*.r065_*_fp32_*",
+    "*_ConvolutionFwd*.r121_*_fp32_*",
+    "*_ConvolutionFwd*.r122_*_fp32_*",
+]
+atol = 1e-4
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.a*_fp32_*",
+    "*_ConvolutionFwd*.l10_*_fp32_*",
+    "*_ConvolutionFwd*.l30_*_fp32_*",
+    "*_ConvolutionFwd*.l36_*_fp32_*",
+    "*_ConvolutionFwd*.l40_*_fp32_*",
+    "*_ConvolutionFwd*.l41_*_fp32_*",
+    "*_ConvolutionFwd*.l43_*_fp32_*",
+    "*_ConvolutionFwd*.r028_*_fp32_*",
+    "*_ConvolutionFwd*.r083_*_fp32_*",
+    "*_ConvolutionFwd*.r119_*_fp32_*",
+    "*_ConvolutionFwd*.r131_*_fp32_*",
+    # Not in the MIOpen class: S10 (3D 5x5x5, accumulation length 2,000) measured 6.0e-5
+    # on gfx1151, above the 3D class.
+    "*_ConvolutionFwd*.s10_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.s19_*_fp32_*",
+    "*_ConvolutionFwd*.l19_*_fp32_*",
+    "*_ConvolutionFwd*.x4_*_fp32_*",
+    "*_ConvolutionFwd*.s45_*_fp32_*",
+    "*_ConvolutionFwd*.l45_*_fp32_*",
+    "*_ConvolutionFwd*.r066_*_fp32_*",
+    "*_ConvolutionFwd*.r067_*_fp32_*",
+]
+atol = 2e-2
+rtol = 1e-5
