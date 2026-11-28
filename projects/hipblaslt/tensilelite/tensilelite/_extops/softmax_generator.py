@@ -613,6 +613,9 @@ class SoftmaxKernelGenerator:
                 mod.add(self.reduction_max(n_reg_idx))
                 max_addr_mod, max_reg_idx = self.max_elem()
                 mod.add(max_addr_mod)
+                # All waves must finish reading the row maximum before any
+                # wave overwrites its LDS slot with an exponential value.
+                mod.add(ri.SBarrier())
                 mod.add(self.sub_max(data_reg_idx, max_reg_idx))
                 self.vgpr_pool.checkIn(max_reg_idx)
 
