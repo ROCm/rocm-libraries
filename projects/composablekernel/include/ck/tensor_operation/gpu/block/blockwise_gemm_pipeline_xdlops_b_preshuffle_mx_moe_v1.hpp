@@ -179,9 +179,15 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
 
     static constexpr auto num_buffer_load_a_scale = MRepeat / MXdlPack * KRepeat / KXdlPack;
     static constexpr auto num_buffer_load_b_scale = NRepeat / NXdlPack * KRepeat / KXdlPack;
+    // Outstanding-load counts for block_sync_lds_async_load(). Only A is loaded by async DMA; B and
+    // the scales are ordinary VMEM loads to VGPRs. Each wait needs the most recently issued A DMA
+    // (the next one is only issued after the wait), so no asyncmarks may stay outstanding, while
+    // the B/scale prefetches issued after that DMA (async_vmcnt of them) may stay in flight. The
+    // gfx9 fallback, where the DMA shares vmcnt with those loads, needs async_vmcnt to express
+    // that.
+    static constexpr index_t async_markcnt = 0;
     static constexpr auto async_vmcnt =
         num_buffer_load_a_scale + num_buffer_load_b_scale + HotLoopInstList::B_Buffer_Load_Inst_Num;
-    static constexpr auto async_vmcnt_encoding = 3952 + async_vmcnt % 16 + async_vmcnt / 16 * 16384;
 
     __host__ static constexpr bool BlockHasHotloop(index_t num_loop)
     {
@@ -350,12 +356,7 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
             make_multi_index(-NWaves * NRepeat / NXdlPack, KRepeat / KXdlPack, 0));
 
         // Local prefetch 1, sync the async load
-#if defined(__gfx125__)
-        block_sync_lds_async_load();
-#else
-        __builtin_amdgcn_s_waitcnt(async_vmcnt_encoding);
-        block_sync_lds();
-#endif
+        block_sync_lds_async_load<async_markcnt, async_vmcnt>();
         static_ford<
             Sequence<MRepeat, KRepeat, xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk)>>{}(
             [&](auto mkc) {
@@ -691,12 +692,7 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                         b_scale_thread_vec.template AsType<mfma_scale_input_type_b>(),
                         c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
             });
-#if defined(__gfx125__)
-            block_sync_lds_async_load();
-#else
-            __builtin_amdgcn_s_waitcnt(async_vmcnt_encoding);
-            block_sync_lds();
-#endif
+            block_sync_lds_async_load<async_markcnt, async_vmcnt>();
             static_ford<Sequence<MRepeat,
                                  KRepeat,
                                  xdlops_gemm.K1PerXdlops / (APackedSize * KThreadChunk)>>{}(
