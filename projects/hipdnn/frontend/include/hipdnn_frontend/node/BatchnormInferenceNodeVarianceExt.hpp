@@ -91,8 +91,8 @@ public:
         // Why: All required tensors must have dimensions set by user - they are never inferred.
         // For inference: x, scale, bias, mean, variance are all required user parameters.
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 1, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 1, "Bias tensor"));
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(mean, 2, "Mean tensor"));
         HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(variance, 2, "Variance tensor"));
 
@@ -112,11 +112,9 @@ public:
         auto& xDims = x->get_dim();
         const int64_t channels = xDims[1];
 
-        // Validate scale has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-
-        // Validate bias has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        // Validate that scale and bias tensors have matching shapes
+        HIPDNN_CHECK_ERROR(
+            detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
 
         // Validate mean has correct channel-only shape (required user parameter for inference)
         HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
