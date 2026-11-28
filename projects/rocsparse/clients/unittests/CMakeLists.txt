@@ -39,7 +39,8 @@ endif()
 
 # Unit-test sources (the tests themselves + a minimal gtest main).
 #
-# Subsequent per-area unit-test branches append their host-pure sources here.
+# Per-area host-only tests are added from cmake/unit_tests_<area>.cmake; see the
+# per-area foreach below.
 set(ROCSPARSE_UNIT_TEST_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_enum_traits.cpp

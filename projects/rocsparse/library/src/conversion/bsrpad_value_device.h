@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "rocsparse_bsr_dims.hpp"
 #include "rocsparse_common.hpp"
 
 namespace rocsparse
@@ -68,7 +69,7 @@ namespace rocsparse
                 {
                     if(i >= start_local_index)
                     {
-                        bsr_val[block_index * block_dim * block_dim + i * block_dim + i] = value;
+                        bsr_val[rocsparse::bsr_diag_offset(block_index, i, block_dim)] = value;
                     }
                 }
             }
@@ -104,11 +105,12 @@ namespace rocsparse
         __syncthreads();
 
         //find block
-        for(rocsparse_int index = start + local_id; index < end; index += BLOCK_SIZE)
+        for(int64_t index = static_cast<int64_t>(start) + local_id; index < end;
+            index += BLOCK_SIZE)
         {
             if(bsr_col_ind[index] - bsr_base == mb - 1)
             {
-                block_index = index;
+                block_index = static_cast<rocsparse_int>(index);
             }
         }
 
@@ -123,7 +125,7 @@ namespace rocsparse
                 {
                     if(i >= start_local_index)
                     {
-                        bsr_val[block_index * block_dim * block_dim + i * block_dim + i] = value;
+                        bsr_val[rocsparse::bsr_diag_offset(block_index, i, block_dim)] = value;
                     }
                 }
             }
