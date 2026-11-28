@@ -295,10 +295,146 @@ CK_TILE_HOST_DEVICE constexpr uint16_t float_to_bf16_raw(float f, constant<round
         return float_to_bf16_truc_raw(f);
 }
 
+// Direct double-to-bf16 conversions that avoid double-rounding through an intermediate float.
+// A double has 52 mantissa bits vs bf16's 7, and bf16 shares float's exponent bias (127).
+// Mapping: bf16_biased_exp = double_biased_exp - 896  (1023 - 127 = 896).
+CK_TILE_HOST_DEVICE
+constexpr uint16_t double_to_bf16_rtn_raw(double d)
+{
+    uint64_t bits   = bit_cast<uint64_t>(d);
+    uint64_t sign   = (bits >> 48) & 0x8000ULL;
+    uint64_t d_exp  = (bits >> 52) & 0x7FFULL;
+    uint64_t d_mant = bits & 0x000FFFFFFFFFFFFFULL;
+
+    if(d_exp == 0x7FF) // Inf or NaN
+    {
+        uint16_t mant16 = static_cast<uint16_t>(d_mant >> 45) | (d_mant ? 1u : 0u);
+        return static_cast<uint16_t>(sign | 0x7F80u | mant16);
+    }
+    if(d_exp == 0) // Zero or subnormal double (too small for any bf16)
+        return static_cast<uint16_t>(sign);
+
+    int32_t bf16_exp = static_cast<int32_t>(d_exp) - 896;
+    if(bf16_exp >= 0xFF)
+        return static_cast<uint16_t>(sign | 0x7F80u); // Overflow to infinity
+
+    if(bf16_exp > 0) // Normal bf16 result
+    {
+        // Round double mantissa (52 bits) to bf16 mantissa (7 bits), RTN.
+        // Bits 51:45 -> kept; bit 44 -> guard; bits 43:0 -> sticky.
+        uint64_t mant7  = d_mant >> 45;
+        uint64_t guard  = (d_mant >> 44) & 1ULL;
+        uint64_t sticky = d_mant & ((1ULL << 44) - 1);
+        uint64_t rnd    = guard & (sticky | (mant7 & 1ULL)); // round-to-nearest-even
+        mant7 += rnd;
+        if(mant7 >> 7) // Mantissa overflow: carry into exponent
+        {
+            mant7 = 0;
+            if(++bf16_exp >= 0xFF)
+                return static_cast<uint16_t>(sign | 0x7F80u);
+        }
+        return static_cast<uint16_t>(sign | (static_cast<uint32_t>(bf16_exp) << 7) | mant7);
+    }
+
+    // Subnormal bf16: double unbiased exponent in [-133, -127] (extra_shift 1..7) or
+    // close enough to round up (extra_shift 8).  Beyond that, flush to zero.
+    int32_t extra_shift = 1 - bf16_exp;
+    if(extra_shift > 8)
+        return static_cast<uint16_t>(sign);
+
+    uint64_t significand = (1ULL << 52) | d_mant;
+    uint32_t total_shift = static_cast<uint32_t>(45 + extra_shift);
+    uint64_t mant7       = significand >> total_shift;
+    uint64_t guard       = (significand >> (total_shift - 1)) & 1ULL;
+    uint64_t sticky      = significand & ((1ULL << (total_shift - 1)) - 1);
+    uint64_t rnd         = guard & (sticky | (mant7 & 1ULL));
+    mant7 += rnd;
+    if(mant7 >> 7) // Rounded up into smallest normal bf16
+        return static_cast<uint16_t>(sign | (1u << 7));
+    return static_cast<uint16_t>(sign | mant7);
+}
+
+CK_TILE_HOST_DEVICE
+constexpr uint16_t double_to_bf16_rtn_cnan_raw(double d)
+{
+    uint64_t bits   = bit_cast<uint64_t>(d);
+    uint64_t d_exp  = (bits >> 52) & 0x7FFULL;
+    uint64_t d_mant = bits & 0x000FFFFFFFFFFFFFULL;
+    if(d_exp == 0x7FF && d_mant != 0) // NaN -> canonical quiet NaN
+    {
+        uint64_t sign = (bits >> 48) & 0x8000ULL;
+        return static_cast<uint16_t>(sign | 0x7FFFu);
+    }
+    return double_to_bf16_rtn_raw(d);
+}
+
+CK_TILE_HOST_DEVICE
+constexpr uint16_t double_to_bf16_truc_raw(double d)
+{
+    uint64_t bits   = bit_cast<uint64_t>(d);
+    uint64_t sign   = (bits >> 48) & 0x8000ULL;
+    uint64_t d_exp  = (bits >> 52) & 0x7FFULL;
+    uint64_t d_mant = bits & 0x000FFFFFFFFFFFFFULL;
+
+    if(d_exp == 0x7FF)
+    {
+        uint16_t mant16 = static_cast<uint16_t>(d_mant >> 45) | (d_mant ? 1u : 0u);
+        return static_cast<uint16_t>(sign | 0x7F80u | mant16);
+    }
+    if(d_exp == 0)
+        return static_cast<uint16_t>(sign);
+
+    int32_t bf16_exp = static_cast<int32_t>(d_exp) - 896;
+    if(bf16_exp >= 0xFF)
+        return static_cast<uint16_t>(sign | 0x7F80u);
+    if(bf16_exp <= 0)
+        return static_cast<uint16_t>(sign);
+
+    return static_cast<uint16_t>(sign | (static_cast<uint32_t>(bf16_exp) << 7) | (d_mant >> 45));
+}
+
+CK_TILE_HOST_DEVICE
+constexpr uint16_t double_to_bf16_truc_nan_raw(double d)
+{
+    uint64_t bits   = bit_cast<uint64_t>(d);
+    uint64_t sign   = (bits >> 48) & 0x8000ULL;
+    uint64_t d_exp  = (bits >> 52) & 0x7FFULL;
+    uint64_t d_mant = bits & 0x000FFFFFFFFFFFFFULL;
+
+    if(d_exp == 0x7FF)
+    {
+        uint16_t mant16  = static_cast<uint16_t>(d_mant >> 45);
+        uint64_t lower45 = d_mant & ((1ULL << 45) - 1);
+        mant16 |= (lower45 ? 1u : 0u); // Preserve signaling NaN if lower bits were set
+        return static_cast<uint16_t>(sign | 0x7F80u | mant16);
+    }
+    if(d_exp == 0)
+        return static_cast<uint16_t>(sign);
+
+    int32_t bf16_exp = static_cast<int32_t>(d_exp) - 896;
+    if(bf16_exp >= 0xFF)
+        return static_cast<uint16_t>(sign | 0x7F80u);
+    if(bf16_exp <= 0)
+        return static_cast<uint16_t>(sign);
+
+    return static_cast<uint16_t>(sign | (static_cast<uint32_t>(bf16_exp) << 7) | (d_mant >> 45));
+}
+
 template <bf16_rounding_mode rounding>
 CK_TILE_HOST_DEVICE constexpr uint16_t double_to_bf16_raw(double f, constant<rounding>)
 {
-    return float_to_bf16_raw(static_cast<float>(f), constant<rounding>{});
+    if constexpr(rounding == bf16_rounding_mode::standard)
+        return double_to_bf16_rtn_raw(f);
+    else if constexpr(rounding == bf16_rounding_mode::standard_cnan)
+        return double_to_bf16_rtn_cnan_raw(f);
+    else if constexpr(rounding == bf16_rounding_mode::truncate_with_nan)
+        return double_to_bf16_truc_nan_raw(f);
+    else if constexpr(rounding == bf16_rounding_mode::truncate)
+        return double_to_bf16_truc_raw(f);
+    else
+        // standard_asm and rta_asm use device-side ASM which only accepts float;
+        // fall back to float path (double-rounding acceptable for ASM modes).
+        return float_to_bf16_raw(static_cast<float>(f), constant<rounding>{});
 }
 
 CK_TILE_HOST_DEVICE

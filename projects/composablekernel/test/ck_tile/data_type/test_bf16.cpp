@@ -178,6 +178,21 @@ TEST_F(Bf16ConversionTest, DoubleToBf16)
         bf16_t b = double_to_bf16(d);
         EXPECT_TRUE(std::isinf(static_cast<float>(b)));
     }
+
+    // Regression: double slightly above a bf16 halfway point must not be double-rounded.
+    // 1.0 + 2^-8 + 2^-30 is above the midpoint between bf16 1.0 (0x3F80) and 1+2^-7 (0x3F81).
+    // static_cast<float> loses the 2^-30 tail and lands exactly on the tie, then rounds-to-even
+    // back to 1.0.  Direct double-to-bf16 must round up to 0x3F81.
+    {
+        double d = 1.0 + std::ldexp(1.0, -8) + std::ldexp(1.0, -30);
+        bf16_t b = double_to_bf16(d, constant<bf16_rounding_mode::standard>{});
+        EXPECT_EQ(bf16_to_bits(b), 0x3F81);
+    }
+    {
+        double d = -(1.0 + std::ldexp(1.0, -8) + std::ldexp(1.0, -30));
+        bf16_t b = double_to_bf16(d, constant<bf16_rounding_mode::standard>{});
+        EXPECT_EQ(bf16_to_bits(b), 0xBF81);
+    }
 }
 
 // Test integer to bf16 conversion
