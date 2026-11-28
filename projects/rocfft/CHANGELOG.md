@@ -21,6 +21,11 @@ Documentation for rocFFT is available at
   on a single device.
 * Planar array types are now rejected by `rocfft_plan_create` if a field is set for either input or
   output (previously, only the side with a field set was checked).
+* Improved performance of 1D complex transforms whose batch is stored with a smaller stride than
+  the transform (for example, FFTs along the slowest axis of an array, with distance 1). These now
+  use column kernels, or transpose to and from a contiguous layout, instead of the row kernel.
+  Column kernels were added for length 1024, and for lengths 2048 and 4096 in single precision on
+  devices with 160 KiB of LDS.
 
 ### Resolved issues
 

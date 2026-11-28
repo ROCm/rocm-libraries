@@ -19,7 +19,6 @@
 # THE SOFTWARE.
 
 from kernels.configs.config_arch import lds_config
-from kernels.configs.config_arch import supported_arch
 from types import SimpleNamespace as NS
 
 # Note: Default direct_to_from_reg is True
@@ -92,4 +91,18 @@ sbcc_kernels = [
         'sp': 'true', 'dp': 'true'}),
     NS(length=512, factors=[8, 8, 8],    use_3steps_large_twd={
         'sp': 'true', 'dp': 'false'}),
+    # Size the single-precision tile independently of the double-precision one.
+    NS(length=1024, factors=[8, 8, 4, 4], precision=['sp'],
+        threads_per_transform=64, workgroup_size=256, half_lds=True,
+        bytes_per_element=8, runtime_compile=True),
+    NS(length=1024, factors=[8, 8, 4, 4], precision=['dp'],
+        threads_per_transform=128, workgroup_size=256, half_lds=True,
+        runtime_compile=True),
+    # Larger column tiles need 128 KiB if the runtime disables half LDS.
+    NS(length=2048, factors=[16, 16, 8], precision=['sp'],
+        threads_per_transform=64, workgroup_size=256, half_lds=True,
+        lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
+    NS(length=4096, factors=[16, 16, 16], precision=['sp'],
+        threads_per_transform=128, workgroup_size=256, half_lds=True,
+        lds_size_bytes=lds_config.SIZE_160KiB.value, runtime_compile=True),
 ]
