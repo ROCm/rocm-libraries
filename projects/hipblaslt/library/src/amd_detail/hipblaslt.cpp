@@ -32,13 +32,16 @@
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt_mat_utils.hpp"
+#include "status.h"
 
 #include <hip/hip_runtime_api.h>
 #include <iostream>
+#include <memory>
 #include <rocblaslt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Debug.hpp"
@@ -737,19 +740,13 @@ extern "C" {
         }                                                               \
     }
 
-#ifndef CHECK_HIP_ERROR
-#define CHECK_HIP_ERROR(error)                    \
-    if(error != hipSuccess)                       \
-    {                                             \
-        fprintf(stderr,                           \
-                "Hip error: '%s'(%d) at %s:%d\n", \
-                hipGetErrorString(error),         \
-                error,                            \
-                __FILE__,                         \
-                __LINE__);                        \
-        exit(EXIT_FAILURE);                       \
-    }
-#endif
+// Logs a failed HIP call and converts its error to the status the public function returns.
+static hipblasStatus_t
+    hip_error_to_hipblas_status(const char* caller, const char* call, hipError_t e)
+{
+    log_error(caller, call, hipGetErrorString(e), "hipError", int(e));
+    return RocBlasLtStatusToHIPStatus(get_rocblaslt_status_for_hip_status(e));
+}
 
 hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle)
 try
@@ -762,44 +759,51 @@ try
         rocblaslt::Debug::Instance().markerStop();
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
+    *handle = nullptr;
 
-    int             deviceId;
-    hipError_t      err;
-    hipblasStatus_t retval = HIPBLAS_STATUS_SUCCESS;
     // Two flag regions with different shapes: GSU reduction keeps the large
     // per-problem buffer it has always had, Stream-K gets a small one that can
     // afford a private region per stream. Both are allocated here so that no
     // matmul path allocates device memory, which would break hipGraph capture.
-    void*            d_Synchronizer = nullptr;
-    void*            d_StreamKFlags = nullptr;
+    auto freeDevice = [](void* p) { static_cast<void>(hipFree(p)); };
+    std::unique_ptr<void, decltype(freeDevice)> d_Synchronizer(nullptr, freeDevice);
+    std::unique_ptr<void, decltype(freeDevice)> d_StreamKFlags(nullptr, freeDevice);
     constexpr size_t gsuBytes = _rocblaslt_handle::c_syncGsuTotalElements * sizeof(int);
     constexpr size_t skBytes  = _rocblaslt_handle::c_syncSkTotalElements * sizeof(int);
-    CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, gsuBytes));
-    CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, gsuBytes));
-    if(hipError_t e = hipMalloc(&d_StreamKFlags, skBytes); e != hipSuccess)
-    {
-        static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(e);
-    }
-    if(hipError_t e = hipMemset(d_StreamKFlags, 0, skBytes); e != hipSuccess)
-    {
-        static_cast<void>(hipFree(d_StreamKFlags));
-        static_cast<void>(hipFree(d_Synchronizer));
-        CHECK_HIP_ERROR(e);
-    }
 
-    err = hipGetDevice(&deviceId);
-    if(err == hipSuccess)
-    {
-        retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
-        (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
-        (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
-    }
+    auto fail = [](hipblasStatus_t status) {
+        rocblaslt::Debug::Instance().markerStop();
+        return status;
+    };
+    void* p = nullptr;
+    if(hipError_t e = hipMalloc(&p, gsuBytes); e != hipSuccess)
+        return fail(hip_error_to_hipblas_status(__func__, "hipMalloc(Synchronizer)", e));
+    d_Synchronizer.reset(p);
+    if(hipError_t e = hipMemset(d_Synchronizer.get(), 0, gsuBytes); e != hipSuccess)
+        return fail(hip_error_to_hipblas_status(__func__, "hipMemset(Synchronizer)", e));
+    p = nullptr;
+    if(hipError_t e = hipMalloc(&p, skBytes); e != hipSuccess)
+        return fail(hip_error_to_hipblas_status(__func__, "hipMalloc(StreamKFlags)", e));
+    d_StreamKFlags.reset(p);
+    if(hipError_t e = hipMemset(d_StreamKFlags.get(), 0, skBytes); e != hipSuccess)
+        return fail(hip_error_to_hipblas_status(__func__, "hipMemset(StreamKFlags)", e));
+
+    int deviceId;
+    if(hipError_t e = hipGetDevice(&deviceId); e != hipSuccess)
+        return fail(hip_error_to_hipblas_status(__func__, "hipGetDevice", e));
+
+    hipblasStatus_t retval
+        = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
+    if(retval != HIPBLAS_STATUS_SUCCESS)
+        return fail(retval);
+    (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer.release();
+    (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags.release();
     rocblaslt::Debug::Instance().markerStop();
     return retval;
 }
 catch(...)
 {
+    rocblaslt::Debug::Instance().markerStop();
     return exception_to_hipblas_status();
 }
 
@@ -807,13 +811,24 @@ hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle)
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtDestroy");
-    if(handle != nullptr and (*(rocblaslt_handle)handle).Synchronizer != nullptr)
+    // A buffer that fails to free stays with the handle, which stays valid, so the
+    // caller can call hipblasLtDestroy again.
+    if(handle != nullptr)
     {
-        CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).Synchronizer));
-    }
-    if(handle != nullptr and (*(rocblaslt_handle)handle).StreamKFlags != nullptr)
-    {
-        CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).StreamKFlags));
+        auto h = (rocblaslt_handle)handle;
+        for(auto [buffer, call] : {std::pair{&h->Synchronizer, "hipFree(Synchronizer)"},
+                                   std::pair{&h->StreamKFlags, "hipFree(StreamKFlags)"}})
+        {
+            if(*buffer == nullptr)
+                continue;
+            if(hipError_t e = hipFree(*buffer); e != hipSuccess)
+            {
+                const auto status = hip_error_to_hipblas_status(__func__, call, e);
+                rocblaslt::Debug::Instance().markerStop();
+                return status;
+            }
+            *buffer = nullptr;
+        }
     }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_destroy((const rocblaslt_handle)handle));
@@ -822,6 +837,7 @@ try
 }
 catch(...)
 {
+    rocblaslt::Debug::Instance().markerStop();
     return exception_to_hipblas_status();
 }
 
