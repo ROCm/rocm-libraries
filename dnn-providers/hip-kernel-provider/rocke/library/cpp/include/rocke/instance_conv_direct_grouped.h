@@ -65,7 +65,10 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
+#include "rocke/arch_target.h"
+#include "rocke/helper_rocke.helpers.grid.h" /* ROCKE_NUM_XCDS_MI350X */
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 
@@ -164,6 +167,22 @@ bool rocke_direct_channel_totals_reason(const rocke_direct_conv_problem_t* p,
 bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
                                       char* why,
                                       size_t why_cap);
+
+/* direct_lds_dma_mfma_caps_reason: the one capability gate of the LDS-DMA MFMA
+ * direct kernels (fwd pp / flex, dgrad pp, tiled and gather wgrad); twin of Python's
+ * direct_lds_dma_mfma_caps_reason. Returns true (and writes the reason) when
+ * `target` is not wave64 or `wave_size` != 64 ("<family> is a wave64 MFMA
+ * kernel"), lacks the transposing LDS read while `needs_ds_read_tr`, lacks the
+ * 16-byte LDS DMA, or lacks mfma_f32_16x16x32 for the operand dtype (`bf16`
+ * picks bf16, else f16), in that order. The caller has checked the dtype. */
+bool rocke_direct_lds_dma_mfma_caps_reason(const rocke_arch_target_t* target,
+                                           const char* arch,
+                                           const char* family,
+                                           int wave_size,
+                                           bool needs_ds_read_tr,
+                                           bool bf16,
+                                           char* why,
+                                           size_t why_cap);
 
 /* The problem's dtype, NULL read as "fp16" (see the dtype field). */
 const char* rocke_direct_conv_problem_dtype(const rocke_direct_conv_problem_t* p);
@@ -585,6 +604,21 @@ typedef struct rocke_direct_depthwise_tiled_spec
  * _DW_TILED_UNROLL_MAX_FMAS). */
 #define ROCKE_DCONV_DW_TILED_REG_BUDGET 256
 #define ROCKE_DCONV_DW_TILED_UNROLL_MAX_FMAS 6144
+
+/* Blocks a persistent direct-conv kernel is launched with: one XCD count of
+ * the platform grid helper (ROCKE_NUM_XCDS_MI350X) x 32 workgroups, the
+ * constants the generic kernel decodes its cells against. Twins of Python's
+ * DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}. */
+#define ROCKE_DIRECT_PERSISTENT_NUM_XCD ROCKE_NUM_XCDS_MI350X
+#define ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD 32
+#define ROCKE_DIRECT_PERSISTENT_BLOCKS \
+    (ROCKE_DIRECT_PERSISTENT_NUM_XCD * ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD)
+/* The XCD count the xcd_tiles remap is built for (Python: _XCD_TILES_ARCHES);
+ * 0 when the target has none. */
+static inline int rocke_direct_conv_xcd_tiles_count(const char* arch)
+{
+    return (arch != NULL && strcmp(arch, "gfx950") == 0) ? ROCKE_NUM_XCDS_MI350X : 0;
+}
 /* Largest filter extent the dgrad mode takes (Python: _DW_TILED_DGRAD_MAX_K). */
 #define ROCKE_DCONV_DW_TILED_DGRAD_MAX_K 64
 

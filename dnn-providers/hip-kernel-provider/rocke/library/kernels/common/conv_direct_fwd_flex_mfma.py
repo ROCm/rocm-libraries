@@ -8,13 +8,13 @@ padding, as a GEMM of output channels (MFMA A = weights) by flattened output
 pixels ``X = N * Ho * Wo`` (MFMA B = input), reducing over taps x 64-channel
 chunks:
 
-* **Tile.** A block computes X256 x K``bk`` with 8 waves in two ping-pong
+* **Tile.** A block computes X256 x K``block_k`` with 8 waves in two ping-pong
   groups (group g owns pixel half g); a wave owns 64 pixels x ``16 * kt``
-  channels (``kt`` = 8 for ``bk`` 256, 4 for ``bk`` 128). One *step* is one
+  channels (``kt`` = 8 for ``block_k`` 256, 4 for ``block_k`` 128). One *step* is one
   tap and one 64-channel chunk: per 32-channel half the wave reads its 4 input
   and ``kt`` weight fragments from LDS and runs ``4 * kt`` ``mfma_16x16x32``.
 * **LDS-DMA for both operands.** Two stages of (input X256 x 64 channels,
-  weights ``bk`` x 64 channels), 16-byte ``buffer_load ... lds`` with the
+  weights ``block_k`` x 64 channels), 16-byte ``buffer_load ... lds`` with the
   granule swizzle applied on the global side. im2col is a per-lane pixel base
   (tile constant) plus a scalar tap offset; taps outside the image are
   dropped by an out-of-range offset (zero fill).
@@ -55,6 +55,8 @@ from rocke.core.ir import VectorType
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    direct_lds_dma_mfma_caps_reason,
+    DIRECT_PERSISTENT_BLOCKS,
     I32_MAX,
     DirectConvProblem,
     _buf_store_vN,
@@ -72,7 +74,7 @@ _WAVE = 64
 _CK = 64  # channels per chunk
 _BX = 256  # pixels per block tile
 _XT = 4  # 16-pixel MFMA tiles per wave
-PERSIST = 256  # blocks of the persistent grid (one per gfx950 CU)
+PERSIST = DIRECT_PERSISTENT_BLOCKS  # blocks of the persistent grid (one per gfx950 CU)
 ROT = 97  # per-round rotation of the item walk
 
 
@@ -81,14 +83,14 @@ class FwdFlexMfmaSpec:
     """One configuration of :func:`build_fwd_flex_mfma`."""
 
     problem: DirectConvProblem
-    bk: int = 256  # output channels per block tile (256 or 128)
+    block_k: int = 256  # output channels per block tile (256 or 128)
     split_c: int = 1  # pieces of the channel chunks (fp32 slabs when > 1)
     name: str = "fwd_flex_mfma"
     wave_size: int = 64
 
     @property
     def kt(self) -> int:
-        return 8 if self.bk == 256 else 4
+        return 8 if self.block_k == 256 else 4
 
     @property
     def threads_per_block(self) -> int:
@@ -104,14 +106,14 @@ class FwdFlexMfmaSpec:
             f"p{p.PAD}x{p.PAD_W}",
             f"s{p.stride}",
             f"d{p.dil_h}x{p.dil_w}",
-            f"k{self.bk}",
+            f"bk{self.block_k}",
             f"sc{self.split_c}",
             flags={"bf16": p.dtype == "bf16"},
         )
 
     def items(self) -> int:
         p = self.problem
-        tiles = ceil_div(p.N * p.Ho * p.Wo, _BX) * ceil_div(p.total_k, self.bk)
+        tiles = ceil_div(p.N * p.Ho * p.Wo, _BX) * ceil_div(p.total_k, self.block_k)
         return tiles * self.split_c
 
     def grid(self) -> Tuple[int, int, int]:
@@ -131,20 +133,20 @@ class FwdFlexMfmaSpec:
 def fwd_flex_mfma_reason(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> "str | None":
     p = spec.problem
     target = ArchTarget.from_gfx(arch)
-    if target.wave_size != 64 or spec.wave_size != 64:
-        return "fwd_flex_mfma is a wave64 MFMA kernel"
-    if target.async_lds_max_dwords < 4:
-        return f"fwd_flex_mfma needs the 16-byte LDS DMA (absent on {arch})"
-    stage = (_BX + spec.bk) * _CK * 2
-    if not target.fits_lds(2 * stage):
-        return f"LDS {2 * stage} B > {target.lds_capacity_bytes}"
     if p.dtype not in ("fp16", "bf16"):
         return "fp16/bf16 only"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
+    why = direct_lds_dma_mfma_caps_reason(
+        target,
+        arch,
+        family="fwd_flex_mfma",
+        bf16=p.dtype == "bf16",
+        wave_size=spec.wave_size,
+    )
+    if why is not None:
+        return why
+    stage = (_BX + spec.block_k) * _CK * 2
+    if not target.fits_lds(2 * stage):
+        return f"LDS {2 * stage} B > {target.lds_capacity_bytes}"
     why = problem_dims_reason(p)
     if why is not None:
         return why
@@ -158,8 +160,8 @@ def fwd_flex_mfma_reason(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> "str | 
     why = pad_w_reason(p)
     if why is not None:
         return why
-    if spec.bk not in (128, 256):
-        return "bk must be 128 or 256"
+    if spec.block_k not in (128, 256):
+        return "block_k must be 128 or 256"
     if p.total_c % _CK:
         return f"C {p.total_c} must be a multiple of {_CK}"
     if p.total_k % 8:
@@ -193,7 +195,7 @@ def build_fwd_flex_mfma(spec: FwdFlexMfmaSpec, *, arch: str = "gfx950") -> Kerne
     p = spec.problem
     dtype = p.dtype
     io_type = _io_type(dtype)
-    BK, KT, SP = spec.bk, spec.kt, spec.split_c
+    BK, KT, SP = spec.block_k, spec.kt, spec.split_c
     WKN = BK // (KT * 16)  # waves of a group along K
     WXN = 4 // WKN  # ... and along X
     assert WKN * WXN == 4 and WXN * 64 * 2 == _BX

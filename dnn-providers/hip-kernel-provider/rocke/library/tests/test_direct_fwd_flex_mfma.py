@@ -7,7 +7,7 @@ CPU: the validator, the AOT grid and the cache offer, the C++/Python engine
 agreement and the run-side re-validation of the split_c knob. GPU (gfx950):
 the output against a torch reference for each layer type in FWD_FLEX_LAYERS
 at small sizes; split_c 2 and 4 (with the split-reduce fold); K tails where
-K % bk != 0 (K=136 with bk=128 and K=264 with bk=256); odd N*Ho*Wo pixel
+K % block_k != 0 (K=136 with block_k=128 and K=264 with block_k=256); odd N*Ho*Wo pixel
 tails; and C == 64 * split_c exactly.
 
 Run:
@@ -103,8 +103,8 @@ def test_arch_gate_is_capability_based():
 def test_reasons():
     ok = FwdFlexMfmaSpec(problem=_problem())
     assert fwd_flex_mfma_reason(ok) is None
-    for bk in (128, 256):
-        assert fwd_flex_mfma_reason(replace(ok, bk=bk)) is None
+    for block_k in (128, 256):
+        assert fwd_flex_mfma_reason(replace(ok, block_k=block_k)) is None
     for sc in (1, 2, 3):
         # C=192, C/64=3: split_c in [1, 3] must pass
         assert fwd_flex_mfma_reason(replace(ok, split_c=sc)) is None, sc
@@ -138,8 +138,8 @@ def test_reasons():
     assert why(cpg=0) == "cpg must be >= 1 (got 0)"
     assert why(kpg=0) == "kpg must be >= 1 (got 0)"
     assert why(N=0) == "N must be >= 1 (got 0)"
-    # bk must be 128 or 256
-    assert "bk must be 128 or 256" in fwd_flex_mfma_reason(replace(ok, bk=64))
+    # block_k must be 128 or 256
+    assert "block_k must be 128 or 256" in fwd_flex_mfma_reason(replace(ok, block_k=64))
     # pad_w: flex supports per-axis padding; only pad_w < -1 is refused
     assert (
         fwd_flex_mfma_reason(replace(ok, problem=replace(ok.problem, pad_w=0))) is None
@@ -193,8 +193,8 @@ def test_reasons():
         "workspace exceeds 2147483647 B, the i32 byte-count kernarg"
     )
     # build raises when spec is invalid
-    with pytest.raises(ValueError, match="bk must be 128 or 256"):
-        build_fwd_flex_mfma(replace(ok, bk=64))
+    with pytest.raises(ValueError, match="block_k must be 128 or 256"):
+        build_fwd_flex_mfma(replace(ok, block_k=64))
 
 
 def test_multi_round_cases_overflow_the_persistent_grid():
@@ -202,7 +202,7 @@ def test_multi_round_cases_overflow_the_persistent_grid():
     leave a partial last round."""
     from kernels.common.conv_direct_fwd_flex_mfma import PERSIST
 
-    for kw, bk, items in (
+    for kw, block_k, items in (
         (
             dict(N=1, H=257, W=257, C=64, K=64, PAD=2, stride=1, dil_h=2, dil_w=2),
             128,
@@ -210,7 +210,7 @@ def test_multi_round_cases_overflow_the_persistent_grid():
         ),
         (dict(N=2, H=91, W=91, C=128, K=512, PAD=1, stride=1), 128, 260),
     ):
-        spec = FwdFlexMfmaSpec(problem=_problem(**kw), bk=bk)
+        spec = FwdFlexMfmaSpec(problem=_problem(**kw), block_k=block_k)
         assert fwd_flex_mfma_reason(spec) is None
         assert spec.items() == items and spec.grid() == (PERSIST, 1, 1)
         assert items % PERSIST
@@ -221,7 +221,7 @@ def test_grid_and_items():
     # ceil(798 / 256) = 4 pixel tiles; ceil(136 / 256) = 1 K tile; split_c=1
     # items = 4 * 1 * 1 = 4; grid = (min(4, 256), 1, 1) = (4, 1, 1)
     p = _problem()
-    spec = FwdFlexMfmaSpec(problem=p, bk=256, split_c=1)
+    spec = FwdFlexMfmaSpec(problem=p, block_k=256, split_c=1)
     items = spec.items()
     assert items == 4, items
     assert spec.grid() == (4, 1, 1)
@@ -237,12 +237,12 @@ def test_grid_and_items():
 def test_kernel_name_and_attrs():
     spec = FwdFlexMfmaSpec(problem=_problem(), name="rocke_fwd_flex_mfma")
     kernel = build_fwd_flex_mfma(spec)
-    # kernel_name_join(name, f3x3, p1x1, s2, d1x1, k256, sc1) + bf16 suffix
-    assert kernel.name == "rocke_fwd_flex_mfma_f3x3_p1x1_s2_d1x1_k256_sc1_bf16"
+    # kernel_name_join(name, f3x3, p1x1, s2, d1x1, bk256, sc1) + bf16 suffix
+    assert kernel.name == "rocke_fwd_flex_mfma_f3x3_p1x1_s2_d1x1_bk256_sc1_bf16"
     assert kernel.attrs["lds_alias_scopes"] is True
     assert kernel.attrs["max_workgroup_size"] == 8 * 64
 
-    spec2 = FwdFlexMfmaSpec(problem=_problem(dtype="fp16"), bk=128)
+    spec2 = FwdFlexMfmaSpec(problem=_problem(dtype="fp16"), block_k=128)
     name2 = build_fwd_flex_mfma(spec2).name
     # No bf16 suffix for fp16
     assert "fp16" not in name2 and "bf16" not in name2
@@ -275,7 +275,7 @@ def test_aot_grid():
         assert not list(_knob_grid(_VARIANT, "gfx942", "bf16", caps))
         assert not list(_knob_grid(_VARIANT, "gfx1250", "bf16", caps))
 
-    # All 6 knobs (bk, split_c) are valid for every caps entry on gfx950
+    # All 6 knobs (block_k, split_c) are valid for every caps entry on gfx950
     built = set()
     for caps in caps_list:
         for dtype in ("bf16", "fp16"):
@@ -285,12 +285,18 @@ def test_aot_grid():
                 ok, why = validate_direct_spec(_VARIANT, spec, "gfx950")
                 assert ok, (caps, knobs, why)
                 built.add(
-                    (caps.KH, caps.kw or caps.KH, knobs["bk"], knobs["split_c"], dtype)
+                    (
+                        caps.KH,
+                        caps.kw or caps.KH,
+                        knobs["block_k"],
+                        knobs["split_c"],
+                        dtype,
+                    )
                 )
 
-    # Every (bk, split_c) combination from FWD_FLEX_KNOBS must appear
-    knob_pairs = {(bk, sc) for bk, sc in FWD_FLEX_KNOBS}
-    built_pairs = {(bk, sc) for _, _, bk, sc, _ in built}
+    # Every (block_k, split_c) combination from FWD_FLEX_KNOBS must appear
+    knob_pairs = {(block_k, sc) for block_k, sc in FWD_FLEX_KNOBS}
+    built_pairs = {(block_k, sc) for _, _, block_k, sc, _ in built}
     assert built_pairs == knob_pairs, (built_pairs, knob_pairs)
 
     # Each split_c > 1 kernel brings its split-C fold job into the AOT cell.
@@ -316,18 +322,20 @@ def test_variant_wiring():
     )
 
     p = _problem(H=32, W=48, C=256)
-    spec = make_direct_spec(_VARIANT, p, {"bk": 256, "split_c": 1})
+    spec = make_direct_spec(_VARIANT, p, {"block_k": 256, "split_c": 1})
     assert spec.problem == p and spec.name == "rocke_fwd_flex_mfma"
-    got, why = direct_spec_for_problem(_VARIANT, p, {"bk": 128, "split_c": 1}, "gfx950")
+    got, why = direct_spec_for_problem(
+        _VARIANT, p, {"block_k": 128, "split_c": 1}, "gfx950"
+    )
     assert got is not None, why
     # Groups != 1 is refused
     got, why = direct_spec_for_problem(
-        _VARIANT, replace(p, groups=2), {"bk": 256, "split_c": 1}, "gfx950"
+        _VARIANT, replace(p, groups=2), {"block_k": 256, "split_c": 1}, "gfx950"
     )
     assert got is None and "groups" in why, why
     # zero channel count is refused, not divided by
     got, why = direct_spec_for_problem(
-        _VARIANT, replace(p, kpg=0), {"bk": 256, "split_c": 1}, "gfx950"
+        _VARIANT, replace(p, kpg=0), {"block_k": 256, "split_c": 1}, "gfx950"
     )
     assert got is None and why == "kpg must be >= 1 (got 0)"
 
@@ -341,14 +349,14 @@ def test_run_side_revalidation_refuses_split_c_too_large():
     # Problem with C=256: split_c=4 is at the limit (C/64=4).
     p_ok = _problem(C=256)
     got, why = direct_spec_for_problem(
-        _VARIANT, p_ok, {"bk": 256, "split_c": 4}, "gfx950"
+        _VARIANT, p_ok, {"block_k": 256, "split_c": 4}, "gfx950"
     )
     assert got is not None, f"expected accepted: {why}"
 
     # Same knobs but C=128: C/64=2, split_c=4 > 2 -> refused.
     p_bad = _problem(C=128)
     got, why = direct_spec_for_problem(
-        _VARIANT, p_bad, {"bk": 256, "split_c": 4}, "gfx950"
+        _VARIANT, p_bad, {"block_k": 256, "split_c": 4}, "gfx950"
     )
     assert got is None, "expected refused for C=128 with split_c=4"
     assert "split_c" in why, f"unexpected refusal reason: {why!r}"
@@ -363,7 +371,7 @@ def test_engines_agree_on_specs():
     specs = []
     for dtype in ("bf16", "fp16"):
         for kh, kw, pad, pw, st, dh, dw in FWD_FLEX_LAYERS[:4]:
-            for bk, sc in ((256, 1), (256, 2), (128, 4)):
+            for block_k, sc in ((256, 1), (256, 2), (128, 4)):
                 p = _problem(
                     N=2,
                     H=29,
@@ -379,7 +387,7 @@ def test_engines_agree_on_specs():
                     dil_w=dw,
                     dtype=dtype,
                 )
-                specs.append(FwdFlexMfmaSpec(problem=p, bk=bk, split_c=sc))
+                specs.append(FwdFlexMfmaSpec(problem=p, block_k=block_k, split_c=sc))
     base = _problem()
     for pkw, skw in (
         (dict(groups=2), {}),
@@ -392,7 +400,7 @@ def test_engines_agree_on_specs():
         (dict(kpg=0), {}),
         (dict(N=0), {}),
         (dict(H=1024, W=2048, cpg=768, kpg=768), {}),
-        ({}, dict(bk=64)),
+        ({}, dict(block_k=64)),
         ({}, dict(split_c=4)),  # C=192, C/64=3, split_c=4 > 3
         ({}, dict(wave_size=32)),
     ):
@@ -437,7 +445,7 @@ def test_binding_rejects_bad_input():
         lambda: eng.conv_direct_fwd_flex_mfma_describe(sd, "gfx950"),
         lambda: eng.conv_direct_fwd_flex_mfma_lower_llvm(sd, arch="gfx950"),
     ):
-        with pytest.raises(ValueError, match="dtype must be a string, not None"):
+        with pytest.raises(ValueError, match="dtype must be .* not None"):
             fn()
     spec = FwdFlexMfmaSpec(problem=replace(_problem(), dtype=None))
     assert fwd_flex_mfma_reason(spec) == "fp16/bf16 only"
@@ -448,7 +456,7 @@ def test_backend_lowers_through_both_engines():
     pytest.importorskip("rocke_library_engine")
     from kernels.conv.engine_bridge import lower_conv_direct_fwd_flex_mfma
 
-    spec = FwdFlexMfmaSpec(problem=_problem(), bk=128, split_c=1)
+    spec = FwdFlexMfmaSpec(problem=_problem(), block_k=128, split_c=1)
     py = lower_conv_direct_fwd_flex_mfma(spec, arch="gfx950", backend="python")
     cpp = lower_conv_direct_fwd_flex_mfma(spec, arch="gfx950", backend="cpp")
     assert py.backend == "python" and cpp.backend == "cpp"
@@ -560,9 +568,9 @@ def _launch_split_reduce(split_c, dtype, p, ws, y):
 @_GPU
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
 @pytest.mark.parametrize(
-    "kh,kw,pad,pad_w,stride,dil_h,dil_w,bk,split_c,N,H,W,C,K",
+    "kh,kw,pad,pad_w,stride,dil_h,dil_w,block_k,split_c,N,H,W,C,K",
     [
-        # 3x3 s2 at both bk, K ending inside a bk block (K % bk != 0)
+        # 3x3 s2 at both block_k, K ending inside a block_k block (K % block_k != 0)
         (3, 3, 1, 1, 2, 1, 1, 256, 1, 2, 19, 21, 192, 136),
         (3, 3, 1, 1, 2, 1, 1, 128, 1, 2, 19, 21, 192, 136),
         (3, 3, 1, 1, 2, 1, 1, 256, 1, 2, 19, 21, 192, 264),
@@ -589,7 +597,7 @@ def _launch_split_reduce(split_c, dtype, p, ws, y):
     ],
 )
 def test_forward_matches_torch(
-    dtype, kh, kw, pad, pad_w, stride, dil_h, dil_w, bk, split_c, N, H, W, C, K
+    dtype, kh, kw, pad, pad_w, stride, dil_h, dil_w, block_k, split_c, N, H, W, C, K
 ):
     if _gpu_arch() != "gfx950":
         pytest.skip("needs a gfx950 GPU")
@@ -610,7 +618,7 @@ def test_forward_matches_torch(
         dil_w=dil_w,
         dtype=dtype,
     )
-    spec = FwdFlexMfmaSpec(problem=p, bk=bk, split_c=split_c)
+    spec = FwdFlexMfmaSpec(problem=p, block_k=block_k, split_c=split_c)
     assert fwd_flex_mfma_reason(spec) is None
     td = torch.bfloat16 if dtype == "bf16" else torch.float16
     torch.manual_seed(0)

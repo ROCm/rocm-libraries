@@ -70,7 +70,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.arch import MmaOp
 from rocke.core.ir import (
@@ -91,7 +91,7 @@ from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
-from rocke.helpers.grid import chiplet_transform_chunked_runtime
+from rocke.helpers.grid import NUM_XCDS_MI350X, chiplet_transform_chunked_runtime
 from rocke.helpers.io import concat_tree, smem_load_fragment
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -874,6 +874,39 @@ def problem_dims_reason(p: "DirectConvProblem") -> Optional[str]:
         value = getattr(p, name)
         if value < 1:
             return f"{name} must be >= 1 (got {value})"
+    return None
+
+
+def direct_lds_dma_mfma_caps_reason(
+    target: Any,
+    arch: str,
+    *,
+    family: str,
+    bf16: bool,
+    wave_size: int = 64,
+    needs_ds_read_tr: bool = False,
+) -> Optional[str]:
+    """Why an arch lacks what the LDS-DMA MFMA direct kernels need, or ``None``.
+
+    One gate for every kernel that stages through the 16-byte LDS DMA and runs
+    ``mfma_f32_16x16x32`` (fwd pp / flex, dgrad pp, tiled and gather wgrad). Checked in
+    this order: wave64 target and kernel, the transposing LDS read when
+    ``needs_ds_read_tr``, the 16-byte LDS DMA, then the 16x16x32 MFMA of the
+    operand dtype. ``family`` names the kernel in the reasons. The caller has
+    already checked the dtype is fp16 or bf16. C twin:
+    ``rocke_direct_lds_dma_mfma_caps_reason``.
+    """
+    if target.wave_size != 64 or wave_size != 64:
+        return f"{family} is a wave64 MFMA kernel"
+    if needs_ds_read_tr and not target.memory.has_ds_read_tr:
+        return f"{family} needs ds_read_b64_tr_b16 (absent on {arch})"
+    if target.async_lds_max_dwords < 4:
+        return f"{family} needs the 16-byte LDS DMA (absent on {arch})"
+    ab = "bf16" if bf16 else "f16"
+    if not target.mma.has_shape(
+        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+    ):
+        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     return None
 
 
@@ -4073,7 +4106,7 @@ def direct_conv_lds_bytes(spec: DirectConvSpec) -> int:
 #: XCD count the ``xcd_tiles`` remap is built for, per target. The remap
 #: groups one image row band per XCD; it is only built where the count is
 #: known (gfx950).
-_XCD_TILES_ARCHES = {"gfx950": 8}
+_XCD_TILES_ARCHES = {"gfx950": NUM_XCDS_MI350X}
 #: Fewest image row bands (``N * ceil(H / block_h)``) an ``xcd_tiles`` launch
 #: needs: with fewer, no full block of row bands exists and the remap is the
 #: identity.
@@ -4289,12 +4322,11 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     PERSISTENT = spec.persistent_grid
 
     # ---- Persistent grid: decode XCD and workgroup positions ----
-    # 256 = 8 XCDs × 32 blocks per XCD.
+    # DIRECT_PERSISTENT_BLOCKS = 8 XCDs x 32 blocks per XCD.
     # Each block processes multiple cells in a runtime loop, keeping weights
     # in registers across all cells (weights are the SAME for groups=1).
-    NUM_XCD = 8
-    BLOCKS_PER_XCD = 32
-    TOTAL_PERSISTENT = NUM_XCD * BLOCKS_PER_XCD  # = 256
+    NUM_XCD = DIRECT_PERSISTENT_NUM_XCD
+    BLOCKS_PER_XCD = DIRECT_PERSISTENT_BLOCKS_PER_XCD
 
     if PERSISTENT:
         # Cell counts follow the runtime shape; only the tile geometry
@@ -14540,9 +14572,12 @@ def build_direct_dgrad(
 # Launch geometry
 # ---------------------------------------------------------------------------
 
-# Blocks a persistent DirectConvSpec kernel is launched with: 8 XCDs x 32
-# workgroups, the same constant the kernel decodes its cells against.
-DIRECT_PERSISTENT_BLOCKS = 256
+# Blocks a persistent DirectConvSpec kernel is launched with: the platform grid
+# helper's XCD count (NUM_XCDS_MI350X) x 32 workgroups, the same constants the kernel decodes its cells against. C twins:
+# ROCKE_DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}.
+DIRECT_PERSISTENT_NUM_XCD = NUM_XCDS_MI350X
+DIRECT_PERSISTENT_BLOCKS_PER_XCD = 32
+DIRECT_PERSISTENT_BLOCKS = DIRECT_PERSISTENT_NUM_XCD * DIRECT_PERSISTENT_BLOCKS_PER_XCD
 
 
 def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:

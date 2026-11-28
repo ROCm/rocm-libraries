@@ -46,9 +46,6 @@
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
-/* 256 = 8 XCDs x 32 blocks per XCD: the persistent grid's block count. */
-#define DCONV_GEN_NUM_XCD 8
-#define DCONV_GEN_BLOCKS_PER_XCD 32
 /* Bound on the DRAM-load passes per row (ceil(NUM_CHUNKS / THREADS)). */
 #define DCONV_GEN_MAX_PASSES 256
 
@@ -462,13 +459,14 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
         n_cells_v = rocke_b_mul(b, params->p_N, nhqg_v);
         rocke_value_t* cells_per_xcd_v;
         {
-            rocke_value_t* c_r = rocke_b_const_i32(b, DCONV_GEN_NUM_XCD - 1);
+            rocke_value_t* c_r = rocke_b_const_i32(b, ROCKE_DIRECT_PERSISTENT_NUM_XCD - 1);
             rocke_value_t* s = rocke_b_add(b, n_cells_v, c_r);
-            rocke_value_t* c_x = rocke_b_const_i32(b, DCONV_GEN_NUM_XCD);
+            rocke_value_t* c_x = rocke_b_const_i32(b, ROCKE_DIRECT_PERSISTENT_NUM_XCD);
             cells_per_xcd_v = rocke_b_div(b, s, c_x);
         }
-        rocke_value_t* xcd_id = rocke_b_mod(b, bx, rocke_b_const_i32(b, DCONV_GEN_NUM_XCD));
-        wg_in_xcd = rocke_b_div(b, bx, rocke_b_const_i32(b, DCONV_GEN_NUM_XCD));
+        rocke_value_t* xcd_id
+            = rocke_b_mod(b, bx, rocke_b_const_i32(b, ROCKE_DIRECT_PERSISTENT_NUM_XCD));
+        wg_in_xcd = rocke_b_div(b, bx, rocke_b_const_i32(b, ROCKE_DIRECT_PERSISTENT_NUM_XCD));
         xcd_start = rocke_b_mul(b, xcd_id, cells_per_xcd_v);
 
         n = rocke_b_const_i32(b, 0);
@@ -513,7 +511,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
             }
             /* _XCD_TILES_ARCHES[arch]: is_valid_spec admits gfx950 only. */
             xc_lin = rocke_chiplet_transform_chunked_runtime(
-                b, xc_lin, num_wgs, DCONV_GEN_NUM_XCD, xc_gxy);
+                b, xc_lin, num_wgs, rocke_direct_conv_xcd_tiles_count(arch), xc_gxy);
             if(xc_lin == NULL)
                 return NULL;
             bx = rocke_b_mod(b, xc_lin, xc_gx);
@@ -704,7 +702,7 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
         rocke_b_region_enter(b, cell_loop.body);
         rocke_value_t* pg_round_iv = cell_loop.iv;
         {
-            rocke_value_t* c_bpx = rocke_b_const_i32(b, DCONV_GEN_BLOCKS_PER_XCD);
+            rocke_value_t* c_bpx = rocke_b_const_i32(b, ROCKE_DIRECT_PERSISTENT_BLOCKS_PER_XCD);
             rocke_value_t* m = rocke_b_mul(b, pg_round_iv, c_bpx);
             rocke_value_t* inner = rocke_b_add(b, wg_in_xcd, m);
             cell_idx = rocke_b_add(b, xcd_start, inner);

@@ -38,7 +38,8 @@ Modules:
                      writer / CLI (`write_golden_shards`, `golden_main`).
   - ``backend``    : python/cpp/both lowering selection
                      (`lower_universal_gemm`, `lower_family`, `import_engine`,
-                     `name_of`, `GemmLowerResult`, `Backend*` errors).
+                     `lower_kernel_python`, `lower_kernel_python_ll_ir`, `name_of`, `GemmLowerResult`,
+                     `Backend*` errors).
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
                      that mirrors the SSA IR one-to-one (compiles via
                      hipcc; useful for IR inspection and ISA diffs).
@@ -100,6 +101,8 @@ from .backend import (
     GemmLowerResult,
     import_engine,
     lower_family,
+    lower_kernel_python,
+    lower_kernel_python_ll_ir,
     lower_universal_gemm,
     name_of,
     resolve_backend,
@@ -170,6 +173,8 @@ __all__ = [
     "GemmLowerResult",
     "import_engine",
     "lower_family",
+    "lower_kernel_python",
+    "lower_kernel_python_ll_ir",
     "lower_universal_gemm",
     "name_of",
     "resolve_backend",

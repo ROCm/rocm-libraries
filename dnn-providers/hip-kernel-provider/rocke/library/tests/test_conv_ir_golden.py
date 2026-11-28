@@ -3662,7 +3662,7 @@ def cases():
                 dtype=dtype,
             )
             return build_fwd_flex_mfma(
-                FwdFlexMfmaSpec(problem=p, bk=bk, split_c=split_c), arch="gfx950"
+                FwdFlexMfmaSpec(problem=p, block_k=bk, split_c=split_c), arch="gfx950"
             )
 
         return _build
