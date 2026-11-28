@@ -1288,7 +1288,6 @@ def get_bwd_blobs(
                 cond &= bias in ["no", "bias"]
                 cond &= dropout in ["no", "dropout_wg32", "dropout_wg16"]
                 cond &= dpad == dvpad
-                cond &= deterministic == "f"
                 if not cond:
                     continue
             # CK Tile Python API
