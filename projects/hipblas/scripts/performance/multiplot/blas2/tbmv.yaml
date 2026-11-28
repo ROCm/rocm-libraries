@@ -24,7 +24,5 @@ Tests:
   diag: N
   incx: 1
   K: 512
-  kl: 512
-  ku: 512
   matrix_size: *sizes
 ...

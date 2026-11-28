@@ -24,7 +24,7 @@ Tests:
   beta: 1
   incx: 1
   incy: 1
-  kl: 512
-  ku: 512
+  KL: 512
+  KU: 512
   matrix_size: *sizes
 ...

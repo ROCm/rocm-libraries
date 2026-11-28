@@ -18,20 +18,12 @@
 --- for a single architecture with commands like                                                            ---
 ---------------------------------------------------------------------------------------------------------------
 
-     Note that the memory bandwidth in the parameter GBps needs to be defined for the architecture for which
-     you are running in the file benchmark.py. It is defined for the architectures below:
+     The memory bandwidth in GB/s comes from --gbps or from GBPS_BY_ARCH in benchmark.py (gfx906, gfx908,
+     gfx90a, gfx942, gfx950). Pass --gbps for any other part. A gfx name can cover several products with
+     different bandwidths, so prefer --gbps with the value for the exact product.
 
-    if machine_spec_dict['arch'] == 'gfx906':
-        GBps = 1000
-    elif machine_spec_dict['arch'] == 'gfx908':
-        GBps = 1100
-    elif machine_spec_dict['arch'] == 'gfx90a':
-        GBps = 1600
-    else:
-        print("do not know GBps memory bandwidth for ", machine_spec_dict['arch'])
-        print("add GBps to", sys.argv[0])
-        print("quitting ", sys.argv[0])
-        quit(
+     Functions without a theoretical maximum in machine_spec.yaml (for example the banded BLAS2 functions,
+     whose arithmetic intensity depends on the band width) are skipped with a message.
 
 # to run benchmarks, no need to run it a second time if you have run it above
 ./benchmark_plot.sh --benchmark true  --plot false --level1 true --level2 false --level3 false --tag1 my_arch
@@ -53,3 +45,11 @@
 # to plot performance of data in blas1/my_arch1/*.csv files relative to blas1/my_arch2/*.csv files and output
 # plots in blas1/my_arch1_my_arch2/plots_perf_vs_perf/*.png
 ./benchmark_plot.sh --benchmark false --plot true  --level1 true --level2 false --level3 false --tag1 my_arch1 --tag2 my_arch2 --perf_vs_perf true
+
+
+-------------
+--- tests ---
+-------------
+
+# host-only tests of benchmark.py and plot.py (no GPU needed)
+python3 -m pytest tests
