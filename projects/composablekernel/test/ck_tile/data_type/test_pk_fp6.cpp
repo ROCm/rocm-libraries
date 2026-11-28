@@ -232,6 +232,25 @@ TEST(PackedBf6, ConvertBasic)
     EXPECT_EQ(pk_bf6_t(-0.0f).get_element(0), 0b100000);
     EXPECT_EQ(pk_bf6_t(1.0f).get_element(0), 0b001100);
     EXPECT_EQ(pk_bf6_t(-1.0f).get_element(0), 0b101100);
+
+    // Saturation: large negative values must saturate to -28 (0b111111), not +28 (0b011111).
+    // BF6 max magnitude = 28; actual_max boundary ~= 29.
+    EXPECT_EQ(ck_tile::convert_to_type<pk_bf6_t>(-31.0f), 0b111111);
+    EXPECT_EQ(ck_tile::convert_to_type<pk_bf6_t>(-100.0f), 0b111111);
+    EXPECT_EQ(ck_tile::convert_to_type<pk_bf6_t>(-1e6f), 0b111111);
+    EXPECT_EQ(ck_tile::convert_to_type<pk_bf6_t>(31.0f), 0b011111);
+    EXPECT_EQ(ck_tile::convert_to_type<pk_bf6_t>(100.0f), 0b011111);
+
+    EXPECT_EQ(ck_tile::type_convert<pk_bf6_t>(-31.0f).get_element(0), 0b111111);
+    EXPECT_EQ(ck_tile::type_convert<pk_bf6_t>(-100.0f).get_element(0), 0b111111);
+    EXPECT_EQ(ck_tile::type_convert<pk_bf6_t>(-1e6f).get_element(0), 0b111111);
+    EXPECT_EQ(ck_tile::type_convert<pk_bf6_t>(100.0f).get_element(0), 0b011111);
+
+    // Saturation with scale: float_to_pk_bf6(-64.f, 2.f) -> value/scale = -32 -> saturate to -28.
+    EXPECT_EQ(ck_tile::float_to_pk_bf6(-64.0f, 2.0f).get_element(0), 0b111111);
+    EXPECT_EQ(ck_tile::pk_bf6_to_float(ck_tile::float_to_pk_bf6(-64.0f, 2.0f), 1.0f), -28.0f);
+    EXPECT_EQ(ck_tile::pk_bf6_to_float(ck_tile::float_to_pk_bf6(-100.0f, 1.0f), 1.0f), -28.0f);
+    EXPECT_EQ(ck_tile::pk_bf6_to_float(ck_tile::float_to_pk_bf6(100.0f, 1.0f), 1.0f), 28.0f);
 }
 
 TEST(PackedBf6, ConvertHost)
