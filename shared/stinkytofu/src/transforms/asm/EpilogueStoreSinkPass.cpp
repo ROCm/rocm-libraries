@@ -40,6 +40,11 @@ static bool isCrossableWait(const StinkyInstruction& store, const StinkyInstruct
     return false;
 }
 
+// The whole bank word, InsertVgprMsbPass's default rule. Under
+// VgprMsbUnusedSlotsDontCare the pass compares only the slots an instruction
+// uses, so the guard can stop a store where no setter is emitted, and let one
+// cross a setter placed between two instructions whose whole words agree.
+// Following that policy here moves epilogue stores, which wants a GPU A/B.
 static int requiredMsbOf(const StinkyInstruction& inst) {
     auto [setVal, hasVgpr] = computeRequiredMsb(&inst);
     return hasVgpr ? setVal : -1;

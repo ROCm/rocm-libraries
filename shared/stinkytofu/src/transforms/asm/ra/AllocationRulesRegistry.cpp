@@ -66,6 +66,14 @@ bool AllocationRulesRegistry::hasArch(const std::array<int, 3>& arch) {
     return factories.find(archKey(arch)) != factories.end();
 }
 
+std::optional<AllocationRulesRegistry::Factory> AllocationRulesRegistry::registeredFactory(
+    const std::array<int, 3>& arch) {
+    const auto& factories = registry().factories;
+    const auto it = factories.find(archKey(arch));
+    if (it == factories.end()) return std::nullopt;
+    return it->second;
+}
+
 void AllocationRulesRegistry::clearArch(const std::array<int, 3>& arch) {
     registry().factories.erase(archKey(arch));
 }
@@ -76,6 +84,24 @@ std::vector<std::string> AllocationRulesRegistry::archKeys() {
     for (const auto& kv : registry().factories) keys.push_back(kv.first);
     std::sort(keys.begin(), keys.end());
     return keys;
+}
+
+std::vector<std::string> AllocationRulesRegistry::matrixRuleNames() {
+    registerAll();
+    std::vector<std::string> names;
+    for (const auto& kv : registry().factories) {
+        if (!kv.second) continue;
+        // Capabilities gate statuses, not rows, so the defaults name every rule.
+        // Named: all() is a view into the table, and a temporary table would be
+        // freed before the loop reads it.
+        const AllocationRules rules = kv.second(AsmCapsConfig{});
+        for (const AllocationRule& rule : rules.all()) {
+            if (rule.role != MatrixRole::None) names.emplace_back(rule.name);
+        }
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return names;
 }
 
 // Anchor declarations -- one per per-arch rules TU. Adding an architecture's

@@ -53,6 +53,10 @@ struct Block {
     SSAValueID leader = kInvalidSSAValueID;
     /// Base the original registers imply, tried before any first-fit candidate.
     std::optional<uint32_t> hintBase;
+    /// The VGPR bank pickBase searches before the rest of the file: the hint's
+    /// bank under quadrant=prefer. A preference, so a block with no room there
+    /// still goes wherever it fits.
+    std::optional<uint32_t> plannedBank;
     /// Must land on hintBase rather than prefer it. Null when free to move;
     /// otherwise the reason, for the diagnostic if that register is unusable.
     const char* pinReason = nullptr;

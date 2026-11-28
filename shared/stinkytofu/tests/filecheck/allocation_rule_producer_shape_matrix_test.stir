@@ -1,0 +1,34 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact,classes=v,apply,noRule=ProducerPinMatrix,rules=ProducerShapeMatrix --print-output
+#
+# gfx1250's ProducerShapeMatrix rule, end to end.
+#
+# The producer accumulates in place on v[100:107] and loads A into v[300:307]
+# twice, once per WMMA. Lifting gives every WMMA destination and every load its
+# own value, so with nothing holding them compaction places each on its own: the
+# second WMMA writes v[0:7] while it still reads its accumulator from v[8:15].
+#
+# The rule ties every value the producer put on one operand tuple, so the chain
+# stays on one tuple and both rounds of A on another. Where is still
+# compaction's choice, which is the point of the rule over ProducerPinMatrix:
+# v[8:15] and v[0:7], not v[100:107] and v[300:307].
+#
+# CHECK-LABEL: @allocation_rule_producer_shape_matrix
+# CHECK: v[0:3] = "st.ds_load_b128"
+# CHECK-NEXT: v[4:7] = "st.ds_load_b128"
+# CHECK-NEXT: v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[16:23], v[8:15])
+# CHECK-NEXT: v[0:3] = "st.ds_load_b128"
+# CHECK-NEXT: v[4:7] = "st.ds_load_b128"
+# CHECK-NEXT: v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[16:23], v[8:15])
+# CHECK-NEXT: "st.v_add_f32"(v8, v9)
+
+st.func @allocation_rule_producer_shape_matrix() {
+^entry:
+  v[300:303] = "st.ds_load_b128"(v50) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v[304:307] = "st.ds_load_b128"(v50) { mod.ds = { na = 1, offset = 16, gds = false } }
+  v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[300:307], v[320:327], v[100:107])
+  v[300:303] = "st.ds_load_b128"(v51) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v[304:307] = "st.ds_load_b128"(v51) { mod.ds = { na = 1, offset = 16, gds = false } }
+  v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[300:307], v[320:327], v[100:107])
+  v40 = "st.v_add_f32"(v100, v101)
+  "st.s_endpgm"()
+}

@@ -22,9 +22,12 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <set>
+#include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -35,6 +38,7 @@
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationVerifier.hpp"
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
+#include "stinkytofu/transforms/asm/ra/VgprMsbStreamModel.hpp"
 #include "stinkytofu/transforms/asm/ssa/SSADestruction.hpp"
 #include "transforms/asm/ra/allocators/GreedyAllocator.hpp"
 #include "transforms/asm/ra/allocators/GreedyPlacement.hpp"
@@ -123,6 +127,14 @@ StinkyInstruction* createDsLoadB64(BasicBlock* bb, int dstReg, int addrReg) {
     load->addDestReg(StinkyRegister("v", dstReg, 2));
     load->addSrcReg(StinkyRegister("v", addrReg, 1));
     return load;
+}
+
+/// mem[v<addr>] = v[<data>:<data>+1], reading the range a load above defined.
+void createDsStoreB64(BasicBlock* bb, int addrReg, int dataReg) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* store = builder.create(getMCIDByUOp(GFX::ds_store_b64, kRaTestArch));
+    store->addSrcReg(StinkyRegister("v", addrReg, 1));
+    store->addSrcReg(StinkyRegister("v", dataReg, 2));
 }
 
 /// `v_wmma_scale16 dst, a, b, 0, scaleA, scaleB`: six register fields against
@@ -927,6 +939,33 @@ TEST_F(GreedyAllocatorTest, AFoldThatCannotBePlacedGivesWayRatherThanRefusing) {
         << coloured->toString();
 }
 
+TEST_F(GreedyAllocatorTest, ARetryThatAlsoRefusesStillSaysWhereTheFoldStopped) {
+    // The same function with only v0..v3 left. The folded block still has base
+    // 0 alone, which v0 holds, and once folding gives way the four-wide
+    // destination has no base either. The retry's refusal is the one the caller
+    // reads, so it has to carry the folded attempt's too, or a fold that ran and
+    // failed looks exactly like no fold at all.
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/60, /*src0=*/0, /*src1=*/0);
+    dsLoad(entry, /*dest=*/10, /*width=*/2, /*addr=*/50);
+    dsLoad(entry, /*dest=*/12, /*width=*/4, /*addr=*/11);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/61, /*src0=*/12, /*src1=*/13);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/62, /*src0=*/0, /*src1=*/0);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup paired(*func, RegClassSet::only(RegType::V), {},
+                           addressPairingWithOneWideBase());
+    keepOnlyFirstVgprs(paired, 4);
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(paired.context());
+
+    ASSERT_TRUE(coloured.hasError());
+    const std::string& error = coloured.getError();
+    EXPECT_TRUE(error.starts_with("@kernel: ")) << error;
+    EXPECT_TRUE(contains(error, "\n    with folding: no v register is free")) << error;
+    EXPECT_FALSE(contains(error, "with folding: @")) << error;
+}
+
 TEST_F(GreedyAllocatorTest, APairingPullsABlockOffTheRegisterFirstFitWouldTake) {
     // v300 is a live-in that stays at its register and dies at the add, so that
     // register is free for the destination afterwards. The destination has no
@@ -1110,4 +1149,232 @@ TEST_F(GreedyAllocatorTest, ThePlacementTableHasARowPerBlockAndMarksTheRefusal) 
         if (lines[i].ends_with("\t1")) ++refused;
     }
     EXPECT_EQ(refused, 1u);
+}
+
+TEST_F(GreedyAllocatorTest, ThePlacementTableShowsThePlannedBank) {
+    // Under quadrant=prefer the planned bank is the hint's, and v300 is in bank 1.
+    BasicBlock* entry = block("entry");
+    vMovZero(entry, 300);
+    dsStoreB32(entry, 300, 300);
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+
+    const std::string path = ::testing::TempDir() + "greedy_planned_bank.tsv";
+    AllocationContext preferring = setup.context();
+    preferring.preferProducerQuadrant = true;
+    preferring.blockDumpPath = path;
+    CompactingGreedyAllocator allocator;
+    ASSERT_TRUE(allocator.allocate(preferring).hasValue());
+
+    std::ifstream in(path);
+    std::vector<std::vector<std::string>> rows;
+    for (std::string line; std::getline(in, line);) {
+        std::vector<std::string>& row = rows.emplace_back();
+        std::istringstream fields(line);
+        for (std::string field; std::getline(fields, field, '\t');) row.push_back(field);
+    }
+    ASSERT_EQ(rows.size(), 2u) << "a header and the one block";
+    const auto column = std::find(rows[0].begin(), rows[0].end(), "plannedBank");
+    ASSERT_NE(column, rows[0].end());
+    EXPECT_EQ(rows[1][static_cast<size_t>(column - rows[0].begin())], "1");
+}
+
+namespace {
+
+/// Each value's bank under \p coloured, for pricing a colouring.
+std::vector<uint8_t> banksOf(const Function& function, const AllocationResult& coloured) {
+    std::vector<uint8_t> banks(function.ssaArena().valueCount() + 1, kUnknownBank);
+    for (const StinkySSAValue* value : function.ssaArena().values()) {
+        if (value == nullptr || !coloured.isAssigned(value->valueId())) continue;
+        const RegKey reg = coloured.assignmentOf(value->valueId());
+        if (reg.type == RegType::V) banks[value->valueId()] = reg.idx / kVgprBankSize;
+    }
+    return banks;
+}
+
+/// Prices one value: nothing in bank 1, ten anywhere else.
+class WantsBankOne final : public BankCostModel {
+   public:
+    explicit WantsBankOne(SSAValueID value) : value_(value) {}
+
+    std::span<const SSAValueID> bankSensitiveValues() const override {
+        return {&value_, 1};
+    }
+
+    double useWeight(SSAValueID value) const override {
+        return value == value_ ? 10.0 : 0.0;
+    }
+
+    double cost(std::span<const uint8_t> banks) const override {
+        return costIn(value_ < banks.size() ? banks[value_] : kUnknownBank);
+    }
+
+    double delta(std::span<const uint8_t> banks, std::span<const SSAValueID> moved,
+                 uint8_t bank) const override {
+        if (!std::binary_search(moved.begin(), moved.end(), value_)) return 0.0;
+        return costIn(bank) - cost(banks);
+    }
+
+   private:
+    static double costIn(uint8_t bank) {
+        return bank == 1 ? 0.0 : 10.0;
+    }
+
+    SSAValueID value_;
+};
+
+}  // namespace
+
+TEST_F(GreedyAllocatorTest, ThePlanGivesALoopsStoresOneBankWord) {
+    // A loop stores one value and then another through one address. Only v0, v1
+    // and v256 are free. Packing from the bottom keeps the address in bank 0
+    // with one of the data values, so the stores need different words. The plan
+    // puts the address alone in bank 1 and both data values in bank 0, where
+    // the two stores share one.
+    BasicBlock* entry = block("entry");
+    BasicBlock* loop = block("loop");
+    BasicBlock* exitBlock = block("exit");
+    func->addEdge(entry, loop);
+    func->addEdge(loop, loop);
+    func->addEdge(loop, exitBlock);
+    const StinkyInstruction* address = vMovZero(entry, 0);
+    const StinkyInstruction* first = vMovZero(entry, 1);
+    const StinkyInstruction* second = vMovZero(entry, 256);
+    dsStoreB32(loop, 0, 1);
+    dsStoreB32(loop, 0, 256);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup setup(*func);
+    const uint32_t indexes = setup.target().indexCount(RegType::V);
+    setup.target().reserve(RegType::V, /*first=*/2, /*count=*/kVgprBankSize - 2);
+    setup.target().reserve(RegType::V, /*first=*/kVgprBankSize + 1,
+                           /*count=*/indexes - kVgprBankSize - 1);
+    CompactingGreedyAllocator allocator;
+    const AllocationResult packed = colourWith(allocator, setup);
+
+    const VgprMsbStreamModel model(*func, setup.context().loops);
+    AllocationContext planning = setup.context();
+    PlanOutcome outcome;
+    planning.bankCost = &model;
+    planning.planOutcome = &outcome;
+    Expected<AllocationResult> planned = allocator.allocate(planning);
+    ASSERT_TRUE(planned.hasValue()) << planned.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *planned, planning).ok());
+
+    const auto bankOf = [&](const StinkyInstruction* def) {
+        return planned->assignmentOf(idOf(ssaDefinedValue(*def))).idx / kVgprBankSize;
+    };
+    EXPECT_EQ(bankOf(address), 1u) << planned->toString();
+    EXPECT_EQ(bankOf(first), 0u) << planned->toString();
+    EXPECT_EQ(bankOf(second), 0u) << planned->toString();
+    EXPECT_LT(model.cost(banksOf(*func, *planned)), model.cost(banksOf(*func, packed)));
+    EXPECT_EQ(outcome.planned, 3u);
+    EXPECT_EQ(outcome.honoured, 3u);
+    EXPECT_TRUE(outcome.dropped.empty());
+}
+
+TEST_F(GreedyAllocatorTest, APlanThatPlacementRefusesGivesWay) {
+    // Free: v1 and v3 in bank 0, v256 and v257 in bank 1. The pair needs two
+    // adjacent registers, which only bank 1 has. The plan puts the single value
+    // there first, and the pair is lighter, so it may not evict it: placing by
+    // the plan is refused. The colouring made without the plan packs the single
+    // value into bank 0 and leaves bank 1 to the pair.
+    BasicBlock* entry = block("entry");
+    const StinkyInstruction* single = vMovZero(entry, 300);
+    vMovZero(entry, 301);
+    createDsLoadB64(entry, 400, 300);
+    dsStoreB32(entry, 300, 301);
+    dsStoreB32(entry, 300, 300);
+    createDsStoreB64(entry, 300, 400);
+    dsStoreB32(entry, 301, 301);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup setup(*func);
+    const uint32_t indexes = setup.target().indexCount(RegType::V);
+    setup.target().reserve(RegType::V, /*first=*/0, /*count=*/1);
+    setup.target().reserve(RegType::V, /*first=*/2, /*count=*/1);
+    setup.target().reserve(RegType::V, /*first=*/4, /*count=*/kVgprBankSize - 4);
+    setup.target().reserve(RegType::V, /*first=*/kVgprBankSize + 2,
+                           /*count=*/indexes - kVgprBankSize - 2);
+
+    const SSAValueID singleId = idOf(ssaDefinedValue(*single));
+    const WantsBankOne model(singleId);
+    AllocationContext planning = setup.context();
+    PlanOutcome outcome;
+    planning.bankCost = &model;
+    planning.planOutcome = &outcome;
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(planning);
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, planning).ok());
+    EXPECT_EQ(outcome.planned, 1u);
+    EXPECT_FALSE(outcome.dropped.empty());
+    EXPECT_EQ(coloured->assignmentOf(singleId).idx / kVgprBankSize, 0u) << coloured->toString();
+}
+
+TEST_F(GreedyAllocatorTest, UnderAPlanEveryOrderPlacesCappedBlocksBeforePlannedOnes) {
+    // The plan counts a capped block in the bank its ceiling allows before it
+    // gives the other blocks theirs, so no planned block may reach that bank
+    // first. The weight, program and largest-first orders have a phase for
+    // capped blocks. The freedom order folds it into its comparator, which the
+    // planned blocks skip by going ahead of the queue. Read off the placement
+    // table's rank column, since a scale operand and the planned value never
+    // compete for a register here: the colouring cannot show the order.
+    BasicBlock* entry = block("entry");
+    defineVgprs(entry, /*base=*/130, /*count=*/2);
+    defineVgprs(entry, /*base=*/140, /*count=*/2);
+    const StinkyInstruction* single = vMovZero(entry, 300);
+    dsStoreB32(entry, 300, 300);
+    createWmmaScale16(entry, /*dst=*/100, /*a=*/400, /*b=*/420, /*scaleA=*/130, /*scaleB=*/140);
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+    const WantsBankOne model(idOf(ssaDefinedValue(*single)));
+
+    CompactingGreedyAllocator byWeight;
+    FreedomOrderedGreedyAllocator byFreedom;
+    ProgramOrderedGreedyAllocator byProgram;
+    LargestFirstGreedyAllocator byLargest;
+    for (RegisterAllocator* allocator :
+         {static_cast<RegisterAllocator*>(&byWeight), static_cast<RegisterAllocator*>(&byFreedom),
+          static_cast<RegisterAllocator*>(&byProgram),
+          static_cast<RegisterAllocator*>(&byLargest)}) {
+        SCOPED_TRACE(allocator->name());
+        const std::string path = ::testing::TempDir() + "greedy_capped_before_planned.tsv";
+        AllocationContext planning = setup.context();
+        PlanOutcome outcome;
+        planning.bankCost = &model;
+        planning.planOutcome = &outcome;
+        planning.blockDumpPath = path;
+        ASSERT_TRUE(allocator->allocate(planning).hasValue());
+        ASSERT_EQ(outcome.planned, 1u);
+        ASSERT_TRUE(outcome.dropped.empty()) << outcome.dropped;
+
+        std::ifstream in(path);
+        std::vector<std::vector<std::string>> rows;
+        for (std::string line; std::getline(in, line);) {
+            std::vector<std::string>& row = rows.emplace_back();
+            std::istringstream fields(line);
+            for (std::string field; std::getline(fields, field, '\t');) row.push_back(field);
+        }
+        ASSERT_FALSE(rows.empty());
+        const auto columnOf = [&](const std::string& name) {
+            return static_cast<size_t>(std::find(rows[0].begin(), rows[0].end(), name) -
+                                       rows[0].begin());
+        };
+        const size_t cappedColumn = columnOf("capped");
+        const size_t plannedColumn = columnOf("plannedBank");
+        const size_t rankColumn = columnOf("rank");
+        ASSERT_LT(rankColumn, rows[0].size());
+
+        std::vector<int> cappedRanks;
+        std::vector<int> plannedRanks;
+        for (size_t row = 1; row < rows.size(); ++row) {
+            const int rank = std::stoi(rows[row][rankColumn]);
+            if (rows[row][cappedColumn] == "1") cappedRanks.push_back(rank);
+            if (rows[row][plannedColumn] != "-1") plannedRanks.push_back(rank);
+        }
+        ASSERT_EQ(cappedRanks.size(), 2u) << "the two scale pairs";
+        ASSERT_EQ(plannedRanks.size(), 1u);
+        EXPECT_LT(*std::max_element(cappedRanks.begin(), cappedRanks.end()), plannedRanks[0]);
+    }
 }

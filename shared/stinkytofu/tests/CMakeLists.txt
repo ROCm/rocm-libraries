@@ -67,6 +67,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
     unit/asm/EstimateAsmCyclesTest.cpp
+    unit/asm/InsertVgprMsbPassTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/AsmMovePropagationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
@@ -80,6 +81,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/SwInstructionPrefetchAbsDynamicPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/StinkyModifiersTest.cpp
+    unit/asm/VgprMsbTrackerTest.cpp
     unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     unit/ssa/AttachedSSATest.cpp
@@ -98,6 +100,8 @@ set(UNIT_ASM_TEST_FILES
     unit/ra/RegisterAllocationPassTest.cpp
     unit/ra/RegisterBudgetTest.cpp
     unit/ra/RegisterSymbolSyncTest.cpp
+    unit/ra/VgprMsbPredictionTest.cpp
+    unit/ra/BankCostModelTest.cpp
     unit/ssa/AsmPrinterSSAFormTest.cpp
     unit/ssa/LiftAsmRegistersToSSATest.cpp
     unit/asm/DefUseAnalysisCleanupTest.cpp

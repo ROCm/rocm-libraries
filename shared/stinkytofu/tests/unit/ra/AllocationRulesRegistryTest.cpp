@@ -24,11 +24,13 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "AllocationTestUtils.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 
@@ -141,6 +143,28 @@ TEST_F(AllocationRulesRegistryTest, ClearArchRemovesOnlyThatTriple) {
     EXPECT_TRUE(AllocationRulesRegistry::hasArch(kOtherArch));
 }
 
+TEST_F(AllocationRulesRegistryTest, TheRegisteredFactoryIsTheOneSetArchInstalled) {
+    EXPECT_FALSE(AllocationRulesRegistry::registeredFactory(kTestArch).has_value());
+
+    AllocationRulesRegistry::setArch(kTestArch,
+                                     [](const AsmCapsConfig&) { return probeTable(true); });
+    const std::optional<AllocationRulesRegistry::Factory> factory =
+        AllocationRulesRegistry::registeredFactory(kTestArch);
+    ASSERT_TRUE(factory.has_value());
+    ASSERT_TRUE(*factory);
+    const AllocationRules rules = (*factory)(AsmCapsConfig{});
+    ASSERT_EQ(rules.all().size(), 1u);
+    EXPECT_EQ(rules.all()[0].name, "ProbeRule");
+
+    // Registered without a factory is still registered, as hasArch() says, so
+    // putting it back has to keep the registration rather than clear it.
+    AllocationRulesRegistry::setArch(kTestArch, nullptr);
+    const std::optional<AllocationRulesRegistry::Factory> empty =
+        AllocationRulesRegistry::registeredFactory(kTestArch);
+    ASSERT_TRUE(empty.has_value());
+    EXPECT_FALSE(*empty);
+}
+
 TEST_F(AllocationRulesRegistryTest, RegisteredKeysAreSortedAndSpellTheTriple) {
     AllocationRulesRegistry::setArch(kTestArch,
                                      [](const AsmCapsConfig&) { return probeTable(true); });
@@ -188,4 +212,19 @@ TEST_F(AllocationRulesRegistryTest, EveryRegisteredArchDeclaresUsableRules) {
         // may be an unconditional property of the ISA -- scalar tuple alignment
         // is one -- and gating those on a capability would be wrong.
     }
+}
+
+TEST(ScopedArchRulesTest, PutsBackTheShippedTableItReplaced) {
+    // Nothing registers a shipped table a second time, so a scope that cleared
+    // it would leave every test after it in the binary without that table.
+    AllocationRulesRegistry::registerAll();
+    const std::array<int, 3> triple = test::raTestTriple();
+    const std::string shipped =
+        AllocationRulesRegistry::forArch(triple, AsmCapsConfig{}).toString();
+    ASSERT_FALSE(AllocationRulesRegistry::forArch(triple, AsmCapsConfig{}).empty());
+    {
+        const test::ScopedArchRules replaced(test::evenVBasesOnly());
+        EXPECT_NE(AllocationRulesRegistry::forArch(triple, AsmCapsConfig{}).toString(), shipped);
+    }
+    EXPECT_EQ(AllocationRulesRegistry::forArch(triple, AsmCapsConfig{}).toString(), shipped);
 }

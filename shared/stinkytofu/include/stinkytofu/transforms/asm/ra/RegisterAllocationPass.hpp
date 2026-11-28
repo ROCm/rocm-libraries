@@ -93,8 +93,32 @@ struct RegisterAllocationOptions {
     /// and searches the whole file only when that bank has no room. Values that
     /// stay in their producer's bank need no s_set_vgpr_msb switch the producer
     /// did not already pay for, at the cost of a less compact colouring.
-    enum class Quadrant { Any, Prefer };
+    ///
+    /// Plan chooses that bank instead. Before placement, each block used in a
+    /// loop gets the bank that costs fewest predicted s_set_vgpr_msb, within what
+    /// each bank can hold, and is placed there when it fits. Only the compacting
+    /// allocators plan, and only on a target that selects banks this way;
+    /// elsewhere it is Any. A planned colouring that is refused gives way to one
+    /// made without the plan.
+    enum class Quadrant { Any, Prefer, Plan };
     Quadrant quadrant = Quadrant::Any;
+
+    /// How matrix operands are placed, chosen among the rules the architecture
+    /// tags with a matrix role (MatrixRole), so no architecture's rule is named
+    /// here.
+    ///
+    /// Pin leaves the table as shipped: every matrix operand keeps the
+    /// producer's register, so the producer's banks are kept too. Shape ties
+    /// the values the producer put on one register tuple and lets the
+    /// allocator choose where the tuple goes, banks included. Accumulators
+    /// pins the accumulators and ties A and B by shape.
+    ///
+    /// Auto tries Shape and, when that colouring is refused, Pin, so a kernel
+    /// the pin colours is not lost. Shape alone has no fallback: a crowded
+    /// kernel it cannot colour is dropped. A table with no Shape-role rule
+    /// refuses Shape and Accumulators, and Auto there is Pin alone.
+    enum class Matrix { Pin, Accumulators, Shape, Auto };
+    Matrix matrix = Matrix::Pin;
 
     bool applyToOperands = false;  // false = shadow
     bool verify = true;
