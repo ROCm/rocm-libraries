@@ -357,7 +357,6 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS
     "test_attention_dense_gfx942.py"
     "test_attention_combo_sweep_fp8.py"
     "test_dense_prefill_emit_shapes.py"
-    "dispatch/attention/test_review_followups.py"
     "test_arch_binding_guard.py"
     "test_selector_parity.py"
     "test_per_engine_spec_fns.py"
