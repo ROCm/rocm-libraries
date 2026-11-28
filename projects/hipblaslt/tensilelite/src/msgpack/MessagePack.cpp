@@ -185,7 +185,7 @@ namespace TensileLite
 
             return inflate_complete && finished_parsing && unp.nonparsed_size() == 0;
         }
-        catch(std::runtime_error const&)
+        catch(std::exception const&)
         {
             return false;
         }
@@ -379,7 +379,7 @@ namespace TensileLite
 
             return rv;
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:\n" << exc.what() << std::endl;
@@ -415,7 +415,7 @@ namespace TensileLite
 
             return rv;
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:" << std::endl << exc.what() << std::endl;
