@@ -89,7 +89,7 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg, shape.n);
     ASSERT_EQ(rppt_rotate(src.ptr(), &desc, dst.ptr(), &desc, angle.data(), op.interp, roi.data(),
                           XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

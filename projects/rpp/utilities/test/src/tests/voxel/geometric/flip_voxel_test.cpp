@@ -86,7 +86,7 @@ void run_flip_voxel(const VoxelConfig& cfg, const FlipVoxelParams& p) {
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_flip_voxel(src.ptr(), desc.get(), dst.ptr(), desc.get(), horizontal.data(),
                               vertical.data(), depth.data(), roi.data(),
                               to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),

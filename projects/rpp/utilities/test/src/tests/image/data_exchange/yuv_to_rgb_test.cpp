@@ -78,7 +78,7 @@ std::vector<WithParams<YuvParams>> yuv_configs() {
         for (const YuvParams& op : kYuvParams)
             for (const Size& size : kSizes)
                 configs.push_back(
-                    {TestConfig{backend, DType::U8, Layout::PKD3, Layout::PKD3, Roi::Full, size},
+                    {TestConfig{{backend}, DType::U8, Layout::PKD3, Layout::PKD3, Roi::Full, size},
                      op});
     }
     return configs;
@@ -159,7 +159,7 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
     srcUV.write(hostUV.data(), uvBytes);
     dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, 1);
+    RppHandle handle(cfg, 1);
     ASSERT_EQ(fn(srcY.ptr(), srcUV.ptr(), &srcDesc, dst.ptr(), &dstDesc, yPitch, uvPitch, dstPitch,
                  width, height, op.standard, op.range, handle.get(), cfg.backend),
               RPP_SUCCESS);

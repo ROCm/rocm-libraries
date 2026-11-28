@@ -98,22 +98,22 @@ struct LayoutConv {
 };
 
 // A single point in the test grid. dtype is both the input and output type.
-struct TestConfig {
-    RppBackend backend;
+struct TestConfig : BackendVariant {
     DType dtype;
     Layout layoutIn, layoutOut;
     Roi roi;
     Size size;
 };
 
-// Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48". The layout token
+// Produces the value-parameter label, e.g. "HIP_U8toU8_PKD3_FullRoi_2x36x48" (or
+// "HOST_T1_U8toU8_..." for a HOST thread-count variant). The layout token
 // names both sides only when they differ ("PKD3toPLN1"); the skip list's patterns depend on this.
 inline std::string config_name(const TestConfig& c) {
     const std::string layout = c.layoutIn == c.layoutOut
                                    ? layout_name(c.layoutIn)
                                    : layout_name(c.layoutIn) + "to" + layout_name(c.layoutOut);
-    return backend_name(c.backend) + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" +
-           layout + "_" + roi_name(c.roi) + "_" + size_name(c.size);
+    return c.name() + "_" + dtype_name(c.dtype) + "to" + dtype_name(c.dtype) + "_" + layout + "_" +
+           roi_name(c.roi) + "_" + size_name(c.size);
 }
 
 namespace presets {
@@ -153,18 +153,18 @@ inline const std::vector<Layout> kLayouts3Ch{Layout::PKD3, Layout::PLN3};
 inline const std::vector<DType> kDefaultDTypes{DType::U8, DType::I8, DType::F16, DType::F32};
 }  // namespace presets
 
-// Cartesian product of the requested axes with every available backend. The layout axis takes
+// Cartesian product of the requested axes with every backend variant. The layout axis takes
 // conversions; an op that does not convert passes plain layouts to the overload below.
 inline std::vector<TestConfig> make_configs(
     const std::vector<DType>& dtypes, const std::vector<LayoutConv>& layouts,
     const std::vector<Roi>& rois, const std::vector<Size>& sizes = {presets::kDefaultSize}) {
     std::vector<TestConfig> configs;
-    for (RppBackend backend : available_backends())
+    for (BackendVariant b : backend_variants())
         for (DType dtype : dtypes)
             for (LayoutConv layout : layouts)
                 for (Roi roi : rois)
                     for (Size size : sizes)
-                        configs.push_back({backend, dtype, layout.in, layout.out, roi, size});
+                        configs.push_back({b, dtype, layout.in, layout.out, roi, size});
     return configs;
 }
 
