@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvRdnaDw2d.hpp"
 
 /**
  * @file HipConvFwdDw2dRdnaLaunchValues.hpp
@@ -26,18 +27,8 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-/// How a depthwise 2D variant walks the output; the grid depends on it. Dtype, layout, the
-/// specialized filter, padding, stride and dilation are compiled into the variant and only
-/// matter for picking it.
-struct HipConvFwdDw2dRdnaGeometry
-{
-    /// The runtime-parameter kernel (filter, padding, stride and dilation as launch arguments).
-    bool generic = false;
-    /// The specialized kernel's dilation-grid walk (LANE_ON_DILATION_GRID).
-    bool laneOnDilationGrid = false;
-    /// Output columns per lane of the specialized kernel (OUT_PER_LANE).
-    int outPerLane = 2;
-};
+/// How a depthwise 2D variant walks the output (ConvRdnaDw2d.hpp).
+using HipConvFwdDw2dRdnaGeometry = conv_rdna::dw2d::Geometry;
 
 /// The tensor uids a matched depthwise conv graph binds, in kernel argument order.
 struct HipConvFwdDw2dRdnaBinding

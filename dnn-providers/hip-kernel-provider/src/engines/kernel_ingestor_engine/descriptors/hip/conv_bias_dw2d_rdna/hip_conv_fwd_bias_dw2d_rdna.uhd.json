@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "1a7918b9-8181-408b-8463-ac0f5ea07949",
+  "name": "hip_conv_fwd_bias_dw2d_rdna selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.hip_conv_fwd_bias_dw2d_rdna.score"
+  }
+}

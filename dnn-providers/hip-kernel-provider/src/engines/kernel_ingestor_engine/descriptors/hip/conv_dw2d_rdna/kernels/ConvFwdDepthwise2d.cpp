@@ -29,7 +29,10 @@
 //
 // Compile-time parameters (one set per variant): IO_DTYPE, FILTER_H/W,
 // PAD_H/W, STRIDE_H/W, DILATION_H/W, OUT_PER_LANE, ROW_CHUNK, WORKGROUP_SIZE,
-// LANE_ON_DILATION_GRID, PAIR_COLUMNS.
+// LANE_ON_DILATION_GRID, PAIR_COLUMNS, HAS_BIAS.
+//
+// HAS_BIAS adds bias[c] (one value per channel, IO_DTYPE) to every output before
+// it is stored; the kernel then takes the bias pointer after `output`.
 
 #ifndef IO_DTYPE
 #define IO_DTYPE __half
@@ -72,6 +75,9 @@
 #endif
 #ifndef PAIR_COLUMNS
 #define PAIR_COLUMNS 0
+#endif
+#ifndef HAS_BIAS
+#define HAS_BIAS 0
 #endif
 
 #include <hip/hip_bf16.h>
@@ -194,6 +200,9 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
     ConvFwdDepthwise2d(const IO_DTYPE* __restrict__ input, // [N, C, iH, iW]
                        const IO_DTYPE* __restrict__ weights, // [C, 1, FILTER_H, FILTER_W]
                        IO_DTYPE* __restrict__ output, // [N, C, oH, oW]
+#if HAS_BIAS
+                       const IO_DTYPE* __restrict__ bias, // [C]
+#endif
                        int N,
                        int C,
                        int iH,
@@ -230,6 +239,9 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
 
         float taps[kFilterH][kFilterW];
         const IO_DTYPE* wptr = weights + static_cast<size_t>(c) * kWeightSize;
+#if HAS_BIAS
+        const float bv = to_float(bias[c]);
+#endif
 #pragma unroll
         for(int fh = 0; fh < kFilterH; ++fh)
         {
@@ -308,7 +320,12 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
             for(int o = 0; o < kOutPerLane; ++o)
             {
                 if(ow0 + o * kColStep < oW)
+                {
+#if HAS_BIAS
+                    acc[o] += bv;
+#endif
                     from_float(acc[o], out[o * kColStep]);
+                }
             }
 
             // Fetch the rows the lane's next output row gains: filter row fh of
@@ -356,6 +373,9 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
 
         float taps[kFilterH][kFilterW];
         const IO_DTYPE* wptr = weights + static_cast<size_t>(c) * kWeightSize;
+#if HAS_BIAS
+        const float bv = to_float(bias[c]);
+#endif
 #pragma unroll
         for(int fh = 0; fh < kFilterH; ++fh)
         {
@@ -439,7 +459,12 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
             for(int o = 0; o < kOutPerLane; ++o)
             {
                 if(ow0 + o < oW)
+                {
+#if HAS_BIAS
+                    acc[o] += bv;
+#endif
                     from_float(acc[o], out[o]);
+                }
             }
 
             // Fetch the rows the next output row gains. Row fh of that row is
