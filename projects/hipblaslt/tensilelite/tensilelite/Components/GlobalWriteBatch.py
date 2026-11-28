@@ -1978,7 +1978,7 @@ class GlobalWriteBatchWriter:
     # all of the beta math, so no store-skip branch is taken with C loads in flight.
     _pt = self.kernel["ProblemType"]
     is16bitSubtileMxf8 = is16bitSubtile \
-        and (_pt["DataTypeA"].is8bitFloat() or _pt["DataTypeB"].is8bitFloat()) \
+        and _pt["DataTypeA"].is8bitFloat() and _pt["DataTypeB"].is8bitFloat() \
         and bool(_pt["MXBlockA"] or _pt["MXBlockB"])
     groupSubtileStores = is16bitSubtileMxf4 or is16bitSubtileMxf8
     # fused-A2A PUSH pass: the A2A tiles go to the LOCAL D output and the cross-card
