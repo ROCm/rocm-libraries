@@ -125,7 +125,8 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
-*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is invalid.
+*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is
+*              invalid, or \p dirA is not a valid value of its enumeration type.
 */
 /**@{*/
 HIPSPARSE_EXPORT
@@ -240,7 +241,8 @@ hipsparseStatus_t hipsparseSgebsr2csr(hipsparseHandle_t         handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
-*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is invalid.
+*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is
+*              invalid, or \p dirA is not a valid value of its enumeration type.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDgebsr2csr(hipsparseHandle_t         handle,
@@ -354,7 +356,8 @@ hipsparseStatus_t hipsparseDgebsr2csr(hipsparseHandle_t         handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
-*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is invalid.
+*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is
+*              invalid, or \p dirA is not a valid value of its enumeration type.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCgebsr2csr(hipsparseHandle_t         handle,
@@ -468,7 +471,8 @@ hipsparseStatus_t hipsparseCgebsr2csr(hipsparseHandle_t         handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
-*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is invalid.
+*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is
+*              invalid, or \p dirA is not a valid value of its enumeration type.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZgebsr2csr(hipsparseHandle_t         handle,

@@ -191,6 +191,9 @@ hipsparseStatus_t hipsparseScsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseScsric02_analysis((cusparseHandle_t)handle,
                                   m,
@@ -200,7 +203,7 @@ hipsparseStatus_t hipsparseScsric02_analysis(hipsparseHandle_t         handle,
                                   csrSortedRowPtrA,
                                   csrSortedColIndA,
                                   (csric02Info_t)info,
-                                  hipsparse::hipPolicyToCudaPolicy(policy),
+                                  backend_policy,
                                   pBuffer));
 }
 
@@ -215,6 +218,9 @@ hipsparseStatus_t hipsparseDcsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDcsric02_analysis((cusparseHandle_t)handle,
                                   m,
@@ -224,7 +230,7 @@ hipsparseStatus_t hipsparseDcsric02_analysis(hipsparseHandle_t         handle,
                                   csrSortedRowPtrA,
                                   csrSortedColIndA,
                                   (csric02Info_t)info,
-                                  hipsparse::hipPolicyToCudaPolicy(policy),
+                                  backend_policy,
                                   pBuffer));
 }
 
@@ -239,6 +245,9 @@ hipsparseStatus_t hipsparseCcsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCcsric02_analysis((cusparseHandle_t)handle,
                                   m,
@@ -248,7 +257,7 @@ hipsparseStatus_t hipsparseCcsric02_analysis(hipsparseHandle_t         handle,
                                   csrSortedRowPtrA,
                                   csrSortedColIndA,
                                   (csric02Info_t)info,
-                                  hipsparse::hipPolicyToCudaPolicy(policy),
+                                  backend_policy,
                                   pBuffer));
 }
 
@@ -263,6 +272,9 @@ hipsparseStatus_t hipsparseZcsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseZcsric02_analysis((cusparseHandle_t)handle,
                                   m,
@@ -272,7 +284,7 @@ hipsparseStatus_t hipsparseZcsric02_analysis(hipsparseHandle_t         handle,
                                   csrSortedRowPtrA,
                                   csrSortedColIndA,
                                   (csric02Info_t)info,
-                                  hipsparse::hipPolicyToCudaPolicy(policy),
+                                  backend_policy,
                                   pBuffer));
 }
 #endif
@@ -291,17 +303,19 @@ hipsparseStatus_t hipsparseScsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseScsric02((cusparseHandle_t)handle,
-                         m,
-                         nnz,
-                         (cusparseMatDescr_t)descrA,
-                         csrSortedValA_valM,
-                         csrSortedRowPtrA,
-                         csrSortedColIndA,
-                         (csric02Info_t)info,
-                         hipsparse::hipPolicyToCudaPolicy(policy),
-                         pBuffer));
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseScsric02((cusparseHandle_t)handle,
+                                                                    m,
+                                                                    nnz,
+                                                                    (cusparseMatDescr_t)descrA,
+                                                                    csrSortedValA_valM,
+                                                                    csrSortedRowPtrA,
+                                                                    csrSortedColIndA,
+                                                                    (csric02Info_t)info,
+                                                                    backend_policy,
+                                                                    pBuffer));
 }
 
 hipsparseStatus_t hipsparseDcsric02(hipsparseHandle_t         handle,
@@ -317,17 +331,19 @@ hipsparseStatus_t hipsparseDcsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDcsric02((cusparseHandle_t)handle,
-                         m,
-                         nnz,
-                         (cusparseMatDescr_t)descrA,
-                         csrSortedValA_valM,
-                         csrSortedRowPtrA,
-                         csrSortedColIndA,
-                         (csric02Info_t)info,
-                         hipsparse::hipPolicyToCudaPolicy(policy),
-                         pBuffer));
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDcsric02((cusparseHandle_t)handle,
+                                                                    m,
+                                                                    nnz,
+                                                                    (cusparseMatDescr_t)descrA,
+                                                                    csrSortedValA_valM,
+                                                                    csrSortedRowPtrA,
+                                                                    csrSortedColIndA,
+                                                                    (csric02Info_t)info,
+                                                                    backend_policy,
+                                                                    pBuffer));
 }
 
 hipsparseStatus_t hipsparseCcsric02(hipsparseHandle_t         handle,
@@ -343,17 +359,19 @@ hipsparseStatus_t hipsparseCcsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCcsric02((cusparseHandle_t)handle,
-                         m,
-                         nnz,
-                         (cusparseMatDescr_t)descrA,
-                         (cuComplex*)csrSortedValA_valM,
-                         csrSortedRowPtrA,
-                         csrSortedColIndA,
-                         (csric02Info_t)info,
-                         hipsparse::hipPolicyToCudaPolicy(policy),
-                         pBuffer));
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCcsric02((cusparseHandle_t)handle,
+                                                                    m,
+                                                                    nnz,
+                                                                    (cusparseMatDescr_t)descrA,
+                                                                    (cuComplex*)csrSortedValA_valM,
+                                                                    csrSortedRowPtrA,
+                                                                    csrSortedColIndA,
+                                                                    (csric02Info_t)info,
+                                                                    backend_policy,
+                                                                    pBuffer));
 }
 
 hipsparseStatus_t hipsparseZcsric02(hipsparseHandle_t         handle,
@@ -369,6 +387,9 @@ hipsparseStatus_t hipsparseZcsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
+    cusparseSolvePolicy_t backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToCudaPolicy(policy, &backend_policy));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseZcsric02((cusparseHandle_t)handle,
                          m,
@@ -378,7 +399,7 @@ hipsparseStatus_t hipsparseZcsric02(hipsparseHandle_t         handle,
                          csrSortedRowPtrA,
                          csrSortedColIndA,
                          (csric02Info_t)info,
-                         hipsparse::hipPolicyToCudaPolicy(policy),
+                         backend_policy,
                          pBuffer));
 }
 #endif

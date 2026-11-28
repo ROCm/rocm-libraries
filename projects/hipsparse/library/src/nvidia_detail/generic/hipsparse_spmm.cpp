@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -41,17 +41,30 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpMMAlg_t          alg,
                                            size_t*                     pBufferSizeInBytes)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpMMAlgToCudaSpMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMM_bufferSize((cusparseHandle_t)handle,
-                                hipsparse::hipOperationToCudaOperation(opA),
-                                hipsparse::hipOperationToCudaOperation(opB),
+                                backend_opA,
+                                backend_opB,
                                 alpha,
                                 (cusparseConstSpMatDescr_t)matA,
                                 (cusparseConstDnMatDescr_t)matB,
                                 beta,
                                 (const cusparseDnMatDescr_t)matC,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
-                                hipsparse::hipSpMMAlgToCudaSpMMAlg(alg),
+                                backend_data_type,
+                                backend_alg,
                                 pBufferSizeInBytes));
 }
 #elif(CUDART_VERSION >= 10010)
@@ -67,17 +80,30 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpMMAlg_t          alg,
                                            size_t*                     pBufferSizeInBytes)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpMMAlgToCudaSpMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMM_bufferSize((cusparseHandle_t)handle,
-                                hipsparse::hipOperationToCudaOperation(opA),
-                                hipsparse::hipOperationToCudaOperation(opB),
+                                backend_opA,
+                                backend_opB,
                                 alpha,
                                 (const cusparseSpMatDescr_t)matA,
                                 (const cusparseDnMatDescr_t)matB,
                                 beta,
                                 (const cusparseDnMatDescr_t)matC,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
-                                hipsparse::hipSpMMAlgToCudaSpMMAlg(alg),
+                                backend_data_type,
+                                backend_alg,
                                 pBufferSizeInBytes));
 }
 #endif
@@ -95,17 +121,30 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                                            hipsparseSpMMAlg_t          alg,
                                            void*                       externalBuffer)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpMMAlgToCudaSpMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMM_preprocess((cusparseHandle_t)handle,
-                                hipsparse::hipOperationToCudaOperation(opA),
-                                hipsparse::hipOperationToCudaOperation(opB),
+                                backend_opA,
+                                backend_opB,
                                 alpha,
                                 (cusparseConstSpMatDescr_t)matA,
                                 (cusparseConstDnMatDescr_t)matB,
                                 beta,
                                 (const cusparseDnMatDescr_t)matC,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
-                                hipsparse::hipSpMMAlgToCudaSpMMAlg(alg),
+                                backend_data_type,
+                                backend_alg,
                                 externalBuffer));
 }
 #elif(CUDART_VERSION >= 11021)
@@ -121,17 +160,30 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                                            hipsparseSpMMAlg_t          alg,
                                            void*                       externalBuffer)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpMMAlgToCudaSpMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMM_preprocess((cusparseHandle_t)handle,
-                                hipsparse::hipOperationToCudaOperation(opA),
-                                hipsparse::hipOperationToCudaOperation(opB),
+                                backend_opA,
+                                backend_opB,
                                 alpha,
                                 (const cusparseSpMatDescr_t)matA,
                                 (const cusparseDnMatDescr_t)matB,
                                 beta,
                                 (const cusparseDnMatDescr_t)matC,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
-                                hipsparse::hipSpMMAlgToCudaSpMMAlg(alg),
+                                backend_data_type,
+                                backend_alg,
                                 externalBuffer));
 }
 #endif
@@ -149,18 +201,30 @@ hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,
                                 hipsparseSpMMAlg_t          alg,
                                 void*                       externalBuffer)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSpMM((cusparseHandle_t)handle,
-                     hipsparse::hipOperationToCudaOperation(opA),
-                     hipsparse::hipOperationToCudaOperation(opB),
-                     alpha,
-                     (cusparseConstSpMatDescr_t)matA,
-                     (cusparseConstDnMatDescr_t)matB,
-                     beta,
-                     (const cusparseDnMatDescr_t)matC,
-                     hipsparse::hipDataTypeToCudaDataType(computeType),
-                     hipsparse::hipSpMMAlgToCudaSpMMAlg(alg),
-                     externalBuffer));
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpMMAlgToCudaSpMMAlg(alg, &backend_alg));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSpMM((cusparseHandle_t)handle,
+                                                                backend_opA,
+                                                                backend_opB,
+                                                                alpha,
+                                                                (cusparseConstSpMatDescr_t)matA,
+                                                                (cusparseConstDnMatDescr_t)matB,
+                                                                beta,
+                                                                (const cusparseDnMatDescr_t)matC,
+                                                                backend_data_type,
+                                                                backend_alg,
+                                                                externalBuffer));
 }
 #elif(CUDART_VERSION >= 10010)
 hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,
@@ -175,17 +239,29 @@ hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,
                                 hipsparseSpMMAlg_t          alg,
                                 void*                       externalBuffer)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSpMM((cusparseHandle_t)handle,
-                     hipsparse::hipOperationToCudaOperation(opA),
-                     hipsparse::hipOperationToCudaOperation(opB),
-                     alpha,
-                     (const cusparseSpMatDescr_t)matA,
-                     (const cusparseDnMatDescr_t)matB,
-                     beta,
-                     (const cusparseDnMatDescr_t)matC,
-                     hipsparse::hipDataTypeToCudaDataType(computeType),
-                     hipsparse::hipSpMMAlgToCudaSpMMAlg(alg),
-                     externalBuffer));
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpMMAlgToCudaSpMMAlg(alg, &backend_alg));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSpMM((cusparseHandle_t)handle,
+                                                                backend_opA,
+                                                                backend_opB,
+                                                                alpha,
+                                                                (const cusparseSpMatDescr_t)matA,
+                                                                (const cusparseDnMatDescr_t)matB,
+                                                                beta,
+                                                                (const cusparseDnMatDescr_t)matC,
+                                                                backend_data_type,
+                                                                backend_alg,
+                                                                externalBuffer));
 }
 #endif

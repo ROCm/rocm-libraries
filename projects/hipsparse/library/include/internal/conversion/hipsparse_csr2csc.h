@@ -512,7 +512,9 @@ hipsparseStatus_t hipsparseZcsr2csc(hipsparseHandle_t       handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p csrRowPtr, \p csrColInd, or
-*              \p pBufferSizeInBytes pointer is invalid.
+*              \p pBufferSizeInBytes pointer is invalid, or \p valType, \p copyValues, \p idxBase,
+*              or \p alg is not a valid value of its enumeration type.
+*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED \p valType is a \p hipDataType that this routine does not support.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 HIPSPARSE_EXPORT
@@ -589,7 +591,9 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p csrRowPtr, \p csrColInd, or
-*              \p pBufferSizeInBytes pointer is invalid.
+*              \p buffer pointer is invalid, or \p valType, \p copyValues, \p idxBase, or \p alg is
+*              not a valid value of its enumeration type.
+*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED \p valType is a \p hipDataType that this routine does not support.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 HIPSPARSE_EXPORT

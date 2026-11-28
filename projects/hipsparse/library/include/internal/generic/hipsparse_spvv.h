@@ -59,7 +59,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result, or 
-*          \p pBufferSizeInBytes is nullptr.
+*          \p pBufferSizeInBytes is nullptr, or \p opX or \p computeType is not a valid value of its
+*          enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not supported.
 */
 HIPSPARSE_EXPORT
@@ -153,7 +154,8 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result, or \p externalBuffer
-*               pointer is invalid.
+*               pointer is invalid, or \p opX or \p computeType is not a valid value of its
+*               enumeration type.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not
 *               supported.
 */

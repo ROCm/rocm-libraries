@@ -51,7 +51,8 @@ extern "C" {
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
- *              \p pBufferSizeInBytes is invalid.
+ *              \p pBufferSizeInBytes is invalid, or \p transA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -87,7 +88,8 @@ hipsparseStatus_t hipsparseSgemvi_bufferSize(hipsparseHandle_t    handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
- *              \p pBufferSizeInBytes is invalid.
+ *              \p pBufferSizeInBytes is invalid, or \p transA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -122,7 +124,8 @@ hipsparseStatus_t hipsparseDgemvi_bufferSize(hipsparseHandle_t    handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
- *              \p pBufferSizeInBytes is invalid.
+ *              \p pBufferSizeInBytes is invalid, or \p transA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -157,7 +160,8 @@ hipsparseStatus_t hipsparseCgemvi_bufferSize(hipsparseHandle_t    handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, or
- *              \p pBufferSizeInBytes is invalid.
+ *              \p pBufferSizeInBytes is invalid, or \p transA is not a valid value of its
+ *              enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -237,7 +241,8 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p nnz, \p alpha,
- *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid.
+ *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid, or \p transA or
+ *              \p idxBase is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -323,7 +328,8 @@ hipsparseStatus_t hipsparseSgemvi(hipsparseHandle_t    handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p nnz, \p alpha,
- *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid.
+ *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid, or \p transA or
+ *              \p idxBase is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -408,7 +414,8 @@ hipsparseStatus_t hipsparseDgemvi(hipsparseHandle_t    handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p nnz, \p alpha,
- *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid.
+ *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid, or \p transA or
+ *              \p idxBase is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -493,7 +500,8 @@ hipsparseStatus_t hipsparseCgemvi(hipsparseHandle_t    handle,
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p nnz, \p alpha,
- *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid.
+ *              \p A, \p x, \p xInd, \p beta, \p y, or \p pBuffer is invalid, or \p transA or
+ *              \p idxBase is not a valid value of its enumeration type.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

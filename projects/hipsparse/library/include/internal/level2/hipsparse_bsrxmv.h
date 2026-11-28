@@ -117,7 +117,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
 *          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
 *          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
-*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr, or \p dir or \p trans is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -231,7 +232,8 @@ hipsparseStatus_t hipsparseSbsrxmv(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
 *          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
 *          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
-*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr, or \p dir or \p trans is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -344,7 +346,8 @@ hipsparseStatus_t hipsparseDbsrxmv(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
 *          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
 *          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
-*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr, or \p dir or \p trans is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -457,7 +460,8 @@ hipsparseStatus_t hipsparseCbsrxmv(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
 *          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
 *          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
-*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr, or \p dir or \p trans is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

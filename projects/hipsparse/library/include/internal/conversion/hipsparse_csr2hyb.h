@@ -77,8 +77,9 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p hybA, \p csrSortedValA,
-*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative, or
-*          \p userEllWidth or \p partitionType is invalid.
+*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative,
+*          \p userEllWidth is invalid, or \p partitionType is not a valid value of its enumeration
+*          type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the HYB matrix could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -144,8 +145,9 @@ hipsparseStatus_t hipsparseScsr2hyb(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p hybA, \p csrSortedValA,
-*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative, or
-*          \p userEllWidth or \p partitionType is invalid.
+*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative,
+*          \p userEllWidth is invalid, or \p partitionType is not a valid value of its enumeration
+*          type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the HYB matrix could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -210,8 +212,9 @@ hipsparseStatus_t hipsparseDcsr2hyb(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p hybA, \p csrSortedValA,
-*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative, or
-*          \p userEllWidth or \p partitionType is invalid.
+*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative,
+*          \p userEllWidth is invalid, or \p partitionType is not a valid value of its enumeration
+*          type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the HYB matrix could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -276,8 +279,9 @@ hipsparseStatus_t hipsparseCcsr2hyb(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p hybA, \p csrSortedValA,
-*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative, or
-*          \p userEllWidth or \p partitionType is invalid.
+*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative,
+*          \p userEllWidth is invalid, or \p partitionType is not a valid value of its enumeration
+*          type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the HYB matrix could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

@@ -45,8 +45,11 @@ hipsparseStatus_t hipsparseSgebsr2csr(hipsparseHandle_t         handle,
                                       int*                      csrRowPtrC,
                                       int*                      csrColIndC)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_sgebsr2csr((rocsparse_handle)handle,
-                                                   hipsparse::hipDirectionToHCCDirection(dirA),
+                                                   backend_dirA,
                                                    mb,
                                                    nb,
                                                    (const rocsparse_mat_descr)descrA,
@@ -77,8 +80,11 @@ hipsparseStatus_t hipsparseDgebsr2csr(hipsparseHandle_t         handle,
                                       int*                      csrRowPtrC,
                                       int*                      csrColIndC)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_dgebsr2csr((rocsparse_handle)handle,
-                                                   hipsparse::hipDirectionToHCCDirection(dirA),
+                                                   backend_dirA,
                                                    mb,
                                                    nb,
                                                    (const rocsparse_mat_descr)descrA,
@@ -109,8 +115,11 @@ hipsparseStatus_t hipsparseCgebsr2csr(hipsparseHandle_t         handle,
                                       int*                      csrRowPtrC,
                                       int*                      csrColIndC)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_cgebsr2csr((rocsparse_handle)handle,
-                                                   hipsparse::hipDirectionToHCCDirection(dirA),
+                                                   backend_dirA,
                                                    mb,
                                                    nb,
                                                    (const rocsparse_mat_descr)descrA,
@@ -141,8 +150,11 @@ hipsparseStatus_t hipsparseZgebsr2csr(hipsparseHandle_t         handle,
                                       int*                      csrRowPtrC,
                                       int*                      csrColIndC)
 {
+    rocsparse_direction_ backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToHCCDirection(dirA, &backend_dirA));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_zgebsr2csr((rocsparse_handle)handle,
-                                                   hipsparse::hipDirectionToHCCDirection(dirA),
+                                                   backend_dirA,
                                                    mb,
                                                    nb,
                                                    (const rocsparse_mat_descr)descrA,

@@ -47,10 +47,16 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
                                        int*                      csrRowPtrC,
                                        int*                      nnzTotalDevHostPtr)
 {
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseXcsrgemmNnz((cusparseHandle_t)handle,
-                            hipsparse::hipOperationToCudaOperation(transA),
-                            hipsparse::hipOperationToCudaOperation(transB),
+                            backend_transA,
+                            backend_transB,
                             m,
                             n,
                             k,
@@ -88,10 +94,16 @@ hipsparseStatus_t hipsparseScsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseScsrgemm((cusparseHandle_t)handle,
-                         hipsparse::hipOperationToCudaOperation(transA),
-                         hipsparse::hipOperationToCudaOperation(transB),
+                         backend_transA,
+                         backend_transB,
                          m,
                          n,
                          k,
@@ -132,10 +144,16 @@ hipsparseStatus_t hipsparseDcsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseDcsrgemm((cusparseHandle_t)handle,
-                         hipsparse::hipOperationToCudaOperation(transA),
-                         hipsparse::hipOperationToCudaOperation(transB),
+                         backend_transA,
+                         backend_transB,
                          m,
                          n,
                          k,
@@ -176,10 +194,16 @@ hipsparseStatus_t hipsparseCcsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseCcsrgemm((cusparseHandle_t)handle,
-                         hipsparse::hipOperationToCudaOperation(transA),
-                         hipsparse::hipOperationToCudaOperation(transB),
+                         backend_transA,
+                         backend_transB,
                          m,
                          n,
                          k,
@@ -220,10 +244,16 @@ hipsparseStatus_t hipsparseZcsrgemm(hipsparseHandle_t         handle,
                                     const int*                csrRowPtrC,
                                     int*                      csrColIndC)
 {
+    cusparseOperation_t backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transA, &backend_transA));
+
+    cusparseOperation_t backend_transB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(transB, &backend_transB));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseZcsrgemm((cusparseHandle_t)handle,
-                         hipsparse::hipOperationToCudaOperation(transA),
-                         hipsparse::hipOperationToCudaOperation(transB),
+                         backend_transA,
+                         backend_transB,
                          m,
                          n,
                          k,

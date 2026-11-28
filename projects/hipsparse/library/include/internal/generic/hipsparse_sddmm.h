@@ -69,9 +69,11 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p A, \p B, \p C or
-*          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
+*          \p pBufferSizeInBytes is nullptr, or \p opA, \p opB, \p computeType, or \p alg is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
-*          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
+*          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or \p computeType is currently
+*          not supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t          handle,
@@ -140,10 +142,12 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p A, \p B, \p C or
-*          \p tempBuffer pointer is invalid or the value of \p opA or \p opB is incorrect.
+*          \p tempBuffer pointer is invalid, or \p opA, \p opB, \p computeType, or \p alg is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
-*          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
+*          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or \p computeType is currently
+*          not supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t          handle,
@@ -273,10 +277,12 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p A, \p B, \p C or
-*          \p tempBuffer pointer is invalid or the value of \p opA or \p opB is incorrect.
+*          \p tempBuffer pointer is invalid, or \p opA, \p opB, \p computeType, or \p alg is not a
+*          valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
-*          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE.
+*          \p opB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or \p computeType is currently
+*          not supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSDDMM(hipsparseHandle_t          handle,

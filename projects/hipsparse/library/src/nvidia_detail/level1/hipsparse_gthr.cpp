@@ -36,13 +36,11 @@ hipsparseStatus_t hipsparseSgthr(hipsparseHandle_t    handle,
                                  const int*           xInd,
                                  hipsparseIndexBase_t idxBase)
 {
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSgthr((cusparseHandle_t)handle,
-                      nnz,
-                      y,
-                      xVal,
-                      xInd,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+        cusparseSgthr((cusparseHandle_t)handle, nnz, y, xVal, xInd, backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseDgthr(hipsparseHandle_t    handle,
@@ -52,13 +50,11 @@ hipsparseStatus_t hipsparseDgthr(hipsparseHandle_t    handle,
                                  const int*           xInd,
                                  hipsparseIndexBase_t idxBase)
 {
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDgthr((cusparseHandle_t)handle,
-                      nnz,
-                      y,
-                      xVal,
-                      xInd,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+        cusparseDgthr((cusparseHandle_t)handle, nnz, y, xVal, xInd, backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseCgthr(hipsparseHandle_t    handle,
@@ -68,13 +64,15 @@ hipsparseStatus_t hipsparseCgthr(hipsparseHandle_t    handle,
                                  const int*           xInd,
                                  hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCgthr((cusparseHandle_t)handle,
-                      nnz,
-                      (const cuComplex*)y,
-                      (cuComplex*)xVal,
-                      xInd,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCgthr((cusparseHandle_t)handle,
+                                                                 nnz,
+                                                                 (const cuComplex*)y,
+                                                                 (cuComplex*)xVal,
+                                                                 xInd,
+                                                                 backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseZgthr(hipsparseHandle_t       handle,
@@ -84,12 +82,14 @@ hipsparseStatus_t hipsparseZgthr(hipsparseHandle_t       handle,
                                  const int*              xInd,
                                  hipsparseIndexBase_t    idxBase)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseZgthr((cusparseHandle_t)handle,
-                      nnz,
-                      (const cuDoubleComplex*)y,
-                      (cuDoubleComplex*)xVal,
-                      xInd,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseZgthr((cusparseHandle_t)handle,
+                                                                 nnz,
+                                                                 (const cuDoubleComplex*)y,
+                                                                 (cuDoubleComplex*)xVal,
+                                                                 xInd,
+                                                                 backend_idxBase));
 }
 #endif

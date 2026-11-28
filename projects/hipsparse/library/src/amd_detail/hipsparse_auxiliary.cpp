@@ -58,13 +58,45 @@ hipsparseStatus_t hipsparseDestroy(hipsparseHandle_t handle)
         rocsparse_destroy_handle((rocsparse_handle)handle));
 }
 
+static bool is_known_hipsparse_status(hipsparseStatus_t status)
+{
+    switch(status)
+    {
+    case HIPSPARSE_STATUS_SUCCESS:
+    case HIPSPARSE_STATUS_NOT_INITIALIZED:
+    case HIPSPARSE_STATUS_ALLOC_FAILED:
+    case HIPSPARSE_STATUS_INVALID_VALUE:
+    case HIPSPARSE_STATUS_ARCH_MISMATCH:
+    case HIPSPARSE_STATUS_MAPPING_ERROR:
+    case HIPSPARSE_STATUS_EXECUTION_FAILED:
+    case HIPSPARSE_STATUS_INTERNAL_ERROR:
+    case HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+    case HIPSPARSE_STATUS_ZERO_PIVOT:
+    case HIPSPARSE_STATUS_NOT_SUPPORTED:
+    case HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES:
+        return true;
+    default:
+        return false;
+    }
+}
+
 const char* hipsparseGetErrorName(hipsparseStatus_t status)
 {
+    if(!is_known_hipsparse_status(status))
+    {
+        return "Unrecognized status code";
+    }
+
     return rocsparse_get_status_name(hipsparse::hipSPARSEStatusToRocSPARSEStatus(status));
 }
 
 const char* hipsparseGetErrorString(hipsparseStatus_t status)
 {
+    if(!is_known_hipsparse_status(status))
+    {
+        return "Unrecognized status code";
+    }
+
     return rocsparse_get_status_description(hipsparse::hipSPARSEStatusToRocSPARSEStatus(status));
 }
 
@@ -138,8 +170,11 @@ hipsparseStatus_t hipsparseGetStream(hipsparseHandle_t handle, hipStream_t* stre
 
 hipsparseStatus_t hipsparseSetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t mode)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_pointer_mode(
-        (rocsparse_handle)handle, hipsparse::hipPtrModeToHCCPtrMode(mode)));
+    rocsparse_pointer_mode_ backend_mode{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPtrModeToHCCPtrMode(mode, &backend_mode));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_set_pointer_mode((rocsparse_handle)handle, backend_mode));
 }
 
 hipsparseStatus_t hipsparseGetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t* mode)
@@ -170,8 +205,11 @@ hipsparseStatus_t hipsparseCopyMatDescr(hipsparseMatDescr_t dest, const hipspars
 
 hipsparseStatus_t hipsparseSetMatType(hipsparseMatDescr_t descrA, hipsparseMatrixType_t type)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_type(
-        (rocsparse_mat_descr)descrA, hipsparse::hipMatTypeToHCCMatType(type)));
+    rocsparse_matrix_type_ backend_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipMatTypeToHCCMatType(type, &backend_type));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_set_mat_type((rocsparse_mat_descr)descrA, backend_type));
 }
 
 hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA)
@@ -181,8 +219,11 @@ hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatFillMode(hipsparseMatDescr_t descrA, hipsparseFillMode_t fillMode)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_fill_mode(
-        (rocsparse_mat_descr)descrA, hipsparse::hipFillModeToHCCFillMode(fillMode)));
+    rocsparse_fill_mode_ backend_fillMode{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipFillModeToHCCFillMode(fillMode, &backend_fillMode));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_set_mat_fill_mode((rocsparse_mat_descr)descrA, backend_fillMode));
 }
 
 hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA)
@@ -193,8 +234,11 @@ hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatDiagType(hipsparseMatDescr_t descrA, hipsparseDiagType_t diagType)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_diag_type(
-        (rocsparse_mat_descr)descrA, hipsparse::hipDiagTypeToHCCDiagType(diagType)));
+    rocsparse_diag_type_ backend_diagType{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDiagTypeToHCCDiagType(diagType, &backend_diagType));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_set_mat_diag_type((rocsparse_mat_descr)descrA, backend_diagType));
 }
 
 hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA)
@@ -205,8 +249,11 @@ hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatIndexBase(hipsparseMatDescr_t descrA, hipsparseIndexBase_t base)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_set_mat_index_base(
-        (rocsparse_mat_descr)descrA, hipsparse::hipBaseToHCCBase(base)));
+    rocsparse_index_base_ backend_base{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(base, &backend_base));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_set_mat_index_base((rocsparse_mat_descr)descrA, backend_base));
 }
 
 hipsparseIndexBase_t hipsparseGetMatIndexBase(const hipsparseMatDescr_t descrA)

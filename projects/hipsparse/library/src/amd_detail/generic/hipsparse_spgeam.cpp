@@ -78,17 +78,6 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr)
 
 namespace hipsparse
 {
-    static rocsparse_spgeam_alg hipSpGEAMAlgToHCCSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
-    {
-        switch(alg)
-        {
-        case HIPSPARSE_SPGEAM_ALG1:
-            return rocsparse_spgeam_alg_default;
-        default:
-            throw "Non existent hipsparseSpGEAMAlg_t";
-        }
-    }
-
     static hipsparseStatus_t setSpGEAMInputs(hipsparseHandle_t      handle,
                                              hipsparseSpGEAMDescr_t descr,
                                              hipsparseOperation_t   opA,
@@ -99,10 +88,14 @@ namespace hipsparse
                                              const void*            beta)
     {
         rocsparse_handle     rocHandle = (rocsparse_handle)handle;
-        rocsparse_spgeam_alg rocAlg    = hipsparse::hipSpGEAMAlgToHCCSpGEAMAlg(alg);
-        rocsparse_operation  rocOpA    = hipsparse::hipOperationToHCCOperation(opA);
-        rocsparse_operation  rocOpB    = hipsparse::hipOperationToHCCOperation(opB);
-        rocsparse_datatype   rocType   = hipsparse::hipDataTypeToHCCDataType(computeType);
+        rocsparse_spgeam_alg rocAlg;
+        rocsparse_operation  rocOpA;
+        rocsparse_operation  rocOpB;
+        rocsparse_datatype   rocType;
+        RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEAMAlgToHCCSpGEAMAlg(alg, &rocAlg));
+        RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &rocOpA));
+        RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &rocOpB));
+        RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &rocType));
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
             rocHandle, descr->descr, rocsparse_spgeam_input_alg, &rocAlg, sizeof(rocAlg), nullptr));
@@ -483,8 +476,55 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
                                              size_t*                    bufferSize)
 {
     // Match cusparse error handling
-    if(handle == nullptr || alpha == nullptr || beta == nullptr || matA == nullptr
-       || matB == nullptr || matC == nullptr || spgeamDescr == nullptr || bufferSize == nullptr)
+
+    if(handle == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    if(alpha == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(beta == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matA == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matB == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matC == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spgeam_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEAMAlgToHCCSpGEAMAlg(alg, &backend_alg));
+
+    if(spgeamDescr == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(bufferSize == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
@@ -527,8 +567,49 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
                                       hipsparseSpGEAMDescr_t     spgeamDescr,
                                       void*                      externalBuffer)
 {
-    if(handle == nullptr || alpha == nullptr || beta == nullptr || matA == nullptr
-       || matB == nullptr || matC == nullptr || spgeamDescr == nullptr)
+
+    if(handle == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    if(alpha == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(beta == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matA == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matB == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matC == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+    rocsparse_datatype rocType;
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &rocType));
+
+    rocsparse_spgeam_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEAMAlgToHCCSpGEAMAlg(alg, &backend_alg));
+
+    if(spgeamDescr == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
@@ -537,7 +618,6 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 
     // Degenerate zero-scalar cases collapse to a scaled copy of a single operand (matching
     // cuSPARSE) and are handled without rocsparse_spgeam.
-    const rocsparse_datatype    rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
     hipsparse::spgeam_zero_mode zeroMode;
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType, &zeroMode));
@@ -582,8 +662,49 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
                                   hipsparseSpGEAMDescr_t     spgeamDescr,
                                   void*                      externalBuffer)
 {
-    if(handle == nullptr || alpha == nullptr || beta == nullptr || matA == nullptr
-       || matB == nullptr || matC == nullptr || spgeamDescr == nullptr)
+
+    if(handle == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    if(alpha == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(beta == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matA == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matB == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matC == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+    rocsparse_datatype rocType;
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &rocType));
+
+    rocsparse_spgeam_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEAMAlgToHCCSpGEAMAlg(alg, &backend_alg));
+
+    if(spgeamDescr == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
@@ -592,7 +713,6 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
 
     // Degenerate zero-scalar cases collapse to a scaled copy of a single operand (matching
     // cuSPARSE) and are handled with rocsparse_spmat_scale instead of rocsparse_spgeam.
-    const rocsparse_datatype    rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
     hipsparse::spgeam_zero_mode zeroMode;
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType, &zeroMode));

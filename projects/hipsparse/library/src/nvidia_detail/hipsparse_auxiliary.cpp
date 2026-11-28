@@ -39,13 +39,47 @@ hipsparseStatus_t hipsparseDestroy(hipsparseHandle_t handle)
 }
 
 #if CUDART_VERSION > 10000
+static bool is_known_hipsparse_status(hipsparseStatus_t status)
+{
+    switch(status)
+    {
+    case HIPSPARSE_STATUS_SUCCESS:
+    case HIPSPARSE_STATUS_NOT_INITIALIZED:
+    case HIPSPARSE_STATUS_ALLOC_FAILED:
+    case HIPSPARSE_STATUS_INVALID_VALUE:
+    case HIPSPARSE_STATUS_ARCH_MISMATCH:
+    case HIPSPARSE_STATUS_MAPPING_ERROR:
+    case HIPSPARSE_STATUS_EXECUTION_FAILED:
+    case HIPSPARSE_STATUS_INTERNAL_ERROR:
+    case HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+    case HIPSPARSE_STATUS_ZERO_PIVOT:
+    case HIPSPARSE_STATUS_NOT_SUPPORTED:
+#if CUDART_VERSION >= 11003
+    case HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES:
+#endif
+        return true;
+    default:
+        return false;
+    }
+}
+
 const char* hipsparseGetErrorName(hipsparseStatus_t status)
 {
+    if(!is_known_hipsparse_status(status))
+    {
+        return "Unrecognized status code";
+    }
+
     return cusparseGetErrorName(hipsparse::hipSPARSEStatusToCUSPARSEStatus(status));
 }
 
 const char* hipsparseGetErrorString(hipsparseStatus_t status)
 {
+    if(!is_known_hipsparse_status(status))
+    {
+        return "Unrecognized status code";
+    }
+
     return cusparseGetErrorString(hipsparse::hipSPARSEStatusToCUSPARSEStatus(status));
 }
 #endif
@@ -115,8 +149,11 @@ hipsparseStatus_t hipsparseGetStream(hipsparseHandle_t handle, hipStream_t* stre
 
 hipsparseStatus_t hipsparseSetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t mode)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetPointerMode(
-        (cusparseHandle_t)handle, hipsparse::hipPointerModeToCudaPointerMode(mode)));
+    cusparsePointerMode_t backend_mode{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPointerModeToCudaPointerMode(mode, &backend_mode));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetPointerMode((cusparseHandle_t)handle, backend_mode));
 }
 
 hipsparseStatus_t hipsparseGetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t* mode)
@@ -146,8 +183,11 @@ hipsparseStatus_t hipsparseCopyMatDescr(hipsparseMatDescr_t dest, const hipspars
 
 hipsparseStatus_t hipsparseSetMatType(hipsparseMatDescr_t descrA, hipsparseMatrixType_t type)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetMatType(
-        (cusparseMatDescr_t)descrA, hipsparse::hipMatrixTypeToCudaMatrixType(type)));
+    cusparseMatrixType_t backend_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipMatrixTypeToCudaMatrixType(type, &backend_type));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetMatType((cusparseMatDescr_t)descrA, backend_type));
 }
 
 hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA)
@@ -158,8 +198,11 @@ hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatFillMode(hipsparseMatDescr_t descrA, hipsparseFillMode_t fillMode)
 {
+    cusparseFillMode_t backend_fillMode{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipFillToCudaFill(fillMode, &backend_fillMode));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSetMatFillMode((cusparseMatDescr_t)descrA, hipsparse::hipFillToCudaFill(fillMode)));
+        cusparseSetMatFillMode((cusparseMatDescr_t)descrA, backend_fillMode));
 }
 
 hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA)
@@ -169,8 +212,11 @@ hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatDiagType(hipsparseMatDescr_t descrA, hipsparseDiagType_t diagType)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetMatDiagType(
-        (cusparseMatDescr_t)descrA, hipsparse::hipDiagonalToCudaDiagonal(diagType)));
+    cusparseDiagType_t backend_diagType{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDiagonalToCudaDiagonal(diagType, &backend_diagType));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetMatDiagType((cusparseMatDescr_t)descrA, backend_diagType));
 }
 
 hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA)
@@ -181,8 +227,11 @@ hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA)
 
 hipsparseStatus_t hipsparseSetMatIndexBase(hipsparseMatDescr_t descrA, hipsparseIndexBase_t base)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSetMatIndexBase(
-        (cusparseMatDescr_t)descrA, hipsparse::hipIndexBaseToCudaIndexBase(base)));
+    cusparseIndexBase_t backend_base{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(base, &backend_base));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseSetMatIndexBase((cusparseMatDescr_t)descrA, backend_base));
 }
 
 hipsparseIndexBase_t hipsparseGetMatIndexBase(const hipsparseMatDescr_t descrA)

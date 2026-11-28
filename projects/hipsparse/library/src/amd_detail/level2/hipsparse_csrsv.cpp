@@ -58,6 +58,9 @@ hipsparseStatus_t hipsparseScsrsv2_bufferSize(hipsparseHandle_t         handle,
                                               csrsv2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -67,7 +70,7 @@ hipsparseStatus_t hipsparseScsrsv2_bufferSize(hipsparseHandle_t         handle,
     rocsparse_status status;
 
     status = rocsparse_scsrsv_buffer_size((rocsparse_handle)handle,
-                                          hipsparse::hipOperationToHCCOperation(transA),
+                                          backend_transA,
                                           m,
                                           nnz,
                                           (rocsparse_mat_descr)descrA,
@@ -93,6 +96,9 @@ hipsparseStatus_t hipsparseDcsrsv2_bufferSize(hipsparseHandle_t         handle,
                                               csrsv2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -102,7 +108,7 @@ hipsparseStatus_t hipsparseDcsrsv2_bufferSize(hipsparseHandle_t         handle,
     rocsparse_status status;
 
     status = rocsparse_dcsrsv_buffer_size((rocsparse_handle)handle,
-                                          hipsparse::hipOperationToHCCOperation(transA),
+                                          backend_transA,
                                           m,
                                           nnz,
                                           (rocsparse_mat_descr)descrA,
@@ -128,6 +134,9 @@ hipsparseStatus_t hipsparseCcsrsv2_bufferSize(hipsparseHandle_t         handle,
                                               csrsv2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -137,7 +146,7 @@ hipsparseStatus_t hipsparseCcsrsv2_bufferSize(hipsparseHandle_t         handle,
     rocsparse_status status;
 
     status = rocsparse_ccsrsv_buffer_size((rocsparse_handle)handle,
-                                          hipsparse::hipOperationToHCCOperation(transA),
+                                          backend_transA,
                                           m,
                                           nnz,
                                           (rocsparse_mat_descr)descrA,
@@ -163,6 +172,9 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSize(hipsparseHandle_t         handle,
                                               csrsv2Info_t              info,
                                               int*                      pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     if(pBufferSizeInBytes == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
@@ -172,7 +184,7 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSize(hipsparseHandle_t         handle,
     rocsparse_status status;
 
     status = rocsparse_zcsrsv_buffer_size((rocsparse_handle)handle,
-                                          hipsparse::hipOperationToHCCOperation(transA),
+                                          backend_transA,
                                           m,
                                           nnz,
                                           (rocsparse_mat_descr)descrA,
@@ -198,9 +210,12 @@ hipsparseStatus_t hipsparseScsrsv2_bufferSizeExt(hipsparseHandle_t         handl
                                                  csrsv2Info_t              info,
                                                  size_t*                   pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_scsrsv_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
+                                     backend_transA,
                                      m,
                                      nnz,
                                      (rocsparse_mat_descr)descrA,
@@ -222,9 +237,12 @@ hipsparseStatus_t hipsparseDcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
                                                  csrsv2Info_t              info,
                                                  size_t*                   pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_dcsrsv_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
+                                     backend_transA,
                                      m,
                                      nnz,
                                      (rocsparse_mat_descr)descrA,
@@ -246,9 +264,12 @@ hipsparseStatus_t hipsparseCcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
                                                  csrsv2Info_t              info,
                                                  size_t*                   pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_ccsrsv_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
+                                     backend_transA,
                                      m,
                                      nnz,
                                      (rocsparse_mat_descr)descrA,
@@ -270,9 +291,12 @@ hipsparseStatus_t hipsparseZcsrsv2_bufferSizeExt(hipsparseHandle_t         handl
                                                  csrsv2Info_t              info,
                                                  size_t*                   pBufferSizeInBytes)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsrsv_buffer_size((rocsparse_handle)handle,
-                                     hipsparse::hipOperationToHCCOperation(transA),
+                                     backend_transA,
                                      m,
                                      nnz,
                                      (rocsparse_mat_descr)descrA,
@@ -295,24 +319,29 @@ hipsparseStatus_t hipsparseScsrsv2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csrsv2_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
 
     // csrsv analysis
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_scsrsv_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipOperationToHCCOperation(transA),
-                                  m,
-                                  nnz,
-                                  (rocsparse_mat_descr)descrA,
-                                  csrSortedValA,
-                                  csrSortedRowPtrA,
-                                  csrSortedColIndA,
-                                  (rocsparse_mat_info)info,
-                                  rocsparse_analysis_policy_force,
-                                  rocsparse_solve_policy_auto,
-                                  pBuffer));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_scsrsv_analysis((rocsparse_handle)handle,
+                                                        backend_transA,
+                                                        m,
+                                                        nnz,
+                                                        (rocsparse_mat_descr)descrA,
+                                                        csrSortedValA,
+                                                        csrSortedRowPtrA,
+                                                        csrSortedColIndA,
+                                                        (rocsparse_mat_info)info,
+                                                        rocsparse_analysis_policy_force,
+                                                        rocsparse_solve_policy_auto,
+                                                        pBuffer));
 
     // Synchronize stream
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
@@ -332,24 +361,29 @@ hipsparseStatus_t hipsparseDcsrsv2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csrsv2_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
 
     // csrsv analysis
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_dcsrsv_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipOperationToHCCOperation(transA),
-                                  m,
-                                  nnz,
-                                  (rocsparse_mat_descr)descrA,
-                                  csrSortedValA,
-                                  csrSortedRowPtrA,
-                                  csrSortedColIndA,
-                                  (rocsparse_mat_info)info,
-                                  rocsparse_analysis_policy_force,
-                                  rocsparse_solve_policy_auto,
-                                  pBuffer));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_dcsrsv_analysis((rocsparse_handle)handle,
+                                                        backend_transA,
+                                                        m,
+                                                        nnz,
+                                                        (rocsparse_mat_descr)descrA,
+                                                        csrSortedValA,
+                                                        csrSortedRowPtrA,
+                                                        csrSortedColIndA,
+                                                        (rocsparse_mat_info)info,
+                                                        rocsparse_analysis_policy_force,
+                                                        rocsparse_solve_policy_auto,
+                                                        pBuffer));
 
     // Synchronize stream
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
@@ -369,6 +403,12 @@ hipsparseStatus_t hipsparseCcsrsv2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csrsv2_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
@@ -376,7 +416,7 @@ hipsparseStatus_t hipsparseCcsrsv2_analysis(hipsparseHandle_t         handle,
     // csrsv analysis
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_ccsrsv_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipOperationToHCCOperation(transA),
+                                  backend_transA,
                                   m,
                                   nnz,
                                   (rocsparse_mat_descr)descrA,
@@ -406,6 +446,12 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
                                             hipsparseSolvePolicy_t    policy,
                                             void*                     pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csrsv2_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
@@ -413,7 +459,7 @@ hipsparseStatus_t hipsparseZcsrsv2_analysis(hipsparseHandle_t         handle,
     // csrsv analysis
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_zcsrsv_analysis((rocsparse_handle)handle,
-                                  hipsparse::hipOperationToHCCOperation(transA),
+                                  backend_transA,
                                   m,
                                   nnz,
                                   (rocsparse_mat_descr)descrA,
@@ -446,21 +492,26 @@ hipsparseStatus_t hipsparseScsrsv2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_scsrsv_solve((rocsparse_handle)handle,
-                               hipsparse::hipOperationToHCCOperation(transA),
-                               m,
-                               nnz,
-                               alpha,
-                               (rocsparse_mat_descr)descrA,
-                               csrSortedValA,
-                               csrSortedRowPtrA,
-                               csrSortedColIndA,
-                               (rocsparse_mat_info)info,
-                               f,
-                               x,
-                               rocsparse_solve_policy_auto,
-                               pBuffer));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_scsrsv_solve((rocsparse_handle)handle,
+                                                                        backend_transA,
+                                                                        m,
+                                                                        nnz,
+                                                                        alpha,
+                                                                        (rocsparse_mat_descr)descrA,
+                                                                        csrSortedValA,
+                                                                        csrSortedRowPtrA,
+                                                                        csrSortedColIndA,
+                                                                        (rocsparse_mat_info)info,
+                                                                        f,
+                                                                        x,
+                                                                        rocsparse_solve_policy_auto,
+                                                                        pBuffer));
 }
 
 hipsparseStatus_t hipsparseDcsrsv2_solve(hipsparseHandle_t         handle,
@@ -478,21 +529,26 @@ hipsparseStatus_t hipsparseDcsrsv2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dcsrsv_solve((rocsparse_handle)handle,
-                               hipsparse::hipOperationToHCCOperation(transA),
-                               m,
-                               nnz,
-                               alpha,
-                               (rocsparse_mat_descr)descrA,
-                               csrSortedValA,
-                               csrSortedRowPtrA,
-                               csrSortedColIndA,
-                               (rocsparse_mat_info)info,
-                               f,
-                               x,
-                               rocsparse_solve_policy_auto,
-                               pBuffer));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dcsrsv_solve((rocsparse_handle)handle,
+                                                                        backend_transA,
+                                                                        m,
+                                                                        nnz,
+                                                                        alpha,
+                                                                        (rocsparse_mat_descr)descrA,
+                                                                        csrSortedValA,
+                                                                        csrSortedRowPtrA,
+                                                                        csrSortedColIndA,
+                                                                        (rocsparse_mat_info)info,
+                                                                        f,
+                                                                        x,
+                                                                        rocsparse_solve_policy_auto,
+                                                                        pBuffer));
 }
 
 hipsparseStatus_t hipsparseCcsrsv2_solve(hipsparseHandle_t         handle,
@@ -510,9 +566,15 @@ hipsparseStatus_t hipsparseCcsrsv2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_ccsrsv_solve((rocsparse_handle)handle,
-                               hipsparse::hipOperationToHCCOperation(transA),
+                               backend_transA,
                                m,
                                nnz,
                                (const rocsparse_float_complex*)alpha,
@@ -542,9 +604,15 @@ hipsparseStatus_t hipsparseZcsrsv2_solve(hipsparseHandle_t         handle,
                                          hipsparseSolvePolicy_t    policy,
                                          void*                     pBuffer)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsrsv_solve((rocsparse_handle)handle,
-                               hipsparse::hipOperationToHCCOperation(transA),
+                               backend_transA,
                                m,
                                nnz,
                                (const rocsparse_double_complex*)alpha,

@@ -86,7 +86,8 @@ hipsparseStatus_t hipsparseSpSV_destroyDescr(hipsparseSpSVDescr_t descr);
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr, or
-*          \p pBufferSizeInBytes is nullptr, or \p opA is invalid.
+*          \p pBufferSizeInBytes is nullptr, or \p opA, \p computeType, or \p alg is not a valid
+*          value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType, or \p alg is currently not supported.
 */
 HIPSPARSE_EXPORT
@@ -150,7 +151,8 @@ hipsparseStatus_t hipsparseSpSV_bufferSize(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr, or
-*               \p externalBuffer pointer is invalid.
+*               \p externalBuffer pointer is invalid, or \p opA, \p computeType, or \p alg is not a
+*               valid value of its enumeration type.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType, or \p alg is
 *               currently not supported.
 */
@@ -241,7 +243,8 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, or \p spsvDescr
-*               pointer is invalid.
+*               pointer is invalid, or \p opA, \p computeType, or \p alg is not a valid value of its
+*               enumeration type.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType, or \p alg is
 *               currently not supported.
 */

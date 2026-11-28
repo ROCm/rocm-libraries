@@ -111,7 +111,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
 *          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC is nullptr,
-*          \p mb or \p nb is negative, or \p blockDim is invalid.
+*          \p mb or \p nb is negative, or \p blockDim is invalid, or \p dirA is not a valid value of
+*          its enumeration type.
 */
 /**@{*/
 HIPSPARSE_EXPORT
@@ -211,7 +212,8 @@ hipsparseStatus_t hipsparseSbsr2csr(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
 *          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC is nullptr,
-*          \p mb or \p nb is negative, or \p blockDim is invalid.
+*          \p mb or \p nb is negative, or \p blockDim is invalid, or \p dirA is not a valid value of
+*          its enumeration type.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDbsr2csr(hipsparseHandle_t         handle,
@@ -310,7 +312,8 @@ hipsparseStatus_t hipsparseDbsr2csr(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
 *          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC is nullptr,
-*          \p mb or \p nb is negative, or \p blockDim is invalid.
+*          \p mb or \p nb is negative, or \p blockDim is invalid, or \p dirA is not a valid value of
+*          its enumeration type.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCbsr2csr(hipsparseHandle_t         handle,
@@ -409,7 +412,8 @@ hipsparseStatus_t hipsparseCbsr2csr(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrC, \p bsrValA,
 *          \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC is nullptr,
-*          \p mb or \p nb is negative, or \p blockDim is invalid.
+*          \p mb or \p nb is negative, or \p blockDim is invalid, or \p dirA is not a valid value of
+*          its enumeration type.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZbsr2csr(hipsparseHandle_t         handle,

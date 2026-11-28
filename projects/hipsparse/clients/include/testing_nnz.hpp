@@ -99,8 +99,7 @@ void testing_nnz_bad_arg(const Arguments& argus)
 #endif
 
     // Testing invalid direction
-    try
-    {
+    verify_hipsparse_status_invalid_value(
         hipsparseXnnz(handle,
                       (hipsparseDirection_t)77,
                       -1,
@@ -109,16 +108,8 @@ void testing_nnz_bad_arg(const Arguments& argus)
                       (const T*)nullptr,
                       -1,
                       nullptr,
-                      nullptr);
-
-        // An exception should be thrown.
-        verify_hipsparse_status_internal_error(
-            HIPSPARSE_STATUS_SUCCESS,
-            "Error: an exception must be thrown from the conversion of the hipsparseDirection_t.");
-    }
-    catch(...)
-    {
-    }
+                      nullptr),
+        "Error: an invalid hipsparseDirection_t must be detected.");
 
     verify_hipsparse_status_invalid_size(hipsparseXnnz(handle,
                                                        dirA,

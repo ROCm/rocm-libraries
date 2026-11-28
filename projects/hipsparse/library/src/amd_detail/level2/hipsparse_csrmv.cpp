@@ -44,21 +44,23 @@ hipsparseStatus_t hipsparseScsrmv(hipsparseHandle_t         handle,
                                   const float*              beta,
                                   float*                    y)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_scsrmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         m,
-                         n,
-                         nnz,
-                         alpha,
-                         (rocsparse_mat_descr)descrA,
-                         csrSortedValA,
-                         csrSortedRowPtrA,
-                         csrSortedColIndA,
-                         nullptr,
-                         x,
-                         beta,
-                         y));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_scsrmv((rocsparse_handle)handle,
+                                                                  backend_transA,
+                                                                  m,
+                                                                  n,
+                                                                  nnz,
+                                                                  alpha,
+                                                                  (rocsparse_mat_descr)descrA,
+                                                                  csrSortedValA,
+                                                                  csrSortedRowPtrA,
+                                                                  csrSortedColIndA,
+                                                                  nullptr,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseDcsrmv(hipsparseHandle_t         handle,
@@ -75,21 +77,23 @@ hipsparseStatus_t hipsparseDcsrmv(hipsparseHandle_t         handle,
                                   const double*             beta,
                                   double*                   y)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dcsrmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         m,
-                         n,
-                         nnz,
-                         alpha,
-                         (rocsparse_mat_descr)descrA,
-                         csrSortedValA,
-                         csrSortedRowPtrA,
-                         csrSortedColIndA,
-                         nullptr,
-                         x,
-                         beta,
-                         y));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dcsrmv((rocsparse_handle)handle,
+                                                                  backend_transA,
+                                                                  m,
+                                                                  n,
+                                                                  nnz,
+                                                                  alpha,
+                                                                  (rocsparse_mat_descr)descrA,
+                                                                  csrSortedValA,
+                                                                  csrSortedRowPtrA,
+                                                                  csrSortedColIndA,
+                                                                  nullptr,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseCcsrmv(hipsparseHandle_t         handle,
@@ -106,9 +110,12 @@ hipsparseStatus_t hipsparseCcsrmv(hipsparseHandle_t         handle,
                                   const hipComplex*         beta,
                                   hipComplex*               y)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_ccsrmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
+                         backend_transA,
                          m,
                          n,
                          nnz,
@@ -137,9 +144,12 @@ hipsparseStatus_t hipsparseZcsrmv(hipsparseHandle_t         handle,
                                   const hipDoubleComplex*   beta,
                                   hipDoubleComplex*         y)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsrmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
+                         backend_transA,
                          m,
                          n,
                          nnz,

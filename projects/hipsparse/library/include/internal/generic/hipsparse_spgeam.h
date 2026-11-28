@@ -106,9 +106,11 @@ hipsparseStatus_t hipsparseSpGEAM_destroyDescr(hipsparseSpGEAMDescr_t descr);
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC,
-*          \p spgeamDescr, or \p bufferSize is nullptr, or \p opA or \p opB is invalid.
+*          \p spgeamDescr, or \p bufferSize is nullptr, or \p opA, \p opB, \p computeType, or \p alg
+*          is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or \p computeType is currently not
+*          supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
@@ -170,9 +172,11 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC, or
-*          \p spgeamDescr is nullptr.
+*          \p spgeamDescr is nullptr, or \p opA, \p opB, \p computeType, or \p alg is not a valid
+*          value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or \p computeType is currently not
+*          supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
@@ -251,9 +255,11 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC, or
-*          \p spgeamDescr is nullptr.
+*          \p spgeamDescr is nullptr, or \p opA, \p opB, \p computeType, or \p alg is not a valid
+*          value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or \p computeType is currently not
+*          supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,

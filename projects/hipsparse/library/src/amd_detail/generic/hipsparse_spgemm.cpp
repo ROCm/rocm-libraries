@@ -174,8 +174,55 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
                                                  void*                      externalBuffer1)
 {
     // Match cusparse error handling
-    if(handle == nullptr || alpha == nullptr || beta == nullptr || matA == nullptr
-       || matB == nullptr || matC == nullptr || bufferSize1 == nullptr || spgemmDescr == nullptr)
+
+    if(handle == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    if(alpha == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(beta == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matA == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matB == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matC == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spgemm_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg, &backend_alg));
+
+    if(bufferSize1 == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(spgemmDescr == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
@@ -209,16 +256,16 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
     {
         // Query for required buffer size
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgemm((rocsparse_handle)handle,
-                                                   hipsparse::hipOperationToHCCOperation(opA),
-                                                   hipsparse::hipOperationToHCCOperation(opB),
+                                                   backend_opA,
+                                                   backend_opB,
                                                    alpha,
                                                    to_rocsparse_const_spmat_descr(matA),
                                                    to_rocsparse_const_spmat_descr(matB),
                                                    nullptr,
                                                    to_rocsparse_const_spmat_descr(matC),
                                                    to_rocsparse_spmat_descr(matC),
-                                                   hipsparse::hipDataTypeToHCCDataType(computeType),
-                                                   hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
+                                                   backend_data_type,
+                                                   backend_alg,
                                                    rocsparse_spgemm_stage_buffer_size,
                                                    bufferSize1,
                                                    nullptr));
@@ -241,18 +288,19 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
 
         // Compute number of non-zeros in C matrix
         size_t bufferSize = (spgemmDescr->bufferSize1 - byteOffset1);
+
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse_spgemm((rocsparse_handle)handle,
-                             hipsparse::hipOperationToHCCOperation(opA),
-                             hipsparse::hipOperationToHCCOperation(opB),
+                             backend_opA,
+                             backend_opB,
                              alpha,
                              to_rocsparse_const_spmat_descr(matA),
                              to_rocsparse_const_spmat_descr(matB),
                              nullptr,
                              to_rocsparse_const_spmat_descr(matC),
                              to_rocsparse_spmat_descr(matC),
-                             hipsparse::hipDataTypeToHCCDataType(computeType),
-                             hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
+                             backend_data_type,
+                             backend_alg,
                              rocsparse_spgemm_stage_nnz,
                              &bufferSize,
                              (static_cast<char*>(spgemmDescr->externalBuffer1) + byteOffset1)));
@@ -275,8 +323,50 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
                                           size_t*                    bufferSize2,
                                           void*                      externalBuffer2)
 {
-    if(handle == nullptr || alpha == nullptr || beta == nullptr || matA == nullptr
-       || matB == nullptr || matC == nullptr || bufferSize2 == nullptr)
+
+    if(handle == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    if(alpha == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(beta == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matA == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matB == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matC == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spgemm_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg, &backend_alg));
+
+    if(bufferSize2 == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
@@ -351,18 +441,19 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
             matC, csrRowOffsetsCFromBuffer1, csrColIndCFromBuffer2, csrValuesCFromBuffer2));
 
         size_t bufferSize = (spgemmDescr->bufferSize1 - byteOffset1);
+
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse_spgemm((rocsparse_handle)handle,
-                             hipsparse::hipOperationToHCCOperation(opA),
-                             hipsparse::hipOperationToHCCOperation(opB),
+                             backend_opA,
+                             backend_opB,
                              alpha,
                              to_rocsparse_const_spmat_descr(matA),
                              to_rocsparse_const_spmat_descr(matB),
                              nullptr,
                              to_rocsparse_const_spmat_descr(matC),
                              to_rocsparse_spmat_descr(matC),
-                             hipsparse::hipDataTypeToHCCDataType(computeType),
-                             hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
+                             backend_data_type,
+                             backend_alg,
                              rocsparse_spgemm_stage_compute,
                              &bufferSize,
                              (static_cast<char*>(spgemmDescr->externalBuffer1) + byteOffset1)));
@@ -401,8 +492,52 @@ hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,
                                        hipsparseSpGEMMAlg_t       alg,
                                        hipsparseSpGEMMDescr_t     spgemmDescr)
 {
-    if(handle == nullptr || alpha == nullptr || beta == nullptr || matA == nullptr
-       || matB == nullptr || matC == nullptr || spgemmDescr == nullptr)
+
+    if(handle == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    rocsparse_operation_ backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opA, &backend_opA));
+
+    rocsparse_operation_ backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(opB, &backend_opB));
+
+    if(alpha == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(beta == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matA == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matB == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    if(matC == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    // Validate computeType before any work. The branches below only compare against the
+    // supported types, so an unsupported type would otherwise pass a null scalar through.
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
+    rocsparse_spgemm_alg_ backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg, &backend_alg));
+
+    if(spgemmDescr == nullptr)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }

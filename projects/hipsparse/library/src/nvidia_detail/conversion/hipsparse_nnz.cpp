@@ -38,16 +38,18 @@ hipsparseStatus_t hipsparseSnnz(hipsparseHandle_t         handle,
                                 int*                      nnzPerRowColumn,
                                 int*                      nnzTotalDevHostPtr)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSnnz((cusparseHandle_t)handle,
-                     hipsparse::hipDirectionToCudaDirection(dirA),
-                     m,
-                     n,
-                     (const cusparseMatDescr_t)descrA,
-                     A,
-                     lda,
-                     nnzPerRowColumn,
-                     nnzTotalDevHostPtr));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseSnnz((cusparseHandle_t)handle,
+                                                                backend_dirA,
+                                                                m,
+                                                                n,
+                                                                (const cusparseMatDescr_t)descrA,
+                                                                A,
+                                                                lda,
+                                                                nnzPerRowColumn,
+                                                                nnzTotalDevHostPtr));
 }
 
 hipsparseStatus_t hipsparseDnnz(hipsparseHandle_t         handle,
@@ -60,16 +62,18 @@ hipsparseStatus_t hipsparseDnnz(hipsparseHandle_t         handle,
                                 int*                      nnzPerRowColumn,
                                 int*                      nnzTotalDevHostPtr)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDnnz((cusparseHandle_t)handle,
-                     hipsparse::hipDirectionToCudaDirection(dirA),
-                     m,
-                     n,
-                     (const cusparseMatDescr_t)descrA,
-                     A,
-                     lda,
-                     nnzPerRowColumn,
-                     nnzTotalDevHostPtr));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDnnz((cusparseHandle_t)handle,
+                                                                backend_dirA,
+                                                                m,
+                                                                n,
+                                                                (const cusparseMatDescr_t)descrA,
+                                                                A,
+                                                                lda,
+                                                                nnzPerRowColumn,
+                                                                nnzTotalDevHostPtr));
 }
 
 hipsparseStatus_t hipsparseCnnz(hipsparseHandle_t         handle,
@@ -82,16 +86,18 @@ hipsparseStatus_t hipsparseCnnz(hipsparseHandle_t         handle,
                                 int*                      nnzPerRowColumn,
                                 int*                      nnzTotalDevHostPtr)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCnnz((cusparseHandle_t)handle,
-                     hipsparse::hipDirectionToCudaDirection(dirA),
-                     m,
-                     n,
-                     (const cusparseMatDescr_t)descrA,
-                     (const cuComplex*)A,
-                     lda,
-                     nnzPerRowColumn,
-                     nnzTotalDevHostPtr));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCnnz((cusparseHandle_t)handle,
+                                                                backend_dirA,
+                                                                m,
+                                                                n,
+                                                                (const cusparseMatDescr_t)descrA,
+                                                                (const cuComplex*)A,
+                                                                lda,
+                                                                nnzPerRowColumn,
+                                                                nnzTotalDevHostPtr));
 }
 
 hipsparseStatus_t hipsparseZnnz(hipsparseHandle_t         handle,
@@ -104,14 +110,16 @@ hipsparseStatus_t hipsparseZnnz(hipsparseHandle_t         handle,
                                 int*                      nnzPerRowColumn,
                                 int*                      nnzTotalDevHostPtr)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseZnnz((cusparseHandle_t)handle,
-                     hipsparse::hipDirectionToCudaDirection(dirA),
-                     m,
-                     n,
-                     (const cusparseMatDescr_t)descrA,
-                     (const cuDoubleComplex*)A,
-                     lda,
-                     nnzPerRowColumn,
-                     nnzTotalDevHostPtr));
+    cusparseDirection_t backend_dirA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDirectionToCudaDirection(dirA, &backend_dirA));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseZnnz((cusparseHandle_t)handle,
+                                                                backend_dirA,
+                                                                m,
+                                                                n,
+                                                                (const cusparseMatDescr_t)descrA,
+                                                                (const cuDoubleComplex*)A,
+                                                                lda,
+                                                                nnzPerRowColumn,
+                                                                nnzTotalDevHostPtr));
 }

@@ -148,16 +148,19 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_pointer_mode_ hipPtrModeToHCCPtrMode(hipsparsePointerMode_t mode)
+    inline hipsparseStatus_t hipPtrModeToHCCPtrMode(hipsparsePointerMode_t   mode,
+                                                    rocsparse_pointer_mode_* out)
     {
         switch(mode)
         {
         case HIPSPARSE_POINTER_MODE_HOST:
-            return rocsparse_pointer_mode_host;
+            *out = rocsparse_pointer_mode_host;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_POINTER_MODE_DEVICE:
-            return rocsparse_pointer_mode_device;
+            *out = rocsparse_pointer_mode_device;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparsePointerMode_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -174,33 +177,40 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_action_ hipActionToHCCAction(hipsparseAction_t action)
+    inline hipsparseStatus_t hipActionToHCCAction(hipsparseAction_t action, rocsparse_action_* out)
     {
         switch(action)
         {
         case HIPSPARSE_ACTION_SYMBOLIC:
-            return rocsparse_action_symbolic;
+            *out = rocsparse_action_symbolic;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_ACTION_NUMERIC:
-            return rocsparse_action_numeric;
+            *out = rocsparse_action_numeric;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseAction_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
-    inline rocsparse_matrix_type_ hipMatTypeToHCCMatType(hipsparseMatrixType_t type)
+    inline hipsparseStatus_t hipMatTypeToHCCMatType(hipsparseMatrixType_t   type,
+                                                    rocsparse_matrix_type_* out)
     {
         switch(type)
         {
         case HIPSPARSE_MATRIX_TYPE_GENERAL:
-            return rocsparse_matrix_type_general;
+            *out = rocsparse_matrix_type_general;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_MATRIX_TYPE_SYMMETRIC:
-            return rocsparse_matrix_type_symmetric;
+            *out = rocsparse_matrix_type_symmetric;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_MATRIX_TYPE_HERMITIAN:
-            return rocsparse_matrix_type_hermitian;
+            *out = rocsparse_matrix_type_hermitian;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_MATRIX_TYPE_TRIANGULAR:
-            return rocsparse_matrix_type_triangular;
+            *out = rocsparse_matrix_type_triangular;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseMatrixType_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -221,16 +231,19 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_fill_mode_ hipFillModeToHCCFillMode(hipsparseFillMode_t fillMode)
+    inline hipsparseStatus_t hipFillModeToHCCFillMode(hipsparseFillMode_t   fillMode,
+                                                      rocsparse_fill_mode_* out)
     {
         switch(fillMode)
         {
         case HIPSPARSE_FILL_MODE_LOWER:
-            return rocsparse_fill_mode_lower;
+            *out = rocsparse_fill_mode_lower;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_FILL_MODE_UPPER:
-            return rocsparse_fill_mode_upper;
+            *out = rocsparse_fill_mode_upper;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseFillMode_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -247,16 +260,19 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_diag_type_ hipDiagTypeToHCCDiagType(hipsparseDiagType_t diagType)
+    inline hipsparseStatus_t hipDiagTypeToHCCDiagType(hipsparseDiagType_t   diagType,
+                                                      rocsparse_diag_type_* out)
     {
         switch(diagType)
         {
         case HIPSPARSE_DIAG_TYPE_UNIT:
-            return rocsparse_diag_type_unit;
+            *out = rocsparse_diag_type_unit;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_DIAG_TYPE_NON_UNIT:
-            return rocsparse_diag_type_non_unit;
+            *out = rocsparse_diag_type_non_unit;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseDiagType_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -273,16 +289,18 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_index_base_ hipBaseToHCCBase(hipsparseIndexBase_t base)
+    inline hipsparseStatus_t hipBaseToHCCBase(hipsparseIndexBase_t base, rocsparse_index_base_* out)
     {
         switch(base)
         {
         case HIPSPARSE_INDEX_BASE_ZERO:
-            return rocsparse_index_base_zero;
+            *out = rocsparse_index_base_zero;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_INDEX_BASE_ONE:
-            return rocsparse_index_base_one;
+            *out = rocsparse_index_base_one;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseIndexBase_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -299,18 +317,22 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_operation_ hipOperationToHCCOperation(hipsparseOperation_t op)
+    inline hipsparseStatus_t hipOperationToHCCOperation(hipsparseOperation_t  op,
+                                                        rocsparse_operation_* out)
     {
         switch(op)
         {
         case HIPSPARSE_OPERATION_NON_TRANSPOSE:
-            return rocsparse_operation_none;
+            *out = rocsparse_operation_none;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_OPERATION_TRANSPOSE:
-            return rocsparse_operation_transpose;
+            *out = rocsparse_operation_transpose;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE:
-            return rocsparse_operation_conjugate_transpose;
+            *out = rocsparse_operation_conjugate_transpose;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseOperation_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -329,18 +351,22 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_hyb_partition_ hipHybPartToHCCHybPart(hipsparseHybPartition_t partition)
+    inline hipsparseStatus_t hipHybPartToHCCHybPart(hipsparseHybPartition_t   partition,
+                                                    rocsparse_hyb_partition_* out)
     {
         switch(partition)
         {
         case HIPSPARSE_HYB_PARTITION_AUTO:
-            return rocsparse_hyb_partition_auto;
+            *out = rocsparse_hyb_partition_auto;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_HYB_PARTITION_USER:
-            return rocsparse_hyb_partition_user;
+            *out = rocsparse_hyb_partition_user;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_HYB_PARTITION_MAX:
-            return rocsparse_hyb_partition_max;
+            *out = rocsparse_hyb_partition_max;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseHybPartition_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -359,16 +385,76 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_direction_ hipDirectionToHCCDirection(hipsparseDirection_t op)
+    inline hipsparseStatus_t hipSpGEAMAlgToHCCSpGEAMAlg(hipsparseSpGEAMAlg_t   alg,
+                                                        rocsparse_spgeam_alg_* out)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPGEAM_ALG1:
+            *out = rocsparse_spgeam_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
+        default:
+            return HIPSPARSE_STATUS_INVALID_VALUE;
+        }
+    }
+
+    inline hipsparseStatus_t hipPolicyToHCCPolicy(hipsparseSolvePolicy_t   policy,
+                                                  rocsparse_solve_policy_* out)
+    {
+        switch(policy)
+        {
+        case HIPSPARSE_SOLVE_POLICY_NO_LEVEL:
+        case HIPSPARSE_SOLVE_POLICY_USE_LEVEL:
+            *out = rocsparse_solve_policy_auto;
+            return HIPSPARSE_STATUS_SUCCESS;
+        default:
+            return HIPSPARSE_STATUS_INVALID_VALUE;
+        }
+    }
+
+    inline hipsparseStatus_t hipCsr2CscAlgCheck(hipsparseCsr2CscAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_CSR2CSC_ALG_DEFAULT:
+        case HIPSPARSE_CSR2CSC_ALG1:
+        case HIPSPARSE_CSR2CSC_ALG2:
+            return HIPSPARSE_STATUS_SUCCESS;
+        default:
+            return HIPSPARSE_STATUS_INVALID_VALUE;
+        }
+    }
+
+    inline hipsparseStatus_t
+        hipSpMatAttributeToHCCSpMatAttribute(hipsparseSpMatAttribute_t   attribute,
+                                             rocsparse_spmat_attribute_* out)
+    {
+        switch(attribute)
+        {
+        case HIPSPARSE_SPMAT_FILL_MODE:
+            *out = rocsparse_spmat_fill_mode;
+            return HIPSPARSE_STATUS_SUCCESS;
+        case HIPSPARSE_SPMAT_DIAG_TYPE:
+            *out = rocsparse_spmat_diag_type;
+            return HIPSPARSE_STATUS_SUCCESS;
+        default:
+            return HIPSPARSE_STATUS_INVALID_VALUE;
+        }
+    }
+
+    inline hipsparseStatus_t hipDirectionToHCCDirection(hipsparseDirection_t  op,
+                                                        rocsparse_direction_* out)
     {
         switch(op)
         {
         case HIPSPARSE_DIRECTION_ROW:
-            return rocsparse_direction_row;
+            *out = rocsparse_direction_row;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_DIRECTION_COLUMN:
-            return rocsparse_direction_column;
+            *out = rocsparse_direction_column;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseDirection_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -385,16 +471,18 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_order_ hipOrderToHCCOrder(hipsparseOrder_t op)
+    inline hipsparseStatus_t hipOrderToHCCOrder(hipsparseOrder_t op, rocsparse_order_* out)
     {
         switch(op)
         {
         case HIPSPARSE_ORDER_ROW:
-            return rocsparse_order_row;
+            *out = rocsparse_order_row;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_ORDER_COL:
-            return rocsparse_order_column;
+            *out = rocsparse_order_column;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseOrder_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -411,16 +499,21 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_indextype_ hipIndexTypeToHCCIndexType(hipsparseIndexType_t indextype)
+    inline hipsparseStatus_t hipIndexTypeToHCCIndexType(hipsparseIndexType_t  indextype,
+                                                        rocsparse_indextype_* out)
     {
         switch(indextype)
         {
         case HIPSPARSE_INDEX_32I:
-            return rocsparse_indextype_i32;
+            *out = rocsparse_indextype_i32;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_INDEX_64I:
-            return rocsparse_indextype_i64;
+            *out = rocsparse_indextype_i64;
+            return HIPSPARSE_STATUS_SUCCESS;
+        case HIPSPARSE_INDEX_16U:
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
         default:
-            throw "Non existent hipsparseIndexType_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -437,28 +530,66 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_datatype_ hipDataTypeToHCCDataType(hipDataType datatype)
+    inline hipsparseStatus_t hipDataTypeToHCCDataType(hipDataType          datatype,
+                                                      rocsparse_datatype_* out)
     {
         switch(datatype)
         {
         case HIP_R_8I:
-            return rocsparse_datatype_i8_r;
+            *out = rocsparse_datatype_i8_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_32I:
-            return rocsparse_datatype_i32_r;
+            *out = rocsparse_datatype_i32_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_16F:
-            return rocsparse_datatype_f16_r;
+            *out = rocsparse_datatype_f16_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_16BF:
-            return rocsparse_datatype_bf16_r;
+            *out = rocsparse_datatype_bf16_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_32F:
-            return rocsparse_datatype_f32_r;
+            *out = rocsparse_datatype_f32_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_R_64F:
-            return rocsparse_datatype_f64_r;
+            *out = rocsparse_datatype_f64_r;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_C_32F:
-            return rocsparse_datatype_f32_c;
+            *out = rocsparse_datatype_f32_c;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIP_C_64F:
-            return rocsparse_datatype_f64_c;
+            *out = rocsparse_datatype_f64_c;
+            return HIPSPARSE_STATUS_SUCCESS;
+        case HIP_C_16F:
+        case HIP_C_8I:
+        case HIP_C_8U:
+        case HIP_R_8U:
+        case HIP_C_32I:
+        case HIP_R_32U:
+        case HIP_C_32U:
+        case HIP_C_16BF:
+        case HIP_R_4I:
+        case HIP_C_4I:
+        case HIP_R_4U:
+        case HIP_C_4U:
+        case HIP_R_16I:
+        case HIP_C_16I:
+        case HIP_R_16U:
+        case HIP_C_16U:
+        case HIP_R_64I:
+        case HIP_C_64I:
+        case HIP_R_64U:
+        case HIP_C_64U:
+        case HIP_R_8F_E4M3:
+        case HIP_R_8F_E5M2:
+        case HIP_R_8F_UE8M0:
+        case HIP_R_6F_E2M3:
+        case HIP_R_6F_E3M2:
+        case HIP_R_4F_E2M1:
+        case HIP_R_8F_E4M3_FNUZ:
+        case HIP_R_8F_E5M2_FNUZ:
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
         default:
-            throw "Non existent hipDataType";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -487,75 +618,93 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_spmv_alg_ hipSpMVAlgToHCCSpMVAlg(hipsparseSpMVAlg_t alg)
+    inline hipsparseStatus_t hipSpMVAlgToHCCSpMVAlg(hipsparseSpMVAlg_t   alg,
+                                                    rocsparse_spmv_alg_* out)
     {
         switch(alg)
         {
         // case HIPSPARSE_MV_ALG_DEFAULT:
         case HIPSPARSE_SPMV_ALG_DEFAULT:
-            return rocsparse_spmv_alg_default;
+            *out = rocsparse_spmv_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         // case HIPSPARSE_COOMV_ALG:
         case HIPSPARSE_SPMV_COO_ALG1:
         case HIPSPARSE_SPMV_COO_ALG2:
-            return rocsparse_spmv_alg_coo;
+            *out = rocsparse_spmv_alg_coo;
+            return HIPSPARSE_STATUS_SUCCESS;
         // case HIPSPARSE_CSRMV_ALG1:
         case HIPSPARSE_SPMV_CSR_ALG1:
-            return rocsparse_spmv_alg_csr_adaptive;
+            *out = rocsparse_spmv_alg_csr_adaptive;
+            return HIPSPARSE_STATUS_SUCCESS;
         // case HIPSPARSE_CSRMV_ALG2:
         case HIPSPARSE_SPMV_CSR_ALG2:
-            return rocsparse_spmv_alg_csr_rowsplit;
+            *out = rocsparse_spmv_alg_csr_rowsplit;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_SPMV_CSR_ALG3:
-            return rocsparse_spmv_alg_csr_nnzsplit;
+            *out = rocsparse_spmv_alg_csr_nnzsplit;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_SPMV_SELL_ALG1:
-            return rocsparse_spmv_alg_sell;
+            *out = rocsparse_spmv_alg_sell;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_SPMV_BSR_ALG1:
-            return rocsparse_spmv_alg_bsr;
+            *out = rocsparse_spmv_alg_bsr;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseSpMVAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
-    inline rocsparse_spmm_alg_ hipSpMMAlgToHCCSpMMAlg(hipsparseSpMMAlg_t alg)
+    inline hipsparseStatus_t hipSpMMAlgToHCCSpMMAlg(hipsparseSpMMAlg_t   alg,
+                                                    rocsparse_spmm_alg_* out)
     {
         switch(alg)
         {
         // case HIPSPARSE_MM_ALG_DEFAULT:
         case HIPSPARSE_SPMM_ALG_DEFAULT:
-            return rocsparse_spmm_alg_default;
+            *out = rocsparse_spmm_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         // case HIPSPARSE_COOMM_ALG1:
         case HIPSPARSE_SPMM_COO_ALG1:
-            return rocsparse_spmm_alg_coo_atomic;
+            *out = rocsparse_spmm_alg_coo_atomic;
+            return HIPSPARSE_STATUS_SUCCESS;
         // case HIPSPARSE_COOMM_ALG2:
         case HIPSPARSE_SPMM_COO_ALG2:
-            return rocsparse_spmm_alg_coo_segmented;
+            *out = rocsparse_spmm_alg_coo_segmented;
+            return HIPSPARSE_STATUS_SUCCESS;
         // case HIPSPARSE_COOMM_ALG3:
         case HIPSPARSE_SPMM_COO_ALG3:
         case HIPSPARSE_SPMM_COO_ALG4:
-            return rocsparse_spmm_alg_coo_segmented_atomic;
+            *out = rocsparse_spmm_alg_coo_segmented_atomic;
+            return HIPSPARSE_STATUS_SUCCESS;
         // case HIPSPARSE_CSRMM_ALG1:
         case HIPSPARSE_SPMM_CSR_ALG1:
-            return rocsparse_spmm_alg_csr_row_split;
+            *out = rocsparse_spmm_alg_csr_row_split;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_SPMM_CSR_ALG2:
         case HIPSPARSE_SPMM_CSR_ALG3:
-            return rocsparse_spmm_alg_csr;
+            *out = rocsparse_spmm_alg_csr;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
-            return rocsparse_spmm_alg_bell;
+            *out = rocsparse_spmm_alg_bell;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_SPMM_BSR_ALG1:
-            return rocsparse_spmm_alg_bsr;
+            *out = rocsparse_spmm_alg_bsr;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseSpMMAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
-    inline rocsparse_sparse_to_dense_alg_
-        hipSpToDnAlgToHCCSpToDnAlg(hipsparseSparseToDenseAlg_t alg)
+    inline hipsparseStatus_t hipSpToDnAlgToHCCSpToDnAlg(hipsparseSparseToDenseAlg_t     alg,
+                                                        rocsparse_sparse_to_dense_alg_* out)
     {
         switch(alg)
         {
         case HIPSPARSE_SPARSETODENSE_ALG_DEFAULT:
-            return rocsparse_sparse_to_dense_alg_default;
+            *out = rocsparse_sparse_to_dense_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseSparseToDenseAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -571,15 +720,16 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_dense_to_sparse_alg_
-        hipDnToSpAlgToHCCDnToSpAlg(hipsparseDenseToSparseAlg_t alg)
+    inline hipsparseStatus_t hipDnToSpAlgToHCCDnToSpAlg(hipsparseDenseToSparseAlg_t     alg,
+                                                        rocsparse_dense_to_sparse_alg_* out)
     {
         switch(alg)
         {
         case HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT:
-            return rocsparse_dense_to_sparse_alg_default;
+            *out = rocsparse_dense_to_sparse_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseDenseToSparseAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
@@ -595,7 +745,8 @@ namespace hipsparse
         }
     }
 
-    inline rocsparse_spgemm_alg_ hipSpGEMMAlgToHCCSpGEMMAlg(hipsparseSpGEMMAlg_t alg)
+    inline hipsparseStatus_t hipSpGEMMAlgToHCCSpGEMMAlg(hipsparseSpGEMMAlg_t   alg,
+                                                        rocsparse_spgemm_alg_* out)
     {
         switch(alg)
         {
@@ -605,65 +756,79 @@ namespace hipsparse
         case HIPSPARSE_SPGEMM_ALG1:
         case HIPSPARSE_SPGEMM_ALG2:
         case HIPSPARSE_SPGEMM_ALG3:
-            return rocsparse_spgemm_alg_default;
+            *out = rocsparse_spgemm_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipSpGEMMAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
-    inline rocsparse_sddmm_alg_ hipSDDMMAlgToHCCSDDMMAlg(hipsparseSDDMMAlg_t alg)
+    inline hipsparseStatus_t hipSDDMMAlgToHCCSDDMMAlg(hipsparseSDDMMAlg_t   alg,
+                                                      rocsparse_sddmm_alg_* out)
     {
         switch(alg)
         {
         case HIPSPARSE_SDDMM_ALG_DEFAULT:
-            return rocsparse_sddmm_alg_default;
+            *out = rocsparse_sddmm_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipSDDMMAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
-    inline rocsparse_spsv_alg_ hipSpSVAlgToHCCSpSVAlg(hipsparseSpSVAlg_t alg)
+    inline hipsparseStatus_t hipSpSVAlgToHCCSpSVAlg(hipsparseSpSVAlg_t   alg,
+                                                    rocsparse_spsv_alg_* out)
     {
         switch(alg)
         {
         case HIPSPARSE_SPSV_ALG_DEFAULT:
-            return rocsparse_spsv_alg_default;
+            *out = rocsparse_spsv_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseSpSVAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
-    inline rocsparse_spsm_alg_ hipSpSMAlgToHCCSpSMAlg(hipsparseSpSMAlg_t alg)
+    inline hipsparseStatus_t hipSpSMAlgToHCCSpSMAlg(hipsparseSpSMAlg_t   alg,
+                                                    rocsparse_spsm_alg_* out)
     {
         switch(alg)
         {
         case HIPSPARSE_SPSM_ALG_DEFAULT:
-            return rocsparse_spsm_alg_default;
+            *out = rocsparse_spsm_alg_default;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseSpSMAlg_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 
-    inline rocsparse_format_ hipFormatToHCCFormat(hipsparseFormat_t format)
+    inline hipsparseStatus_t hipFormatToHCCFormat(hipsparseFormat_t format, rocsparse_format_* out)
     {
         switch(format)
         {
         case HIPSPARSE_FORMAT_CSR:
-            return rocsparse_format_csr;
+            *out = rocsparse_format_csr;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_FORMAT_CSC:
-            return rocsparse_format_csc;
+            *out = rocsparse_format_csc;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_FORMAT_COO:
-            return rocsparse_format_coo;
+            *out = rocsparse_format_coo;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_FORMAT_COO_AOS:
-            return rocsparse_format_coo_aos;
+            *out = rocsparse_format_coo_aos;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_FORMAT_BLOCKED_ELL:
-            return rocsparse_format_bell;
+            *out = rocsparse_format_bell;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_FORMAT_SLICED_ELL:
-            return rocsparse_format_sell;
+            *out = rocsparse_format_sell;
+            return HIPSPARSE_STATUS_SUCCESS;
         case HIPSPARSE_FORMAT_BSR:
-            return rocsparse_format_bsr;
+            *out = rocsparse_format_bsr;
+            return HIPSPARSE_STATUS_SUCCESS;
         default:
-            throw "Non existent hipsparseFormat_t";
+            return HIPSPARSE_STATUS_INVALID_VALUE;
         }
     }
 

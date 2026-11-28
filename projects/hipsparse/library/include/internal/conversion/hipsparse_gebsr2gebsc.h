@@ -358,7 +358,8 @@ hipsparseStatus_t hipsparseZgebsr2gebsc_bufferSize(hipsparseHandle_t       handl
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrVal,
 *              \p bsrRowPtr, \p bsrColInd, \p bscVal, \p bscRowInd, \p bscColPtr, or
-*              \p temp_buffer pointer is invalid.
+*              \p temp_buffer pointer is invalid, or \p copyValues or \p idxBase is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -490,7 +491,8 @@ hipsparseStatus_t hipsparseSgebsr2gebsc(hipsparseHandle_t    handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrVal,
 *              \p bsrRowPtr, \p bsrColInd, \p bscVal, \p bscRowInd, \p bscColPtr, or
-*              \p temp_buffer pointer is invalid.
+*              \p temp_buffer pointer is invalid, or \p copyValues or \p idxBase is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -621,7 +623,8 @@ hipsparseStatus_t hipsparseDgebsr2gebsc(hipsparseHandle_t    handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrVal,
 *              \p bsrRowPtr, \p bsrColInd, \p bscVal, \p bscRowInd, \p bscColPtr, or
-*              \p temp_buffer pointer is invalid.
+*              \p temp_buffer pointer is invalid, or \p copyValues or \p idxBase is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -752,7 +755,8 @@ hipsparseStatus_t hipsparseCgebsr2gebsc(hipsparseHandle_t    handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p bsrVal,
 *              \p bsrRowPtr, \p bsrColInd, \p bscVal, \p bscRowInd, \p bscColPtr, or
-*              \p temp_buffer pointer is invalid.
+*              \p temp_buffer pointer is invalid, or \p copyValues or \p idxBase is not a valid
+*              value of its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */

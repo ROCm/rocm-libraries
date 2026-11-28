@@ -37,8 +37,11 @@ hipsparseStatus_t hipsparseSgthrz(hipsparseHandle_t    handle,
                                   const int*           xInd,
                                   hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_sgthrz(
-        (rocsparse_handle)handle, nnz, y, xVal, xInd, hipsparse::hipBaseToHCCBase(idxBase)));
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_sgthrz((rocsparse_handle)handle, nnz, y, xVal, xInd, backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseDgthrz(hipsparseHandle_t    handle,
@@ -48,8 +51,11 @@ hipsparseStatus_t hipsparseDgthrz(hipsparseHandle_t    handle,
                                   const int*           xInd,
                                   hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dgthrz(
-        (rocsparse_handle)handle, nnz, y, xVal, xInd, hipsparse::hipBaseToHCCBase(idxBase)));
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_dgthrz((rocsparse_handle)handle, nnz, y, xVal, xInd, backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseCgthrz(hipsparseHandle_t    handle,
@@ -59,13 +65,15 @@ hipsparseStatus_t hipsparseCgthrz(hipsparseHandle_t    handle,
                                   const int*           xInd,
                                   hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_cgthrz((rocsparse_handle)handle,
-                         nnz,
-                         (rocsparse_float_complex*)y,
-                         (rocsparse_float_complex*)xVal,
-                         xInd,
-                         hipsparse::hipBaseToHCCBase(idxBase)));
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_cgthrz((rocsparse_handle)handle,
+                                                                  nnz,
+                                                                  (rocsparse_float_complex*)y,
+                                                                  (rocsparse_float_complex*)xVal,
+                                                                  xInd,
+                                                                  backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseZgthrz(hipsparseHandle_t    handle,
@@ -75,11 +83,13 @@ hipsparseStatus_t hipsparseZgthrz(hipsparseHandle_t    handle,
                                   const int*           xInd,
                                   hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_zgthrz((rocsparse_handle)handle,
-                         nnz,
-                         (rocsparse_double_complex*)y,
-                         (rocsparse_double_complex*)xVal,
-                         xInd,
-                         hipsparse::hipBaseToHCCBase(idxBase)));
+    rocsparse_index_base_ backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipBaseToHCCBase(idxBase, &backend_idxBase));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_zgthrz((rocsparse_handle)handle,
+                                                                  nnz,
+                                                                  (rocsparse_double_complex*)y,
+                                                                  (rocsparse_double_complex*)xVal,
+                                                                  xInd,
+                                                                  backend_idxBase));
 }

@@ -39,15 +39,17 @@ hipsparseStatus_t hipsparseShybmv(hipsparseHandle_t         handle,
                                   const float*              beta,
                                   float*                    y)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_shybmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         alpha,
-                         (rocsparse_mat_descr)descrA,
-                         (rocsparse_hyb_mat)hybA,
-                         x,
-                         beta,
-                         y));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_shybmv((rocsparse_handle)handle,
+                                                                  backend_transA,
+                                                                  alpha,
+                                                                  (rocsparse_mat_descr)descrA,
+                                                                  (rocsparse_hyb_mat)hybA,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseDhybmv(hipsparseHandle_t         handle,
@@ -59,15 +61,17 @@ hipsparseStatus_t hipsparseDhybmv(hipsparseHandle_t         handle,
                                   const double*             beta,
                                   double*                   y)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_dhybmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
-                         alpha,
-                         (rocsparse_mat_descr)descrA,
-                         (rocsparse_hyb_mat)hybA,
-                         x,
-                         beta,
-                         y));
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dhybmv((rocsparse_handle)handle,
+                                                                  backend_transA,
+                                                                  alpha,
+                                                                  (rocsparse_mat_descr)descrA,
+                                                                  (rocsparse_hyb_mat)hybA,
+                                                                  x,
+                                                                  beta,
+                                                                  y));
 }
 
 hipsparseStatus_t hipsparseChybmv(hipsparseHandle_t         handle,
@@ -79,9 +83,12 @@ hipsparseStatus_t hipsparseChybmv(hipsparseHandle_t         handle,
                                   const hipComplex*         beta,
                                   hipComplex*               y)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_chybmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
+                         backend_transA,
                          (const rocsparse_float_complex*)alpha,
                          (rocsparse_mat_descr)descrA,
                          (rocsparse_hyb_mat)hybA,
@@ -99,9 +106,12 @@ hipsparseStatus_t hipsparseZhybmv(hipsparseHandle_t         handle,
                                   const hipDoubleComplex*   beta,
                                   hipDoubleComplex*         y)
 {
+    rocsparse_operation_ backend_transA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToHCCOperation(transA, &backend_transA));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zhybmv((rocsparse_handle)handle,
-                         hipsparse::hipOperationToHCCOperation(transA),
+                         backend_transA,
                          (const rocsparse_double_complex*)alpha,
                          (rocsparse_mat_descr)descrA,
                          (rocsparse_hyb_mat)hybA,

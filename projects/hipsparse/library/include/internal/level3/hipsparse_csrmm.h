@@ -117,7 +117,8 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
 *          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
-*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr, or
+*          \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -229,7 +230,8 @@ hipsparseStatus_t hipsparseScsrmm(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
 *          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
-*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr, or
+*          \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -340,7 +342,8 @@ hipsparseStatus_t hipsparseDcsrmm(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
 *          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
-*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr, or
+*          \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -451,7 +454,8 @@ hipsparseStatus_t hipsparseCcsrmm(hipsparseHandle_t         handle,
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
 *          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
-*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr, or
+*          \p transA is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -573,7 +577,8 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
 *              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
-*              \p B, \p beta, or \p C is invalid.
+*              \p B, \p beta, or \p C is invalid, or \p transA or \p transB is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -693,7 +698,8 @@ hipsparseStatus_t hipsparseScsrmm2(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
 *              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
-*              \p B, \p beta, or \p C is invalid.
+*              \p B, \p beta, or \p C is invalid, or \p transA or \p transB is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -812,7 +818,8 @@ hipsparseStatus_t hipsparseDcsrmm2(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
 *              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
-*              \p B, \p beta, or \p C is invalid.
+*              \p B, \p beta, or \p C is invalid, or \p transA or \p transB is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -931,7 +938,8 @@ hipsparseStatus_t hipsparseCcsrmm2(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
 *              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
-*              \p B, \p beta, or \p C is invalid.
+*              \p B, \p beta, or \p C is invalid, or \p transA or \p transB is not a valid value of
+*              its enumeration type.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

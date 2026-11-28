@@ -37,14 +37,11 @@ hipsparseStatus_t hipsparseSdoti(hipsparseHandle_t    handle,
                                  float*               result,
                                  hipsparseIndexBase_t idxBase)
 {
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSdoti((cusparseHandle_t)handle,
-                      nnz,
-                      xVal,
-                      xInd,
-                      y,
-                      result,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+        cusparseSdoti((cusparseHandle_t)handle, nnz, xVal, xInd, y, result, backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseDdoti(hipsparseHandle_t    handle,
@@ -55,14 +52,11 @@ hipsparseStatus_t hipsparseDdoti(hipsparseHandle_t    handle,
                                  double*              result,
                                  hipsparseIndexBase_t idxBase)
 {
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseDdoti((cusparseHandle_t)handle,
-                      nnz,
-                      xVal,
-                      xInd,
-                      y,
-                      result,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+        cusparseDdoti((cusparseHandle_t)handle, nnz, xVal, xInd, y, result, backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseCdoti(hipsparseHandle_t    handle,
@@ -73,14 +67,16 @@ hipsparseStatus_t hipsparseCdoti(hipsparseHandle_t    handle,
                                  hipComplex*          result,
                                  hipsparseIndexBase_t idxBase)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseCdoti((cusparseHandle_t)handle,
-                      nnz,
-                      (const cuComplex*)xVal,
-                      xInd,
-                      (const cuComplex*)y,
-                      (cuComplex*)result,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCdoti((cusparseHandle_t)handle,
+                                                                 nnz,
+                                                                 (const cuComplex*)xVal,
+                                                                 xInd,
+                                                                 (const cuComplex*)y,
+                                                                 (cuComplex*)result,
+                                                                 backend_idxBase));
 }
 
 hipsparseStatus_t hipsparseZdoti(hipsparseHandle_t       handle,
@@ -91,13 +87,15 @@ hipsparseStatus_t hipsparseZdoti(hipsparseHandle_t       handle,
                                  hipDoubleComplex*       result,
                                  hipsparseIndexBase_t    idxBase)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseZdoti((cusparseHandle_t)handle,
-                      nnz,
-                      (const cuDoubleComplex*)xVal,
-                      xInd,
-                      (const cuDoubleComplex*)y,
-                      (cuDoubleComplex*)result,
-                      hipsparse::hipIndexBaseToCudaIndexBase(idxBase)));
+    cusparseIndexBase_t backend_idxBase{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipIndexBaseToCudaIndexBase(idxBase, &backend_idxBase));
+
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseZdoti((cusparseHandle_t)handle,
+                                                                 nnz,
+                                                                 (const cuDoubleComplex*)xVal,
+                                                                 xInd,
+                                                                 (const cuDoubleComplex*)y,
+                                                                 (cuDoubleComplex*)result,
+                                                                 backend_idxBase));
 }
 #endif

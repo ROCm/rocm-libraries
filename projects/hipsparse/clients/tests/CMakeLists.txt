@@ -38,12 +38,15 @@ elseif(HIPSPARSE_ENABLE_CUDA)
   endif()
 endif()
 
-# These are standalone pre_checkin tests. They do not use a version-gated API,
-# so every backend builds them.
+# These are standalone pre_checkin tests, built by every backend. Version-gated
+# calls in them are guarded to match the public headers.
 set(_hipsparse_test_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_device_malloc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_check_error.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_status_handling.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_datatype_validation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_enum_validation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_get_version.cpp")
 foreach(_src IN LISTS HIPSPARSE_TEST_SOURCES)
   list(APPEND _hipsparse_test_sources "${CMAKE_CURRENT_SOURCE_DIR}/${_src}")

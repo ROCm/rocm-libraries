@@ -96,10 +96,12 @@ hipsparseStatus_t hipsparseSpGEMM_destroyDescr(hipsparseSpGEMMDescr_t descr);
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC,
-*          \p spgemmDescr, or \p bufferSize1 is nullptr, or \p opA or \p opB is invalid.
+*          \p spgemmDescr, or \p bufferSize1 is nullptr, or \p opA, \p opB, \p computeType, or
+*          \p alg is not a valid value of its enumeration type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or \p computeType is currently not
+*          supported.
 *
 *  \par Example (see full example below)
 *  \code{.c}
@@ -201,12 +203,15 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t      handle,
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, \p matC,
-*                                         or \p bufferSize2 pointer is invalid.
+*                                         or \p bufferSize2 pointer is invalid, or \p opA, \p opB,
+*                                         \p computeType, or \p alg is not a valid value of its
+*                                         enumeration type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or \p computeType is currently not
+*          supported.
 *
 *  \par Example (see full example below)
 *  \code{.c}
@@ -315,12 +320,15 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  spgemmDescr      SpGEMM descriptor.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, or \p matC pointer is invalid.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p beta, \p matA, \p matB, or \p matC
+*          pointer is invalid, or \p opA, \p opB, \p computeType, or \p alg is not a valid value of
+*          its enumeration type.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED additional buffer for long rows could not be
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or \p computeType is currently not
+*          supported.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMM_copy(hipsparseHandle_t          handle,

@@ -278,6 +278,9 @@ hipsparseStatus_t hipsparseScsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csric02_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
@@ -312,6 +315,9 @@ hipsparseStatus_t hipsparseDcsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csric02_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
@@ -346,6 +352,9 @@ hipsparseStatus_t hipsparseCcsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csric02_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
@@ -381,6 +390,9 @@ hipsparseStatus_t hipsparseZcsric02_analysis(hipsparseHandle_t         handle,
                                              hipsparseSolvePolicy_t    policy,
                                              void*                     pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     // Obtain stream, to explicitly sync (cusparse csric02_analysis is blocking)
     hipStream_t stream;
     RETURN_IF_HIPSPARSE_ERROR(hipsparseGetStream(handle, &stream));
@@ -418,6 +430,9 @@ hipsparseStatus_t hipsparseScsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_scsric0((rocsparse_handle)handle,
                                                                    m,
                                                                    nnz,
@@ -443,6 +458,9 @@ hipsparseStatus_t hipsparseDcsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_dcsric0((rocsparse_handle)handle,
                                                                    m,
                                                                    nnz,
@@ -468,6 +486,9 @@ hipsparseStatus_t hipsparseCcsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_ccsric0((rocsparse_handle)handle,
                           m,
@@ -494,6 +515,9 @@ hipsparseStatus_t hipsparseZcsric02(hipsparseHandle_t         handle,
                                     hipsparseSolvePolicy_t policy,
                                     void*                  pBuffer)
 {
+    rocsparse_solve_policy_ backend_policy{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipPolicyToHCCPolicy(policy, &backend_policy));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_zcsric0((rocsparse_handle)handle,
                           m,

@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -40,14 +40,23 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t         
                                                       size_t*                    bufferSize1,
                                                       void*                      externalBuffer1)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_workEstimation((cusparseHandle_t)handle,
-                                           hipsparse::hipOperationToCudaOperation(opA),
-                                           hipsparse::hipOperationToCudaOperation(opB),
+                                           backend_opA,
+                                           backend_opB,
                                            (cusparseConstSpMatDescr_t)matA,
                                            (cusparseConstSpMatDescr_t)matB,
                                            (cusparseSpMatDescr_t)matC,
-                                           hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                           backend_alg,
                                            (cusparseSpGEMMDescr_t)spgemmDescr,
                                            bufferSize1,
                                            externalBuffer1));
@@ -64,14 +73,23 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
                                                       size_t*                bufferSize1,
                                                       void*                  externalBuffer1)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_workEstimation((cusparseHandle_t)handle,
-                                           hipsparse::hipOperationToCudaOperation(opA),
-                                           hipsparse::hipOperationToCudaOperation(opB),
+                                           backend_opA,
+                                           backend_opB,
                                            (cusparseSpMatDescr_t)matA,
                                            (cusparseSpMatDescr_t)matB,
                                            (cusparseSpMatDescr_t)matC,
-                                           hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                           backend_alg,
                                            (cusparseSpGEMMDescr_t)spgemmDescr,
                                            bufferSize1,
                                            externalBuffer1));
@@ -94,14 +112,23 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t          handle,
                                            size_t*                    bufferSize4,
                                            void*                      externalBuffer4)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_nnz((cusparseHandle_t)handle,
-                                hipsparse::hipOperationToCudaOperation(opA),
-                                hipsparse::hipOperationToCudaOperation(opB),
+                                backend_opA,
+                                backend_opB,
                                 (cusparseConstSpMatDescr_t)matA,
                                 (cusparseConstSpMatDescr_t)matB,
                                 (cusparseSpMatDescr_t)matC,
-                                hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                backend_alg,
                                 (cusparseSpGEMMDescr_t)spgemmDescr,
                                 bufferSize2,
                                 externalBuffer2,
@@ -126,14 +153,23 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
                                            size_t*                bufferSize4,
                                            void*                  externalBuffer4)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_nnz((cusparseHandle_t)handle,
-                                hipsparse::hipOperationToCudaOperation(opA),
-                                hipsparse::hipOperationToCudaOperation(opB),
+                                backend_opA,
+                                backend_opB,
                                 (cusparseSpMatDescr_t)matA,
                                 (cusparseSpMatDescr_t)matB,
                                 (cusparseSpMatDescr_t)matC,
-                                hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                backend_alg,
                                 (cusparseSpGEMMDescr_t)spgemmDescr,
                                 bufferSize2,
                                 externalBuffer2,
@@ -158,17 +194,30 @@ hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t          handle
                                                hipsparseSpGEMMAlg_t       alg,
                                                hipsparseSpGEMMDescr_t     spgemmDescr)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_compute((cusparseHandle_t)handle,
-                                    hipsparse::hipOperationToCudaOperation(opA),
-                                    hipsparse::hipOperationToCudaOperation(opB),
+                                    backend_opA,
+                                    backend_opB,
                                     alpha,
                                     (cusparseConstSpMatDescr_t)matA,
                                     (cusparseConstSpMatDescr_t)matB,
                                     beta,
                                     (cusparseSpMatDescr_t)matC,
-                                    computeType,
-                                    hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                    backend_data_type,
+                                    backend_alg,
                                     (cusparseSpGEMMDescr_t)spgemmDescr));
 }
 #elif(CUDART_VERSION >= 11031)
@@ -184,17 +233,30 @@ hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t      handle,
                                                hipsparseSpGEMMAlg_t   alg,
                                                hipsparseSpGEMMDescr_t spgemmDescr)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_compute((cusparseHandle_t)handle,
-                                    hipsparse::hipOperationToCudaOperation(opA),
-                                    hipsparse::hipOperationToCudaOperation(opB),
+                                    backend_opA,
+                                    backend_opB,
                                     alpha,
                                     (cusparseSpMatDescr_t)matA,
                                     (cusparseSpMatDescr_t)matB,
                                     beta,
                                     (cusparseSpMatDescr_t)matC,
-                                    computeType,
-                                    hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                    backend_data_type,
+                                    backend_alg,
                                     (cusparseSpGEMMDescr_t)spgemmDescr));
 }
 #endif
@@ -211,14 +273,23 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t          handle,
                                             size_t*                    bufferSize5,
                                             void*                      externalBuffer5)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_copy((cusparseHandle_t)handle,
-                                 hipsparse::hipOperationToCudaOperation(opA),
-                                 hipsparse::hipOperationToCudaOperation(opB),
+                                 backend_opA,
+                                 backend_opB,
                                  (cusparseConstSpMatDescr_t)matA,
                                  (cusparseConstSpMatDescr_t)matB,
                                  (cusparseSpMatDescr_t)matC,
-                                 hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                 backend_alg,
                                  (cusparseSpGEMMDescr_t)spgemmDescr,
                                  bufferSize5,
                                  externalBuffer5));
@@ -235,14 +306,23 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
                                             size_t*                bufferSize5,
                                             void*                  externalBuffer5)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cusparseSpGEMMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg, &backend_alg));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEMMreuse_copy((cusparseHandle_t)handle,
-                                 hipsparse::hipOperationToCudaOperation(opA),
-                                 hipsparse::hipOperationToCudaOperation(opB),
+                                 backend_opA,
+                                 backend_opB,
                                  (cusparseSpMatDescr_t)matA,
                                  (cusparseSpMatDescr_t)matB,
                                  (cusparseSpMatDescr_t)matC,
-                                 hipsparse::hipSpGEMMAlgToCudaSpGEMMAlg(alg),
+                                 backend_alg,
                                  (cusparseSpGEMMDescr_t)spgemmDescr,
                                  bufferSize5,
                                  externalBuffer5));

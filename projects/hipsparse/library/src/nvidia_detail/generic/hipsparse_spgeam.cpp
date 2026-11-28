@@ -110,6 +110,19 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
                                              hipsparseSpGEAMDescr_t     spgeamDescr,
                                              size_t*                    bufferSize)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpGEAMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEAMAlgToCudaSpGEAMAlg(alg, &backend_alg));
+
     hipsparseStatus_t status = checkSpGEAMSupport(opA, opB, matA, matB, matC);
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
@@ -118,15 +131,15 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEAM_bufferSize((cusparseHandle_t)handle,
-                                  hipsparse::hipOperationToCudaOperation(opA),
-                                  hipsparse::hipOperationToCudaOperation(opB),
+                                  backend_opA,
+                                  backend_opB,
                                   alpha,
                                   (cusparseSpMatDescr_t)matA,
                                   beta,
                                   (cusparseSpMatDescr_t)matB,
                                   (cusparseSpMatDescr_t)matC,
-                                  computeType,
-                                  hipsparse::hipSpGEAMAlgToCudaSpGEAMAlg(alg),
+                                  backend_data_type,
+                                  backend_alg,
                                   (cusparseSpGEAMDescr_t)spgeamDescr,
                                   bufferSize));
 }
@@ -148,6 +161,19 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
                                       hipsparseSpGEAMDescr_t     spgeamDescr,
                                       void*                      externalBuffer)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpGEAMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEAMAlgToCudaSpGEAMAlg(alg, &backend_alg));
+
     hipsparseStatus_t status = checkSpGEAMSupport(opA, opB, matA, matB, matC);
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
@@ -156,15 +182,15 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEAM_nnz((cusparseHandle_t)handle,
-                           hipsparse::hipOperationToCudaOperation(opA),
-                           hipsparse::hipOperationToCudaOperation(opB),
+                           backend_opA,
+                           backend_opB,
                            alpha,
                            (cusparseSpMatDescr_t)matA,
                            beta,
                            (cusparseSpMatDescr_t)matB,
                            (cusparseSpMatDescr_t)matC,
-                           computeType,
-                           hipsparse::hipSpGEAMAlgToCudaSpGEAMAlg(alg),
+                           backend_data_type,
+                           backend_alg,
                            (cusparseSpGEAMDescr_t)spgeamDescr,
                            externalBuffer));
 }
@@ -186,6 +212,19 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
                                   hipsparseSpGEAMDescr_t     spgeamDescr,
                                   void*                      externalBuffer)
 {
+    cusparseOperation_t backend_opA{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opA, &backend_opA));
+
+    cusparseOperation_t backend_opB{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipOperationToCudaOperation(opB, &backend_opB));
+
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
+    cusparseSpGEAMAlg_t backend_alg{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipSpGEAMAlgToCudaSpGEAMAlg(alg, &backend_alg));
+
     hipsparseStatus_t status = checkSpGEAMSupport(opA, opB, matA, matB, matC);
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
@@ -194,15 +233,15 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
 
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEAM((cusparseHandle_t)handle,
-                       hipsparse::hipOperationToCudaOperation(opA),
-                       hipsparse::hipOperationToCudaOperation(opB),
+                       backend_opA,
+                       backend_opB,
                        alpha,
                        (cusparseSpMatDescr_t)matA,
                        beta,
                        (cusparseSpMatDescr_t)matB,
                        (cusparseSpMatDescr_t)matC,
-                       computeType,
-                       hipsparse::hipSpGEAMAlgToCudaSpGEAMAlg(alg),
+                       backend_data_type,
+                       backend_alg,
                        (cusparseSpGEAMDescr_t)spgeamDescr,
                        externalBuffer));
 }
