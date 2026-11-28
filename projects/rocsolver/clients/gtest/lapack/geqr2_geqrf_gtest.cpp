@@ -103,6 +103,7 @@ const vector<int64_t> large_n_size_range_64 = {64, 98, 130, 220, 400};
 template <typename I>
 const static vector<geqrf_tuple<I>> very_large_problem_range = {
     {{220, 220}, 16384},
+    {{16384, 16384}, 220},
 };
 
 template <typename I>
