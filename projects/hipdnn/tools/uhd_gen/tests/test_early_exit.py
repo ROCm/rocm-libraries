@@ -387,6 +387,7 @@ def test_an_explicit_schedule_on_a_calibrated_model_is_refused():
         early_exit="30:16",
         role="sort_kernel_catalog",
         group_by_feature=None,
+        model_family="lightgbm",
         calibrated=True,
     )
     # A pruned candidate carries no estimate, and a calibrated ranking reads every one.

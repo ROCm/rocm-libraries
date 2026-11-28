@@ -8,11 +8,15 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Added support for the following new GPU targets:
   * gfx11-7: gfx1170, gfx1171.
   * gfx12: gfx1251.
+* Added a backend interface between the solution layer and the kernels. The Composable Kernel backend remains the default. The environment variables `HIPTENSOR_BACKEND`, `HIPTENSOR_BACKEND_FALLBACK`, and `HIPTENSOR_BACKEND_AB` select the backend, control the fallback, and compare two backends.
+* Added initial support for rocKE as an optional, non-default backend for contractions, permutations, elementwise operations, and reductions. Build it with `-DHIPTENSOR_ENABLE_ROCKE_BACKEND=ON` and select it with `HIPTENSOR_BACKEND=rocke`.
 * Added fp64 support to hiptensorPermute for ranks 2-6.
 * Added bf16 support to hiptensorPermute for ranks 2-6, with a bf16 or fp32 scalar type.
 * Added bf16 support to `hiptensorElementwiseTrinaryExecute` for ranks 2-6, with a bf16 or fp32 scalar type, and fp32 scalar support for fp16 tensors. Trinary now accepts the same data type combinations as `hiptensorElementwiseBinaryExecute`.
 
 ### Changed
+* Changed the plan cache to keep its entries per backend, so plans of one backend never take a kernel cached for another. Composable Kernel entries keep their earlier keys, so plan cache files written by earlier versions still apply. The plan cache file format is unchanged.
+* Changed `hiptensorWriteKernelCacheToFile` and `hiptensorReadKernelCacheFromFile` to return `HIPTENSOR_STATUS_NOT_INITIALIZED` for a null `handle` and `HIPTENSOR_STATUS_INVALID_VALUE` for a null `fileName`. With no backend that keeps a kernel cache, both still succeed without touching the file.
 * Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
 * Changed `hiptensorElementwiseTrinaryExecute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the data type of D differs from that of C, matching `hiptensorElementwiseBinaryExecute`. Previously the mismatch failed later with `HIPTENSOR_STATUS_INTERNAL_ERROR`.
 * Changed the `hiptensor::hiptensor` CMake target to propagate `hip::host` instead of `hip::device`. Code that links hipTensor is no longer compiled as HIP for every GPU target by default. Projects that compile their own HIP kernels must link `hip::device` themselves.
@@ -28,6 +32,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Fixed `HIPTENSOR_AUTOTUNE_MODE_INCREMENTAL` caching the wrong kernel when calls on different problems of the same operation were interleaved. Autotuning counted calls and kept the fastest kernel per operation type, so timings from one problem could select the kernel cached for another. Autotuning is now tracked per problem and handle. A failed `hiptensorContract` or `hiptensorContractTrinary` call is no longer cached as the fastest kernel; autotuning skips the failed candidate and moves on to the next one. Calls that share a plan each run the candidate they were given, and a round caches its kernel only after all of its candidates finish.
 * Fixed `hiptensorPermute` ignoring alpha when a plan first executed with alpha equal to 1 was executed again with another alpha. The plan kept the copy-only kernel of its first call; a call that needs scaling now selects a kernel that scales.
 * Fixed `hiptensorReduce` reporting 0 TFlops/s and 0 GB/s in `HIPTENSOR_LOG_LEVEL_PERF_TRACE` logs.
+* Fixed `hiptensorReduce` returning wrong results on a non-blocking stream when C and D are different tensors. The copy of C into D now runs on the caller's stream, ahead of the reduction kernel, instead of on the default stream.
 * Fixed `hiptensorDestroy` aborting with a double free, or corrupting the heap, after `hiptensorHandleWritePlanCacheToFile` was called on a handle whose plan cache held entries.
 * Fixed a full plan cache growing past its size limit when a new problem was added, and evicting its least recently used entry when an existing problem was updated instead. A new entry now evicts the least recently used one, and updating an existing entry evicts nothing.
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.

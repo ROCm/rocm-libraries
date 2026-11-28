@@ -463,7 +463,7 @@ TEST(TestGpuBatchnormBwdPlan, ExecutorIsApplicable)
 }
 
 template <typename Types>
-class TestGpuBatchnormBwdPlanExecute : public testing::Test
+class TestGpuBatchnormBwdPlanExecuteDevice : public testing::Test
 {
 };
 
@@ -474,9 +474,9 @@ using RegisteredBatchnormBwdTypes = testing::Types<std::tuple<float, float, floa
                                                    std::tuple<bfloat16, bfloat16, float>,
                                                    std::tuple<float, bfloat16, bfloat16>,
                                                    std::tuple<float, half, half>>;
-TYPED_TEST_SUITE(TestGpuBatchnormBwdPlanExecute, RegisteredBatchnormBwdTypes, );
+TYPED_TEST_SUITE(TestGpuBatchnormBwdPlanExecuteDevice, RegisteredBatchnormBwdTypes, );
 
-TYPED_TEST(TestGpuBatchnormBwdPlanExecute, ExecutorMatchesCpuReference)
+TYPED_TEST(TestGpuBatchnormBwdPlanExecuteDevice, ExecutorMatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
     using Dy = std::tuple_element_t<0, TypeParam>;

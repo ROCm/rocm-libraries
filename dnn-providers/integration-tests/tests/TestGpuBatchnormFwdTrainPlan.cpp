@@ -578,42 +578,42 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims, const TensorLayout
 
 } // namespace
 
-TEST(TestGpuBatchnormFwdTrainPlanFp32, ExecutePlanNchw)
+TEST(TestGpuBatchnormFwdTrainPlanDeviceFp32, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
     runPlanExecuteVsCpuRef<float>({1, 64, 56, 56}, TensorLayout::NCHW);
 }
 
-TEST(TestGpuBatchnormFwdTrainPlanFp32, ExecutePlanNhwc)
+TEST(TestGpuBatchnormFwdTrainPlanDeviceFp32, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
     runPlanExecuteVsCpuRef<float>({1, 64, 56, 56}, TensorLayout::NHWC);
 }
 
-TEST(TestGpuBatchnormFwdTrainPlanFp16, ExecutePlanNchw)
+TEST(TestGpuBatchnormFwdTrainPlanDeviceFp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
     runPlanExecuteVsCpuRef<half>({1, 64, 56, 56}, TensorLayout::NCHW);
 }
 
-TEST(TestGpuBatchnormFwdTrainPlanFp16, ExecutePlanNhwc)
+TEST(TestGpuBatchnormFwdTrainPlanDeviceFp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
     runPlanExecuteVsCpuRef<half>({1, 64, 56, 56}, TensorLayout::NHWC);
 }
 
-TEST(TestGpuBatchnormFwdTrainPlanBfp16, ExecutePlanNchw)
+TEST(TestGpuBatchnormFwdTrainPlanDeviceBfp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
     runPlanExecuteVsCpuRef<bfloat16>({1, 64, 56, 56}, TensorLayout::NCHW);
 }
 
-TEST(TestGpuBatchnormFwdTrainPlanBfp16, ExecutePlanNhwc)
+TEST(TestGpuBatchnormFwdTrainPlanDeviceBfp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 

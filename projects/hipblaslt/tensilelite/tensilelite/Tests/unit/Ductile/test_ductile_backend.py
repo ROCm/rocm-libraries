@@ -54,6 +54,40 @@ class _FakeSearchSpace:
         pass
 
 
+class _FakeKernelWriter:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def _initKernel(self, *args, **kwargs):
+        pass
+
+
+def _tdm_state(fuse, waves, hintA, hintB):
+    return {
+        "TDMFuse": fuse, "TDMInst": 3, "TDMSplit": False, "UseSubtileImpl": False,
+        "enableTDMA": True, "enableTDMB": True, "NumWaves": waves,
+        "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
+        "TemporalHintA": hintA, "TemporalHintB": hintB,
+    }
+
+
+@pytest.mark.parametrize("fuse, waves, hintA, hintB, valid", [
+    (0, 4, 0, 1, False),
+    (0, 4, 1, 0, False),
+    (0, 4, 1, 1, True),
+    (0, 1, 0, 1, True),
+    (1, 4, 0, 1, True),
+    (3, 4, 1, 0, True),
+])
+def test_validate_solution_drops_a_renamed_equal_hint_kernel(monkeypatch, fuse, waves, hintA, hintB, valid):
+    """A disagreeing TemporalHintA/B pair on a load A and B share only renames the
+    TemporalHintA=TemporalHintB=0 kernel, so the GA treats it as invalid and redraws."""
+    state = _tdm_state(fuse, waves, hintA, hintB)
+    monkeypatch.setattr(ductile_backend_mod, "_generate_single_solution_with_groups", lambda *a, **k: state)
+    monkeypatch.setattr(ductile_backend_mod, "KernelWriterAssembly", _FakeKernelWriter)
+    assert ductile_backend_mod._validate_solution(None, {}, None, None, {}, {}) is valid
+
+
 def _base_ductile_merged_config():
     return {
         "max_iters": 4,
@@ -711,7 +745,7 @@ def test_validate_solution_returns_false_when_kernel_init_fails(monkeypatch):
     monkeypatch.setattr(
         ductile_backend_mod,
         "_generate_single_solution_with_groups",
-        lambda *_a, **_kw: types.SimpleNamespace(),
+        lambda *_a, **_kw: {},
     )
 
     class _FailKW:
@@ -740,7 +774,7 @@ def test_validate_solution_calls_get_kernel_source_when_requested(monkeypatch):
     monkeypatch.setattr(
         ductile_backend_mod,
         "_generate_single_solution_with_groups",
-        lambda *_a, **_kw: types.SimpleNamespace(),
+        lambda *_a, **_kw: {},
     )
     seen = {"src": False}
 
@@ -775,7 +809,7 @@ def test_validate_solution_sets_rocisa_data_when_provided(monkeypatch):
     monkeypatch.setattr(
         ductile_backend_mod,
         "_generate_single_solution_with_groups",
-        lambda *_a, **_kw: types.SimpleNamespace(),
+        lambda *_a, **_kw: {},
     )
 
     class _OkKW:
@@ -821,7 +855,7 @@ def test_validate_solution_skips_rocisa_setdata_when_not_provided(monkeypatch):
     monkeypatch.setattr(
         ductile_backend_mod,
         "_generate_single_solution_with_groups",
-        lambda *_a, **_kw: types.SimpleNamespace(),
+        lambda *_a, **_kw: {},
     )
 
     class _OkKW:

@@ -335,6 +335,18 @@ repos:
         files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|check_plugin_reentry|test_check_plugin_reentry|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
         pass_filenames: false
 
+      # The GPU-free dbsync runner exits 0 when it validates nothing (an unknown family, or a
+      # gtest run in which every StaticFDBSync param skipped). Its self-tests feed it gtest JSON
+      # fixtures and family tables a bad merge can produce, and check that each of them fails. They
+      # read db_sync.cpp and the shipped system DB names, which are in the checkout whenever a file
+      # under projects/miopen is part of the diff. Standard library only.
+      - id: miopen-dbsync-runner-tests
+        name: MIOpen GPU-free dbsync runner self-tests
+        entry: python -m unittest discover -s projects/miopen/test/gtest/dbsync -p test_run_dbsync_rocjitsu.py
+        language: python
+        files: ^projects/miopen/test/gtest/(db_sync\.cpp|dbsync/(test_)?run_dbsync_rocjitsu\.py)$
+        pass_filenames: false
+
       - id: kpack-pin-sync
         name: rocm_kpack pin is consistent (hipDNN)
         # The pin is the kpack-ref output of .github/actions/ci-env/action.yml.

@@ -561,7 +561,7 @@ TEST(TestGpuPointwiseTernaryPlanBuilder, BuildNodePlanThrowsForWrongAttributesTy
 // Test executing the plans
 // =============================================================
 
-TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithAlpha)
+TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanEluWithAlpha)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -609,7 +609,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithAlpha)
     }
 }
 
-TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithBeta)
+TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanSoftplusWithBeta)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -659,7 +659,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithBeta)
     }
 }
 
-TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithDefaultAlpha)
+TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanEluWithDefaultAlpha)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -696,7 +696,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithDefaultAlpha)
     }
 }
 
-TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithDefaultBeta)
+TEST(TestGpuPointwiseUnaryPlanDeviceFp32, ExecutePlanSoftplusWithDefaultBeta)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -734,7 +734,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithDefaultBeta)
     }
 }
 
-TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanMaxMin)
+TEST(TestGpuPointwiseBinaryPlanDeviceFp32, ExecutePlanMaxMin)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -782,7 +782,7 @@ TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanMaxMin)
     }
 }
 
-TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanCmpGt)
+TEST(TestGpuPointwiseBinaryPlanDeviceFp32, ExecutePlanCmpGt)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -825,7 +825,7 @@ TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanCmpGt)
     }
 }
 
-TEST(TestGpuPointwiseTernaryPlanFp32, ExecutePlanBinarySelect)
+TEST(TestGpuPointwiseTernaryPlanDeviceFp32, ExecutePlanBinarySelect)
 {
     SKIP_IF_NO_DEVICES();
 

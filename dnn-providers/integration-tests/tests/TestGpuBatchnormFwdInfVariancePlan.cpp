@@ -411,7 +411,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
 // FP32 plan execution tests
 // ============================================================================
 
-TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNchw)
+TEST(TestGpuBatchnormFwdInfVariancePlanDevice, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -419,7 +419,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNchw)
         {2, 3, 4, 4}, TensorLayout::NCHW, batchnorm::getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNhwc)
+TEST(TestGpuBatchnormFwdInfVariancePlanDevice, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -427,7 +427,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNhwc)
         {2, 3, 4, 4}, TensorLayout::NHWC, batchnorm::getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanWithDoubleEpsilon)
+TEST(TestGpuBatchnormFwdInfVariancePlanDevice, ExecutePlanWithDoubleEpsilon)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -442,7 +442,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanWithDoubleEpsilon)
 // FP16 plan execution tests
 // ============================================================================
 
-TEST(TestGpuBatchnormFwdInfVariancePlanFp16, ExecutePlanNchw)
+TEST(TestGpuBatchnormFwdInfVariancePlanDeviceFp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -450,7 +450,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlanFp16, ExecutePlanNchw)
         {2, 3, 4, 4}, TensorLayout::NCHW, batchnorm::getToleranceInferenceWithVariance<half>());
 }
 
-TEST(TestGpuBatchnormFwdInfVariancePlanFp16, ExecutePlanNhwc)
+TEST(TestGpuBatchnormFwdInfVariancePlanDeviceFp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -462,7 +462,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlanFp16, ExecutePlanNhwc)
 // BFP16 plan execution tests
 // ============================================================================
 
-TEST(TestGpuBatchnormFwdInfVariancePlanBfp16, ExecutePlanNchw)
+TEST(TestGpuBatchnormFwdInfVariancePlanDeviceBfp16, ExecutePlanNchw)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -470,7 +470,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBfp16, ExecutePlanNchw)
         {2, 3, 4, 4}, TensorLayout::NCHW, batchnorm::getToleranceInferenceWithVariance<bfloat16>());
 }
 
-TEST(TestGpuBatchnormFwdInfVariancePlanBfp16, ExecutePlanNhwc)
+TEST(TestGpuBatchnormFwdInfVariancePlanDeviceBfp16, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 

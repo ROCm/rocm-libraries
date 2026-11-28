@@ -150,6 +150,19 @@ def tdmSeparateABDescriptors(ks):
     return tdmWaveSeparated(ks) and tdmGroupingSeparatesAB(ks)
 
 
+def tdmABShareOneLoad(ks):
+    """True when one tensor_load_to_lds moves both A and B.
+
+    That instruction's th/scope/nv bits are instruction-wide, so the hints of A
+    and B apply only where they agree (see tdmHintDeciders and
+    KernelWriterAssembly.tdmLoadModifiers, which this mirrors): the resolved
+    grouping keeps A and B in one set (TDMFuse=0) on more than one wave, outside
+    the subtile path, which keeps one descriptor per tensor.
+    """
+    return (tdmWaveSeparated(ks) and not ks.get("UseSubtileImpl")
+            and not tdmGroupingSeparatesAB(ks))
+
+
 def tdmMemberIsLive(ks, tc):
     """True when tensor `tc` exists on this problem; only MX scales can be absent."""
     if tc not in ("MXSA", "MXSB"):

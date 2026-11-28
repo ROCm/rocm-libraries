@@ -45,8 +45,10 @@ Classify every changed file with TheRock's skip-ci patterns: the base patterns p
 `$HEAD`. The loop prints every file (`is_ci_run_required` stops listing at ten). An external repository passes an empty
 workflow allowlist, so `.github/workflows/` files are classified by the patterns alone. When the pin lacks
 `_is_path_unrelated_to_ci` (**Helper drift**), the block uses the first function whose source uses `fnmatch` and that classifies
-`projects/hipdnn/docs/TESTING.md` as skip and `projects/hipdnn/backend/src/HipdnnBackend.cpp` as CI-relevant; with none it prints
-`STOP:` to stderr and the lane ends on the drift finding.
+`projects/hipdnn/docs/TESTING.md` and `.github/workflows/pre-commit.yml` (skip-listed in the repo's config) as skip, and
+`projects/hipdnn/backend/src/HipdnnBackend.cpp` and `.github/workflows/therock-multi-arch-ci.yml` as CI-relevant. The workflow
+pair rejects a function that applies TheRock's own workflow allowlist, which would mark the multi-arch workflow as skip. With
+no such function it prints `STOP:` to stderr and the lane ends on the drift finding.
 
 ```bash
 . ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); export PYTHONPATH=$T/build_tools/github_actions
@@ -55,16 +57,17 @@ git -C "$CLONE" show "$HEAD:.github/skip-ci-config.toml" > "$C" || { echo "no sk
 git -C "$CLONE" diff --name-only "$BASE" "$HEAD" | python3 -c '
 import sys, inspect; from pathlib import Path; import configure_ci_path_filters as f
 p, _ = f.load_skip_ci_config(extension_config_path=Path(sys.argv[1]))
-DOC, COD = "projects/hipdnn/docs/TESTING.md", "projects/hipdnn/backend/src/HipdnnBackend.cpp"
+CHECKS = {"projects/hipdnn/docs/TESTING.md": True, ".github/workflows/pre-commit.yml": True,
+          "projects/hipdnn/backend/src/HipdnnBackend.cpp": False, ".github/workflows/therock-multi-arch-ci.yml": False}
 def try_fn(fn, path):
     try: n = len(inspect.signature(fn).parameters); return fn(path, p) if n == 2 else fn(path, p, set()) if n == 3 else None
     except Exception: return None
 def candidate(fn):
-    try: return "fnmatch" in inspect.getsource(fn) and try_fn(fn, DOC) is True and try_fn(fn, COD) is False
+    try: return "fnmatch" in inspect.getsource(fn) and all(try_fn(fn, x) is want for x, want in CHECKS.items())
     except Exception: return False
 H = "_is_path_unrelated_to_ci"; use = H if hasattr(f, H) else next((n for n, fn in inspect.getmembers(f, inspect.isfunction) if candidate(fn)), None)
 if use != H: print(f"HELPER-DRIFT: {H} not found in TheRock {sys.argv[2]}" + (f"; using {use}" if use else ""), file=sys.stderr)
-if use is None: sys.exit(f"STOP: TheRock pin has no {H} and no replacement passed the docs/.cpp check")
+if use is None: sys.exit(f"STOP: TheRock pin has no {H} and no replacement passed the docs/.cpp/workflow check")
 skip = lambda x, fn=getattr(f, use): try_fn(fn, x)
 for x in sys.stdin.read().splitlines(): print("[skip]" if skip(x) else "[ci]  ", x)' "$C" "$ROCK_REF"
 ```

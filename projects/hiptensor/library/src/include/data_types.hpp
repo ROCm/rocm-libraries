@@ -42,6 +42,7 @@
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/hiptensor_types.h>
 
+#include "../backends/common/backend.hpp"
 #include "hip_device.hpp"
 #include "plan_cache.hpp"
 
@@ -61,9 +62,11 @@ struct hiptensorOperationDescriptor
     hiptensorDataType_t mScalarType;
     float               mFlops;
     float               mMovedBytes;
-    uint32_t            mPaddingLeft;
-    uint32_t            mPaddingRighT;
-    void*               mPaddingValue;
+    //! One entry per mode of the output tensor.
+    std::vector<uint32_t> mPaddingLeft;
+    std::vector<uint32_t> mPaddingRight;
+    //! One element of the output tensor's data type.
+    std::vector<uint8_t> mPaddingValue;
 
     hiptensorOperationType_t    mOperationType;
     int32_t                     mContractionOpId;
@@ -132,6 +135,10 @@ struct hiptensorPlan
     std::unique_ptr<hiptensorTensorDescriptor>    mOwnedDescE;
     std::unique_ptr<hiptensorOperationDescriptor> mOwnedOpDesc;
     std::unique_ptr<hiptensorPlanPreference>      mOwnedPref;
+
+    // The backend that serves the plan and its prepared program, set at plan creation.
+    // Declared last so it is released before the descriptors it was prepared from.
+    std::unique_ptr<hiptensor::backend::PlanBackendState> mBackend;
 };
 
 struct hiptensorPlanPreference
@@ -251,7 +258,7 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id);
 
-    void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
+    void writeVal(void* addr, hiptensorComputeDescriptor_t id, ScalarData value);
 
     std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
     std::string hipTypeToString(hiptensorDataType_t hipType);

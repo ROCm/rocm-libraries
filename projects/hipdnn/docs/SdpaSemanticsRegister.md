@@ -59,7 +59,7 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN today:**
   - The CPU executor and the dense and ragged GPU references all compose this way, through `PlanUtils.hpp`
     `extractDiagonalBandParams`, as the frontend documents (`SdpaAttributes.hpp:128-135`). Pinned for the ragged
-    GPU reference by `TestGpuSdpaRaggedFwdPlanDeprecatedCausal`.
+    GPU reference by `TestGpuSdpaRaggedFwdPlanDeprecatedCausalDevice`.
   - Setting both deprecated flags is rejected by `SdpaFwdNode` and `SdpaBwdNode` `pre_validate_node`
     (`validateSdpaDeprecatedCausalFlags`).
   - The rocKE `sdpa_reference.py` (hip-kernel-provider) still forces `(-1, 0)`.
@@ -284,7 +284,7 @@ batch when `seq_len_q/kv` are set).
     hold draws the engine discards.
   - The references run a packed graph as its dense padded rewrite with the dump as the mask
     (`TestRaggedSdpaDensify.PhiloxDropoutThroughTheRewriteAppliesTheDenseDump`,
-    `TestGpuRaggedSdpaDensify.PhiloxDropoutWithItsDumpMatchesCpu`).
+    `TestGpuRaggedSdpaDensifyDevice.PhiloxDropoutWithItsDumpMatchesCpu`).
 - **Probability 0 (forward Aligned, backward Diverges; without `rng_dump`):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
   explicit mask or `dropout_scale` drops nothing, so the CPU and GPU forward references compute it as no dropout
   (`isSdpaZeroProbabilityDropout`): bit-identical to the graph without dropout fields. A seed and an offset may be
@@ -293,11 +293,11 @@ batch when `seq_len_q/kv` are set).
   outputs are bit-identical to the scaled graph without dropout. The forward matches cudnn-frontend v1.24.0: a
   probability of 0 builds no dropout (`scaled_dot_product_flash_attention.h:839-842`, backend 8.9.3 and later; the
   unified node sets dropout only for a probability other than 0, `:2449`). Pinned by
-  `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropout`. The backward references treat the same form as no
+  `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropoutDevice`. The backward references treat the same form as no
   dropout (`isSdpaZeroProbabilityDropout` on the backward attributes, which also requires `dropout_scale_inv` absent):
   dQ, dK and dV are bit-identical to the graph without dropout fields. The decline of `dropout_probability`, seed and
   offset in "hipDNN today" applies to a probability above 0 and to a seed or offset named without a probability.
-  Pinned by `TestSdpaBwdPlanZeroDropout` and `TestGpuSdpaBwdPlanZeroDropout`. The backward diverges from
+  Pinned by `TestSdpaBwdPlanZeroDropout` and `TestGpuSdpaBwdPlanZeroDropoutDevice`. The backward diverges from
   cudnn-frontend v1.24.0, whose backward builds its RNG node from seed and offset whatever the probability
   (`scaled_dot_product_flash_attention.h:1496-1512`), where hipDNN's backward reads neither at probability 0; it is
   listed in [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md#sdpa-dropout-random-stream).
@@ -452,7 +452,7 @@ batch when `seq_len_q/kv` are set).
 
 - **hipDNN:** no rule change; the bounds already express every FA window. The references with this mapping equal an
   oracle written in FA's terms, dense and paged, padded and ragged (`FaWindowsMapToHipdnnBounds` in
-  `TestSdpaFwdPlanVllmForm` and `TestGpuSdpaFwdPlanVllmForm`). Keys no row sees (outside every row's window, past
+  `TestSdpaFwdPlanVllmForm` and `TestGpuSdpaFwdPlanVllmFormDevice`). Keys no row sees (outside every row's window, past
   `seq_len_kv`, in null or unreferenced blocks) are never read into the result: NaN or infinity there gives the same
   bits as zeros (`KeysNoRowSeesDoNotLeak`). The FlyDSL engines read no V at a key no row of their query block sees
   either, on every family, so NaN or infinity at a key no row sees reaches no output there too (hip-kernel-provider
@@ -481,7 +481,7 @@ batch when `seq_len_q/kv` are set).
   The forward node requires both lengths only with paged K/V (SEM-009). The CPU and GPU references derive
   `seq_len_q` from the offsets (`RaggedSdpaDensify.hpp`): bit-identical to the same graph with
   `seq_len_q = diff(offsets)`, equal to an oracle in FlashAttention's terms, and keys past `seq_len_kv` holding NaN
-  or infinity are never read (`TestSdpaFwdPlanSeqLenKvOnly`, `TestGpuSdpaFwdPlanSeqLenKvOnly`). A `seq_len_kv` past
+  or infinity are never read (`TestSdpaFwdPlanSeqLenKvOnly`, `TestGpuSdpaFwdPlanSeqLenKvOnlyDevice`). A `seq_len_kv` past
   its slot is an error, as PyTorch forbids it. The same problem with both lengths (cuDNN 1.24's form,
   `seq_len_q = diff(offsets)`) has the same meaning and result.
 - **Engines:** the FlyDSL RDNA prefill (gfx11, gfx12), aiw (gfx12) and CDNA generic prefill engines serve the
