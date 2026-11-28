@@ -268,9 +268,13 @@ public:
 
             if(mp_lib == fft_mp_lib_mpi)
             {
+#if FFT_PARAMS_WITH_MPI
                 if(rocfft.plan_description_set_comm(desc, rocfft_comm_mpi, mp_comm)
                    != rocfft_status_success)
                     throw std::runtime_error("rocfft_plan_description_set_comm failed");
+#else
+                throw std::runtime_error("MPI is not enabled");
+#endif
             }
 
             if(run_callbacks == fft_callback_type_jit)
