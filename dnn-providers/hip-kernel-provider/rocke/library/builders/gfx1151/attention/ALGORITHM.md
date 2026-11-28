@@ -1,8 +1,10 @@
 # The winning kernel, from the math up
 
-A step-by-step derivation of the algorithm the **single-wave WMMA flash-attention
-forward** kernel (`fmha_singlewave.py`, and its software-pipelined sibling
-`fmha_pipelined.py`) actually computes — the campaign winner at ~11 TF on gfx1151.
+A step-by-step derivation of the algorithm the gfx1151 **single-wave WMMA
+flash-attention forward** kernels compute. It starts from the untransposed
+$S = Q K^\top$ formulation that the campaign's ~11 TF winner used, and ends in
+section 9 at the transposed-QK rewrite that ships today,
+[`kernels/gfx1151/wmma_fmha_swapqk.py`](../../../kernels/gfx1151/wmma_fmha_swapqk.py).
 
 This is written for a reader with a math / CS background who has **not** seen
 flash attention before. We start from the definition of attention, derive the
@@ -434,8 +436,92 @@ matrix unit.
 - [`README.md`](./README.md) — the optimization case study: why single-wave gather
   wins, why every LDS-staging rewrite loses, the roofline, and the iteration
   ledger.
-- `fmha_singlewave.py` — the kernel this document describes (D128 winner). Each step
-  above maps to a labelled section in `build_wmma_fmha_singlewave`.
-- `fmha_pipelined.py` — the same algorithm with the QK of tile $t+1$ hoisted to
-  overlap with the softmax of tile $t$ (software pipelining); the D64 winner. The
-  *math* is identical — only the *order* of the independent operations changes.
+- [`kernels/gfx1151/wmma_fmha_swapqk.py`](../../../kernels/gfx1151/wmma_fmha_swapqk.py)
+  — the production kernel, built by `build_wmma_fmha_swapqk`. Sections 1–8 derive the
+  recurrence it evaluates; section 9 derives the transpose that makes it fast.
+- [`kernels/gfx1151/wmma_fmha_fwd.py`](../../../kernels/gfx1151/wmma_fmha_fwd.py)
+  — the untransposed $S = Q K^\top$ kernel sections 1–8 describe directly.
+
+---
+
+## 9. The transposed-QK reformulation (`swapqk`) — the production kernel
+
+Everything above computes the scores **untransposed**, $S = Q K^\top$, which puts
+the *query* on the accumulator slots and the *key* on the lane. Two costs follow:
+the online-softmax reduction is over the key index, which is spread **across the
+16 lanes** (a butterfly reduction), and the probabilities $P$ come out of the WMMA
+in the *accumulator* layout but the PV matmul needs them in the *A-operand*
+layout — a transpose the fixed WMMA map can only do through an **LDS round-trip**
+every K-tile.
+
+The `swapqk` kernel computes the scores **transposed**:
+
+$$ S^\top = K Q^\top, \qquad (S^\top)_{k,q} = \sum_d K_{k,d}\, Q_{q,d} = S_{q,k}. $$
+
+Mathematically identical scores; physically the layout flips. Now **query is on
+the lane** ($\text{col} = \text{lane}\bmod 16$) and the key index sits on the 8
+accumulator slots (plus the $\text{lane}\oplus16$ half). Three consequences:
+
+1. **In-lane softmax.** For a fixed query (fixed lane) the 16 keys of a tile are
+   the lane's own 8 slots + the 8 slots of its $\oplus16$ partner. The row-max and
+   row-sum are therefore an **8-way in-lane reduction plus one `permlanex16`
+   cross-half exchange** — not a 16-lane butterfly. The running statistics
+   $m_i, \ell_i$ (§4) are a *scalar per lane* (one query per lane).
+
+2. **Register P-transpose, no LDS.** $P$ is produced with query on the lane; the
+   PV A-operand also wants query on the lane, so the C→A transpose is CK's
+   `PermuteWarpGemmCToA`: **one `permlanex16` + two `v_perm_b32` per dword**, in
+   registers, **no LDS round-trip and no barrier**. This is exactly the transform
+   that *cannot* be applied to $S = QK^\top$ (there query is on the slots, so the
+   full 16-lane gather is unavoidable — the documented `p_xpose="shuffle"`
+   dead-end of §7).
+
+3. **Transposed PV keeps the layout coherent.** PV is computed
+   $O^\top = V P$ (V is the A operand, P the B operand), so the output
+   $O^\top_{d,q}$ carries query on the lane — the **same** distribution as
+   $m_i, \ell_i$. The online rescale $O \mathrel{*}= \alpha$ (§4) is then a plain
+   in-lane vector-multiply, with no cross-lane redistribution of $\alpha$. The
+   only cost is a transposed (strided-in-$d$) $O$ store in the epilogue, paid once
+   per query block.
+
+$V$ is still the cache-resident column **gather** (gfx1151 has no `ds_read_tr`);
+the transpose here is on $P$ (registers), not on $V$.
+
+**What actually moved the number** (each hardware-A/B'd on gfx1151; see
+`README.md` for the ledger):
+
+- **pingpong `s_setprio`** wave scheduling — the dominant lever (~2.25×): two
+  waves alternate priority so one issues WMMA while the other runs softmax VALU.
+- **buffer-descriptor D16 V-gather** — issue the strided V gather through a buffer
+  resource returning `half` (not `i16`+bitcast), so the backend keeps the gather
+  **clause-batched** (`s_clause` 121→38) and the loads pipeline (+~14%).
+- **dual-subtile gather** — lanes 16–31 gather the *adjacent* d-subtile and a
+  `permlanex16` broadcasts each subtile into both lane-halves, **halving** the V
+  load count.
+- **lazy online rescale** — skip the $O$/$\ell$ rescale on tiles whose max does
+  not re-anchor $m_i$ (a wave-uniform predicate gates a 0/1-trip `scf.for`).
+- **fast exp2** — the softmax argument is $\le 0$, so the IEEE `exp2`
+  overflow guard is dead; the raw `v_exp_f32` is safe (+2.7%).
+- **transposed $V$ layout** — take $V$ as $[B, H, D, S]$ so a lane's 16 keys are
+  contiguous and read as 2 `dwordx4` instead of 16 strided d16 loads (256→32
+  vector-memory instructions per iteration). Costs address divergence across the
+  32 lanes, which a standalone bandwidth probe settles in favour of the
+  transposed form by roughly 2×. Worth −20.3% cycles at $L=4096$, −5.9% at
+  $L=8192$, and nothing at $L=16384$ where the memory unit is latency-saturated
+  rather than throughput-saturated.
+- **d-outer QK loop** (`qk_douter`) — restructure the QK loop to iterate $d$
+  outside the kv sub-tiles (+3.3%). Note the mechanism is *not* the one it was
+  built for: $Q$ is loop-invariant and LLVM already hoisted it, so no loads were
+  removed. The gain is duplicate-address elimination in the texture unit, visible
+  only in `TA_TA_BUSY` — which is why the ISA is worth checking before crediting
+  a mechanism.
+
+The result is roughly **2×** the single-wave record, peaking at $L\approx1024$
+and holding most of that out to $L=16384$. The reformulation, not any micro-op,
+is what unlocked it: putting the query on the lane made the softmax in-lane, the
+P-transpose LDS-free, and the rescale a register op — removing the three
+structural taxes the untransposed kernel pays every K-tile.
+
+- `kernels/gfx1151/wmma_fmha_swapqk.py` — the production kernel (this section).
+  Ref: CK `ck_tile/.../warp_wmma_gemm_gfx11_utils.hpp::PermuteWarpGemmCToA` and
+  `block_fmha_pipeline_qr_ks_vs.hpp`.

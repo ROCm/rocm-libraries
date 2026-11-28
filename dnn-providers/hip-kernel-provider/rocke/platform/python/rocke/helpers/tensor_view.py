@@ -62,7 +62,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, Sequence, Tuple, Union
 
-from ..core.ir import IRBuilder, Type, Value
+from ..core.ir import IRBuilder, TemporalHint, Type, Value
 
 
 StrideElem = Union[int, Value]
@@ -382,6 +382,7 @@ class TensorView:
         value: Value,
         *,
         align: Optional[int] = None,
+        nontemporal: bool = False,
     ) -> None:
         """Scalar store. ``value.type`` must match ``self.dtype``.
 
@@ -390,7 +391,8 @@ class TensorView:
         store does not depend on the target's unaligned-access mode; for every
         other dtype the IR builder picks. Pass the element size (2 for f16) to
         match a hand-rolled ``global_store(..., align=2)`` and let the backend
-        coalesce neighbouring f16 stores.
+        coalesce neighbouring f16 stores. ``nontemporal`` (global only) streams
+        the store (cache-bypass) for write-once outputs.
         """
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16", "f64"):
@@ -418,14 +420,22 @@ class TensorView:
         if align is None and self.dtype.name == "f64":
             # Same 8-byte element alignment as the f64 load_scalar.
             align = 8
+        hint = TemporalHint.STREAMING if nontemporal else TemporalHint.DEFAULT
         if align is None:
-            b.global_store(self.base, off, value)
+            b.global_store(self.base, off, value, temporal_hint=hint)
         else:
-            b.global_store(self.base, off, value, align=align)
+            b.global_store(self.base, off, value, align=align, temporal_hint=hint)
 
     # ---- vector ops ----
 
-    def load_vec(self, b: IRBuilder, indices: Sequence[Value], n: int) -> Value:
+    def load_vec(
+        self,
+        b: IRBuilder,
+        indices: Sequence[Value],
+        n: int,
+        *,
+        nontemporal: bool = False,
+    ) -> Value:
         """Vectorised load of ``n`` consecutive elements starting at
         ``indices``. Supports ``n in {2, 4, 8}`` for f16/bf16 (global &
         LDS), ``n in {2, 4, 8, 16}`` for the 8-bit float types (global &
@@ -875,15 +885,24 @@ class TileWindow:
         *local_indices: Value,
         value: Value,
         align: Optional[int] = None,
+        nontemporal: bool = False,
     ) -> None:
         self.view.store_scalar(
-            b, self._global_indices(b, local_indices), value=value, align=align
+            b,
+            self._global_indices(b, local_indices),
+            value=value,
+            align=align,
+            nontemporal=nontemporal,
         )
 
     # ---- vector ops ----
 
-    def load_vec(self, b: IRBuilder, *local_indices: Value, n: int) -> Value:
-        return self.view.load_vec(b, self._global_indices(b, local_indices), n=n)
+    def load_vec(
+        self, b: IRBuilder, *local_indices: Value, n: int, nontemporal: bool = False
+    ) -> Value:
+        return self.view.load_vec(
+            b, self._global_indices(b, local_indices), n=n, nontemporal=nontemporal
+        )
 
     def store_vec(
         self, b: IRBuilder, *local_indices: Value, value: Value, n: int
