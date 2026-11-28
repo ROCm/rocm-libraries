@@ -150,6 +150,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 
 ### Changed
+* [DB] Refreshed the system find-db and perf-db for gfx942, gfx950, gfx1100, gfx1151 and gfx1201
+  from current exhaustive tuning results (gfx950 also takes the `ConvHipConv` v0.5 results). New
+  results are merged per solver over the shipped entries, which are kept where they were recorded
+  faster or where DBSync rejects the new perf config. Each database passes DBSync on its
+  architecture. Winograd solvers that were recorded under the direct algorithm now carry the
+  Winograd algorithm.
 * [Conv] The gfx942/gfx950 two-tower config-selection heuristic now ranks a shipped precomputed
   config-embedding table instead of running the per-candidate fdeep config tower at run time, then
   checks CK applicability lazily top-down; on a miss (no table, or nothing applicable) selection
