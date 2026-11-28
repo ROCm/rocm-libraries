@@ -485,6 +485,103 @@ TEST_F(ExtraBsrgemm, mult_c64)
     run_mult<rocsparse_double_complex>();
 }
 
+// C = A * B + D with the row pointer of D passed as that of C, which only
+// rocsparse_spgemm supports: rejected, and the row pointer of D is left as it is.
+TEST_F(ExtraBsrgemm, nnzb_shared_row_ptr_C_D)
+{
+    const rocsparse_int              mb = 1, nb = 1, kb = 1, block_dim = 2, nnzb = 1;
+    const std::vector<rocsparse_int> h_row_ptr{0, 1};
+    device_vector<rocsparse_int>     row_ptr{h_row_ptr};
+    device_vector<rocsparse_int>     col_ind{std::vector<rocsparse_int>{0}};
+    device_vector<rocsparse_int>     row_ptr_D{h_row_ptr};
+    ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && row_ptr_D.ptr);
+
+    rocsparse_mat_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+    rocsparse_mat_info info = nullptr;
+    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+    const float               alpha = 1.0f, beta = 1.0f;
+    const rocsparse_operation opn = rocsparse_operation_none;
+    const rocsparse_direction dir = rocsparse_direction_row;
+
+    size_t           buffer_size = 0;
+    rocsparse_status st          = ut_bsrgemm_buffer_size<float>(handle,
+                                                        dir,
+                                                        opn,
+                                                        opn,
+                                                        mb,
+                                                        nb,
+                                                        kb,
+                                                        block_dim,
+                                                        &alpha,
+                                                        descr,
+                                                        nnzb,
+                                                        row_ptr,
+                                                        col_ind,
+                                                        descr,
+                                                        nnzb,
+                                                        row_ptr,
+                                                        col_ind,
+                                                        &beta,
+                                                        descr,
+                                                        nnzb,
+                                                        row_ptr_D,
+                                                        col_ind,
+                                                        info,
+                                                        &buffer_size);
+    if(st == rocsparse_status_not_implemented)
+    {
+        EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+        GTEST_SKIP() << "bsrgemm multadd not implemented for this configuration";
+    }
+    ASSERT_EQ(st, rocsparse_status_success);
+
+    device_vector<char> buffer{buffer_size};
+    ASSERT_TRUE(buffer.ptr);
+
+    rocsparse_int nnzb_C = -1;
+    EXPECT_EQ(rocsparse_bsrgemm_nnzb(handle,
+                                     dir,
+                                     opn,
+                                     opn,
+                                     mb,
+                                     nb,
+                                     kb,
+                                     block_dim,
+                                     descr,
+                                     nnzb,
+                                     row_ptr,
+                                     col_ind,
+                                     descr,
+                                     nnzb,
+                                     row_ptr,
+                                     col_ind,
+                                     descr,
+                                     nnzb,
+                                     row_ptr_D,
+                                     col_ind,
+                                     descr,
+                                     row_ptr_D,
+                                     &nnzb_C,
+                                     info,
+                                     buffer.ptr),
+              rocsparse_status_invalid_value);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    std::vector<rocsparse_int> after(h_row_ptr.size());
+    ASSERT_EQ(hipMemcpy(after.data(),
+                        row_ptr_D.ptr,
+                        after.size() * sizeof(rocsparse_int),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+    EXPECT_EQ(after, h_row_ptr);
+
+    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+}
+
 TEST_F(ExtraBsrgemm, bad_args)
 {
     const rocsparse_int          mb = 1, nb = 1, kb = 1, block_dim = 2, nnzb = 1;

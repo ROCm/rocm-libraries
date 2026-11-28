@@ -167,6 +167,12 @@ namespace rocsparse
             {
                 ROCSPARSE_CHECKARG_POINTER(24, temp_buffer);
             }
+
+            // Only rocsparse_spgemm supports C and D sharing their row pointer.
+            ROCSPARSE_CHECKARG(21,
+                               bsr_row_ptr_C,
+                               (bsr_row_ptr_C != nullptr && bsr_row_ptr_C == bsr_row_ptr_D),
+                               rocsparse_status_invalid_value);
             return rocsparse_status_continue;
         }
         else if(mul == true && add == false)

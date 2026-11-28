@@ -748,6 +748,14 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(7, D, (D->col_type != A->col_type), rocsparse_status_type_mismatch);
         ROCSPARSE_CHECKARG(8, C, (C->col_type != A->col_type), rocsparse_status_type_mismatch);
 
+        // A row pointer shared by C and D cannot hold the offsets of both in
+        // different index bases.
+        ROCSPARSE_CHECKARG(8,
+                           C,
+                           (beta != nullptr && D->nnz != 0 && C->const_row_data == D->const_row_data
+                            && C->descr->base != D->descr->base),
+                           rocsparse_status_invalid_value);
+
         ROCSPARSE_CHECKARG(
             1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(

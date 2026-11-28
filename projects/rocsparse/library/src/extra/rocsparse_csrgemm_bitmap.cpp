@@ -963,7 +963,8 @@ namespace rocsparse
     }
 
     // Clears the pass's rows of C and adds both terms into them through its rank index. A row
-    // walked in tiles is cleared by its first tile only.
+    // walked in tiles is cleared by its first tile only. When C shares its values with D, the rows
+    // are scaled by beta instead of cleared, and only the product is added.
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J, typename T>
     rocsparse_status csrgemm_bitmap_values_pass(rocsparse_handle                      handle,
                                                 const csrgemm_bitmap_workspace<I, J>& workspace,
@@ -986,7 +987,29 @@ namespace rocsparse
         const int64_t entry_first = layout.h_entry_offset[pass.base];
         const int64_t entry_last  = layout.h_entry_offset[pass.base + pass.count];
 
-        if(pass.first_tile)
+        // C shares its values with D, which rocsparse_spgemm allows when both have
+        // the same sparsity pattern: an entry of D is then in its place in C
+        // already, and clearing C would erase it before it is added.
+        const bool in_place = D.row_ptr != nullptr && values.val_D == csr_val_C;
+
+        if(pass.first_tile && in_place)
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::csrgemm_bitmap_scale_val_kernel<BLOCKSIZE, I, J, T>),
+                dim3(pass.count, pass.npiece),
+                dim3(BLOCKSIZE),
+                0,
+                stream,
+                pass.base,
+                group.offset,
+                group.perm,
+                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, values.beta),
+                csr_row_ptr_C,
+                idx_base_C,
+                csr_val_C,
+                is_host_mode);
+        }
+        else if(pass.first_tile)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgemm_bitmap_clear_val_kernel<BLOCKSIZE, I, J, T>),
@@ -1045,7 +1068,7 @@ namespace rocsparse
                 is_host_mode);
         }
 
-        if(D.row_ptr != nullptr)
+        if(D.row_ptr != nullptr && !in_place)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgemm_bitmap_accumulate_D_kernel<BLOCKSIZE, I, J, T>),

@@ -87,6 +87,11 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
     // Temporary buffer
     char* buffer = reinterpret_cast<char*>(temp_buffer);
 
+    // Row lengths of C. They cannot be accumulated in csr_row_ptr_C, which may
+    // be csr_row_ptr_D: the kernels below read csr_row_ptr_D up to the last one.
+    I* row_nnz = reinterpret_cast<I*>(buffer);
+    buffer += ((sizeof(I) * (m + 1) - 1) / 256 + 1) * 256;
+
     // rocprim buffer
     size_t rocprim_size;
     void*  rocprim_buffer;
@@ -112,7 +117,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                 csr_col_ind_A,
                 csr_row_ptr_B,
                 csr_row_ptr_D,
-                csr_row_ptr_C,
+                row_nnz,
                 base_A,
                 mul,
                 add);
@@ -126,11 +131,11 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
         (rocsparse::primitives::find_max_buffer_size<I, I>(handle, m, &rocprim_size)));
     rocprim_buffer = reinterpret_cast<void*>(buffer);
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::find_max(
-        handle, csr_row_ptr_C, csr_row_ptr_C + m, m, rocprim_size, rocprim_buffer));
+        handle, row_nnz, row_nnz + m, m, rocprim_size, rocprim_buffer));
 
     I int_max;
-    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        &int_max, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToHost, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemcpyAsync(&int_max, row_nnz + m, sizeof(I), hipMemcpyDeviceToHost, stream));
     // Wait for host transfer to finish
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
@@ -163,7 +168,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
             0,
             stream,
             m,
-            csr_row_ptr_C,
+            row_nnz,
             d_group_size,
             handle->shared_mem_per_block_optin);
 
@@ -212,7 +217,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::create_identity_permutation_template(handle, m, tmp_perm));
 
-        rocsparse::primitives::double_buffer<I> d_keys(csr_row_ptr_C, tmp_keys);
+        rocsparse::primitives::double_buffer<I> d_keys(row_nnz, tmp_keys);
         rocsparse::primitives::double_buffer<J> d_vals(tmp_perm, tmp_vals);
 
         uint32_t startbit = 0;
@@ -269,7 +274,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -312,7 +317,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -355,7 +360,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -398,7 +403,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -441,7 +446,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -484,7 +489,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -527,7 +532,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -581,7 +586,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -635,7 +640,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -689,7 +694,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                     csr_col_ind_B,
                     csr_row_ptr_D,
                     csr_col_ind_D,
-                    csr_row_ptr_C,
+                    row_nnz,
                     base_A,
                     base_B,
                     base_D,
@@ -731,20 +736,46 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
                                                                        csr_row_ptr_D,
                                                                        csr_col_ind_D,
                                                                        base_D,
-                                                                       csr_row_ptr_C)));
+                                                                       row_nnz)));
     }
+
+    // C may share its row pointer with D, which rocsparse_spgemm allows when C
+    // and D have the same sparsity pattern.
+    const bool in_place = add && (csr_row_ptr_C == csr_row_ptr_D);
 
     // Exclusive sum to obtain row pointers of C
     rocprim_buffer = reinterpret_cast<void*>(buffer);
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::exclusive_scan_buffer_size<I, I>(
         handle, static_cast<I>(descr_C->base), m + 1, &rocprim_size)));
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::exclusive_scan(handle,
-                                                                    csr_row_ptr_C,
-                                                                    csr_row_ptr_C,
-                                                                    static_cast<I>(descr_C->base),
-                                                                    m + 1,
-                                                                    rocprim_size,
-                                                                    rocprim_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::primitives::exclusive_scan(handle,
+                                              row_nnz,
+                                              in_place ? row_nnz : csr_row_ptr_C,
+                                              static_cast<I>(descr_C->base),
+                                              m + 1,
+                                              rocprim_size,
+                                              rocprim_buffer));
+
+    if(in_place)
+    {
+        // Every row of C contains the row of D, so both have the same pattern
+        // exactly when they have the same number of non-zeros (D without
+        // duplicate entries). The shared row pointer holds one index base only.
+        I nnz_CD;
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            &nnz_CD, row_nnz + m, sizeof(I), hipMemcpyDeviceToHost, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+        if(base_D != descr_C->base || nnz_CD - static_cast<I>(descr_C->base) != nnz_D)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_value,
+                "C and D share their row pointer but differ in sparsity pattern or index base");
+        }
+
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            csr_row_ptr_C, row_nnz, sizeof(I) * (m + 1), hipMemcpyDeviceToDevice, stream));
+    }
 
     // Store nnz of C
     if(handle->pointer_mode == rocsparse_pointer_mode_device)
