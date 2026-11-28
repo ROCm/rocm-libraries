@@ -38,6 +38,9 @@ __all__ = [
     "DIRECT_DW_FWD_WMMA",
     "DIRECT_FWD_GSTREAM_WMMA",
     "DIRECT_FWD_TAPOUTER_WMMA",
+    "DIRECT_NCHW_FWD",
+    "DIRECT_NCHW_DGRAD",
+    "DIRECT_NCHW_WGRAD",
     "DIRECT_GROUPED_HALO",
     "DIRECT_HALO_VARIANTS",
     "DIRECT_MFMA_DGRAD",
@@ -59,6 +62,7 @@ __all__ = [
     "make_direct_spec",
     "select_direct_kernel_builder",
     "validate_direct_spec",
+    "variant_layout",
 ]
 
 # Weight-transform kernels of the MFMA dgrad pipeline, cached as their own
@@ -139,6 +143,16 @@ DIRECT_FWD_GSTREAM_WMMA = "direct_fwd_gstream_wmma"
 # Wave32 WMMA forward of large dilations: the taps as shifted 1x1 GEMMs over
 # TDM windows, the taps whose window lies in the padding skipped.
 DIRECT_FWD_TAPOUTER_WMMA = "direct_fwd_tapouter_wmma"
+# gfx950 native-NCHW direct forward (X NCHW -> Y NKHW, no host transpose);
+# stride 1 or 2, fp16/bf16, groups == 1. AOT-buildable, not yet dispatch-wired.
+DIRECT_NCHW_FWD = "direct_nchw_fwd"
+# gfx950 native-NCHW direct dgrad (dY NKHW -> dX NCHW, no host transpose);
+# stride 1 or 2, fp16/bf16, groups == 1. AOT-buildable, not yet dispatch-wired.
+DIRECT_NCHW_DGRAD = "direct_nchw_dgrad"
+# gfx950 native-NCHW direct wgrad (X NCHW + dY NKHW -> dW KCYX, no host
+# transpose); stride 1 or 2, fp16/bf16, groups == 1. AOT-buildable, not yet
+# dispatch-wired.
+DIRECT_NCHW_WGRAD = "direct_nchw_wgrad"
 # Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
 # groups/channels, small cpg merged into one MFMA problem).
 DIRECT_GROUPED_HALO = "direct_grouped_halo"
@@ -254,6 +268,16 @@ def direct_spec_takes_target_wave(variant: str, knobs: dict) -> bool:
     return variant == "direct_depthwise_dgrad_win" and bool(knobs.get("mfma"))
 
 
+def variant_layout(variant: str) -> str:
+    """Activation layout ``variant``'s binary reads/writes: ``"NCHW"`` for the
+    native-NCHW families (prefix ``"direct_nchw_"``, e.g. :data:`DIRECT_NCHW_FWD`,
+    :data:`DIRECT_NCHW_DGRAD` and :data:`DIRECT_NCHW_WGRAD`), ``"NHWC"`` for
+    every other (today's whole) table. The
+    foundation of the AOT sweep's
+    ``layout`` filter (:func:`kernels.conv.direct_aot_jobs.direct_jobs`)."""
+    return "NCHW" if variant.startswith("direct_nchw_") else "NHWC"
+
+
 def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     """The spec ``variant`` builds for ``problem``.
 
@@ -344,6 +368,24 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
 
         return DirectFwdTapOuterSpec(
             problem=problem, name="rocke_direct_fwd_tapouter_wmma", **knobs
+        )
+    if variant == DIRECT_NCHW_FWD:
+        from kernels.common.conv_direct_nchw_fwd import DirectNchwFwdSpec
+
+        return DirectNchwFwdSpec(
+            problem=problem, name="conv_direct_nchw_fwd", **knobs
+        )
+    if variant == DIRECT_NCHW_DGRAD:
+        from kernels.common.conv_direct_nchw_dgrad import DirectNchwDgradSpec
+
+        return DirectNchwDgradSpec(
+            problem=problem, name="conv_direct_nchw_dgrad", **knobs
+        )
+    if variant == DIRECT_NCHW_WGRAD:
+        from kernels.common.conv_direct_nchw_wgrad import DirectNchwWgradSpec
+
+        return DirectNchwWgradSpec(
+            problem=problem, name="conv_direct_nchw_wgrad", **knobs
         )
     if variant == "direct_nongrouped":
         return dn.DirectNongroupedConvSpec(
@@ -891,6 +933,24 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
 
             why = fwd_flex_mfma_reason(spec, arch)
             return why is None, why or "ok"
+        if variant == DIRECT_NCHW_FWD:
+            from kernels.common.conv_direct_nchw_fwd import (
+                is_valid_direct_nchw_fwd_spec,
+            )
+
+            return is_valid_direct_nchw_fwd_spec(spec, arch=arch)
+        if variant == DIRECT_NCHW_DGRAD:
+            from kernels.common.conv_direct_nchw_dgrad import (
+                is_valid_direct_nchw_dgrad_spec,
+            )
+
+            return is_valid_direct_nchw_dgrad_spec(spec, arch=arch)
+        if variant == DIRECT_NCHW_WGRAD:
+            from kernels.common.conv_direct_nchw_wgrad import (
+                is_valid_direct_nchw_wgrad_spec,
+            )
+
+            return is_valid_direct_nchw_wgrad_spec(spec, arch=arch)
     except ValueError as e:
         return False, str(e)
     raise ValueError(f"unknown direct conv variant {variant!r}")
@@ -914,6 +974,9 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_fwd_gstream_wmma as fgs
     from kernels.common import conv_direct_fwd_pp_mfma as fpp
     from kernels.common import conv_direct_fwd_tapouter_wmma as ft
+    from kernels.common import conv_direct_nchw_fwd as dnf
+    from kernels.common import conv_direct_nchw_dgrad as dnd
+    from kernels.common import conv_direct_nchw_wgrad as dnw
     from kernels.common import conv_direct_dw_wgrad as dw
     from kernels.common import conv_direct_dw_wgrad_mfma as dwmf
     from kernels.common import conv_direct_fwd_wmma as fw
@@ -942,6 +1005,9 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_DW_FWD_WMMA: dfw.build_dw_fwd_wmma,
         DIRECT_FWD_GSTREAM_WMMA: fgs.build_fwd_gstream_wmma,
         DIRECT_FWD_TAPOUTER_WMMA: ft.build_direct_fwd_tapouter_wmma,
+        DIRECT_NCHW_FWD: dnf.build_direct_conv_nchw_fwd,
+        DIRECT_NCHW_DGRAD: dnd.build_direct_conv_nchw_dgrad,
+        DIRECT_NCHW_WGRAD: dnw.build_direct_conv_nchw_wgrad,
         "direct_wgrad_tiled": wt.build_direct_wgrad_tiled,
         "direct_wgrad_dw": dw.build_dw_wgrad_lds,
         "direct_wgrad_dw_cols": dw.build_dw_wgrad_cols,

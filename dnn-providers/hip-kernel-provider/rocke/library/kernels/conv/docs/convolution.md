@@ -1637,6 +1637,157 @@ twin covers every knob; the byte-identity gate is
 `library/tests/parity/conv_direct_fwd_pp_mfma_emit.{c,py}`, the GPU numeric
 test `library/tests/test_direct_fwd_pp_mfma.py`.
 
+## Direct Forward, Native NCHW (gfx950)
+
+`library/kernels/common/conv_direct_nchw_fwd.py`, spec `DirectNchwFwdSpec`,
+builder `build_direct_conv_nchw_fwd` (C++ twin
+`instance_conv_direct_nchw_fwd.h`). AOT-buildable and C++-mirrored like every
+other family in this document, but **not yet wired into runtime dispatch**:
+it is absent from `library/dispatch/grouped_convolution.py` and its instance
+JSONs, so `algorithm="auto"` never reaches it. Reach it explicitly, through
+`build_direct_conv_nchw_fwd` directly or the AOT sweep
+(`kernels/conv/direct_variants.py` / `kernels/conv/direct_aot_jobs.py`,
+variant `direct_nchw_fwd`).
+
+A dense (`groups == 1`) forward that consumes `X` in NCHW and produces `Y` in
+NKHW directly -- no host transpose of the activations, only a one-time host
+repack of the weights to `[K][KH][KW][C]` (`repack_weights_krsc`). It reuses
+the native dgrad family's design (`kernels.common.conv_direct_nchw_dgrad`):
+a workgroup owns a `tile_i x tile_j` block of output positions and `tile_k`
+output channels, stages the input window in LDS as `[row][col][c]` (`c`
+contiguous, padded by `lds_pad`; rows padded by `lds_wpad`), and reads the
+window at column `wo*S + s` per filter tap `s` (the stride sits on the input
+side, unlike dgrad's output-side stride-phase trick). At stride 2 the
+`col_split` knob splits the LDS columns into even/odd planes so the MFMA
+fragment lanes read adjacent positions (bank-conflict free, see
+`x_read_conflict_ways`). `waves_per_eu` and `pin_prefetch` (a scheduling
+barrier that keeps the next chunk's prefetch ahead of the MFMA stream) are
+the remaining levers.
+
+Runtime (kernargs, the direct-conv forward block): batch, extents and both
+channel counts. Build-time: the filter, stride, padding and every knob
+(`tile_i`, `tile_j`, `tile_k`, `ck`, `waves_m`, `waves_n`, `atom`, `lds_pad`,
+`lds_wpad`, `stage_group`, `col_split`, `waves_per_eu`, `pin_prefetch`).
+Constraints (`DirectNchwFwdSpec.validate`, checked by
+`is_valid_direct_nchw_fwd_spec` against the target): `groups == 1`, fp16 /
+bf16 storage only, dilation 1, stride 1 or 2, `W` a multiple of 8 (whole
+aligned runs along `w`), `col_split` only at stride 2, and the usual tile /
+atom / LDS-capacity checks. The AOT grid is
+`DIRECT_CAPABILITIES["direct_nchw_fwd"]` (3x3 and 5x5, stride 1 and 2,
+"same" padding, `cpg = kpg = 0`) times a small lever grid over `lds_pad`,
+`waves_per_eu`, `pin_prefetch` and (at stride 2) `col_split`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_nchw_fwd`); the activation
+layout a variant reads is `kernels.conv.direct_variants.variant_layout`. The
+C++ twin covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_nchw_fwd_emit.{c,py}`, the GPU numeric test
+`library/tests/test_conv_direct_nchw_fwd.py`.
+
+## Direct Dgrad, Native NCHW (gfx950)
+
+`library/kernels/common/conv_direct_nchw_dgrad.py`, spec `DirectNchwDgradSpec`,
+builder `build_direct_conv_nchw_dgrad` (C++ twin
+`instance_conv_direct_nchw_dgrad.h`). AOT-buildable and C++-mirrored like
+every other family in this document, but **not yet wired into runtime
+dispatch**: it is absent from `library/dispatch/grouped_convolution.py` and
+its instance JSONs, so `algorithm="auto"` never reaches it. Reach it
+explicitly, through `build_direct_conv_nchw_dgrad` directly or the AOT sweep
+(`kernels/conv/direct_variants.py` / `kernels/conv/direct_aot_jobs.py`,
+variant `direct_nchw_dgrad`).
+
+A dense (`groups == 1`) backward-data pass that consumes `dY` in NKHW and
+produces `dX` in NCHW directly -- no host transpose of the activations, only
+a one-time host repack of the weights to `[C][KH][KW][K]`
+(`repack_weights_cyxk`). Algorithm: stride-phase direct dgrad -- the `dX`
+grid is split into its `S x S` stride phases, each phase a small dense
+stride-1 correlation of `dY` (no zero-insertion, no wasted MACs; at stride 1
+there is one phase and it is the forward conv of `dY` with the transposed
+weights, pad `KH - 1 - PAD`). One workgroup owns a `tile_i x tile_j` block of
+the phase grid (all `S*S` phases of it) and `tile_c` input channels; the `dY`
+window every phase reads is staged once per `ck`-deep channel chunk in LDS as
+`[row][col][k]` (`k` contiguous, padded by `lds_pad`), with `stage_group`
+picking how channels move to the innermost LDS axis (register transpose +
+`ds_write_b128` at 8, a per-element `ds_write_b16` scatter at 1). The MFMA
+operands are swapped (the `dY` fragment is the `A` operand); the epilogue
+stores a stride-1 tile as one `dwordx2` and interleaves the `pw = 0` / `pw = 1`
+accumulators of a stride-2 tile into one `dwordx4` so the stride-2 scatter
+along `w` never reaches memory.
+
+Runtime (kernargs, the direct-conv forward block, reused unchanged -- `A` =
+`dY`, `D` = `dX`): batch, extents and both channel counts. Build-time: the
+filter, stride, padding and every knob (`tile_i`, `tile_j`, `tile_c`, `ck`,
+`waves_m`, `waves_n`, `atom`, `lds_pad`, `stage_group`). Constraints
+(`DirectNchwDgradSpec.validate`, checked by `is_valid_direct_nchw_dgrad_spec`
+against the target): `groups == 1`, fp16 / bf16 storage only, dilation 1,
+stride 1 or 2, `Wo` a multiple of 8 (whole aligned `dY` runs), and the usual
+tile / atom / LDS-capacity checks. The AOT grid is
+`DIRECT_CAPABILITIES["direct_nchw_dgrad"]` (3x3 and 5x5, stride 1 and 2,
+"same" padding, `cpg = kpg = 0`) times a small lever grid over `lds_pad` and
+every `stage_group` value (`kernels/conv/direct_aot_jobs.py`, variant
+`direct_nchw_dgrad`); the activation layout a variant reads is
+`kernels.conv.direct_variants.variant_layout`. The C++ twin covers every
+knob; the byte-identity gate is
+`library/tests/parity/conv_direct_nchw_dgrad_emit.{c,py}`, the GPU numeric
+test `library/tests/test_conv_direct_nchw_dgrad.py`.
+
+## Direct Wgrad, Native NCHW (gfx950)
+
+`library/kernels/common/conv_direct_nchw_wgrad.py`, spec `DirectNchwWgradSpec`,
+builder `build_direct_conv_nchw_wgrad` (C++ twin
+`instance_conv_direct_nchw_wgrad.h`). AOT-buildable and C++-mirrored like
+every other family in this document, but **not yet wired into runtime
+dispatch**: it is absent from `library/dispatch/grouped_convolution.py` and
+its instance JSONs, so `algorithm="auto"` never reaches it. Reach it
+explicitly, through `build_direct_conv_nchw_wgrad` directly or the AOT sweep
+(`kernels/conv/direct_variants.py` / `kernels/conv/direct_aot_jobs.py`,
+variant `direct_nchw_wgrad`).
+
+A dense (`groups == 1`) backward-weight pass that consumes `X` in NCHW and
+`dY` in NKHW and produces `dW` in KCYX directly -- no host transpose of
+either activation. A workgroup owns a `tile_m x tile_c` block of `(k, c)` for
+all the filter taps of `KH / y_groups` filter rows and walks a list of
+spatial tiles (`tile_h x tile_w` output positions of one image), staging,
+once per spatial tile, the `dY` tile `[k][ho][wo]` and the `X` window the
+tile's taps read as `[row][col][c]` (`c` contiguous, padded by `lds_pad` /
+`lds_wpad`); every tap then reads the same staged window at a build-time
+offset (no per-tap reload). The MFMA feed is `dY` as the A operand (one
+`ds_read_b128` per k step, shared by every tap) and `X` as the B operand (two
+`ds_read_b64_tr_b16` transpose reads per fragment, with `kmap` picking which
+tile positions a k step covers -- `"row"` or the bank-conflict-free `"2row"`,
+see `x_read_conflict_ways` / `conflict_free_pads`). `y_groups` spreads filter
+rows over workgroups, a `split` kernarg splits the spatial-tile list, and the
+partials meet in a caller-zeroed `dW` through packed 16-bit atomics (or, with
+`atomic=False`, plain stores at `split == 1`, one writer per element). Other
+levers: `stage_group` (the NCHW-to-channel-contiguous LDS register
+transpose), `mfma_order` (`"row"` groups MFMAs by X window row so a fragment
+is read once; `"ks"` walks k steps), `prefetch` / `lds_buffers` (register
+prefetch and double-buffered LDS), `waves_per_eu`, `xcd_remap` (renumbers a
+flattened 1-D grid so one spatial slice's workgroups share an XCD's L2), and
+the `"lds"` / `"direct"` epilogue (an LDS-staged pass issuing packed atomics
+over contiguous KCYX runs, versus every lane adding its own values straight
+from the accumulators).
+
+Runtime (kernargs): `dY`, `X`, `dW` pointers, their byte sizes, and `split`.
+Build-time: the filter, stride, padding and every knob (`tile_m`, `tile_c`,
+`tile_h`, `tile_w`, `waves_m`, `waves_c`, `waves_t`, `y_groups`,
+`stage_group`, `lds_pad`, `lds_wpad`, `waves_per_eu`, `mfma_order`,
+`prefetch`, `xcd_remap`, `epilogue`, `kmap`, `lds_buffers`, `atomic`).
+Constraints (`DirectNchwWgradSpec.validate`, checked by
+`is_valid_direct_nchw_wgrad_spec` against the target): `groups == 1`, fp16 /
+bf16 storage only, dilation 1, stride 1 or 2, `W` and `Wo` multiples of 8,
+`tile_w` a power of two >= 8, `tile_h * tile_w` a multiple of 32, the `"lds"`
+epilogue needs `y_groups == 1`, `kmap == "2row"` needs `tile_w % 16 == 0` and
+an even `tile_h`, `lds_buffers == 2` needs `prefetch`, `atomic=False` needs
+the `"lds"` epilogue, and the usual accumulator / thread / LDS-capacity
+checks. The AOT grid is `DIRECT_CAPABILITIES["direct_nchw_wgrad"]` (3x3 and
+5x5, stride 1 and 2, "same" padding, `cpg = kpg = 0`) times a small lever
+grid over `lds_pad`, `stage_group` and one-at-a-time variations of the rest
+of the knob space (`kernels/conv/direct_aot_jobs.py`, variant
+`direct_nchw_wgrad`); the activation layout a variant reads is
+`kernels.conv.direct_variants.variant_layout`. The C++ twin covers every
+knob; the byte-identity gate is
+`library/tests/parity/conv_direct_nchw_wgrad_emit.{c,py}`, the GPU numeric
+test `library/tests/test_conv_direct_nchw_wgrad.py`.
+
 ## Direct Forward on MFMA with Flattened Pixels (gfx950)
 
 `library/kernels/common/conv_direct_fwd_flex_mfma.py`, spec `FwdFlexMfmaSpec`,
