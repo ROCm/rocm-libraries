@@ -188,6 +188,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_HIP_CONV_FWD_FMA_IGEMM_RDNA=1
         )
     endif()
+    # The RDNA 2-D conv backward-data engine ships from descriptors/hip/conv_dgrad_fma_2d_rdna/.
+    hkp_product_offers_engine(_hkp_hip_conv_dgrad_fma_2d_rdna_bundle "hipkernel:hip_conv_dgrad_fma_2d_rdna")
+    if(_hkp_hip_conv_dgrad_fma_2d_rdna_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuHipConvDgradFma2dRdna.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_HIP_CONV_DGRAD_FMA_2D_RDNA=1
+        )
+    endif()
     # The paged-K/V suite of the RDNA prefill engine, gated like the knob suites; it
     # GTEST_SKIPs on devices the engine's objects are not built for.
     hkp_product_offers_engine(_hkp_rdna_attention_bundle "hipkernel:Gfx1151WmmaAttention")
