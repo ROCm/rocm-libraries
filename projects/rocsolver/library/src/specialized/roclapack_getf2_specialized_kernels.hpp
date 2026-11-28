@@ -58,7 +58,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     // (SHUFFLES DO NOT IMPROVE PERFORMANCE IN THIS CASE)
     extern __shared__ double lmem[];
     T* common = reinterpret_cast<T*>(lmem);
-    common += ty * std::max(m, DIM);
+    common += ty * std::max(m, I(DIM));
 
     // local variables
     T pivot_value;
@@ -252,10 +252,56 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
 
     // shared memory (for communication between threads in group)
     extern __shared__ double lmem[];
-    T* x = reinterpret_cast<T*>(lmem);
-    T* y = x + bdx;
-    S* sval = reinterpret_cast<S*>(y + n);
-    I* sidx = reinterpret_cast<I*>(sval + bdx);
+    T* x{};
+    T* y{};
+    S* sval{};
+    I* sidx{};
+
+    {
+        auto const len_x = bdx;
+        auto const len_y = n;
+        auto const len_sval = bdx;
+        auto const len_sidx = bdx;
+
+        if constexpr(sizeof(T) <= sizeof(I))
+        {
+            //  -----------------------------------
+            //  sizeof(S) <= sizeof(T) <= sizeof(I)
+            //
+            //  declare sidx[] first
+            //  -----------------------------------
+            sidx = reinterpret_cast<I*>(&(lmem[0]));
+            x = reinterpret_cast<T*>(sidx + len_sidx);
+            y = reinterpret_cast<T*>(x + len_x);
+            sval = reinterpret_cast<S*>(y + len_y);
+        }
+        else if constexpr(sizeof(I) <= sizeof(S))
+        {
+            //  -----------------------------------
+            //  sizeof(I) <= sizeof(S) <= sizeof(T)
+            //
+            //  declare sidx[] last
+            //  -----------------------------------
+
+            x = reinterpret_cast<T*>(&(lmem[0]));
+            y = reinterpret_cast<T*>(x + len_x);
+            sval = reinterpret_cast<S*>(y + len_y);
+            sidx = reinterpret_cast<I*>(sval + len_sval);
+        }
+        else if constexpr((sizeof(S) <= sizeof(I)) && (sizeof(I) <= sizeof(T)))
+        {
+            //  -----------------------------------
+            //  sizeof(S) <= sizeof(I) <= sizeof(T)
+            //
+            //  declare sidx[] before sval[]
+            //  -----------------------------------
+            x = reinterpret_cast<T*>(&(lmem[0]));
+            y = reinterpret_cast<T*>(x + len_x);
+            sidx = reinterpret_cast<I*>(y + len_y);
+            sval = reinterpret_cast<S*>(sidx + len_sidx);
+        }
+    }
+
     __shared__ T val;
 
     // local variables
@@ -722,7 +768,28 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
 
     if(pivot)
     {
-        size_t lmemsize = (dimx + n) * sizeof(T) + dimx * (sizeof(I) + sizeof(S));
+        auto const bdx = dimx;
+
+        auto const len_x = bdx;
+        auto const len_y = n;
+        auto const len_sval = bdx;
+        auto const len_sidx = bdx;
+
+        size_t const size_x = len_x * sizeof(T);
+        size_t const size_y = len_y * sizeof(T);
+        size_t const size_sval = len_sval * sizeof(S);
+        size_t const size_sidx = len_sidx * sizeof(I);
+
+        size_t const lmemsize = size_x + size_y + size_sval + size_sidx;
+#ifndef NDEBUG
+        {
+            const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+            size_t const max_lds_size = props->sharedMemPerBlock;
+
+            size_t const size_val = sizeof(T);
+            assert((size_val + lmemsize) <= max_lds_size);
+        }
+#endif
         ROCSOLVER_LAUNCH_KERNEL((getf2_panel_kernel<T>), grid, block, lmemsize, stream, m, n, A,
                                 shiftA, lda, strideA, ipiv, shiftP, strideP, info, batch_count,
                                 offset, permut_idx, stride);
