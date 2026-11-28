@@ -120,7 +120,10 @@ namespace hipblaslt_ext
          *  The mode is tri-state: a caller can use the uniform summation order (``1``),
          *  disable the uniform summation order (``0``), or inherit the handle request (``-1``).
          *
-         *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
+         *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``. When hipBLASLt
+         *  is built without rocRoller, a routed Stream-K kernel is rejected only
+         *  when this request is on and its grid does not divide the output tiles.
+         *  A build with rocRoller honors the request on this API.
          */
         HIPBLASLT_EXPORT void setUniformSummationOrder(int32_t value);
 

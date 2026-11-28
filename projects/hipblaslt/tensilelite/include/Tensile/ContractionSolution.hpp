@@ -86,6 +86,10 @@ namespace TensileLite
         // same order. A data-parallel RR_GEMM kernel runs without it. Other
         // hand-written kernels are refused while uniform summation order is on.
         bool uniformSummationOrder = false;
+        // Declared by a rocRoller kernel: the K-loop unroll it was generated
+        // with (rocRoller's prefetchInFlight). 0 means not declared, and
+        // hipBLASLt's rocRoller-off selector never picks such a kernel.
+        int unroll = 0;
     };
   
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is

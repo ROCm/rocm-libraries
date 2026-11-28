@@ -964,6 +964,8 @@ For gfx1250:
   GEMM outside fp16, aux output only for fp16, no FP6 or fp16-output MX) carries a
   `# Not on gfx1250:` comment saying which. fnuz FP8 cases stay off it too, since gfx1250 has OCP
   FP8 only. Without `allow_no_solution: 1`, a case that finds no solution fails rather than skips.
+  `expect_no_solution: 1` is the opposite check: a solution is a failure. It is a
+  bench argument of the same name (`--expect_no_solution`) as well as a YAML field.
 
 **Explicitly not tested**, so that nothing is assumed at release time:
 

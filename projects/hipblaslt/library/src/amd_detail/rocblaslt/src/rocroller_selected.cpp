@@ -23,6 +23,17 @@ rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& p
     if(kernelType.typeAcc != HIP_R_32F)
         return rocblaslt_status_invalid_value;
 
+    // rocRoller refuses every tile of such a problem.
+    if(rocRollerOperandExceeds4GiB(
+           kernelType.typeA, kernelType.typeB, kernelType.typeC, kernelType.typeD, prob.m, prob.n, prob.k))
+        return rocblaslt_status_success;
+
+    // Same inputs parameter_selection.cpp feeds preferredUnrolling.
+    const bool hasPreSwizzle = kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                               && kernelType.scaleTypeB.preSwizzleTile.size() == 3;
+    const bool hasPreTile
+        = kernelType.scaleTypeA.preTile.size() == 2 && kernelType.scaleTypeB.preTile.size() == 2;
+
     const auto ranked = chooseSolutionIndexParameters(kernelType, prob, -1);
     tiles.reserve(ranked.size());
     for(const SolutionIndexParameters& params : ranked)
@@ -35,6 +46,8 @@ rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& p
         tile.streamK          = params.streamK;
         tile.nonTemporalA     = params.nonTemporalA;
         tile.nonTemporalB     = params.nonTemporalB;
+        tile.unroll           = preferredUnrolling(
+            kernelType.typeA, kernelType.typeB, params.workgroupTile, hasPreSwizzle, hasPreTile);
         tiles.push_back(tile);
     }
     return rocblaslt_status_success;

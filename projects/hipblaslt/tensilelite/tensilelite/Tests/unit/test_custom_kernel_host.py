@@ -341,6 +341,19 @@ def test_custom_kernel_state_carries_uniform_summation_order():
     assert CustomKernel.FromOriginalState({**base, "uniformSummationOrder": True}).uniformSummationOrder is True
 
 
+def test_custom_kernel_state_carries_unroll():
+    # hipBLASLt matches a rocRoller kernel to rocRoller's pick on its declared
+    # unroll. 0, the default, is omitted from the serialized record.
+    base = {"name": "k", "args": [], "macrotile": [16, 16, 16], "threads": [64, 1, 1],
+            "grid": ["One", "One", "One"]}
+    absent = CustomKernel.FromOriginalState(base)
+    assert absent.unroll == 0
+    assert "unroll" not in absent.state()
+    declared = CustomKernel.FromOriginalState({**base, "unroll": 2})
+    assert declared.unroll == 2
+    assert declared.state()["unroll"] == 2
+
+
 def test_uso_capability_assignment_survives_missing_custom_kernel_name():
     # The merge-time KeyError was state["CustomKernelName"] inside
     # assignDerivedParameters. Drive the same assignment the derivation uses.

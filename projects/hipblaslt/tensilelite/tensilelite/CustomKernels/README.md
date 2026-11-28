@@ -209,6 +209,15 @@ Pass `--check` instead to report without writing; it exits non-zero when
 provenance is still present, which suits a pre-commit or continuous-integration
 gate.
 
+## rocRoller `unroll` and `occupancy`
+
+A rocRoller kernel's `custom.config` declares `unroll`, the K-loop unroll it was
+generated with. The rocRoller-off selector matches that field to rocRoller's
+ranked tile and does not serve a kernel that omits it. Non-rocRoller kernels
+must not declare `unroll`. A rocRoller Stream-K kernel on gfx950 may also
+declare `occupancy`, the workgroups it keeps resident on one CU. The selector
+reads occupancy only for that grid; any other kernel leaves it unset.
+
 ## Validation
 
 Two ways to validate:

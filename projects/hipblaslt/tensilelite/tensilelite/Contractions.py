@@ -958,13 +958,20 @@ class CustomKernel:
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
                    generated=d.get('generated', False),
-                   uniformSummationOrder=d.get('uniformSummationOrder', False))
+                   uniformSummationOrder=d.get('uniformSummationOrder', False),
+                   # rocRoller's K-loop unroll. 0 means "not declared"; the
+                   # rocRoller-off selector never picks such a kernel.
+                   unroll=d.get('unroll', 0))
 
     def state(self):
         rv = {key: state(getattr(self, key)) for key in self.StateKeys}
         # Emitted only when recorded so kernels without it serialize unchanged.
+        # unroll 0 means "not declared"; writing it would change every
+        # checked-in solution record.
         if getattr(self, 'occupancy', 0):
             rv['occupancy'] = self.occupancy
+        if getattr(self, 'unroll', 0):
+            rv['unroll'] = self.unroll
         return rv
 
     def __init__(self, **kwargs):

@@ -34,6 +34,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Public functions whose C++ exceptions reach the shared exception handler now log
   the function name and exception message at `HIPBLASLT_LOG_LEVEL=1` (error).
   The returned status is unchanged.
+* In a build without rocRoller (`HIPBLASLT_ENABLE_ROCROLLER=OFF`), a GEMM that hipBLASLt routes to rocRoller now runs the checked-in kernel for the configuration the rocRoller build would pick, or gets no algorithm. Previously it could run the kernel of a lower-ranked configuration or, through the `hipblaslt_ext` API, a TensileLite kernel. This applies to `hipblasLtMatmul`, `hipblasLtMatmulAlgoGetHeuristic` and the `hipblaslt_ext` API.
+  A rocRoller Stream-K launch is rejected with `HIPBLAS_STATUS_INVALID_VALUE` only when uniform summation order is on and its grid does not divide the output tiles. Otherwise that kernel runs, and no other kernel is substituted for a rejected one.
+  A routed GEMM with bias, or with `batch_count` other than 1, returns `HIPBLAS_STATUS_INVALID_VALUE`, including from the `hipblaslt_ext` heuristic. With `HIPBLASLT_USE_ROCROLLER` set so that its first character is `1`, every GEMM is routed, and one that has no checked-in kernel gets no algorithm.
+  Tuning files, cache replay and adaptive re-selection are not consulted for a routed GEMM, so they cannot replace the checked-in kernel with a TensileLite one. An algorithm the caller supplies must be one of those rocRoller kernels; any other index returns `HIPBLAS_STATUS_INVALID_VALUE`.
 
 ### Optimized
 
