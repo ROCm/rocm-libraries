@@ -266,14 +266,6 @@ namespace
         return hardware;
     }
 
-    // The CU count library logic is selected by, or 0 when the device cannot
-    // be described.
-    int currentCUCount()
-    {
-        const auto* gpu = dynamic_cast<const TensileLite::AMDGPU*>(currentHardware().get());
-        return gpu != nullptr ? gpu->computeUnitCount : 0;
-    }
-
     // The solution record behind an enumerated algorithm, or null with a
     // populated reason. This is metadata only: getSolutionByIndex pulls in a
     // placeholder's .dat on demand and never touches the code objects.
@@ -627,33 +619,9 @@ namespace
         {
             std::vector<hipblasLtMatmulHeuristicResult_t> supported;
 
-            hipblasLtMatmulPreference_t preference     = nullptr;
-            uint64_t                    workspaceBytes = kWorkspaceBytes;
-            hipblasLtMatmulPreferenceCreate(&preference);
-            hipblasLtMatmulPreferenceSetAttribute(preference,
-                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                  &workspaceBytes,
-                                                  sizeof(workspaceBytes));
-
             // The default heuristic picks go first: the regression shapes were
             // measured as non-uniform on exactly that path.
-            hipblasLtMatmulHeuristicResult_t heuristic[4]{};
-            int                              heuristicCount = 0;
-            hipblasLtMatmulAlgoGetHeuristic(m_handle,
-                                            m_desc,
-                                            m_layoutA,
-                                            m_layoutB,
-                                            m_layoutD,
-                                            m_layoutD,
-                                            preference,
-                                            4,
-                                            heuristic,
-                                            &heuristicCount);
-            hipblasLtMatmulPreferenceDestroy(preference);
-
-            const std::vector<hipblasLtMatmulHeuristicResult_t> defaults(
-                heuristic, heuristic + heuristicCount);
-            appendSupported(defaults, 0, 1, kMaxHeuristicCandidates, supported);
+            appendSupported(heuristicPicks(4), 0, 1, kMaxHeuristicCandidates, supported);
 
             std::vector<hipblasLtMatmulHeuristicResult_t> enumerated;
             hipblaslt_ext::getAllAlgos(m_handle,
@@ -681,6 +649,19 @@ namespace
             return supported;
         }
 
+        // The heuristic's first pick with the mode either off or on, or false
+        // when it has none.
+        bool defaultPick(bool uniformMode, hipblasLtMatmulHeuristicResult_t& pick)
+        {
+            if(setUniformMode(uniformMode) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+            const auto picks = heuristicPicks(1);
+            if(picks.empty())
+                return false;
+            pick = picks.front();
+            return true;
+        }
+
         std::string solutionName(const hipblasLtMatmulHeuristicResult_t& candidate)
         {
             hipblasLtMatmulAlgo_t algo = candidate.algo;
@@ -691,13 +672,7 @@ namespace
         // the result in the host copy inspected by firstNonUniformRowOfLastRun.
         hipblasStatus_t run(const hipblasLtMatmulHeuristicResult_t& candidate, bool uniformMode)
         {
-            const int32_t mode      = uniformMode ? 1 : 0;
-            const auto    setStatus = hipblasLtMatmulDescSetAttribute(
-                m_desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &mode, sizeof(mode));
-            // Distinguished from a matmul-level refusal, which the caller is
-            // allowed to accept: setting a legal mode value must always work.
-            EXPECT_EQ(setStatus, HIPBLAS_STATUS_SUCCESS)
-                << "Setting UNIFORM_SUMMATION_ORDER_EXT to " << mode << " must succeed";
+            const auto setStatus = setUniformMode(uniformMode);
             if(setStatus != HIPBLAS_STATUS_SUCCESS)
                 return setStatus;
 
@@ -760,6 +735,47 @@ namespace
         }
 
     private:
+        hipblasStatus_t setUniformMode(bool uniformMode)
+        {
+            const int32_t mode   = uniformMode ? 1 : 0;
+            const auto    status = hipblasLtMatmulDescSetAttribute(
+                m_desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &mode, sizeof(mode));
+            // Distinguished from a matmul-level refusal, which the caller is
+            // allowed to accept: setting a legal mode value must always work.
+            EXPECT_EQ(status, HIPBLAS_STATUS_SUCCESS)
+                << "Setting UNIFORM_SUMMATION_ORDER_EXT to " << mode << " must succeed";
+            return status;
+        }
+
+        // The heuristic's picks, best first, under whichever mode the
+        // descriptor holds: candidateAlgos does not set one.
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristicPicks(int requested)
+        {
+            hipblasLtMatmulPreference_t preference     = nullptr;
+            uint64_t                    workspaceBytes = kWorkspaceBytes;
+            hipblasLtMatmulPreferenceCreate(&preference);
+            hipblasLtMatmulPreferenceSetAttribute(preference,
+                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                  &workspaceBytes,
+                                                  sizeof(workspaceBytes));
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> picks(requested);
+            int                                           count = 0;
+            hipblasLtMatmulAlgoGetHeuristic(m_handle,
+                                            m_desc,
+                                            m_layoutA,
+                                            m_layoutB,
+                                            m_layoutD,
+                                            m_layoutD,
+                                            preference,
+                                            requested,
+                                            picks.data(),
+                                            &count);
+            hipblasLtMatmulPreferenceDestroy(preference);
+            picks.resize(static_cast<size_t>(std::max(count, 0)));
+            return picks;
+        }
+
         // Records the workspace this algorithm needs, or says why the library
         // cannot run it on this problem.
         bool runnable(hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
@@ -1191,38 +1207,70 @@ namespace
 
         // Unlike checkRowUniformity, needs no witness with the mode off: the
         // default heuristic picks run once with the mode on and must either be
-        // row-uniform or refused cleanly. With gfx950Pick, the first pick on a
-        // 256-CU gfx950 must be a kernel whose name starts with it; elsewhere a
-        // problem with no pick is skipped.
-        void checkDefaultPicksUniform(const Problem& problem, const char* gfx950Pick = nullptr)
+        // row-uniform or refused cleanly. When the default pick with the mode
+        // off is a kernel whose custom.config declares uniformSummationOrder,
+        // the mode must keep it as the pick: when uniform summation order
+        // refused such kernels (#14010), nothing failed, they just stopped
+        // being picked. The check keys on the declaration rather than on a
+        // device, CU count or kernel name, so it follows the logic files
+        // instead of copying them, and rather than on
+        // uniformSummationOrderSupported(), which is the filter under test. A
+        // problem the mode leaves without a pick fails; one with no pick either
+        // way is skipped.
+        void checkDefaultPicksUniform(const Problem& problem)
         {
             RowUniformityHarness harness(problem);
             prepare(harness);
             if(IsSkipped() || HasFailure())
                 return;
 
-            int        enumeratedCount = 0;
+            int enumeratedCount = 0;
+            // Asked before defaultPick sets the mode, so these are the picks under
+            // the handle's default: uniform summation order on.
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
-            // The logic that routes these shapes to the gfx950 skinny kernels
-            // declares CUCount: 256, so other CU counts (MI350P, compute
-            // partitions) keep the Tensile picks. Rows for another CU count in
-            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml
-            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml
-            // that route here need expectPick to cover that count too.
-            const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
-            if(gfx950Pick != nullptr && gfx950)
-                ASSERT_NE(currentCUCount(), 0)
-                    << "TensileLite cannot describe this gfx950, so the test cannot tell whether "
-                       "the skinny-kernel logic applies";
-            const bool expectPick = gfx950Pick != nullptr && gfx950 && currentCUCount() == 256;
-            if(candidates.empty() && gfx950Pick != nullptr && !expectPick)
-                GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
-            ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
-            if(expectPick)
+
+            hipblasLtMatmulHeuristicResult_t pickOff{};
+            const bool        hasPickOff = harness.defaultPick(/*uniformMode=*/false, pickOff);
+            const std::string nameOff = hasPickOff ? harness.solutionName(pickOff) : std::string();
+            if(hasPickOff)
             {
-                const std::string pick = harness.solutionName(candidates.front());
-                ASSERT_EQ(pick.rfind(gfx950Pick, 0), 0u)
-                    << "The default pick is " << pick << ", not a " << gfx950Pick << " kernel";
+                std::string       unresolved;
+                const auto        solution = solutionForAlgo(pickOff, unresolved);
+                ASSERT_TRUE(solution) << "Cannot tell whether " << nameOff
+                                      << " declares uniformSummationOrder: " << unresolved;
+                const bool declared = solution->customKernel.uniformSummationOrder;
+                RecordProperty("default_pick_mode_off", nameOff);
+                RecordProperty("declares_uniform_order", declared ? 1 : 0);
+
+                if(declared)
+                {
+                    hipblasLtMatmulHeuristicResult_t pickOn{};
+                    const std::string nameOn = harness.defaultPick(/*uniformMode=*/true, pickOn)
+                                                   ? harness.solutionName(pickOn)
+                                                   : std::string("<none>");
+                    RecordProperty("default_pick_mode_on", nameOn);
+                    if(nameOn != nameOff)
+                    {
+                        const bool runs
+                            = harness.run(pickOff, /*uniformMode=*/true) == HIPBLAS_STATUS_SUCCESS;
+                        ADD_FAILURE()
+                            << nameOff << " declares uniformSummationOrder and is the default "
+                            << "pick with the mode off, but with the mode on the default pick is "
+                            << nameOn << ". "
+                            << (runs ? "The library still runs it with the mode on, so the mode "
+                                       "cost it its rank."
+                                     : "The library refuses to run it with the mode on.");
+                    }
+                }
+            }
+
+            if(candidates.empty())
+            {
+                ASSERT_FALSE(hasPickOff)
+                    << "With the mode off the default pick is " << nameOff
+                    << ", but with the mode on the heuristic offers nothing this test can run";
+                GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName()
+                             << ", with the mode on or off";
             }
 
             for(const auto& candidate : candidates)
@@ -1252,38 +1300,32 @@ namespace
         checkDefaultPicksUniform({1536, 1536, 2048, HIP_R_32F, 160});
     }
 
-    // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
-    // custom.config. Library logic routes these shapes to them on 256-CU gfx950,
-    // so there the default pick must be one of them: when uniform summation
-    // order refused them (#14010), nothing failed, they just stopped being
-    // picked. Other devices check that their default picks keep rows uniform.
+    // Shapes the logic files route to the gfx950 skinny TN custom kernels, which
+    // declare uniformSummationOrder in their custom.config; where one of them is
+    // the default pick, checkDefaultPicksUniform requires the mode to keep it.
     // A is TN and D takes A's type, as the kernels require.
     TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16_4096x1x4096)
     {
-        checkDefaultPicksUniform({4096, 1, 4096, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-                                 "wvSplitK_vllm_bf16_tn_n1_");
+        checkDefaultPicksUniform({4096, 1, 4096, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     // m % 3 != 0: the last YTILE = 3 row tile shifts down over rows the
     // previous one wrote.
     TEST_F(RowUniformity_pre_checkin, SkinnyTnF16Tail_8191x5x1024)
     {
-        checkDefaultPicksUniform({8191, 5, 1024, HIP_R_16F, 0, false, HIPBLAS_OP_T, HIP_R_16F},
-                                 "wvSplitK_vllm_f16_tn_n5_y3");
+        checkDefaultPicksUniform({8191, 5, 1024, HIP_R_16F, 0, false, HIPBLAS_OP_T, HIP_R_16F});
     }
 
     // n * K past the 80K-element LDS stage: K is staged in chunks.
     TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16LdsChunked_1024x3x28672)
     {
-        checkDefaultPicksUniform({1024, 3, 28672, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-                                 "wvSplitK_vllm_bf16_tn_n3_");
+        checkDefaultPicksUniform({1024, 3, 28672, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     // The rocBLAS kernel that reads n from its arguments.
     TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16Rocblas_4096x3x256)
     {
-        checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-                                 "wvSpltK_bf16_tn_m4");
+        checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     // OCP FP6 code of halves / 2. Every |halves| <= 8 is exact in both E2M3 and E3M2.
@@ -2136,57 +2178,49 @@ namespace
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_1152x4x5120)
     {
         checkDefaultPicksUniform(
-            {1152, 4, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+            {1152, 4, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4x1152x5120)
     {
         checkDefaultPicksUniform(
-            {4, 1152, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+            {4, 1152, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_16384x3x25600)
     {
         checkDefaultPicksUniform(
-            {16384, 3, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+            {16384, 3, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_2x32768x14336)
     {
         checkDefaultPicksUniform(
-            {2, 32768, 14336, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+            {2, 32768, 14336, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_10240x1x5120)
     {
         checkDefaultPicksUniform(
-            {10240, 1, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1");
+            {10240, 1, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4096x4x1280)
     {
         checkDefaultPicksUniform(
-            {4096, 4, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+            {4096, 4, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4x4096x1280)
     {
         checkDefaultPicksUniform(
-            {4, 4096, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+            {4, 4096, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_3x16384x25600)
     {
         checkDefaultPicksUniform(
-            {3, 16384, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
-            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+            {3, 16384, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF});
     }
 
     // Measured non-uniform on gfx950 with the default heuristic path.
