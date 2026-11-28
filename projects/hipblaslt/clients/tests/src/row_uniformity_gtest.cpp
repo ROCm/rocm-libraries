@@ -1453,6 +1453,7 @@ namespace
                          const TensileLite::ContractionProblemGemm& tensile,
                          const TensileLite::Hardware&               hardware,
                          size_t                                     queriedWorkspace,
+                         const Problem&                             problem,
                          bool                                       parallel)
         {
             std::string   reason;
@@ -1479,6 +1480,13 @@ namespace
                               << " its " << parts << " launched parts need";
                 return false;
             }
+            if(problem.smCountTarget > 0 && parts > static_cast<size_t>(problem.smCountTarget))
+            {
+                ADD_FAILURE() << name << " launched " << launched.tiles << " tiles in "
+                              << launched.split << " parts under a " << problem.smCountTarget
+                              << "-CU hint";
+                return false;
+            }
             return true;
         }
 
@@ -1488,10 +1496,11 @@ namespace
         // the arrival fixup, as asked, and requires D uniform along the
         // problem's line. Each runs with the whole workspace, so the launch
         // resolves the split predicted here; a run counts as honored only once
-        // its kernel arguments carry a split with that reduction and the
-        // workspace hipBLASLt asked for holds exactly its parts. A clean refusal
-        // is allowed, but on a 256-CU gfx950 at least one split solution must be
-        // honored; elsewhere none is a skip.
+        // its kernel arguments carry that split and reduction, the workspace
+        // hipBLASLt asked for holds exactly its parts, and, under a CU-count hint
+        // (smCountTarget), the parts fit the hint. A clean refusal is allowed, but
+        // on a 256-CU gfx950 at least one split solution must be honored;
+        // elsewhere none is a skip.
         void checkDynamicSplitUniform(const Problem& problem, bool parallel)
         {
             RowUniformityHarness harness(problem);
@@ -1550,7 +1559,8 @@ namespace
                                    << ", a split dynamic StreamK launch, with uniform "
                                       "summation order enabled";
                 if(bad < 0
-                   && launchSplit(candidate, name, tensile, *hardware, queriedWorkspace, parallel))
+                   && launchSplit(
+                       candidate, name, tensile, *hardware, queriedWorkspace, problem, parallel))
                     ++honored;
             }
 
@@ -1599,6 +1609,14 @@ namespace
     {
         checkDynamicSplitUniform(
             {1152, 1152, 16384, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1, true}, false);
+    }
+
+    // A 128-CU hint: the split is sized for 128 CUs, not the device's. gfx950:
+    // MT128x128 kernels give 42 tiles in 3 parts (6 parts without the hint).
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicSplit_896x768x16384_SmCount128)
+    {
+        checkDynamicSplitUniform(
+            {896, 768, 16384, HIP_R_32F, 128, false, HIPBLAS_OP_N, HIP_R_32F, 1}, false);
     }
 
     // At most a quarter as many tiles as CUs: the parts are summed in part
