@@ -6118,6 +6118,305 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsANanRowNan)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
+/// One CDNA object launched on dense @p q, @p k and @p v laid out as @p spec states them (and a
+/// zero [1, 1, Sq, Skv] bias when it has one); its O and LSE read back into @p o and @p stats.
+template <typename T>
+void runCdnaObject(const MatchContext& context,
+                   const BoundTokens& bound,
+                   const KernelDefinition& kernel,
+                   const SdpaGraphSpec& spec,
+                   const std::vector<T>& q,
+                   const std::vector<T>& k,
+                   const std::vector<T>& v,
+                   std::vector<T>& o,
+                   std::vector<float>& stats)
+{
+    std::vector<void*> allocations;
+    struct FreeAll
+    {
+        std::vector<void*>& pointers;
+        FreeAll(const FreeAll&) = delete;
+        FreeAll& operator=(const FreeAll&) = delete;
+        FreeAll(FreeAll&&) = delete;
+        FreeAll& operator=(FreeAll&&) = delete;
+        ~FreeAll()
+        {
+            for(auto* pointer : pointers)
+            {
+                static_cast<void>(hipFree(pointer));
+            }
+        }
+    } const freeAll{allocations};
+    const auto upload = [&allocations](const auto& host, void*& device) {
+        using Element = typename std::decay_t<decltype(host)>::value_type;
+        ASSERT_EQ(hipSuccess, hipMalloc(&device, host.size() * sizeof(Element)));
+        allocations.push_back(device);
+        ASSERT_EQ(
+            hipSuccess,
+            hipMemcpy(device, host.data(), host.size() * sizeof(Element), hipMemcpyHostToDevice));
+    };
+    void* qDevice = nullptr;
+    void* kDevice = nullptr;
+    void* vDevice = nullptr;
+    void* oDevice = nullptr;
+    void* statsDevice = nullptr;
+    ASSERT_NO_FATAL_FAILURE(upload(q, qDevice));
+    ASSERT_NO_FATAL_FAILURE(upload(k, kDevice));
+    ASSERT_NO_FATAL_FAILURE(upload(v, vDevice));
+    // Every output byte 0xFF first (NaN), so an element the launch does not write differs.
+    std::fill(o.begin(), o.end(), T(std::numeric_limits<float>::quiet_NaN()));
+    std::fill(stats.begin(), stats.end(), std::numeric_limits<float>::quiet_NaN());
+    ASSERT_NO_FATAL_FAILURE(upload(o, oDevice));
+    ASSERT_NO_FATAL_FAILURE(upload(stats, statsDevice));
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers{{FLYDSL_SDPA_RDNA_Q_UID, qDevice},
+                                                    {FLYDSL_SDPA_RDNA_K_UID, kDevice},
+                                                    {FLYDSL_SDPA_RDNA_V_UID, vDevice},
+                                                    {FLYDSL_SDPA_RDNA_O_UID, oDevice},
+                                                    {FLYDSL_SDPA_RDNA_STATS_UID, statsDevice}};
+    if(spec.withBias)
+    {
+        ASSERT_TRUE(spec.biasDims.empty());
+        void* biasDevice = nullptr;
+        ASSERT_NO_FATAL_FAILURE(
+            upload(std::vector<T>(static_cast<size_t>(spec.seqLenQ * spec.seqLenKv), T(0.0F)),
+                   biasDevice));
+        buffers.push_back({FLYDSL_SDPA_RDNA_BIAS_UID, biasDevice});
+    }
+    const auto& handler = dispatchHandler(cdnaEngineFor(kernel));
+    const auto prepared = handler.prepare(context, bound, kernel);
+    ASSERT_NE(prepared, nullptr);
+    const GuardedWorkspace workspace(handler.workspaceBytes(context, bound, kernel));
+    const Handle handle;
+    handler.launch(
+        handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
+    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(o.data(), oDevice, o.size() * sizeof(T), hipMemcpyDeviceToHost));
+    ASSERT_EQ(
+        hipSuccess,
+        hipMemcpy(stats.data(), statsDevice, stats.size() * sizeof(float), hipMemcpyDeviceToHost));
+}
+
+/// The query row whose own input changes, and the last row of a wave of 32 (rows 256-287)
+/// whose diagonal KV tile the dual-wave kernel's pipelined loop runs, under its lazy rescale.
+constexpr int64_t INDEPENDENCE_QUERY_ROW = 300;
+constexpr int64_t INDEPENDENCE_KEY = 287;
+
+/// Every dual-wave object the shape admits returns the same bits, O and LSE, for every row whose
+/// own inputs are unchanged between two launches (vendored-kernel modification 48):
+///  - query row INDEPENDENCE_QUERY_ROW times 32 (exact in the dtype), so its running max jumps
+///    past the lazy-rescale threshold; every other row is held;
+///  - causal: K and V at key INDEPENDENCE_KEY made large for the one row of its wave that sees
+///    it (K its query row times 32, V 32); the rows before it mask it, and are held.
+/// The dual-wave kernel had decided the lazy rescale once per wave of 32 query rows (a ballot)
+/// and every row of the wave followed the row whose max jumped, so the held rows of its wave
+/// moved by about a 16-bit ulp.
+template <typename T>
+void expectRowsIndependentOfTheirWave(const SdpaGraphSpec& spec)
+{
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec), packedArchDeviceProperties());
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    // The generic and decode objects keep each row's max to itself; the dual-wave kernel's
+    // objects are the ones that share a decision across a wave.
+    auto candidates = stagedCdnaCandidates(fixture.context(), *bound);
+    candidates.erase(std::remove_if(candidates.begin(),
+                                    candidates.end(),
+                                    [](const auto& kernel) {
+                                        return &cdnaEngineFor(kernel) != &FLYDSL_SDPA_CDNA_DUALWAVE;
+                                    }),
+                     candidates.end());
+    ASSERT_FALSE(candidates.empty())
+        << "this build ships the dual-wave kernel for this device, but none of its objects "
+           "serves the shape";
+    ASSERT_EQ(spec.heads, spec.kvHeads);
+    const int64_t b = spec.batch;
+    const int64_t h = spec.heads;
+    const int64_t s = spec.seqLenQ;
+    const int64_t d = spec.headDim;
+    ASSERT_EQ(s, spec.seqLenKv);
+    ASSERT_GT(s, INDEPENDENCE_QUERY_ROW);
+    const auto strides = sdpaStrides(spec.layout, h, s, d);
+    const auto at = [&strides](int64_t bi, int64_t hi, int64_t si, int64_t e) {
+        return static_cast<size_t>(bi * strides[0] + hi * strides[1] + si * strides[2]
+                                   + e * strides[3]);
+    };
+    const auto count = static_cast<size_t>(b * s * h * d);
+    const auto q = fillValues<T>(count, 1U);
+    const auto k = fillValues<T>(count, 2U);
+    const auto v = fillValues<T>(count, 3U);
+    struct Variant
+    {
+        std::string name;
+        std::vector<T> q;
+        std::vector<T> k;
+        std::vector<T> v;
+        int64_t heldBelow;
+        int64_t ownRow;
+    };
+    std::vector<Variant> variants;
+    {
+        auto scaled = q;
+        for(int64_t bi = 0; bi < b; ++bi)
+        {
+            for(int64_t hi = 0; hi < h; ++hi)
+            {
+                for(int64_t e = 0; e < d; ++e)
+                {
+                    const auto index = at(bi, hi, INDEPENDENCE_QUERY_ROW, e);
+                    scaled[index] = T(static_cast<float>(q[index]) * 32.0F);
+                }
+            }
+        }
+        variants.push_back({"query row " + std::to_string(INDEPENDENCE_QUERY_ROW) + " times 32",
+                            std::move(scaled),
+                            k,
+                            v,
+                            s,
+                            INDEPENDENCE_QUERY_ROW});
+    }
+    if(spec.mask == SdpaMask::TOP_LEFT_CAUSAL)
+    {
+        auto keys = k;
+        auto values = v;
+        for(int64_t bi = 0; bi < b; ++bi)
+        {
+            for(int64_t hi = 0; hi < h; ++hi)
+            {
+                for(int64_t e = 0; e < d; ++e)
+                {
+                    keys[at(bi, hi, INDEPENDENCE_KEY, e)]
+                        = T(static_cast<float>(q[at(bi, hi, INDEPENDENCE_KEY, e)]) * 32.0F);
+                    values[at(bi, hi, INDEPENDENCE_KEY, e)] = T(32.0F);
+                }
+            }
+        }
+        variants.push_back({"K and V at key " + std::to_string(INDEPENDENCE_KEY)
+                                + ", which the rows before it mask",
+                            q,
+                            std::move(keys),
+                            std::move(values),
+                            INDEPENDENCE_KEY,
+                            -1});
+    }
+    const auto statsCount = static_cast<size_t>(b * h * s);
+    for(const auto& kernel : candidates)
+    {
+        SCOPED_TRACE(kernel.name);
+        std::vector<T> o(count);
+        std::vector<float> stats(statsCount);
+        ASSERT_NO_FATAL_FAILURE(
+            runCdnaObject<T>(fixture.context(), *bound, kernel, spec, q, k, v, o, stats));
+        for(const auto& variant : variants)
+        {
+            SCOPED_TRACE(variant.name);
+            std::vector<T> oVariant(count);
+            std::vector<float> statsVariant(statsCount);
+            ASSERT_NO_FATAL_FAILURE(runCdnaObject<T>(fixture.context(),
+                                                     *bound,
+                                                     kernel,
+                                                     spec,
+                                                     variant.q,
+                                                     variant.k,
+                                                     variant.v,
+                                                     oVariant,
+                                                     statsVariant));
+            int64_t moved = 0;
+            std::string where;
+            for(int64_t bi = 0; bi < b; ++bi)
+            {
+                for(int64_t hi = 0; hi < h; ++hi)
+                {
+                    for(int64_t si = 0; si < variant.heldBelow; ++si)
+                    {
+                        if(si == variant.ownRow)
+                        {
+                            continue;
+                        }
+                        const auto row = static_cast<size_t>((bi * h + hi) * s + si);
+                        // Compare the LSE bits, not the values: float has no unique object
+                        // representation, so memcmp on it is suspect (bugprone check).
+                        uint32_t statsBits = 0;
+                        uint32_t statsVariantBits = 0;
+                        std::memcpy(&statsBits, &stats[row], sizeof(statsBits));
+                        std::memcpy(
+                            &statsVariantBits, &statsVariant[row], sizeof(statsVariantBits));
+                        bool same = statsBits == statsVariantBits;
+                        for(int64_t e = 0; same && e < d; ++e)
+                        {
+                            same = std::memcmp(&o[at(bi, hi, si, e)],
+                                               &oVariant[at(bi, hi, si, e)],
+                                               sizeof(T))
+                                   == 0;
+                        }
+                        if(!same)
+                        {
+                            ++moved;
+                            if(moved <= 8)
+                            {
+                                where += " h=" + std::to_string(hi) + " s=" + std::to_string(si);
+                            }
+                        }
+                    }
+                }
+            }
+            EXPECT_EQ(moved, 0) << "held rows whose O or LSE bits moved, first:" << where;
+        }
+    }
+}
+
+// A row's output bits may depend only on its own query, K and V, never on another row's scores;
+// PyTorch's SDPA, every backend, keeps rows independent bit for bit. Every dual-wave object: both
+// dtypes, every head dim, causal or not, and with a (zero) bias, which selects the bias objects
+// (head_dim 64 and 128; vendored-kernel modification 48).
+TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsRowsIndependentOfTheirWave)
+{
+    if(!flydslShipsForThisDevice(shippedOpFor(FLYDSL_SDPA_CDNA_DUALWAVE)))
+    {
+        GTEST_SKIP() << "no dual-wave kernel for this device";
+    }
+    SdpaGraphSpec spec;
+    spec.batch = 1;
+    spec.heads = 2;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 512;
+    spec.seqLenKv = 512;
+    spec.stats = SdpaStats::LSE;
+    for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
+    {
+        for(const int64_t headDim : {int64_t{64}, int64_t{128}, int64_t{256}})
+        {
+            for(const auto mask : {SdpaMask::NONE, SdpaMask::TOP_LEFT_CAUSAL})
+            {
+                for(const bool withBias : {false, true})
+                {
+                    if(withBias && headDim == 256)
+                    {
+                        continue;
+                    }
+                    SCOPED_TRACE(std::string(dataType == DataType::HALF ? "f16" : "bf16")
+                                 + " head_dim " + std::to_string(headDim)
+                                 + (mask == SdpaMask::NONE ? " non-causal" : " causal")
+                                 + (withBias ? " with a bias" : ""));
+                    spec.dataType = dataType;
+                    spec.headDim = headDim;
+                    spec.mask = mask;
+                    spec.withBias = withBias;
+                    spec.biasDataType = dataType;
+                    if(dataType == DataType::HALF)
+                    {
+                        expectRowsIndependentOfTheirWave<hipdnn_data_sdk::types::half>(spec);
+                    }
+                    else
+                    {
+                        expectRowsIndependentOfTheirWave<Bf16>(spec);
+                    }
+                }
+            }
+        }
+    }
+}
+
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHalfAtHeadDim128)
 {
     auto spec = cdnaStandardSpec();

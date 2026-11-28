@@ -882,6 +882,29 @@ diff against upstream plus the modifications below.
       prologue); the KV loop is unchanged. The decode, merge and dual-wave builds read no
       row offsets and are byte-identical. Measured cost: `COVERAGE.md` section 7.5.
     - Not yet upstream.
+48. **Each row keeps or moves its own max under the lazy rescale** (`flash_attn_utils.py`,
+    `DualwaveSoftmaxHelper`; every dual-wave object). The lazy rescale asks, per KV tile,
+    whether any row's max jumped by more than `DUALWAVE_SWP_RESCALE_THRESHOLD` (2^8 in log2
+    units), and skips the O and l rescale when none did. It asked once per wave (a ballot over
+    the wave's 32 query rows), and on a "yes" every row of the wave moved its max to the
+    tile's, so P = exp2(s - m), its 16-bit pack and the O and l rescale of rows whose max had
+    not jumped changed with it. A row's output bits then depended on scores only other rows
+    of its wave see, including keys the row masks: on gfx950, scaling one query row, or a
+    key only one row of a wave sees (causal, or a bias that masks it for the others), moved
+    the other rows of that row's wave by up to a 16-bit ulp of O (and their LSE), and only
+    those rows.
+    - **Change:** the ballot still decides whether the wave takes the rescale branch. Inside
+      it, a row within the threshold keeps its max and a factor of exactly 1 (a select, not
+      `exp2(0)`, which the fast-math contraction of `(m - m') * c` need not give), as on the
+      skip branch, so its P, l and O are bit for bit the skip branch's; a row past it moves
+      its max as before. The same per-row decision as rocKE's MLA body
+      (`library/kernels/mla/_mla_body.py`). The FP8 dual-wave helpers' `lazy_rescale_o` and
+      `lazy_correct_o` have the same wave-wide decision and are unchanged: no kernel here
+      builds them.
+    - **Objects:** every dual-wave object changes (two selects per row in the rescale
+      branch); every other object is byte-identical. Measured cost: `COVERAGE.md` section 7.5.
+    - Not yet upstream (upstream FlyDSL's `flash_attn_utils.py` makes the same wave-wide
+      decision at the pinned commit and on main).
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).
