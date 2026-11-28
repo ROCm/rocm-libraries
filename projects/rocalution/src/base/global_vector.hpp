@@ -231,11 +231,17 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Power(double power);
 
-        /** \brief Restriction operator based on restriction mapping vector */
+        /** \brief Restriction operator based on restriction mapping vector
+        * \details
+        * Not implemented; this function does nothing.
+        */
         ROCALUTION_EXPORT
         void Restriction(const GlobalVector<ValueType>& vec_fine, const LocalVector<int>& map);
 
-        /** \brief Prolongation operator based on restriction mapping vector */
+        /** \brief Prolongation operator based on restriction mapping vector
+        * \details
+        * Not implemented; this function does nothing.
+        */
         ROCALUTION_EXPORT
         void Prolongation(const GlobalVector<ValueType>& vec_coarse, const LocalVector<int>& map);
 

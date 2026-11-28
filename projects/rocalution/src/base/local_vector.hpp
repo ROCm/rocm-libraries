@@ -338,11 +338,52 @@ namespace rocalution
         ROCALUTION_EXPORT
         void PermuteBackward(const LocalVector<int>& permutation);
 
-        /** \brief Restriction operator based on restriction mapping vector */
+        /** \brief Restriction operator based on restriction mapping vector
+      * \details
+      * Sums the entries of a fine vector into this coarse vector: entry i of this vector
+      * is the sum of the entries j of \p vec_fine with map[j] = i, or zero if there are
+      * none. Fine entries with map[j] = -1 are skipped.
+      *
+      * This vector must already be allocated with at least max(map) + 1 entries, which
+      * is not checked, and its size does not change. \p map must have one entry per
+      * entry of \p vec_fine, and each entry of \p map must be -1 or a coarse index,
+      * which is not checked either. A coarse vector that is too short, or a map entry
+      * below -1, leads to a write out of bounds. If this vector has no entries, nothing
+      * is computed and the size of \p map is not checked. This vector, \p vec_fine and
+      * \p map must be on the same backend.
+      *
+      * There is no accelerator implementation. On the accelerator, the result is
+      * computed on the host and this vector is moved back to the accelerator.
+      *
+      * @param[in]
+      * vec_fine    fine vector to restrict.
+      * @param[in]
+      * map         index of the coarse entry of each fine entry, or -1.
+      */
         ROCALUTION_EXPORT
         void Restriction(const LocalVector<ValueType>& vec_fine, const LocalVector<int>& map);
 
-        /** \brief Prolongation operator based on restriction mapping vector */
+        /** \brief Prolongation operator based on restriction mapping vector
+      * \details
+      * Copies the entries of a coarse vector into this fine vector: entry j of this
+      * vector is set to entry map[j] of \p vec_coarse, or to zero if map[j] = -1. \p map
+      * is the mapping that Restriction() takes.
+      *
+      * This vector must already be allocated with one entry per entry of \p map. If it
+      * has no entries, nothing is computed and the size of \p map is not checked.
+      * \p vec_coarse must have at least max(map) + 1 entries, and each entry of \p map
+      * must be -1 or a coarse index. Neither is checked: a coarse vector that is too
+      * short, or a map entry below -1, leads to a read out of bounds. This vector,
+      * \p vec_coarse and \p map must be on the same backend.
+      *
+      * There is no accelerator implementation. On the accelerator, the result is
+      * computed on the host and this vector is moved back to the accelerator.
+      *
+      * @param[in]
+      * vec_coarse  coarse vector to prolongate.
+      * @param[in]
+      * map         index of the coarse entry of each fine entry, or -1.
+      */
         ROCALUTION_EXPORT
         void Prolongation(const LocalVector<ValueType>& vec_coarse, const LocalVector<int>& map);
 
