@@ -93,6 +93,28 @@ it in a separate process before importing torch, and hand the HSACO bytes
 to the torch process. A stale mapped comgr rejecting an unsupported ISA
 still reports the ordinary `set_isa` error; #12919 tracks that diagnostic.
 
+### Diagnose a possible torch/ROCm mismatch
+
+Call `rocke.runtime.torch_rocm_probe.probe_torch_rocm()` **in the process you
+want to inspect**. It snapshots mapped HIP, COMGR, LLVM, and `clang-cpp`
+libraries (not the separate `libclang` C API) on Linux or Windows, imports
+torch in a fresh Python subprocess, and compares the observed fingerprints.
+The child uses its own interpreter startup path (including inherited
+`PYTHONPATH`), not changes made to `sys.path` in the caller. `torch_file` shows
+which torch module the child imported, when available. That path, torch's
+version, and its HIP build version are context, not proof that the binaries
+match. The report separates different binaries, matching observations, and
+inconclusive results, and includes child import failures, crashes, and timeouts.
+
+For a standalone report, run `python -m rocke.runtime.torch_rocm_probe`. This
+starts in a fresh parent, so its report may list torch's libraries but have
+nothing to compare them against. The probe does not load torch or a ROCm
+library in the parent, select a compiler, initialize a GPU, or prove that
+sharing HIP handles is safe. It only observes what the child loads at import;
+JIT compilation may load additional dependencies later. Host fixtures in
+`tests/runtime/test_torch_rocm_probe.py` run in `rocke_pytest_runtime_tools`
+without installing torch or requiring a GPU.
+
 ## Entry Point
 
 ```python
