@@ -144,11 +144,20 @@ set(rocrefact_test_source
 set(rocunit_test_source
   # gemm
   unit/gemm_gtest.cpp
+  # gemv workspace sizing
+  unit/gemv_mem_gtest.cpp
   # generate helpers
   unit/gerand_gtest.cpp
   unit/herand_gtest.cpp
   unit/syrand_gtest.cpp
   unit/hbrand_gtest.cpp
+)
+
+# gemv_mem_gtest calls rocblasCall_gemv_mem_max from the library's internal header
+# rocblas.hpp, which needs the rocBLAS internal API and the definitions the library
+# always sets (not the optional ones such as OPTIMAL).
+set_source_files_properties(unit/gemv_mem_gtest.cpp PROPERTIES
+  COMPILE_DEFINITIONS "ROCBLAS_INTERNAL_API;ROCM_USE_FLOAT16;ROCSOLVER_LIBRARY"
 )
 
 set(others_test_source

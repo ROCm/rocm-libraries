@@ -852,6 +852,55 @@ rocblas_status rocblasCall_ger(rocblas_handle handle,
     }
 }
 
+// gemv memory sizes
+//
+// Returns the largest scratch rocBLAS needs for any gemv (transA, m', n') with m' <= m and
+// n' <= n. Callers such as larf size their workspace once and then run on smaller shapes,
+// and rocblas_internal_gemv_kernel_workspace_size is not monotone in m and n, so the size
+// for (m, n) alone is not enough.
+//
+// Only the skinny-n (transposed) and skinny-m (not transposed) kernels use scratch, so the
+// maximum has a closed form derived from their selection rules in rocBLAS
+// (blas2/rocblas_gemv_kernels.cpp). This copies rocBLAS constants;
+// clients/gtest/unit/gemv_mem_gtest.cpp checks the result against the rocBLAS query.
+// TODO: use a rocBLAS max-workspace query for gemv when one is available (AIROCBLAS-1424).
+template <bool BATCHED, typename T>
+void rocblasCall_gemv_mem_max(rocblas_operation transA,
+                              rocblas_int m,
+                              rocblas_int n,
+                              rocblas_int batch_count,
+                              size_t* w_temp)
+{
+    *w_temp = 0;
+    if(m <= 0 || n <= 0 || batch_count <= 0)
+        return;
+
+    constexpr bool is_s = std::is_same_v<T, float>;
+    constexpr bool is_d = std::is_same_v<T, double>;
+    constexpr bool is_z = std::is_same_v<T, rocblas_double_complex>;
+    size_t elements = 0;
+    if(transA != rocblas_operation_none)
+    {
+        // skinny n: used when n < crossover and m >= 2048 * n, with ceil(m / 1024) partial
+        // results per column
+        constexpr size_t crossover = is_s ? 256 : is_d ? 128 : is_z ? 16 : 64;
+        const size_t cols = std::min({size_t(n), crossover - 1, size_t(m) / 2048});
+        elements = ((size_t(m) - 1) / 1024 + 1) * cols;
+    }
+    else
+    {
+        // skinny m: n is split into ceil(n / 4096) parts, at most 256, each with an m-long
+        // partial result; used only when m * n >= 2^20 and m is small enough, the most with
+        // two or more parts
+        const size_t splits = std::min((size_t(n) - 1) / 4096 + 1, size_t(256));
+        const size_t max_m = splits >= 2 ? (is_z ? 256 : 1024) : (is_z ? 128 : 512);
+        const size_t rows = std::min(size_t(m), max_m);
+        if(rows * size_t(n) >= (size_t(1) << 20))
+            elements = splits * rows;
+    }
+    *w_temp = sizeof(T) * elements * batch_count;
+}
+
 // gemv - non batched
 template <typename T>
 rocblas_status rocblasCall_gemv(rocblas_handle handle,
@@ -875,7 +924,8 @@ rocblas_status rocblasCall_gemv(rocblas_handle handle,
                                 rocblas_int incy,
                                 rocblas_stride stridey,
                                 rocblas_int batch_count,
-                                T** work)
+                                T** work,
+                                T* gemv_work = nullptr)
 {
     // TODO: How to get alpha and beta for trace logging
     ROCBLAS_ENTER("gemv", "trans:", transA, "m:", m, "n:", n, "shiftA:", offseta, "lda:", lda,
@@ -884,7 +934,7 @@ rocblas_status rocblasCall_gemv(rocblas_handle handle,
 
     THROW_IF_ROCBLAS_ERROR(rocblas_internal_gemv_template(
         handle, transA, m, n, alpha, stride_alpha, A, offseta, lda, strideA, x, offsetx, incx,
-        stridex, beta, stride_beta, y, offsety, incy, stridey, batch_count));
+        stridex, beta, stride_beta, y, offsety, incy, stridey, batch_count, gemv_work));
     return rocblas_status_success;
 }
 
@@ -1033,7 +1083,8 @@ rocblas_status rocblasCall_gemv(rocblas_handle handle,
                                 rocblas_int incy,
                                 rocblas_stride stridey,
                                 rocblas_int batch_count,
-                                T** work)
+                                T** work,
+                                T* gemv_work = nullptr)
 {
     // TODO: How to get alpha and beta for trace logging
     ROCBLAS_ENTER("gemv", "trans:", transA, "m:", m, "n:", n, "shiftA:", offseta, "lda:", lda,
@@ -1049,7 +1100,8 @@ rocblas_status rocblasCall_gemv(rocblas_handle handle,
 
     THROW_IF_ROCBLAS_ERROR(rocblas_internal_gemv_batched_template(
         handle, transA, m, n, alpha, stride_alpha, A, offseta, lda, strideA, x, offsetx, incx,
-        stridex, beta, stride_beta, cast2constPointer<T>(work), offsety, incy, stridey, batch_count));
+        stridex, beta, stride_beta, cast2constPointer<T>(work), offsety, incy, stridey, batch_count,
+        gemv_work));
     return rocblas_status_success;
 }
 

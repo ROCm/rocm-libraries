@@ -226,6 +226,29 @@ void rocsolver_larf_getMemorySize(const rocblas_side side,
     else
         *size_Abyx = std::max(m, n);
     *size_Abyx *= sizeof(T) * batch_count;
+
+    // rocBLAS gates its optimized gemv kernels on receiving scratch space; without it
+    // the slower general kernel runs instead. The requirement is appended to Abyx, past
+    // the order * batch_count elements holding W, so that the callers of this function
+    // do not have to thread an additional buffer through; rocsolver_larf_template does
+    // the split. Callers size larf once and then run it on smaller matrices, so this
+    // covers every m' <= m and n' <= n, on each side larf may be called with.
+    size_t size_gemv_work = 0;
+    if(side != rocblas_side_right)
+    {
+        const rocblas_operation trans = rocblas_is_complex<T> ? rocblas_operation_conjugate_transpose
+                                                              : rocblas_operation_transpose;
+        rocblasCall_gemv_mem_max<BATCHED, T>(trans, rocblas_int(m), rocblas_int(n),
+                                             rocblas_int(batch_count), &size_gemv_work);
+    }
+    if(side != rocblas_side_left)
+    {
+        size_t w;
+        rocblasCall_gemv_mem_max<BATCHED, T>(rocblas_operation_none, rocblas_int(m), rocblas_int(n),
+                                             rocblas_int(batch_count), &w);
+        size_gemv_work = std::max(size_gemv_work, w);
+    }
+    *size_Abyx += size_gemv_work;
 }
 
 template <typename T, typename I, typename U>
@@ -349,10 +372,27 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     //      IT WILL WORK ON THE ENTIRE MATRIX/VECTOR REGARDLESS OF
     //      ZERO ENTRIES ****
 
+    // rocBLAS scratch for the optimized gemv kernels occupies the tail of Abyx, past the
+    // order * batch_count elements that receive W below. Kept in step with
+    // rocsolver_larf_getMemorySize.
+    T* gemv_work = Abyx + size_t(order) * batch_count;
+
+    // Callers reserved rocblasCall_gemv_mem_max for their own, larger, m and n. That covers
+    // this call only if the bound is at least what rocBLAS asks for here, so check it in
+    // debug builds; an overrun is silent otherwise.
+#ifndef NDEBUG
+    size_t gemv_bound;
+    rocblasCall_gemv_mem_max<false, T>(trans, rocblas_int(m), rocblas_int(n),
+                                       rocblas_int(batch_count), &gemv_bound);
+    assert(rocblas_internal_gemv_kernel_workspace_size<T>(trans, rocblas_int(m), rocblas_int(n),
+                                                          rocblas_int(batch_count))
+           <= gemv_bound);
+#endif
+
     // compute the matrix vector product  (W=-A'*X or W=-A*X)
     rocblasCall_gemv<T>(handle, trans, m, n, cast2constType<T>(scalars), 0, A, shiftA, lda, stridea,
                         x, shiftx, incx, stridex, cast2constType<T>(scalars + 1), 0, Abyx, 0, 1,
-                        order, batch_count, workArr);
+                        order, batch_count, workArr, gemv_work);
 
     // compute the rank-1 update  (A + tau*X*W'  or A + tau*W*X')
     if(leftside)
