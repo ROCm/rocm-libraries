@@ -323,6 +323,56 @@ struct data_set_t
                                                       const data_set_t& second);
 
     /**
+     * @brief Merges batch axes of all `data_sets` simultaneously, as long as some
+     * pair of batch axes can be merged into one in every data set.
+     *
+     * Any pair of batch axes `(a, b)` is considered, regardless of their positions.
+     * In a given data set, `a` may be merged as the outer axis over the inner axis
+     * `b` iff `stride(a) == stride(b) * span(b)` or `a` is trivial (unit span and
+     * zero lower bound). The merge is done iff it is valid with the same outer/inner
+     * roles in every data set and neither axis is a length axis of the embedding
+     * data set of any (embedded) data set. The merged axis has `b`'s stride, the
+     * span `span(a) * span(b)` and the lower bound `lower(b) + span(b) * lower(a)`,
+     * which keeps the in-buffer location of every logical element unchanged (partial
+     * ranges included). It takes the position of the higher-indexed axis of the pair
+     * and the other one is erased (embedding maps are updated accordingly). Merging
+     * is repeated until no pair can be merged. Length axes are never modified.
+     *
+     * @param[in] data_sets data sets that must all be dimensionally consistent
+     * with one another and have the same spans along all batch axes.
+     * @return The compressed data sets, in the order of `data_sets` (empty if
+     * `data_sets` is empty).
+     *
+     * @throw An `std::invalid_argument` is thrown if `data_sets` are not dimensionally
+     * consistent with one another or have different spans along any batch axis.
+     */
+    static std::vector<data_set_t>
+        compress_batch_axes_consistently_in(std::vector<data_set_t> data_sets);
+
+    /**
+     * @brief Merges length axes of all `data_sets` simultaneously, as long as some
+     * pair of length axes can be merged into one in every data set.
+     *
+     * Same as `compress_batch_axes_consistently_in` with the roles of length and
+     * batch axes swapped: only length axes are merged (with the same rules) and
+     * batch axes are never modified. Unlike batch axes, length axes may have
+     * different spans across `data_sets` (e.g., real vs. complex data): a pair of
+     * length axes is merged only if both have the same spans in every data set.
+     * Length axes of an embedded data set are length axes of its embedding data
+     * set, so they are never merged.
+     *
+     * @param[in] data_sets data sets that must all be dimensionally consistent
+     * with one another.
+     * @return The compressed data sets, in the order of `data_sets` (empty if
+     * `data_sets` is empty).
+     *
+     * @throw An `std::invalid_argument` is thrown if `data_sets` are not dimensionally
+     * consistent with one another.
+     */
+    static std::vector<data_set_t>
+        compress_length_axes_consistently_in(std::vector<data_set_t> data_sets);
+
+    /**
      * @param[in] other data set against which ranks are to be compared
      * @return `true` if this data set is dimensionally consistent with `other` 
      */
@@ -488,6 +538,10 @@ private:
 
     inline bool has_consistent_embedding() const;
 
+    // Shared implementation of compress_{length,batch}_axes_consistently_in.
+    static std::vector<data_set_t> compress_axes_consistently_in(std::vector<data_set_t> data_sets,
+                                                                 bool length_axes);
+
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch
      * axes of the data set.
@@ -580,7 +634,7 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
-    // rocfft-internal-test drives reorder_length_axes directly (defined in data_set_test.cpp).
+    // rocfft-internal-test drives private members directly (defined in data_set_test.cpp).
     friend struct data_set_test_access;
 };
 
