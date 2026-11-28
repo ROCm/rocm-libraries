@@ -650,6 +650,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
+        "hipkernel.gfx942_conv_wgrad_aot.dispatch",
         "hipkernel.gfx942_attention_unified3d.dispatch",
 
 #ifdef HIPDNN_ENGINE_FLYDSL

@@ -149,6 +149,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
         )
     endif()
+    # The gfx942 wgrad AOT-instance engine, gated the same way: hkp_product_offers_engine
+    # reads offered_engines off the product root's KDP shards, so the suite compiles only
+    # where gfx942_conv_wgrad_aot's artifacts are present.
+    hkp_product_offers_engine(_hkp_gfx942_conv_wgrad_aot_bundle "hipkernel:Gfx942ConvWgradAot")
+    if(_hkp_gfx942_conv_wgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942ConvWgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX942_CONV_WGRAD_AOT=1
+        )
+    endif()
     hkp_product_offers_engine(_hkp_gfx1250_conv_dgrad_aot_bundle "hipkernel:Gfx1250ConvDgradAot")
     if(_hkp_gfx1250_conv_dgrad_aot_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE

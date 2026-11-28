@@ -107,6 +107,22 @@
           "sha256": "5820c7a5de3f5881b6a1fbb34b7cfec4aeb080df31f9869135a8dba85cd64b53",
           "status": "ok"
         },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv3_fp16": {
+          "arch": "gfx950",
+          "bytes": 44736,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv3_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a16x16x32_compv3_cshuffle_pgr",
+          "sha256": "4654a67cad9436f590a61e2e72d3bf8963a1cb0ac8de6a7fac7b752023ed1efe",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv4_bf16": {
+          "arch": "gfx950",
+          "bytes": 44466,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv4_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv4_cshuffle_pgr",
+          "sha256": "f5797175c81e37c3f16d46cb563846a227403e51835ce1f46f49092103ee0c77",
+          "status": "ok"
+        },
         "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {
           "arch": "gfx950",
           "bytes": 38125,
@@ -323,6 +339,22 @@
           "family": "conv",
           "kernel_name": "irhash_conv_942_dw_gm8_N2H14W14C64_K64Y3X3G64_t64x32x16_w2x2_a16x16x16_mem_cshuffle_gm8",
           "sha256": "24641cddc14e01a6a4ec40c57ad6996d9f37d09828ec02e12605140a840b9e4d",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv3_fp16": {
+          "arch": "gfx950",
+          "bytes": 44875,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv3_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a16x16x32_compv3_cshuffle_pgr",
+          "sha256": "f1e1a4d3e0f1cf2fc8be353f9098267fa3049852be147f6602fbb110386fb8c8",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv4_bf16": {
+          "arch": "gfx950",
+          "bytes": 44605,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv4_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv4_cshuffle_pgr",
+          "sha256": "bcf2f5da327d96cc168a4452d7ab99f2ae8eb4b2e66741120923e5f9ec2ef7f4",
           "status": "ok"
         },
         "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {
@@ -551,6 +583,22 @@
           "sha256": "5bb8064acb504068d834f80a4ac0de93d24dc4e6a28128876321b7d51ad5c033",
           "status": "ok"
         },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv3_fp16": {
+          "arch": "gfx950",
+          "bytes": 44939,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv3_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a16x16x32_compv3_cshuffle_pgr",
+          "sha256": "5968d96270ca7b7c37b8a4b248c122eb47013ba6dadda029fd6b85aee8d3ed27",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv4_bf16": {
+          "arch": "gfx950",
+          "bytes": 44669,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv4_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv4_cshuffle_pgr",
+          "sha256": "e427b0fe65d99b41f12de07c884f1442d9e30483b0880d0ca7c8665d88128b99",
+          "status": "ok"
+        },
         "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {
           "arch": "gfx950",
           "bytes": 38371,
@@ -770,6 +818,22 @@
           "family": "conv",
           "kernel_name": "irhash_conv_942_dw_gm8_N2H14W14C64_K64Y3X3G64_t64x32x16_w2x2_a16x16x16_mem_cshuffle_gm8",
           "sha256": "5bb8064acb504068d834f80a4ac0de93d24dc4e6a28128876321b7d51ad5c033",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv3_fp16": {
+          "arch": "gfx950",
+          "bytes": 44939,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv3_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a16x16x32_compv3_cshuffle_pgr",
+          "sha256": "5968d96270ca7b7c37b8a4b248c122eb47013ba6dadda029fd6b85aee8d3ed27",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/pgr_compv4_bf16": {
+          "arch": "gfx950",
+          "bytes": 44669,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_pgr_compv4_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv4_cshuffle_pgr",
+          "sha256": "e427b0fe65d99b41f12de07c884f1442d9e30483b0880d0ca7c8665d88128b99",
           "status": "ok"
         },
         "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {

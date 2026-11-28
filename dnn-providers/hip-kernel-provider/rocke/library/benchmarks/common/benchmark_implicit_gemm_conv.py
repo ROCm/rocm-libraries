@@ -663,7 +663,9 @@ def _verify_kernel(
     import torch
 
     if zero_init_out:
-        rt.memset(out_dev, 0, out_t.nbytes)
+        # ROCKE_POISON_OUT=1: fill with 0xFF instead, so a kernel that leaves
+        # output elements unwritten (dgrad zero residues) fails verification.
+        rt.memset(out_dev, 0xFF if os.environ.get("ROCKE_POISON_OUT") else 0, out_t.nbytes)
 
     if launch_fn is not None:
         launch_fn()
@@ -6539,6 +6541,14 @@ def _cached_bind(
             rt.memset_async(dw_ptr, 0, dw_bytes, stream)
             _launch()
 
+    elif direction == "dgrad" and extras.get("zero_dx"):
+        # Honest timing: the product path memsets dX inside the call.
+        _launch = run
+
+        def run(_launch=_launch, dx_ptr=ptrs[2], dx_bytes=sizes[2], stream=stream):
+            rt.memset_async(dx_ptr, 0, dx_bytes, stream)
+            _launch()
+
     elif direction == "wgrad" and ident.needs_stage2:
         # Two-stage is three steps and all of them are the algorithm's cost:
         # zero the scratch (Stage 1 accumulates), Stage 1, then the fold/cast
@@ -6695,6 +6705,21 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         # budget (see _extras_bytes). The table is small, but the accounting
         # should name everything it holds.
         extras["sub_gemm_bytes"] = int(flat.nbytes)
+        # The product plan (ConvDgradAotPlan.zero_dx) zeroes dX first when the
+        # kernel leaves residues unwritten (1x1 at stride 2): part of the cost.
+        from builders.common.convolution_backward_data import _dx_fully_written
+
+        from kernels.common.conv_implicit_gemm_dgrad import dgrad_fuses_dx_zero_fill
+
+        # The kernel zeroes the residues of its own tile when it can (no memset).
+        extras["zero_dx"] = not _dx_fully_written(
+            problem, sub_gemms, bool(ident.patch)
+        ) and not dgrad_fuses_dx_zero_fill(
+            problem,
+            dtype_d=ident.dtype_d,
+            split_k=ident.split_k,
+            pipeline=ident.pipeline,
+        )
         blocks = sum(
             -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
             for sg in sub_gemms

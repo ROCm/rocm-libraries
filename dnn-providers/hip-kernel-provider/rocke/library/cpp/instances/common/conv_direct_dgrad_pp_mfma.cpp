@@ -35,7 +35,8 @@ const rocke_pp::PpFamily kFamily
        kBlockKs,
        2,
        "block_k must be 128 or 256 (256-byte weight rows for the swizzle)",
-       true};
+       true,
+       false};
 
 rocke_pp::PpSpec pp_spec(const rocke_dgrad_pp_mfma_spec_t* s)
 {
@@ -114,7 +115,7 @@ struct DgradWeights : rocke_pp::PpWeights
         }
     }
 
-    void a_geometry(rocke_pp::PpCtx& c) override
+    V a_geometry(rocke_pp::PpCtx& c) override
     {
         Em& e = c.e;
         const int BK = c.spec.block_k;
@@ -145,7 +146,7 @@ struct DgradWeights : rocke_pp::PpWeights
                 }
             }
         }
-        c.shared["lane_hi"] = tb;
+        return tb;
     }
 
     V read_a(rocke_pp::PpCtx& c, int buf, int kf, int part) override

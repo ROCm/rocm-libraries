@@ -456,9 +456,18 @@ def evaluate_feature_maps(
 
     An unbound bare reference fails the whole batch, as the engine refuses that row.
     """
-    digest, values, _ = _run_feature_evaluator(
-        signature, categorical_encoding, rows, executable
-    )
+    # hipdnn_uhd_features caps one request at 256 MiB, so a large corpus goes over in
+    # batches; the digest is the signature's, the same for every batch.
+    batch = 8192
+    digest, values = None, []
+    for start in range(0, max(1, len(rows)), batch):
+        part_digest, part, _ = _run_feature_evaluator(
+            signature, categorical_encoding, rows[start : start + batch], executable
+        )
+        if digest is not None and part_digest != digest:
+            raise ValueError("features_hash differs between evaluator batches")
+        digest = part_digest
+        values.extend(part)
     return digest, values
 
 

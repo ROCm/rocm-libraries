@@ -910,6 +910,19 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                   ? rocke_b_mul(b, ctx->group_idx, ctx->merged ? ctx->c_gm : ctx->p_cpg)
                   : NULL;
     }
+    /* Python: if spec.patch: patch_kgemm = Y * cpg (ungrouped split path only). */
+    ctx->patch = spec->patch;
+    ctx->patch_kgemm = NULL;
+    if(ctx->patch)
+    {
+        if(!ctx->split_ab || ctx->group_idx != NULL)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "patch needs the ungrouped 2-D split addressing path");
+            return false;
+        }
+        ctx->patch_kgemm = rocke_b_mul(b, ctx->p_Y, ctx->p_cpg);
+    }
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
     ctx->schedule
@@ -1036,6 +1049,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
      *
      *   unroll_k     -> kloop_unroll  (2x-unrolled ping-pong body over two
      *                                  LDS buffers)
+     *   prefetch_global_regs -> kloop_prefetch_global_regs (kloop_simple
+     *                                  with tile k+1 carried in VGPRs)
      *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4/basic
      *                                  share this; pipeline string only
      *                                  affects schedule hints inside mfma)
@@ -1048,6 +1063,21 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     else if(spec->pipeline != NULL && strcmp(spec->pipeline, "wavelet") == 0)
     {
         rocke_conv_emit_kloop_wavelet(&ctx);
+    }
+    else if(spec->prefetch_global_regs)
+    {
+        /* The register-prefetch form of kloop_simple, shared with wgrad;
+         * validate() keeps async_dma / unroll_k / wavelet off it. An A load
+         * override writes LDS itself, so it has no staged values to carry. */
+        if(ctx.ov != NULL && ctx.ov->a_load_override != NULL)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "prefetch_global_regs does not support an A load override: the "
+                            "override writes LDS itself instead of returning staged values");
+            return NULL;
+        }
+        rocke_conv_emit_kloop_prefetch_global_regs(&ctx);
     }
     else if(!ctx.async_dma)
     {

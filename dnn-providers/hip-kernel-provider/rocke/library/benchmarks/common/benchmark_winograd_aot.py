@@ -309,14 +309,22 @@ def _gemm_conv_problem(geo):
 class Case:
     """Device buffers of one case: x / y (all chunks) and w are shared by the tiles."""
 
-    def __init__(self, rt, problem, io: str, seed: int, verify: bool):
+    def __init__(
+        self, rt, problem, io: str, seed: int, verify: bool, dgrad: bool = False
+    ):
         from benchmarks.common.benchmark_winograd_conv import make_inputs, reference
 
         self.rt = rt
         self.problem = problem
         self.io = io
+        self.dgrad = dgrad
         self.x_t, self.w_t, self.y_t = make_inputs(problem, io, seed=seed)
         self.ref = reference(self.x_t, self.w_t, problem, io) if verify else None
+        if dgrad:
+            # ``problem`` is the forward the dgrad runs as (dgrad_problem); the
+            # device holds the original dgrad's [C][3][3][K] filter, whose
+            # flipped transpose is this forward's filter.
+            self.w_t = self.w_t.flip(1, 2).permute(3, 1, 2, 0).contiguous()
         self.xb = self.x_t.numel() * 2
         self.wb = self.w_t.numel() * 2
         self.yb = self.y_t.numel() * 2
@@ -477,6 +485,8 @@ def _fits(binary: Binary, tp: TilePipe) -> bool:
     k = m["knobs"]
     if k.get("io_dtype") != tp.case.io:
         return False
+    if m["stage"] == "K1" and bool(k.get("dgrad")) != tp.case.dgrad:
+        return False
     if m["stage"] != "K2a":
         if (k["mh"], k["mw"]) != tp.tile or k["operand_dtype"] != tp.op:
             return False
@@ -496,6 +506,10 @@ def _time_us(run, args) -> float:
 
         samples = time_launches_staged(run, warmup=args.warmup, iters=args.iters)
         return median(samples) * 1e3
+    if args.timing == "hcbatch":
+        from benchmarks.common.batched_timing import time_launches_hcbatch
+
+        return time_launches_hcbatch(run, warmup=args.warmup, iters=args.iters) * 1e3
     from rocke.runtime import time_launches
 
     return time_launches(run, warmup=args.warmup, iters=args.iters) * 1e3
@@ -663,12 +677,40 @@ def winograd_case_reason(problem, dtype: str, direction: str) -> Optional[str]:
     narrowed to the 3x3 filters the shape-generic transforms build."""
     from kernels.common.conv_winograd_select import winograd_ineligible_reason
 
-    if direction != "fwd":
-        return "Winograd runs the forward direction only"
+    if direction == "dgrad":
+        why = _dgrad_reason(problem)
+        if why is not None:
+            return why
+        problem = dgrad_problem(problem)
+    elif direction != "fwd":
+        return "Winograd runs the forward and dgrad directions only"
     why = winograd_ineligible_reason(problem, dtype)
     if why is None and (problem.Y, problem.X) != (3, 3):
         why = f"{problem.Y}x{problem.X} filter (the AOT transforms are 3x3)"
     return why
+
+
+def _dgrad_reason(problem) -> Optional[str]:
+    p = problem
+    if p.is_3d or (p.Y, p.X) != (3, 3):
+        return "dgrad: 3x3 2-D only"
+    if (p.sH, p.sW) != (1, 1) or (p.dH, p.dW) != (1, 1):
+        return "dgrad: stride 1, dilation 1 only"
+    if p.groups != 1:
+        return "dgrad: dense only"
+    if not (0 <= p.pH <= 2 and 0 <= p.pW <= 2):
+        return "dgrad: padding 0..2 only"
+    return None
+
+
+def dgrad_problem(problem):
+    """The forward a dense 3x3 stride-1 dgrad is: dY (N, Ho, Wo, K) in, dX
+    (N, Hi, Wi, C) out, padding ``2 - pad``; its filter is the original one
+    flipped with C and K swapped (K1 ``dgrad`` reads it so)."""
+    p = problem
+    return dataclasses.replace(
+        p, Hi=p.Ho, Wi=p.Wo, C=p.K, K=p.C, pH=2 - p.pH, pW=2 - p.pW
+    )
 
 
 def cases_of(args) -> list:
@@ -740,7 +782,7 @@ def run_from_cache(args) -> int:
                 flush=True,
             )
             continue
-        cases.append((problem, dtype))
+        cases.append((problem, dtype, direction))
     if not cases:
         return 0
     # Read before the writer opens --results: the two may name one file.
@@ -779,13 +821,19 @@ def run_from_cache(args) -> int:
     rt = Runtime()
     rc = 0
     n_skipped = 0
-    for ci, (problem, dtype) in enumerate(cases, 1):
-        key = case_key(problem, dtype, "fwd")
+    for ci, (problem, dtype, direction) in enumerate(cases, 1):
+        key = case_key(problem, dtype, direction)
         if key in done:
             n_skipped += 1
             continue
-        print(f"\n== [{ci}/{len(cases)}] {problem.short()} {dtype}", flush=True)
-        case = Case(rt, problem, dtype, args.seed, args.verify)
+        print(
+            f"\n== [{ci}/{len(cases)}] {problem.short()} {dtype} {direction}", flush=True
+        )
+        dg = direction == "dgrad"
+        case = Case(
+            rt, dgrad_problem(problem) if dg else problem, dtype, args.seed,
+            args.verify, dgrad=dg,
+        )  # fmt: skip
         res = []
         failed = False
         try:
@@ -830,7 +878,7 @@ def run_from_cache(args) -> int:
             case=ci,
             shape=problem.short(),
             dtype=dtype,
-            direction="fwd",
+            direction=direction,
             tflops=tflops,
             ms=best["ms"],
             gbps=gbps,

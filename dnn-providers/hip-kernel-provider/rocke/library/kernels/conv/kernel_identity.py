@@ -143,15 +143,17 @@ class KernelIdentity:
     # Left out of the hash while False, like ws_replicas, so identities that
     # predate the field keep their hash and their cache entries.
     prefetch_addr: bool = False
-    # wgrad only (WgradConvSpec.prefetch_global_regs): the register-prefetch K loop.
-    # Left out of the hash while False, like prefetch_addr.
+    # fwd and wgrad (ImplicitGemmConvSpec / WgradConvSpec.prefetch_global_regs):
+    # the register-prefetch K loop. Left out of the hash while False, like
+    # prefetch_addr.
     prefetch_global_regs: bool = False
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
-    # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
+    # dgrad (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
-    # identity_supports_problem). Left out of the hash while False.
+    # identity_supports_problem). fwd (ImplicitGemmConvSpec.patch): the
+    # width-folded patch GEMM's loads. Left out of the hash while False.
     patch: bool = False
     # dgrad only (DgradConvSpec.tap_outer_k): the stride-1 tap-outer K loop.
     # Serves only problems whose kpg is a multiple of tile_k (see
@@ -485,7 +487,18 @@ def identity_supports_problem(
         extents = ((kpg, "kpg"), (cpg, "cpg"), (cpg, "cpg"))
     else:
         extents = ((cpg, "cpg"), (cpg, "cpg"), (kpg, "kpg"))
-    if identity.patch:
+    if identity.patch and identity.direction == "fwd":
+        # The width-folded patch GEMM: X along C (one filter row), W along
+        # its whole Y*C row, Y along kpg.
+        from kernels.common.conv_implicit_gemm import is_fwd_patch_problem
+
+        if not is_fwd_patch_problem(problem):
+            return False, (
+                "patch kernel serves width-folded patch embeddings only (2-D, "
+                "ungrouped, X == 1, no padding or dilation, sH >= Y)"
+            )
+        extents = ((cpg, "cpg"), (int(problem.Y) * cpg, "Y*C"), (kpg, "kpg"))
+    elif identity.patch:
         # One GEMM over the filter's (y, x, c): dY along K, W along Y*X*C,
         # dX along the X*C of one filter row, which starts at a multiple of
         # sW*C and of the row Wi*C.

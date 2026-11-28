@@ -105,7 +105,8 @@ def test_reasons():
     assert why(kpg=0) == "kpg must be >= 1 (got 0)"
     assert why(N=0) == "N must be >= 1 (got 0)"
     # "Same" padding on both axes only.
-    assert why(PAD=0) == "'same' padding only: PAD must be 1 (got 0)"
+    assert why(PAD=0) is None  # valid padding
+    assert why(PAD=2) == "'same' padding only: PAD must be 1 (got 2)"
     assert why(pad_w=0) == "one padding for both axes (got PAD=1x0)"
     assert "pad_w must be -1" in why(pad_w=-3)
     assert why(pad_w=1) is None
@@ -335,7 +336,7 @@ def test_binding_rejects_bad_input():
         lambda: eng.conv_direct_fwd_pp_mfma_describe(sd, "gfx950"),
         lambda: eng.conv_direct_fwd_pp_mfma_lower_llvm(sd, arch="gfx950"),
     ):
-        with pytest.raises(ValueError, match="dtype must be a string, not None"):
+        with pytest.raises(ValueError, match="dtype must be .* not None"):
             fn()
     spec = FwdPpMfmaSpec(problem=replace(_problem(), dtype=None))
     assert fwd_pp_mfma_reason(spec) == "fp16/bf16 only"

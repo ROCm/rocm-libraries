@@ -269,6 +269,43 @@ bool rocke_direct_problem_dims_reason(const rocke_direct_conv_problem_t* p,
     return false;
 }
 
+/* direct_lds_dma_mfma_caps_reason: declared in rocke/instance_conv_direct_grouped.h. */
+bool rocke_direct_lds_dma_mfma_caps_reason(const rocke_arch_target_t* target,
+                                           const char* arch,
+                                           const char* family,
+                                           int wave_size,
+                                           bool needs_ds_read_tr,
+                                           bool bf16,
+                                           char* why,
+                                           size_t why_cap)
+{
+    if(target->wave_size != 64 || wave_size != 64)
+    {
+        rocke_spec_set_reasonf(why, why_cap, "%s is a wave64 MFMA kernel", family);
+        return true;
+    }
+    if(needs_ds_read_tr && !target->memory.has_ds_read_tr)
+    {
+        rocke_spec_set_reasonf(
+            why, why_cap, "%s needs ds_read_b64_tr_b16 (absent on %s)", family, arch);
+        return true;
+    }
+    if(rocke_archtarget_async_lds_max_dwords(target) < 4)
+    {
+        rocke_spec_set_reasonf(
+            why, why_cap, "%s needs the 16-byte LDS DMA (absent on %s)", family, arch);
+        return true;
+    }
+    const char* ab = bf16 ? "bf16" : "f16";
+    if(!rocke_mma_catalog_has_shape(
+           rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
+    {
+        rocke_spec_set_reasonf(why, why_cap, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
+        return true;
+    }
+    return false;
+}
+
 /* dilation_reason(p): declared in rocke/instance_conv_direct_grouped.h. */
 bool rocke_direct_dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t why_cap)
 {
@@ -1729,8 +1766,10 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     const rocke_direct_depthwise_spatial_spec_t* spec, char* out, size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[2];
+    const char* parts[3];
     char bwv_buf[32];
+    char bh_buf[32];
+    int n_parts = 2;
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -1744,6 +1783,12 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bwv_buf;
+    /* *([f"bh{block_h}"] if block_h else []) */
+    if(spec->block_h)
+    {
+        snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
+        parts[n_parts++] = bh_buf;
+    }
     {
         /* flags=_scalar_name_flags(dtype) */
         const char* flag_names[2] = {"bf16", "f32"};
@@ -1752,7 +1797,7 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
         flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
         flag_on[1] = rocke_dconv_scalar_f32_flag(dt);
         return rocke_kernel_name_join(
-            spec->name, parts, 2, flag_names, flag_on, 2, out, out_cap, NULL);
+            spec->name, parts, n_parts, flag_names, flag_on, 2, out, out_cap, NULL);
     }
 }
 
@@ -1842,6 +1887,14 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         }
         return false;
     }
+    if(spec->block_h < 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "block_h must be >= 0 (got %d)", spec->block_h);
+        }
+        return false;
+    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
@@ -1853,6 +1906,12 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
     if(spec == NULL)
         return ROCKE_ERR_VALUE;
     p = &spec->problem;
+    if(spec->block_h < 0)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "block_h must be >= 0 (got %d)", spec->block_h);
+        return ROCKE_ERR_VALUE;
+    }
     /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
@@ -4193,13 +4252,6 @@ static bool dconv_gen_row_stream_reason(const rocke_direct_conv_spec_t* spec, ch
     return false;
 }
 
-/* The XCD count the xcd_tiles remap is built for (_XCD_TILES_ARCHES); 0 when
- * the target has none. */
-static int dconv_gen_xcd_tiles_count(const char* arch)
-{
-    return (arch != NULL && strcmp(arch, "gfx950") == 0) ? 8 : 0;
-}
-
 rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
                                           char* reason,
                                           size_t reason_cap)
@@ -4388,7 +4440,7 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
             reason, reason_cap, "dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on %s)", arch);
     if(dconv_gen_row_stream_reason(spec, why, sizeof why))
         ROCKE_SPEC_FAIL(reason, reason_cap, "%s", why);
-    if(spec->xcd_tiles && dconv_gen_xcd_tiles_count(arch) == 0)
+    if(spec->xcd_tiles && rocke_direct_conv_xcd_tiles_count(arch) == 0)
         ROCKE_SPEC_FAIL(
             reason, reason_cap, "xcd_tiles is built for ['gfx950'] only (got %s)", arch);
     if(spec->block_groups <= 0 || p->groups % spec->block_groups != 0)

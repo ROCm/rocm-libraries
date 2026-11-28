@@ -70,7 +70,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.arch import MmaOp
 from rocke.core.ir import (
@@ -91,7 +91,7 @@ from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.spec import ceil_div
-from rocke.helpers.grid import chiplet_transform_chunked_runtime
+from rocke.helpers.grid import NUM_XCDS_MI350X, chiplet_transform_chunked_runtime
 from rocke.helpers.io import concat_tree, smem_load_fragment
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -108,7 +108,12 @@ from rocke.helpers.transforms import (
 
 
 def emit_direct_params(
-    b: IRBuilder, *, direction: str = "fwd", io_type=F16
+    b: IRBuilder,
+    *,
+    direction: str = "fwd",
+    io_type=F16,
+    d16: bool = False,
+    d16_atomic: bool = False,
 ) -> Dict[str, Value]:
     """Declare the direct-conv kernarg block in :mod:`conv_abi` order.
 
@@ -123,11 +128,19 @@ def emit_direct_params(
     ``direction="wgrad"`` binds dY to A and X to B, and D is the fp32 dW the
     kernel ``global_atomic_add``s into: an atomic reads its target, so it is
     not ``writeonly``, and a scalar f32 atomic only needs dword alignment.
+    WIP: ``d16`` makes a wgrad D the ``io_type`` dW a kernel stores whole,
+    ``d16_atomic`` the one it adds packed pairs into.
     """
     out: Dict[str, Value] = {}
     for name, kind in conv_direct_arg_names(direction=direction):
         if kind == "i32":
             out[name] = b.param(name, I32)
+        elif kind == "d" and direction == "wgrad" and d16_atomic:
+            out[name] = b.param(name, PtrType(io_type, "global"), noalias=True, align=4)
+        elif kind == "d" and direction == "wgrad" and d16:
+            out[name] = b.param(
+                name, PtrType(io_type, "global"), noalias=True, writeonly=True, align=2
+            )
         elif kind == "d" and direction == "wgrad":
             out[name] = b.param(name, PtrType(F32, "global"), noalias=True, align=4)
         elif kind == "d":
@@ -298,16 +311,19 @@ def _buf_store_vN(
     soff: Value,
     val: Value,
     dwords: int,
+    *,
+    cachepolicy: int = 0,
 ) -> None:
     """Dtype-dispatch for vectorised buffer store.
 
     ``dwords`` matches the ``dwords`` parameter of ``buffer_store_vN_f16`` /
     ``buffer_store_vN_bf16``: each dword holds two 16-bit elements.
+    ``cachepolicy`` is passed through (the intrinsic's aux immediate).
     """
     if dtype == "bf16":
-        b.buffer_store_vN_bf16(rsrc, voff, soff, val, dwords)
+        b.buffer_store_vN_bf16(rsrc, voff, soff, val, dwords, cachepolicy=cachepolicy)
     else:
-        b.buffer_store_vN_f16(rsrc, voff, soff, val, dwords)
+        b.buffer_store_vN_f16(rsrc, voff, soff, val, dwords, cachepolicy=cachepolicy)
 
 
 def _trunc_f32(b: IRBuilder, dtype: str, val: Value) -> Value:
@@ -874,6 +890,39 @@ def problem_dims_reason(p: "DirectConvProblem") -> Optional[str]:
         value = getattr(p, name)
         if value < 1:
             return f"{name} must be >= 1 (got {value})"
+    return None
+
+
+def direct_lds_dma_mfma_caps_reason(
+    target: Any,
+    arch: str,
+    *,
+    family: str,
+    bf16: bool,
+    wave_size: int = 64,
+    needs_ds_read_tr: bool = False,
+) -> Optional[str]:
+    """Why an arch lacks what the LDS-DMA MFMA direct kernels need, or ``None``.
+
+    One gate for every kernel that stages through the 16-byte LDS DMA and runs
+    ``mfma_f32_16x16x32`` (fwd pp / flex, dgrad pp, tiled and gather wgrad). Checked in
+    this order: wave64 target and kernel, the transposing LDS read when
+    ``needs_ds_read_tr``, the 16-byte LDS DMA, then the 16x16x32 MFMA of the
+    operand dtype. ``family`` names the kernel in the reasons. The caller has
+    already checked the dtype is fp16 or bf16. C twin:
+    ``rocke_direct_lds_dma_mfma_caps_reason``.
+    """
+    if target.wave_size != 64 or wave_size != 64:
+        return f"{family} is a wave64 MFMA kernel"
+    if needs_ds_read_tr and not target.memory.has_ds_read_tr:
+        return f"{family} needs ds_read_b64_tr_b16 (absent on {arch})"
+    if target.async_lds_max_dwords < 4:
+        return f"{family} needs the 16-byte LDS DMA (absent on {arch})"
+    ab = "bf16" if bf16 else "f16"
+    if not target.mma.has_shape(
+        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+    ):
+        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     return None
 
 
@@ -4073,7 +4122,7 @@ def direct_conv_lds_bytes(spec: DirectConvSpec) -> int:
 #: XCD count the ``xcd_tiles`` remap is built for, per target. The remap
 #: groups one image row band per XCD; it is only built where the count is
 #: known (gfx950).
-_XCD_TILES_ARCHES = {"gfx950": 8}
+_XCD_TILES_ARCHES = {"gfx950": NUM_XCDS_MI350X}
 #: Fewest image row bands (``N * ceil(H / block_h)``) an ``xcd_tiles`` launch
 #: needs: with fewer, no full block of row bands exists and the remap is the
 #: identity.
@@ -4289,12 +4338,11 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     PERSISTENT = spec.persistent_grid
 
     # ---- Persistent grid: decode XCD and workgroup positions ----
-    # 256 = 8 XCDs × 32 blocks per XCD.
+    # DIRECT_PERSISTENT_BLOCKS = 8 XCDs x 32 blocks per XCD.
     # Each block processes multiple cells in a runtime loop, keeping weights
     # in registers across all cells (weights are the SAME for groups=1).
-    NUM_XCD = 8
-    BLOCKS_PER_XCD = 32
-    TOTAL_PERSISTENT = NUM_XCD * BLOCKS_PER_XCD  # = 256
+    NUM_XCD = DIRECT_PERSISTENT_NUM_XCD
+    BLOCKS_PER_XCD = DIRECT_PERSISTENT_BLOCKS_PER_XCD
 
     if PERSISTENT:
         # Cell counts follow the runtime shape; only the tile geometry
@@ -8664,6 +8712,9 @@ class DirectTransposeWeightsDgradSpec:
 
     problem: "DirectConvProblem"
     runtime_channels: bool = False
+    # WIP: 64 x 64 (k, c) tiles through LDS, 16-byte loads and stores
+    # (runtime channels; cpg and kpg multiples of 8)
+    tiled: bool = False
 
 
 @dataclass(frozen=True)
@@ -8725,6 +8776,8 @@ def build_direct_transpose_weights_dgrad(
     Grid: (KH * KW * groups, ceil(kpg / 64), ceil(cpg / 64))
     Block: (64, 1, 1)
     """
+    if spec.tiled:
+        return _build_transpose_weights_dgrad_tiled(spec, arch)
     p = spec.problem
     io_type = _io_type(p.dtype)
     BLOCK = 64
@@ -8827,6 +8880,73 @@ def build_direct_transpose_weights_dgrad(
     else:
         b.buffer_store_f16(d_rsrc, dst_safe, c0, val)
 
+    return b.kernel
+
+
+def _build_transpose_weights_dgrad_tiled(
+    spec: "DirectTransposeWeightsDgradSpec", arch: str = "gfx950"
+) -> "KernelDef":
+    """WIP: :func:`build_direct_transpose_weights_dgrad` (runtime channels)
+    by 64 x 64 (k, c) tiles of one (group, r', s'): 16-byte loads of W rows
+    into LDS, then each thread gathers 8 k of one c and stores them as one
+    16-byte W_T granule. cpg and kpg must be multiples of 8.
+
+    Grid: (groups * KH * KW, ceil(kpg / 64), ceil(cpg / 64)); block 256.
+    """
+    p = spec.problem
+    io_type = _io_type(p.dtype)
+    eb = _elem_bytes(p.dtype)
+    RS = p.KH * p.KW
+    ROW = 72  # LDS row: 64 c + 8 pad
+    b = IRBuilder(
+        f"direct_transpose_weights_dgrad_{p.short()}_rtc_t64{_xform_dtype_tag(p.dtype)}"
+    )
+    b.kernel.attrs["max_workgroup_size"] = 256
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(io_type, "global"), noalias=True, writeonly=True, align=16)
+    A_bytes = b.param("A_bytes", I32)
+    D_bytes = b.param("D_bytes", I32)
+    cpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[0], I32)
+    kpg = b.param(DIRECT_WEIGHT_TRANSFORM_RTC_ARGS[1], I32)
+
+    def ci(v: int) -> Value:
+        return b.const_i32(v)
+
+    c0 = ci(0)
+    oob = ci((1 << 31) - 1)
+    tid = b.thread_id_x()
+    bx, k0, cc0 = b.block_id_x(), b.mul(b.block_id_y(), ci(64)), b.mul(b.block_id_z(), ci(64))
+    grp, rs = b.div(bx, ci(RS)), b.mod(bx, ci(RS))
+    rf = b.sub(ci(RS - 1), rs)  # flipped (r, s) = (KH-1-r', KW-1-s'), flattened
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    d_rsrc = b.buffer_rsrc(D, D_bytes)
+    lds = b.smem_alloc(io_type, [1, 64 * ROW], name_hint="wtr_tile")
+    n = 16 // eb
+    for h in range(2):
+        g = b.add(tid, ci(256 * h))
+        row, gc = b.div(g, ci(8)), b.mod(g, ci(8))
+        k, c = b.add(k0, row), b.add(cc0, b.mul(gc, ci(8)))
+        ok = b.land(b.cmp_lt(k, kpg), b.cmp_lt(c, cpg))
+        src = b.add(b.mul(b.add(b.mul(b.add(b.mul(grp, kpg), k), ci(RS)), rf), cpg), c)
+        v = b.buffer_load_vN(a_rsrc, b.select(ok, b.mul(src, ci(eb)), oob), c0, io_type, n)
+        b.smem_store_vN(lds, [c0, b.add(b.mul(row, ci(ROW)), b.mul(gc, ci(8)))], v, n)
+    b.s_waitcnt(lgkmcnt=0)
+    b.s_barrier_bare()
+    for h in range(2):
+        g = b.add(tid, ci(256 * h))
+        crow, kg = b.div(g, ci(8)), b.mod(g, ci(8))
+        vals = []
+        for j in range(8):
+            e = b.smem_load_vN(
+                lds, c0, b.add(b.mul(b.add(b.mul(kg, ci(8)), ci(j)), ci(ROW)), crow),
+                dtype=io_type, n=1,
+            )
+            vals.append(b.vec_extract(e, 0))
+        v = b.vec_pack(vals, io_type)
+        c, k = b.add(cc0, crow), b.add(k0, b.mul(kg, ci(8)))
+        ok = b.land(b.cmp_lt(c, cpg), b.cmp_lt(k, kpg))
+        dst = b.add(b.mul(b.add(b.mul(b.add(b.mul(grp, cpg), c), ci(RS)), rs), kpg), k)
+        _buf_store_vN(b, p.dtype, d_rsrc, b.select(ok, b.mul(dst, ci(eb)), oob), c0, v, 4)
     return b.kernel
 
 
@@ -10740,13 +10860,19 @@ DW_DGRAD_MFMA_W_FOLDS = (1, 2, 4)
 DW_DGRAD_MFMA_MAX_UNROLL = 512
 # Up to 8 waves (2 per SIMD) so a wave keeps 256 VGPRs, of which the
 # register-resident fragments (mfma_frag_vgprs) may take at most this many.
-DW_DGRAD_MFMA_MAX_WAVES = 8
+DW_DGRAD_MFMA_MAX_WAVES = 16
 DW_DGRAD_MFMA_MAX_FRAG_VGPRS = 224
 DW_DGRAD_MFMA_MAX_PREFETCH_ROWS = 4
 # LDS per workgroup for the staged dY windows and dX rows.
 DW_DGRAD_MFMA_LDS_BUDGET = 64 * 1024
 # Widest group (cpg = kpg) the grouped forward form contracts per wave.
 DW_WIN_MAX_GROUP_CH = 64
+# Groups smaller than one 8-channel chunk the grouped forward form packs
+# block-diagonally (cpg 2 / 4: 4 / 2 groups per chunk).
+DW_WIN_FWD_SUB_GROUP_CH = (2, 4)
+# The dense channel form (``dense``): 16 channels per wave, 32-channel K.
+DW_WIN_DENSE_CH = 16
+DW_WIN_DENSE_K = 32
 
 
 def _dw_mfma_passes(KW: int) -> int:
@@ -10781,6 +10907,114 @@ def _dw_mfma_lds_bytes(
     in_px = ceil_div(in_passes * threads, per_px)
     out_px = w_fold * tile_w
     return 2 * (in_px + out_px) * (block_ch + DW_DGRAD_MFMA_CH) * 2
+
+
+# Swizzled LDS staging of the Toeplitz form (``lds_swz``, wave64 MFMA): both
+# staging buffers hold 16-byte channel chunks without the per-pixel pad,
+# chunk ``c`` of local pixel ``lo`` of image ``f`` at
+# ``f * IMG + lo * Q + (c + lo // ROT) % Q`` (``Q = block_ch / 8``). ROT and
+# the image pitch IMG are picked per kernel against the gfx950 LDS rules
+# (rocke.analysis.lds profile: ds_read_b128 16 lanes per phase on a 256-byte
+# window, phase bits (5, 4^3^2); writes 8 / 16 lanes per phase on 128 bytes)
+# over the four access shapes: the B-fragment reads, the dY staging stores,
+# the D-fragment stores and the dX drain reads.
+def _dw_lds_phase(read: bool, width: int, lane: int) -> Tuple[int, ...]:
+    b5, b4, b3, b2 = (lane >> 5) & 1, (lane >> 4) & 1, (lane >> 3) & 1, (lane >> 2) & 1
+    if read:
+        return (b5,) if width == 8 else (b5, b4 ^ b3 ^ b2)
+    return (b5, b4) if width == 8 else (b5, b4, b3)
+
+
+def _dw_lds_cycles(read: bool, width: int, addrs: Sequence[Tuple[int, int]]) -> int:
+    """Predicted bank cycles of one wave instruction (lane, byte address)."""
+    banks_n = 64 if read else 32
+    phases: Dict[Tuple[int, ...], set] = {}
+    for lane, a in addrs:
+        phases.setdefault(_dw_lds_phase(read, width, lane), set()).add(a)
+    tot = 0
+    for v in phases.values():
+        banks: Dict[int, set] = {}
+        for a in v:
+            for d in range(width // 4):
+                dw = a // 4 + d
+                banks.setdefault(dw % banks_n, set()).add(dw)
+        tot += max(len(x) for x in banks.values())
+    return tot
+
+
+def _dw_swz_chunk(px: int, c: int, w: int, img: int, q: int, rot: int) -> int:
+    f, lo = divmod(px, w)
+    return f * img + lo * q + ((c + lo // rot) % q if rot else c)
+
+
+@lru_cache(maxsize=None)
+def _dw_win_swz_layout(
+    KW: int, F: int, waves: int, cpg: int, dense: bool, S: int
+) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
+    """((W, IMG, ROT) of the dY staging, (W, IMG, ROT) of the dX staging)."""
+    SUB = 16 // F
+    TW = 16 // F if dense else 32 // F
+    KWP = (KW + 4) // 4
+    U = TW + KW - 1 if dense else TW + 4 * KWP - 2
+    Q = waves * (DW_WIN_DENSE_CH if dense else DW_DGRAD_MFMA_CH) // DW_DGRAD_MFMA_CH
+    T = waves * 64
+
+    def side(w: int, shapes) -> Tuple[int, int, int]:
+        span = w * Q
+        best = None
+        for rot in (0, 1, 2, 4) if Q > 1 else (0,):
+            for img in range(span, span + 17) if F > 1 else (span,):
+                cy = 0
+                for read, width, lanes in shapes:
+                    cy += _dw_lds_cycles(
+                        read,
+                        width,
+                        [
+                            (l, _dw_swz_chunk(px, c // 8, w, img, Q, rot) * 16 + (c % 8) * 2)
+                            for l, px, c in lanes
+                        ],
+                    )
+                key = (cy, img, rot)
+                if best is None or key < best:
+                    best = key
+        return (w, best[1], best[2])
+
+    ins, outs = [], []
+    for wv in range(waves):
+        wch = wv * (DW_WIN_DENSE_CH if dense else DW_DGRAD_MFMA_CH)
+        L = range(64)
+        if dense:
+            grp = wch // cpg * cpg
+            for s_ in range(KW):
+                for h in range(cpg // DW_WIN_DENSE_K):
+                    ins.append((True, 16, [
+                        (l, (l % 16) // SUB * U + (l % 16) % SUB + s_,
+                         grp + 8 * (l // 16) + DW_WIN_DENSE_K * h) for l in L]))
+            outs.append((False, 8, [
+                (l, (l % 16) // SUB * TW + (l % 16) % SUB, wch + 4 * (l // 16)) for l in L]))
+        else:
+            grp = wch // max(cpg, 8) * max(cpg, 8) if cpg > 1 else wch
+            for ph in range(KWP):
+                for h in range(max(1, cpg // DW_DGRAD_MFMA_CH)):
+                    ins.append((True, 16, [
+                        (l, (l % 16) // SUB * U + 2 * ((l % 16) % SUB) + l // 16 + 4 * ph,
+                         grp + 8 * h) for l in L]))
+            outs.append((False, 8, [
+                (l, (l % 16) // SUB * TW + 2 * ((l % 16) % SUB) + (l // 16) // 2,
+                 wch + 4 * ((l // 16) % 2)) for l in L]))
+        for n, shapes, read in ((F * U * Q, ins, False), (F * (TW // S) * Q, outs, True)):
+            for i in range(-(-n // T)):
+                lanes = []
+                for l in L:
+                    idx = wv * 64 + l + i * T
+                    if idx < n:
+                        px = idx // Q
+                        if read and S > 1:
+                            px = px // (TW // S) * TW + px % (TW // S) * S
+                        lanes.append((l, px, (idx % Q) * 8))
+                if lanes:
+                    shapes.append((read, 16, lanes))
+    return side(U, ins), side(TW, outs)
 
 
 @dataclass(frozen=True)
@@ -10837,12 +11071,31 @@ class DirectDepthwiseDgradWindowedSpec:
     # also be grouped with ``cpg = kpg`` a multiple of 8 (at most
     # DW_WIN_MAX_GROUP_CH): a wave's 8 output channels then contract the
     # ``cpg / 8`` 8-channel chunks of their group, with the group's dense
-    # weights as A fragments instead of the one-hot diagonal.
+    # weights as A fragments instead of the one-hot diagonal; with cpg 2 or 4
+    # (DW_WIN_FWD_SUB_GROUP_CH) one 8-channel chunk holds 4 or 2 groups and
+    # the A fragment is block-diagonal.
     fwd: bool = False
     # Forward output stride (``fwd`` only): 2 keeps every second row and
     # column of the stride-1 grid the kernel walks (the problem is then that
     # grid's: see :func:`dw_win_fwd_problem`), skipping the odd rows' MFMAs.
     out_stride: int = 1
+    # WIP (grouped MFMA form, cpg a multiple of 32, wave64): the dense
+    # channel form. A wave owns 16 channels (a pair of waves one 32-channel
+    # group) and one 16x16 tile per in-flight row: tile row m = channel m,
+    # tile column n = column n % SUB of image n // SUB (SUB = 16 / w_fold).
+    # One atom contracts 32 input channels of one tap, so a row takes
+    # KH * KW * cpg / 32 MFMAs per wave and no Toeplitz pass is padded
+    # (tile_w = 16 / w_fold).
+    dense: bool = False
+    # Swizzled LDS staging (wave64 MFMA form): unpadded 16-byte channel
+    # chunks, rotated per pixel, at a per-kernel image pitch (see
+    # :func:`_dw_win_swz_layout`) instead of the 16-byte pixel pad.
+    lds_swz: bool = False
+    # XCD-contiguous tile order (gfx950): the launch is remapped so each XCD
+    # runs one contiguous run of (column tile, channel block, row band)
+    # tiles; neighbouring column tiles then share their window halo in one
+    # L2 instead of refetching it on another XCD.
+    xcd_tiles: bool = False
 
     @property
     def threads_per_block(self) -> int:
@@ -10851,12 +11104,16 @@ class DirectDepthwiseDgradWindowedSpec:
     @property
     def block_ch(self) -> int:
         if self.mfma:
-            return self.block_waves * DW_DGRAD_MFMA_CH
+            return self.block_waves * (
+                DW_WIN_DENSE_CH if self.dense else DW_DGRAD_MFMA_CH
+            )
         return self.threads_per_block * self.ch_per_lane
 
     @property
     def tile_w(self) -> int:
         """dX columns per block along W (per image)."""
+        if self.mfma and self.dense:
+            return 16 // self.w_fold
         return _dw_mfma_tile_w(self.w_fold) if self.mfma else self.block_w
 
     @property
@@ -10894,10 +11151,16 @@ class DirectDepthwiseDgradWindowedSpec:
     def unrolled_mfmas(self) -> int:
         """Statically unrolled MFMAs per wave (MFMA form)."""
         p = self.problem
+        if self.dense:
+            return self.block_h * p.KH * p.KW * (p.cpg // DW_WIN_DENSE_K)
         return self.block_h * p.KH * _dw_mfma_passes(p.KW) * self.cin_chunks
 
     def _mfma_in_passes(self) -> int:
         """16-byte dY loads per thread and window row (MFMA form)."""
+        if self.dense:
+            win = self.tile_w + self.problem.KW - 1
+            per_px = self.block_ch // DW_DGRAD_MFMA_CH
+            return ceil_div(self.w_fold * win * per_px, self.threads_per_block)
         return _dw_mfma_in_passes(
             self.tile_w,
             self.problem.KW,
@@ -10913,13 +11176,38 @@ class DirectDepthwiseDgradWindowedSpec:
         each on the wave32 WMMA)."""
         p = self.problem
         kwp = _dw_mfma_passes(p.KW) * self.cin_chunks
+        if self.dense:
+            kwp = p.KW * (p.cpg // DW_WIN_DENSE_K)
         rows = self.prefetch_rows * self._mfma_in_passes()
         frag = _dw_toeplitz_lanes(self.wave_size).frag_vgprs
         return frag * (p.KH * kwp + p.KH + kwp) + 4 * rows
 
+    def swz_layout(self):
+        """``_dw_win_swz_layout`` of this spec (``lds_swz``)."""
+        p = self.problem
+        return _dw_win_swz_layout(
+            p.KW, self.w_fold, self.block_waves, p.cpg, self.dense, self.out_stride
+        )
+
+    def swz_chunks(self) -> Tuple[int, int]:
+        """16-byte chunks per buffer of the swizzled dY and dX staging."""
+        (wi, ii, ri), (wo, io, ro) = self.swz_layout()
+        q = self.block_ch // DW_DGRAD_MFMA_CH
+        in_px = ceil_div(self._mfma_in_passes() * self.threads_per_block, q)
+        n_in = max(_dw_swz_chunk(px, c, wi, ii, q, ri) for px in range(in_px) for c in range(q))
+        n_out = max(
+            _dw_swz_chunk(px, c, wo, io, q, ro)
+            for px in range(self.w_fold * self.tile_w)
+            for c in range(q)
+        )
+        return n_in + 1, n_out + 1
+
     def mfma_lds_bytes(self) -> int:
         """LDS bytes of the MFMA form: double-buffered dY window rows and dX
         rows, ``block_ch + 8`` channels per pixel (16-byte bank skew)."""
+        if self.lds_swz:
+            n_in, n_out = self.swz_chunks()
+            return 2 * (n_in + n_out) * 16
         return _dw_mfma_lds_bytes(
             self._mfma_in_passes(),
             self.threads_per_block,
@@ -10947,7 +11235,10 @@ class DirectDepthwiseDgradWindowedSpec:
                     "bf16": p.dtype == "bf16",
                     "fwd": self.fwd,
                     f"g{p.cpg}": self.grouped,
-                    "s2": self.out_stride == 2,
+                    "s2": self.out_stride == 2 or (not self.fwd and p.stride == 2),
+                    "dn": self.dense,
+                    "sw": self.lds_swz,
+                    "xc": self.xcd_tiles,
                 },
             )
         return kernel_name_join(
@@ -11022,8 +11313,21 @@ def _depthwise_dgrad_win_mfma_check(
             return False, (
                 f"fwd at wave_size=32 needs out_stride=1 (got {spec.out_stride})"
             )
+    if spec.dense and not (
+        spec.grouped
+        and spec.wave_size == 64
+        and p.cpg % DW_WIN_DENSE_K == 0
+    ):
+        return False, (
+            f"dense needs the wave64 grouped form with cpg % {DW_WIN_DENSE_K} == 0"
+            f" (got cpg={p.cpg}, wave_size={spec.wave_size})"
+        )
     if spec.w_fold not in DW_DGRAD_MFMA_W_FOLDS:
         return False, f"w_fold must be 1, 2 or 4 (got {spec.w_fold})"
+    if spec.lds_swz and spec.wave_size != 64:
+        return False, f"lds_swz needs the wave64 MFMA (got wave_size={spec.wave_size})"
+    if spec.xcd_tiles and spec.wave_size != 64:
+        return False, f"xcd_tiles needs the wave64 MFMA (got wave_size={spec.wave_size})"
     if spec.prefetch_rows > DW_DGRAD_MFMA_MAX_PREFETCH_ROWS:
         return False, (
             f"prefetch_rows must be <= {DW_DGRAD_MFMA_MAX_PREFETCH_ROWS} "
@@ -11052,11 +11356,17 @@ def _depthwise_dgrad_win_check(
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         return False, f"unsupported dtype {p.dtype!r}; expected fp16 or bf16"
+    # WIP: the dgrad form (not fwd) is grouped too, on the wave64 MFMA.
     grouped = (
         spec.mfma
-        and spec.fwd
+        and (spec.fwd or spec.wave_size == 64)
         and p.cpg == p.kpg
-        and p.cpg % DW_DGRAD_MFMA_CH == 0
+        and (
+            p.cpg % DW_DGRAD_MFMA_CH == 0
+            # The forward form also packs 2 or 4 small groups into one
+            # 8-channel chunk (block-diagonal A rows).
+            or (spec.fwd and p.cpg in DW_WIN_FWD_SUB_GROUP_CH)
+        )
         and p.cpg <= DW_WIN_MAX_GROUP_CH
     )
     if (p.cpg != 1 or p.kpg != 1) and not grouped:
@@ -11067,7 +11377,16 @@ def _depthwise_dgrad_win_check(
             f"cpg={p.cpg})"
         )
     if p.stride != 1:
-        return False, f"requires stride=1 (got {p.stride})"
+        # WIP: a stride-2 dgrad walks the zero-upsampled dY (wave64 MFMA, an
+        # even row tile so every tile starts on a real dY row).
+        if not (
+            p.stride == 2
+            and spec.mfma
+            and not spec.fwd
+            and spec.wave_size == 64
+            and spec.block_h % 2 == 0
+        ):
+            return False, f"requires stride=1, or 2 on the mfma dgrad form (got {p.stride})"
     why = dilation_reason(p)
     if why is not None:
         return False, why
@@ -11108,11 +11427,13 @@ def _depthwise_dgrad_win_check(
         ok, why = _depthwise_dgrad_win_mfma_check(spec)
         if not ok:
             return False, why
-    elif spec.w_fold != 1 or spec.prefetch_rows != 1:
+    elif spec.w_fold != 1 or spec.prefetch_rows != 1 or spec.dense:
         return False, (
-            f"w_fold and prefetch_rows require mfma (got w_fold={spec.w_fold}, "
-            f"prefetch_rows={spec.prefetch_rows})"
+            f"w_fold, prefetch_rows and dense require mfma (got w_fold="
+            f"{spec.w_fold}, prefetch_rows={spec.prefetch_rows}, dense={spec.dense})"
         )
+    elif spec.lds_swz or spec.xcd_tiles:
+        return False, "lds_swz and xcd_tiles require mfma"
     # A plan-time rule (the IR does not depend on it): every in-range byte
     # offset plus a sentinel must stay a valid unsigned 32-bit offset.
     dy_bytes = p.N * p.Ho * p.Wo * p.total_c * 2
@@ -11167,6 +11488,10 @@ def is_valid_depthwise_dgrad_win_spec(
                 False,
                 f"mfma needs one of {DW_DGRAD_MFMA_ARCHES} (got {arch}){hint}",
             )
+    if spec.xcd_tiles and arch not in _XCD_TILES_ARCHES:
+        return False, (
+            f"xcd_tiles is built for {sorted(_XCD_TILES_ARCHES)} only (got {arch})"
+        )
     return _depthwise_dgrad_win_check(spec)
 
 
@@ -11197,10 +11522,11 @@ def _dw_win_byte_strides(b: IRBuilder, params: Dict[str, Value], fwd: bool = Fal
     return tuple(b.mul(params[n], c2) for n in names)
 
 
-def _dw_win_tile(b: IRBuilder, p_Hi: Value, rows: int):
+def _dw_win_tile(b: IRBuilder, p_Hi: Value, rows: int, bz: Optional[Value] = None):
     """``(image_tile, h0)`` of this block: block z is
     ``image_tile * h_tiles + h_tile`` with ``h_tiles = ceil(p_Hi / rows)``."""
-    bz = b.block_id_z()
+    if bz is None:
+        bz = b.block_id_z()
     c_rows = b.const_i32(rows)
     h_tiles = b.div(b.add(p_Hi, b.const_i32(rows - 1)), c_rows)
     n_tile = b.div(bz, h_tiles)
@@ -11615,15 +11941,24 @@ def _build_dw_dgrad_win_toeplitz(
     TW = spec.tile_w
     KWP = _dw_mfma_passes(KW)
     U = TW + 4 * KWP - 2  # window columns per image
+    DN = spec.dense
+    if DN:
+        U = TW + KW - 1
     ROWS = spec.block_h
     THREADS = spec.threads_per_block
     BLOCK_CH = spec.block_ch
     PER_PX = BLOCK_CH // DW_DGRAD_MFMA_CH  # 16-byte channel chunks per pixel
     CH_PAD = BLOCK_CH + DW_DGRAD_MFMA_CH
     io_type = _io_type(p.dtype)
+    SW = spec.lds_swz
 
     FWD = spec.fwd
     S = spec.out_stride
+    # WIP: a stride-2 dgrad is the stride-1 dgrad over
+    # dY upsampled with zeros (dY_up[2 i] = dY[i], odd rows/columns zero). The
+    # kernel walks dY_up: odd window rows are skipped at build time (block_h is
+    # even, so h0 is), odd window columns read zero.
+    IS = 1 if FWD else p.stride
     # First window column relative to the tile: the forward pads both axes
     # by the same amount, the row's (equal to the dgrad's for a square filter).
     COL0 = PAD - (KH - 1) if FWD else PAD - (KW - 1)
@@ -11670,14 +12005,37 @@ def _build_dw_dgrad_win_toeplitz(
     tid = b.thread_id_x()
     bx = b.block_id_x()
     by = b.block_id_y()
-    n_tile, h0 = _dw_win_tile(b, p_Hi, ROWS)
+    bz = None
+    if spec.xcd_tiles:
+        # Launch order is column tile fastest, then channel block, then
+        # (image tile, row band). Remap it to XCD-contiguous runs so the
+        # column tiles sharing a window halo land in one L2; the grid comes
+        # from the kernargs, only the XCD count is baked.
+        xc_gx = b.div(b.add(p_Wi, b.const_i32(TW - 1)), b.const_i32(TW))
+        xc_gy = b.div(b.add(p_G, b.const_i32(BLOCK_CH - 1)), b.const_i32(BLOCK_CH))
+        xc_gz = b.mul(
+            b.div(b.add(p_N, b.const_i32(F - 1)), b.const_i32(F)),
+            b.div(b.add(p_Hi, b.const_i32(ROWS - 1)), b.const_i32(ROWS)),
+        )
+        xc_gxy = b.mul(xc_gx, xc_gy)
+        xc_lin = b.add(bx, b.add(b.mul(by, xc_gx), b.mul(b.block_id_z(), xc_gxy)))
+        xc_lin = chiplet_transform_chunked_runtime(
+            b,
+            xc_lin,
+            num_wgs=b.mul(xc_gxy, xc_gz),
+            num_xcds=_XCD_TILES_ARCHES[arch],
+        )
+        bx = b.mod(xc_lin, xc_gx)
+        by = b.mod(b.div(xc_lin, xc_gx), xc_gy)
+        bz = b.div(xc_lin, xc_gxy)
+    n_tile, h0 = _dw_win_tile(b, p_Hi, ROWS, bz)
     c_wave_size = b.const_i32(atom.wave)
     lane = b.mod(tid, c_wave_size)
     wave = b.div(tid, c_wave_size)
     x0 = b.mul(bx, b.const_i32(TW))
     img0 = b.mul(n_tile, b.const_i32(F))
     ch_blk = b.mul(by, b.const_i32(BLOCK_CH))
-    wave_ch = b.mul(wave, b.const_i32(DW_DGRAD_MFMA_CH))
+    wave_ch = b.mul(wave, b.const_i32(DW_WIN_DENSE_CH if DN else DW_DGRAD_MFMA_CH))
     c_wave = b.add(ch_blk, wave_ch)
     ch_ok = b.cmp_lt(c_wave, p_G)
     c16 = b.const_i32(16)
@@ -11700,10 +12058,70 @@ def _build_dw_dgrad_win_toeplitz(
     # chunk h at slots 0..7.
     tap_bytes = CPG * 2
     w_base = b.mul(b.add(c_wave, k), b.const_i32(KH * KW * tap_bytes))
+    if G8 and not FWD:
+        # The grouped dgrad (WIP) contracts the group's dY channels: slot j of
+        # input chunk h is W[kb + 8 h + j, r, KW - 1 - s, c_loc], gathered with
+        # 16-bit loads (the forward layout [K][KH][KW][cpg] keeps the dX
+        # channel innermost).
+        c_cpg_w = b.const_i32(CPG)
+        kb = b.mul(b.div(c_wave, c_cpg_w), c_cpg_w)
+        c_loc = b.add(b.mod(c_wave, c_cpg_w), k)
+        w_base = b.add(
+            b.mul(kb, b.const_i32(KH * KW * tap_bytes)), b.mul(c_loc, b.const_i32(2))
+        )
     c_KW = b.const_i32(KW)
     is_k = [] if G8 else [b.cmp_eq(k, b.const_i32(j)) for j in range(DW_DGRAD_MFMA_CH)]
     weights: List[List[Value]] = []
-    for r in range(KH):
+    H32 = CPG // DW_WIN_DENSE_K if DN else 0
+    if DN:
+        # Dense A fragments weights[r][s][h]: lane (m, t) holds output
+        # channel c_wave + m against the 8 input channels 32 h + 8 t .. + 7
+        # of its group at tap (r, s) (s = window column - output column).
+        kk_bytes = KH * KW * tap_bytes
+        c_m = b.add(c_wave, col16)
+        if not FWD:
+            c_cpg_w = b.const_i32(CPG)
+            kb = b.mul(b.div(c_m, c_cpg_w), c_cpg_w)
+            c_loc2 = b.mul(b.mod(c_m, c_cpg_w), b.const_i32(2))
+        for r in range(KH):
+            row = []
+            for s_ in range(KW):
+                hs = []
+                for h in range(H32):
+                    kin = b.add(b.mul(t, c8), b.const_i32(DW_WIN_DENSE_K * h))
+                    if FWD:
+                        tap = (KH - 1 - r) * KW + s_
+                        off = b.add(
+                            b.mul(c_m, b.const_i32(kk_bytes)),
+                            b.add(b.const_i32(tap * tap_bytes), b.mul(kin, b.const_i32(2))),
+                        )
+                        hs.append(
+                            _buf_load_vN(
+                                b, p.dtype, b_rsrc, b.select(ch_ok, off, oob_lane), c0, 4
+                            )
+                        )
+                        continue
+                    tap = r * KW + KW - 1 - s_
+                    base = b.add(
+                        b.mul(b.add(kb, kin), b.const_i32(kk_bytes)),
+                        b.add(b.const_i32(tap * tap_bytes), c_loc2),
+                    )
+                    halves = [
+                        _buf_load_half(
+                            b,
+                            p.dtype,
+                            b_rsrc,
+                            b.select(
+                                ch_ok, b.add(base, b.const_i32(i * kk_bytes)), oob_lane
+                            ),
+                            c0,
+                        )
+                        for i in range(DW_DGRAD_MFMA_CH)
+                    ]
+                    hs.append(b.vec_pack(halves, io_type))
+                row.append(hs)
+            weights.append(row)
+    for r in range(KH if not DN else 0):
         row: List[Value] = []
         for ph in range(KWP):
             comps: list[Value] = []
@@ -11719,6 +12137,51 @@ def _build_dw_dgrad_win_toeplitz(
                 off = b.select(
                     ok, b.add(w_base, b.mul(tap, b.const_i32(tap_bytes))), oob_lane
                 )
+                if G8 and not FWD:
+                    kk_bytes = KH * KW * tap_bytes
+                    comps = []
+                    for h in range(H8):
+                        halves = [
+                            _buf_load_half(
+                                b,
+                                p.dtype,
+                                b_rsrc,
+                                b.select(
+                                    ok,
+                                    b.add(off, b.const_i32((8 * h + i) * kk_bytes)),
+                                    oob_lane,
+                                ),
+                                c0,
+                            )
+                            for i in range(DW_DGRAD_MFMA_CH)
+                        ]
+                        comps.append(b.vec_pack(halves, io_type))
+                    continue
+                if G8 and CPG < DW_DGRAD_MFMA_CH:
+                    # Block-diagonal chunk: slot i (channel c_wave + i) is in
+                    # channel k's group iff i // cpg == k // cpg; its weight is
+                    # W[k, ., ., i % cpg].
+                    ws = [
+                        _buf_load_half(
+                            b, p.dtype, b_rsrc, b.add(off, b.const_i32(2 * i)), c0
+                        )
+                        for i in range(CPG)
+                    ]
+                    k_grp = b.div(k, b.const_i32(CPG))
+                    comps = [
+                        b.vec_pack(
+                            [
+                                b.select(
+                                    b.cmp_eq(k_grp, b.const_i32(i // CPG)),
+                                    ws[i % CPG],
+                                    zero_half,
+                                )
+                                for i in range(DW_DGRAD_MFMA_CH)
+                            ],
+                            io_type,
+                        )
+                    ]
+                    continue
                 if G8:
                     comps = [
                         _buf_load_vN(
@@ -11735,7 +12198,7 @@ def _build_dw_dgrad_win_toeplitz(
         weights.append(row)
     if G8:
         # The first channel of the wave's group inside the block.
-        c_cpg = b.const_i32(CPG)
+        c_cpg = b.const_i32(max(CPG, DW_DGRAD_MFMA_CH))
         grp_ch = b.mul(b.div(wave_ch, c_cpg), c_cpg)
 
     # Lane parts shared by the B reads and the D staging.
@@ -11748,7 +12211,33 @@ def _build_dw_dgrad_win_toeplitz(
     # fragment (MFMA: 4 channels of column 2 (n % SUB) + t // 2; WMMA: the
     # wave's 8 channels of column 2 (n % SUB) + t); the block then drains each
     # pixel's BLOCK_CH channels in 16-byte chunks.
-    o_smem = b.smem_alloc(io_type, [2, F * TW, CH_PAD], name_hint="dx_stage")
+    sw_memo: Dict[Tuple[int, int, int], Value] = {}
+
+    def sw_at(lay: Tuple[int, int, int], px: Value, ch: Value) -> Tuple[Value, Value]:
+        """(chunk, element) of channel ``ch`` of pixel ``px`` in a swizzled
+        staging buffer (``lds_swz``; see :func:`_dw_win_swz_layout`)."""
+        key = (id(lay), id(px), id(ch))
+        if key not in sw_memo:
+            w, img, rot = lay
+            fi = b.div(px, b.const_i32(w))
+            lo = b.mod(px, b.const_i32(w))
+            c = b.div(ch, c8)
+            if rot:
+                c = b.mod(b.add(c, b.div(lo, b.const_i32(rot))), b.const_i32(PER_PX))
+            sw_memo[key] = b.add(
+                b.add(b.mul(fi, b.const_i32(img)), b.mul(lo, b.const_i32(PER_PX))), c
+            )
+        return sw_memo[key], b.mod(ch, c8)
+
+    if SW:
+        lay_in, lay_out = spec.swz_layout()
+        sw_in_n, sw_out_n = spec.swz_chunks()
+    if SW:
+        o_smem = b.smem_alloc(
+            io_type, [2, sw_out_n, DW_DGRAD_MFMA_CH], name_hint="dx_stage"
+        )
+    else:
+        o_smem = b.smem_alloc(io_type, [2, F * TW, CH_PAD], name_hint="dx_stage")
     o_col = b.add(
         b.mul(f, b.const_i32(TW)),
         b.add(pair2, t if J == 2 else b.div(t, b.const_i32(2))),
@@ -11757,6 +12246,11 @@ def _build_dw_dgrad_win_toeplitz(
         o_ch = wave_ch
     else:
         o_ch = b.add(wave_ch, b.mul(b.mod(t, b.const_i32(2)), b.const_i32(4)))
+    if DN:
+        # Lane (n, t): channels wave_ch + 4 t .. + 3 of column n % SUB.
+        o_col = b.add(b.mul(f, b.const_i32(TW)), b.mod(col16, c_sub))
+        o_ch = b.add(wave_ch, b.mul(t, b.const_i32(4)))
+    o_at = sw_at(lay_out, o_col, o_ch) if SW else (o_col, o_ch)
     n_out = F * (TW // S) * PER_PX
     c_TW = b.const_i32(TW)
     if S > 1:
@@ -11798,7 +12292,12 @@ def _build_dw_dgrad_win_toeplitz(
     n_in = F * U * PER_PX
     in_passes = -(-n_in // THREADS)
     in_px = -(-in_passes * THREADS // PER_PX)
-    i_smem = b.smem_alloc(io_type, [2, in_px, CH_PAD], name_hint="dy_stage")
+    if SW:
+        i_smem = b.smem_alloc(
+            io_type, [2, sw_in_n, DW_DGRAD_MFMA_CH], name_hint="dy_stage"
+        )
+    else:
+        i_smem = b.smem_alloc(io_type, [2, in_px, CH_PAD], name_hint="dy_stage")
     c_U = b.const_i32(U)
     in_plan: List[Tuple[Value, Value, Value]] = []
     for i in range(in_passes):
@@ -11808,8 +12307,14 @@ def _build_dw_dgrad_win_toeplitz(
         img_i = b.add(img0, b.div(px, c_U))
         wo = b.add(x0, b.add(b.mod(px, c_U), b.const_i32(COL0)))
         ch_i = b.add(ch_blk, ch8)
+        ok = b.land(b.cmp_lt(idx, b.const_i32(n_in)), b.cmp_lt(img_i, p_N))
+        if IS > 1:
+            # dY_up column wo is dY column wo / 2 when even, zero when odd.
+            c_IS = b.const_i32(IS)
+            ok = b.land(ok, b.cmp_eq(b.mod(wo, c_IS), c0))
+            wo = b.div(wo, c_IS)
         ok = b.land(
-            b.land(b.cmp_lt(idx, b.const_i32(n_in)), b.cmp_lt(img_i, p_N)),
+            ok,
             b.land(b.land(b.cmp_ge(wo, c0), b.cmp_lt(wo, p_Wo)), b.cmp_lt(ch_i, p_G)),
         )
         g_off = b.add(
@@ -11824,12 +12329,43 @@ def _build_dw_dgrad_win_toeplitz(
         [b.add(f_u, b.add(pair2, b.add(u0, b.const_i32(4 * ph + j)))) for j in range(J)]
         for ph in range(KWP)
     ]
+    # Dense form: lane (n, t) reads window column n % SUB + s of image n // SUB.
+    b_px_dn = (
+        [b.add(f_u, b.add(b.mod(col16, c_sub), b.const_i32(s_))) for s_ in range(KW)]
+        if DN
+        else []
+    )
 
-    row_ok: Dict[int, Value] = {}
+    # Dense form: lane (n, t) reads channels grp_ch + 8 t + 32 h.
+    dn_ch = (
+        [
+            b.add(grp_ch, b.add(b.mul(t, c8), b.const_i32(DW_WIN_DENSE_K * h)))
+            for h in range(H32)
+        ]
+        if DN and SW
+        else []
+    )
+    row_ok: Dict[int, Optional[Value]] = {}
 
     def load_row(y: int) -> List[Value]:
         """Issue the 16-byte dY window loads of local row ``y``."""
         rel_ho = y + PAD - (KH - 1)
+        if IS > 1:
+            # dY_up row h0 + rel_ho (h0 even): an odd one is zero (never
+            # loaded), an even one is dY row h0 / IS + rel_ho / IS.
+            if rel_ho % IS:
+                row_ok[y] = None
+                return []
+            ho = b.add(b.div(h0, b.const_i32(IS)), b.const_i32(rel_ho // IS))
+            ok = b.land(b.cmp_ge(ho, c0), b.cmp_lt(ho, p_Ho))
+            row_ok[y] = ok
+            dy_row = b.select(ok, b.mul(ho, dy_row_bytes), oob_uniform)
+            vals = [
+                _buf_load_vN(b, p.dtype, a_rsrc, b.add(off, dy_row), c0, 4)
+                for _, _, off in in_plan
+            ]
+            b.sched_barrier(0)
+            return vals
         ho = b.add(h0, b.const_i32(rel_ho))
         ok = b.cmp_lt(ho, p_Ho)
         if rel_ho < 0:
@@ -11852,7 +12388,12 @@ def _build_dw_dgrad_win_toeplitz(
 
     def drain_out(buf: Value, dx_row: Value) -> None:
         for px, ch8, g_off in drain:
-            v = b.smem_load_vN(o_smem, buf, px, ch8, dtype=io_type, n=8)
+            if SW:
+                v = b.smem_load_vN(
+                    o_smem, buf, *sw_at(lay_out, px, ch8), dtype=io_type, n=8
+                )
+            else:
+                v = b.smem_load_vN(o_smem, buf, px, ch8, dtype=io_type, n=8)
             _buf_store_vN(b, p.dtype, d_rsrc, b.add(g_off, dx_row), c0, v, 4)
 
     n_rows = ROWS + KH - 1
@@ -11863,21 +12404,66 @@ def _build_dw_dgrad_win_toeplitz(
 
     def stage_row(raw: List[Value], buf: Value) -> None:
         for (px, ch8, _), v in zip(in_plan, raw):
-            b.smem_store_vN(i_smem, [buf, px, ch8], v, 8)
+            if SW:
+                b.smem_store_vN(i_smem, [buf, *sw_at(lay_in, px, ch8)], v, 8)
+            else:
+                b.smem_store_vN(i_smem, [buf, px, ch8], v, 8)
 
-    def b_frag(buf: Value, ph: int, ch: Value) -> Value:
+    # Swizzled form: every B-read address once, ahead of the guarded rows.
+    sw_b: Dict[Tuple[int, int, int], Tuple[Value, Value]] = {}
+    if SW and not DN:
+        for ph in range(KWP):
+            for h in range(H8 if G8 else 1):
+                ch_h = b.add(grp_ch, b.const_i32(8 * h)) if G8 else wave_ch
+                for j in range(J):
+                    sw_b[(ph, j, h)] = sw_at(lay_in, b_px[ph][j], ch_h)
+
+    def b_frag(buf: Value, ph: int, ch: Optional[Value], h: int = 0) -> Value:
         """The B fragment of pass ``ph``: one 8-channel read per K chunk."""
         reads = [
-            b.smem_load_vN(i_smem, buf, b_px[ph][j], ch, dtype=io_type, n=8)
+            b.smem_load_vN(
+                i_smem,
+                buf,
+                *(sw_b[(ph, j, h)] if SW else (b_px[ph][j], ch)),
+                dtype=io_type,
+                n=8,
+            )
             for j in range(J)
         ]
         return reads[0] if J == 1 else b.vec_concat(*reads)
 
     def multiply(accs: List[Value], buf: Value, rs: List[int]) -> List[Value]:
+        if DN:
+            out = list(accs)
+            for s_ in range(KW):
+                for h in range(H32):
+                    ch_dn = (
+                        dn_ch[h]
+                        if SW
+                        else b.add(
+                            grp_ch,
+                            b.add(b.mul(t, c8), b.const_i32(DW_WIN_DENSE_K * h)),
+                        )
+                    )
+                    x = b.smem_load_vN(
+                        i_smem,
+                        buf,
+                        *(sw_at(lay_in, b_px_dn[s_], ch_dn) if SW else (b_px_dn[s_], ch_dn)),
+                        dtype=io_type,
+                        n=8,
+                    )
+                    for i, r in enumerate(rs):
+                        out[i] = atom.mma(b, p.dtype, weights[r][s_][h], x, out[i])
+            return out
         if G8:
             # Input chunk h of the wave's group: its 8 channels at grp_ch + 8h.
             xs = [
-                [b_frag(buf, ph, b.add(grp_ch, b.const_i32(8 * h))) for h in range(H8)]
+                [
+                    b_frag(buf, ph, None, h)
+                    if SW
+                    else b_frag(buf, ph, b.add(grp_ch, b.const_i32(8 * h)))
+                    for h in range(H8)
+                ]
                 for ph in range(KWP)
             ]
             out = list(accs)
@@ -11903,6 +12489,16 @@ def _build_dw_dgrad_win_toeplitz(
     # Every phase still syncs and drains its finished dX row, so the double
     # buffers keep alternating. (A row inside the tile but past the image
     # still multiplies zeros; guarding it would cost every full tile.)
+    if SW:
+        # Every other swizzled address ahead of the guarded rows too (the
+        # memo must not hand a value defined inside a guard to a later row).
+        for px, ch8, _ in in_plan:
+            sw_at(lay_in, px, ch8)
+        for px, ch8, _ in drain:
+            sw_at(lay_out, px, ch8)
+        for s_ in range(KW if DN else 0):
+            for h in range(H32):
+                sw_at(lay_in, b_px_dn[s_], dn_ch[h])
     c1 = b.const_i32(1)
     pend_out: Optional[Tuple[Value, Value]] = None
     acc: List[Value] = [zero_acc] * KH
@@ -11919,14 +12515,16 @@ def _build_dw_dgrad_win_toeplitz(
         buf = b.const_i32(y % 2)
         rel_ho = y + PAD - (KH - 1)
         halo = rel_ho < 0 or rel_ho >= ROWS
-
-        if halo:
+        if row_ok[y] is None:
+            # A zero row of dY_up (IS > 1): no staging, no MFMAs.
+            rs, slots = [], []
+        elif halo:
             with b.scf_if(row_ok[y]):
                 stage_row(raw, buf)
         else:
             stage_row(raw, buf)
         if pend_out is not None:
-            b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], atom.acc_len)
+            b.smem_store_vN(o_smem, [buf, *o_at], pend_out[0], atom.acc_len)
         b.sync_lds_only()
         if pend_out is not None:
             drain_out(buf, pend_out[1])
@@ -11960,7 +12558,7 @@ def _build_dw_dgrad_win_toeplitz(
         acc[slot] = zero_acc
     if pend_out is not None:
         buf = b.const_i32(n_rows % 2)
-        b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], atom.acc_len)
+        b.smem_store_vN(o_smem, [buf, *o_at], pend_out[0], atom.acc_len)
         b.sync_lds_only()
         drain_out(buf, pend_out[1])
     return b.kernel
@@ -13832,6 +14430,11 @@ class DirectDepthwiseSpatialSpec:
     name: str = "direct_depthwise_spatial"
     block_waves: int = 1
     wave_size: int = 64
+    # Output rows per block (0: one block walks the whole image). A row tile
+    # puts ``ceil(Ho / block_h)`` blocks on each image, each streaming its
+    # ``(block_h - 1) * stride + KH`` input rows: the whole-image walk leaves
+    # small-N, few-channel maps (C3 480x640) at < 1 wave per CU.
+    block_h: int = 0
 
     @property
     def n_w_per_wave(self) -> int:
@@ -13853,11 +14456,14 @@ class DirectDepthwiseSpatialSpec:
             self.name,
             p.short(),
             f"bwv{self.block_waves}",
+            *([f"bh{self.block_h}"] if self.block_h else []),
             flags=_scalar_name_flags(p.dtype),
         )
 
     def validate(self) -> None:
         p = self.problem
+        if self.block_h < 0:
+            raise ValueError(f"block_h must be >= 0 (got {self.block_h})")
         why = _scalar_dtype_reason("DirectDepthwiseSpatialSpec", p.dtype)
         if why is not None:
             raise ValueError(why)
@@ -13907,6 +14513,8 @@ def is_valid_depthwise_spatial_spec(
         return False, f"groups {p.groups} > wave_size {spec.wave_size}"
     if spec.n_w_per_wave == 0:
         return False, f"groups={p.groups} == wave_size: no W positions per wave"
+    if spec.block_h < 0:
+        return False, f"block_h must be >= 0 (got {spec.block_h})"
     return True, "ok"
 
 
@@ -13938,8 +14546,10 @@ def build_direct_depthwise_spatial(
     # Two waves per SIMD: the KH x KW weights and the prefetch window push
     # larger filters just over the threshold for one wave, and the two-wave
     # budget spills a few loop-invariant weights while being faster overall.
-    # Small filters fit either way.
-    b.kernel.attrs["waves_per_eu"] = 2
+    # Small filters fit either way. A row-tiled block (block_h) of the large
+    # filters takes one wave per SIMD instead: its tile count already fills
+    # the device, and the whole register file keeps the weights out of scratch.
+    b.kernel.attrs["waves_per_eu"] = 1 if spec.block_h and p.KH * p.KW > 64 else 2
 
     io_type = _io_type(p.dtype)
 
@@ -13969,7 +14579,17 @@ def build_direct_depthwise_spatial(
     w_in_wave = b.div(t_in_wave, c_groups)
 
     bx = b.block_id_x()
-    n = b.block_id_z()
+    BH = spec.block_h
+    if BH:
+        # bz = image * h_tiles + row tile; h_tiles follows the runtime Ho.
+        bz = b.block_id_z()
+        h_tiles = b.div(b.add(params["p_Ho"], b.const_i32(BH - 1)), b.const_i32(BH))
+        n = b.div(bz, h_tiles)
+        # First padded input row of the tile (a multiple of the stride).
+        y_base = b.mul(b.mod(bz, h_tiles), b.const_i32(BH * c_stride_dw))
+    else:
+        n = b.block_id_z()
+        y_base = None
 
     # AOT: groups is a kernarg, so the W positions per wave (and with them the
     # block's W tile) are derived at run time; the host sizes the grid with
@@ -14009,9 +14629,19 @@ def build_direct_depthwise_spatial(
     c1 = b.const_i32(1)
     c_KH = b.const_i32(p.KH)
     c_stride_rv = b.const_i32(c_stride_dw)
-    # n_iters = H + KH - 1 rows; the loop walks them KH at a time.
-    n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
-    n_groups_v = b.div(b.add(n_iters_v, b.const_i32(p.KH - 1)), c_KH)
+    if BH:
+        # A row tile walks (BH - 1) * stride + KH padded input rows from y_base.
+        n_iters_c = (BH - 1) * c_stride_dw + p.KH
+        n_iters_v = b.const_i32(n_iters_c)
+        n_groups_v = b.const_i32(-(-n_iters_c // p.KH))
+    else:
+        # n_iters = H + KH - 1 rows; the loop walks them KH at a time.
+        n_iters_v = b.add(p_Hi, b.const_i32(p.KH - 1))
+        n_groups_v = b.div(b.add(n_iters_v, b.const_i32(p.KH - 1)), c_KH)
+
+    def abs_row(y: Value) -> Value:
+        """Padded input row of the tile-local step ``y``."""
+        return b.add(y_base, y) if BH else y
 
     # Split each input offset into a per-lane column part and a wave-uniform
     # row part. The column part -- and with it the column bounds and the lane
@@ -14057,7 +14687,7 @@ def build_direct_depthwise_spatial(
     PF = min(p.KH, -(-16 // p.KW))
     iter_args = [(f"sp_acc_{kh}", zero_f32) for kh in range(p.KH)]
     for k in range(PF):
-        for s_const, a_h in enumerate(load_row(b.const_i32(k))):
+        for s_const, a_h in enumerate(load_row(abs_row(b.const_i32(k)))):
             iter_args.append((f"sp_a_r{k}_s{s_const}", a_h))
     group_loop = b.scf_for_iter(
         c0,
@@ -14074,7 +14704,7 @@ def build_direct_depthwise_spatial(
         for j in range(p.KH):
             y_j = b.add(b.mul(grp_iv, c_KH), b.const_i32(j))
             j_valid = b.cmp_lt(y_j, n_iters_v)
-            window.append(load_row(b.add(y_j, b.const_i32(PF))))
+            window.append(load_row(abs_row(b.add(y_j, b.const_i32(PF)))))
             a_row = [b.cast_to_f32(a_h) for a_h in window.pop(0)]
 
             for s_const in range(p.KW):
@@ -14099,8 +14729,11 @@ def build_direct_depthwise_spatial(
                 flush_stride = b.cmp_eq(b.mod(p_flush_rv, c_stride_rv), c0)
                 should_flush = b.land(flush_ge, flush_stride)
 
-            ho_row_j = b.div(p_flush_rv, c_stride_rv)
+            ho_row_j = b.div(abs_row(p_flush_rv), c_stride_rv)
             store_ok = b.land(q_ok, should_flush)
+            if BH:
+                # The last row tile may run past Ho.
+                store_ok = b.land(store_ok, b.cmp_lt(ho_row_j, params["p_Ho"]))
 
             acc_val = new_accs[P_FLUSH_j]  # STATIC index
             d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=q_out, k=ch)
@@ -14540,9 +15173,12 @@ def build_direct_dgrad(
 # Launch geometry
 # ---------------------------------------------------------------------------
 
-# Blocks a persistent DirectConvSpec kernel is launched with: 8 XCDs x 32
-# workgroups, the same constant the kernel decodes its cells against.
-DIRECT_PERSISTENT_BLOCKS = 256
+# Blocks a persistent DirectConvSpec kernel is launched with: the platform grid
+# helper's XCD count (NUM_XCDS_MI350X) x 32 workgroups, the same constants the kernel decodes its cells against. C twins:
+# ROCKE_DIRECT_PERSISTENT_{NUM_XCD,BLOCKS_PER_XCD,BLOCKS}.
+DIRECT_PERSISTENT_NUM_XCD = NUM_XCDS_MI350X
+DIRECT_PERSISTENT_BLOCKS_PER_XCD = 32
+DIRECT_PERSISTENT_BLOCKS = DIRECT_PERSISTENT_NUM_XCD * DIRECT_PERSISTENT_BLOCKS_PER_XCD
 
 
 def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
@@ -14572,8 +15208,11 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         grid = (ceil_div(p.Wo, spec.block_q), p.groups // spec.block_groups, p.N)
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpatialSpec):
-        # Every channel of the image lives in one wavefront.
-        return (ceil_div(p.Wo, spec.block_w), 1, p.N), (spec.threads_per_block, 1, 1)
+        # Every channel of the image lives in one wavefront; bz = image * row
+        # tiles + row tile (one tile without block_h).
+        h_tiles = ceil_div(p.Ho, spec.block_h) if spec.block_h else 1
+        grid = (ceil_div(p.Wo, spec.block_w), 1, p.N * h_tiles)
+        return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpec):
         grid = (ceil_div(p.Wo, spec.block_w), ceil_div(p.groups, spec.block_ch), p.N)
         return grid, (spec.threads_per_block, 1, 1)
@@ -14627,6 +15266,8 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseWgradSpec):
         return spec.grid(), (spec.threads_per_block, 1, 1)
+    if isinstance(spec, DirectTransposeWeightsDgradSpec) and spec.tiled:
+        return (p.groups * p.KH * p.KW, ceil_div(p.kpg, 64), ceil_div(p.cpg, 64)), (256, 1, 1)
     if isinstance(spec, DirectTransposeWeightsDgradSpec):
         # One (group, r, s) per x, a 64-wide kpg tile per y, one cpg per z.
         return (p.groups * p.KH * p.KW, ceil_div(p.kpg, 64), p.cpg), (64, 1, 1)

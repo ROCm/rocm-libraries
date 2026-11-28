@@ -35,6 +35,8 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_SMALLC_MFMA as _FWD_SMALLC_MFMA,
     DIRECT_FWD_SMALLK_MFMA as _FWD_SMALLK_MFMA,
     DIRECT_FWD_FLEX_MFMA as _FWD_FLEX_MFMA,
+    DIRECT_DGRAD_FLEX_MFMA as _DGRAD_FLEX_MFMA,
+    DIRECT_DGRAD_TRANSPOSE_RTC as _TRANSPOSE_RTC,
     DIRECT_FWD_PP_MFMA as _FWD_PP_MFMA,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
@@ -42,13 +44,19 @@ from kernels.conv.direct_variants import (
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
+    DIRECT_FWD_RR_MFMA as _FWD_RR_MFMA,
+    DIRECT_FWD_RR_WFMT as _RR_WFMT,
+    DIRECT_FWD_TAP1D_MFMA as _FWD_TAP1D_MFMA,
+    DIRECT_FWD_ROWSTREAM_MFMA as _FWD_ROWSTREAM_MFMA,
     direct_spec_takes_target_wave,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
+    DIRECT_WGRAD_SLAB_FOLD as _WGRAD_SLAB_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     PER_AXIS_PAD_VARIANTS,
     direct_wgrad_fold_knobs,
     dgrad_rtc_vgprs,
     DIRECT_WGRAD_REDUCE,
+    DIRECT_WGRAD_WS_REDUCE,
     DIRECT_WGRAD_TWO_STAGE as _WGRAD_TWO_STAGE,
     direct_dgrad_weight_transforms,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
@@ -177,6 +185,10 @@ DW_TILED_DGRAD_BLOCK_W = (4, 8, 16, 32)
 DW_TILED_DGRAD_BLOCK_H = (1, 2, 3, 4, 7)
 DW_TILED_DGRAD_BLOCK_WAVES = (1,)
 DW_BLOCK_WAVES = (1, 2, 4)
+# Row tiles of the small-group spatial forward (0 = whole image per block):
+# few-channel maps with a small batch (C3 480x640, N 7) put < 1 wave per CU
+# on the whole-image walk.
+DW_SPATIAL_BLOCK_H = (16, 32, 64)
 # Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
 # 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
 # the spec validator drops the tiles that overflow the register budget and the
@@ -248,12 +260,60 @@ DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
 # grid stays at DW_WIN_MFMA_BLOCK_H.
 DW_WIN_WMMA_BLOCK_H = (28, 32)
 DW_WIN_MFMA_PREFETCH = 2
+# ... and the "valid" 7x7 (the late-stage 7x7-map layers, a 1x1 dY): (KH, PAD).
+DW_WIN_MFMA_VALID_CAPS = ((7, 0),)
+# WIP: depthwise (cpg 1) 3x3 / 5x5 blocks of 2, 6, 12 and
+# 16 waves (channel blocks that divide 48- and 96-channel multiples) and a
+# third prefetched row on the 4- and 8-wave blocks.
+DW_WIN_MFMA_EXTRA_FILTERS = (3, 5)
+DW_WIN_MFMA_EXTRA_WAVES = (2, 6, 12, 16)
+DW_WIN_MFMA_EXTRA_PREFETCH = 3
+# WIP: tall row tiles (whole 24..32-row maps, half a 56/60-row one; 56 rows
+# for 3x3 only, the unroll budget) on the same blocks.
+DW_WIN_MFMA_TALL_BLOCK_H = (24, 28, 30, 32, 56)
+DW_WIN_MFMA_TALL_WAVES = (4, 6, 8, 12, 16)
+
+
+def _dw_win_mfma_extra(caps) -> tuple:
+    """(block_waves, prefetch_rows) pairs the WIP extends the depthwise
+    Toeplitz grid with (none for grouped or other filters)."""
+    if caps is None or caps.cpg > 1 or caps.KH not in DW_WIN_MFMA_EXTRA_FILTERS:
+        return ()
+    if caps.PAD != _same_pad(caps.KH):
+        return ()
+    return tuple((w, DW_WIN_MFMA_PREFETCH) for w in DW_WIN_MFMA_EXTRA_WAVES) + tuple(
+        (w, DW_WIN_MFMA_EXTRA_PREFETCH) for w in DW_WIN_MFMA_WAVES
+    )
+
+
+def _dw_win_mfma_tall(caps) -> tuple:
+    """(block_waves, block_h) pairs of the WIP tall row tiles."""
+    if not _dw_win_mfma_extra(caps):
+        return ()
+    return tuple(
+        (w, h)
+        for w in DW_WIN_MFMA_TALL_WAVES
+        for h in DW_WIN_MFMA_TALL_BLOCK_H
+        if h % caps.stride == 0 and (h < 56 or caps.KH == 3)
+    )
+
+
+# WIP: grouped (cpg > 1) stride-1 row tiles that split small odd images
+# (25x25: 13 + 12, or the whole image) instead of 14 + 11 of 14.
+DW_WIN_GRP_EXTRA_BLOCK_H = (5, 9, 13, 25)
 # The forward pass on the same Toeplitz MFMA kernel (rotated filter,
 # direct_depthwise_win): "same"-padded square filters, stride 1.
 DW_WIN_FWD_FILTERS = (3, 5, 7, 9)
 # ... and its grouped form (cpg = kpg, the ResNeXt 3x3 layers).
 DW_WIN_FWD_G8_FILTERS = (3,)
 DW_WIN_FWD_GROUP_CH = (8, 16, 24, 32, 40, 48, 56, 64)
+# ... and with 4 channels per group (2 groups per 8-channel chunk, the
+# block-diagonal A rows); stride 1 only (the corpus' cpg 4 rows).
+DW_WIN_FWD_SUB_GROUP_CH = (4,)
+# WIP: dense channel form (``dense``) twins of the grouped fwd / dgrad cells
+# for these group sizes (16 channels per wave, a wave pair per group).
+DW_WIN_DENSE_CPG = (32,)
+DW_WIN_DENSE_WAVES = (2, 4, 8)
 # Toeplitz WMMA depthwise forward (direct_dw_fwd_wmma, stride 1, wave32):
 # "same"-padded 3x3..7x7 plus "valid" 7x7 (a 9x9's register-resident
 # fragments overflow the budget). Tiles from 1 row (small maps, many blocks)
@@ -1030,8 +1090,8 @@ DW_WGRAD_CONFIGS = (
 WGRAD_TILED_WAVES = ((2, 2, 2, 2), (2, 2, 4, 2), (2, 1, 2, 2))
 WGRAD_TILED_PIPE = ((2, 0), (5, 6))
 WGRAD_TILED_RPS = (15, 30)
-WGRAD_TILED_BLOCKS = (256, 512)
-WGRAD_TILED_UNFOLD = (1, 4)
+WGRAD_TILED_BLOCKS = (256, 512, 1024)  # WIP: 1024 added
+WGRAD_TILED_UNFOLD = (1, 2, 4, 8)  # WIP: 2 and 8 added
 # Eight-wave blocks of two ping-ponged wave groups, on
 # the plain two-row prefetch of four-wave 32x32 tiles.
 WGRAD_TILED_PINGPONG = ((2, 2, 2, 2), (2, 0), (30,), (256,), (1,))
@@ -1063,12 +1123,322 @@ WGRAD_TILED_AUTO = (
     ((2, 2, 2, 2), (3, 4), 1),
     ((2, 2, 2, 2), (3, 4), 4),
 )
+# WIP: balanced segments for one layer each (gfx950): rows_per_seg /
+# target_blocks picked so the segments fill whole rounds of blocks per CU.
+# (dtype, KH, KW, PAD, PAD_W, knobs); the knobs are the whole cell (no pk16 /
+# slab twins added).
+WGRAD_TILED_BAL = (
+    (
+        "bf16", 3, 3, 0, 0,
+        dict(
+            pingpong=True,
+            prefetch=2,
+            row_unroll=4,
+            rows_per_seg=164,
+            target_blocks=256,
+            unfold_n=1,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=4,
+            waves_k=2,
+        ),
+    ),
+    (
+        "bf16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            pp_tight=True,
+            prefetch=2,
+            q_groups=4,
+            row_unroll=0,
+            rows_per_seg=132,
+            target_blocks=256,
+            unfold_n=1,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=1,
+        ),
+    ),
+    (
+        "bf16", 3, 3, 1, 1,
+        dict(
+            prefetch=5,
+            row_unroll=6,
+            rows_per_seg=60,
+            target_blocks=510,
+            unfold_n=1,
+            wave_c16=1,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=2,
+        ),
+    ),
+    (
+        "fp16", 1, 3, 0, 1,
+        dict(
+            pingpong=True,
+            prefetch=2,
+            row_unroll=4,
+            rows_per_seg=0,
+            slab=True,
+            target_blocks=256,
+            unfold_n=1,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=4,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            pk16=True,
+            pp_tight=True,
+            prefetch=2,
+            q_groups=4,
+            row_unroll=0,
+            rows_per_seg=129,
+            target_blocks=256,
+            unfold_n=1,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=1,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            pk16=True,
+            pp_tight=True,
+            prefetch=2,
+            q_groups=4,
+            row_unroll=0,
+            rows_per_seg=132,
+            target_blocks=256,
+            unfold_n=1,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=1,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            pk16=True,
+            pp_tight=True,
+            prefetch=2,
+            q_groups=4,
+            row_unroll=0,
+            rows_per_seg=21,
+            target_blocks=252,
+            unfold_n=1,
+            wave_c16=1,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=1,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            pk16=True,
+            prefetch=2,
+            row_tail=True,
+            row_unroll=4,
+            rows_per_seg=0,
+            target_blocks=1024,
+            unfold_n=4,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=4,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            pp_tight=True,
+            prefetch=2,
+            q_groups=4,
+            row_unroll=0,
+            rows_per_seg=33,
+            slab=True,
+            target_blocks=256,
+            unfold_n=2,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=1,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            pp_tight=True,
+            prefetch=2,
+            q_groups=4,
+            row_unroll=0,
+            rows_per_seg=48,
+            target_blocks=252,
+            unfold_n=1,
+            wave_c16=2,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=1,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            pingpong=True,
+            prefetch=2,
+            row_unroll=0,
+            rows_per_seg=72,
+            slab=True,
+            target_blocks=256,
+            unfold_n=2,
+            wave_c16=1,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=4,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            prefetch=3,
+            row_unroll=0,
+            rows_per_seg=120,
+            slab=True,
+            target_blocks=256,
+            unfold_n=2,
+            wave_c16=1,
+            wave_k16=1,
+            waves_c=2,
+            waves_k=2,
+        ),
+    ),
+    (
+        "fp16", 3, 3, 1, 1,
+        dict(
+            prefetch=5,
+            row_unroll=6,
+            rows_per_seg=60,
+            target_blocks=510,
+            unfold_n=1,
+            wave_c16=1,
+            wave_k16=2,
+            waves_c=2,
+            waves_k=2,
+        ),
+    ),
+)
+# WIP: narrow one-pass wgrad (dW-bound, small images, deep channels; gfx950
+# fp16 3x3 pad 1): one block per channel tile (one_split) storing the 16-bit
+# dW (dw16), the pixel reduction split over the block's wave groups and
+# summed in LDS: four groups ping-ponged in halves (q_groups 4, pp_tight) on
+# 2x1 waves, or two groups on 2x2 waves. (wave_k16, wave_c16, waves_k,
+# waves_c, q_groups, unfold_n): the cells that won a row.
+WGRAD_TILED_OS_NARROW = (
+    (2, 2, 2, 1, 4, 1),
+    (2, 2, 2, 1, 4, 2),
+    (1, 2, 2, 1, 4, 4),
+    (2, 2, 2, 2, 2, 1),
+)
+# WIP: the four-group ping-pong (q_groups 4, pp_tight, 32x32 wave tiles on
+# 2x1 / 1x2 waves) storing fp32 slabs, at a rows_per_seg that fills exactly
+# one round of 256 blocks: 3x3 pad-1 big images with 64-128 channels, where
+# rows_per_seg 30 / 60 leave a partial second or third pass of segments.
+# (dtype, rows_per_seg, waves_k, waves_c)
+WGRAD_TILED_Q4_SLAB = (
+    ("fp16", 66, 1, 2),
+    ("fp16", 66, 2, 1),
+    ("fp16", 132, 1, 2),
+    ("bf16", 66, 2, 1),
+)
+# WIP: the same slab cell at the rows_per_seg that fills one round for the row
+# (multiple of 3): the cells that won a row, (dtype, rows_per_seg, waves_k, waves_c)
+WGRAD_TILED_Q4_SLAB_ROUND = (
+    ("fp16", 33, 1, 2),
+    ("fp16", 33, 2, 1),
+    ("fp16", 39, 2, 1),
+    ("fp16", 129, 1, 2),
+    ("fp16", 129, 2, 1),
+    ("fp16", 258, 1, 2),
+    ("bf16", 33, 1, 2),
+    ("bf16", 39, 2, 1),
+    ("bf16", 129, 1, 2),
+)
+# WIP: Nx1 filters (and so 1xN layers on one-row images, run exchanged): up
+# to 32 one-column images packed per strip; eight-wave blocks.
+WGRAD_TILED_COL_WAVES = ((2, 4, 4, 2), (4, 2, 2, 4), (2, 2, 4, 2), (2, 2, 2, 4))
+WGRAD_TILED_COL_UNFOLD = (8, 16, 32)
+WGRAD_TILED_COL_PIPE = ((2, 0), (3, 0))
+# (target_blocks, pingpong) of the auto launch (rows_per_seg 0)
+WGRAD_TILED_COL_LAUNCH = ((256, False), (512, False), (256, True))
+# WIP: a wider eight-wave ping-pong (halves) search for the dense 3x3 layers:
+# wave tile, (prefetch, row_unroll), rows_per_seg (0: auto), unfold_n.
+WGRAD_TILED_PPX_WAVES = ((2, 2, 4, 2), (2, 2, 2, 4), (2, 1, 4, 2), (1, 2, 2, 4))
+WGRAD_TILED_PPX_PIPE = ((2, 0), (3, 0), (2, 4))
+WGRAD_TILED_PPX_RPS = (0, 48, 96, 192)
+WGRAD_TILED_PPX_UNFOLD = (1, 2, 4)
+# WIP: small 3x3 layers: auto launch with the row tail, four-wave blocks
+# (two per CU) and q-group pairs of small wave tiles.
+WGRAD_TILED_SMALL_WAVES = ((2, 2, 2, 2), (2, 1, 2, 2), (1, 2, 2, 2), (1, 1, 2, 2), (1, 2, 2, 1))
+WGRAD_TILED_SMALL_PIPE = ((2, 0), (3, 0))
+WGRAD_TILED_SMALL_BLOCKS = (256, 512, 1024)
+WGRAD_TILED_SMALL_UNFOLD = (1, 2, 4)
+# WIP: four segments per block (q_groups 4, one per wave group), ping-ponged in
+# halves with prefetch + 1 row buffers (pp_tight), two-row prefetch, 256
+# blocks: wave tile, rows_per_seg (0: auto with the row tail), unfold_n. The
+# points of a 1% greedy cover of the dense / grouped 3x3 rows they won.
+WGRAD_TILED_Q4 = (
+    ((2, 2, 1, 2), 0, 1),
+    ((2, 2, 1, 2), 0, 2),
+    ((2, 2, 1, 2), 30, 1),
+    ((2, 2, 1, 2), 30, 2),
+    ((2, 2, 1, 2), 60, 2),
+    ((2, 1, 1, 2), 0, 1),
+    ((2, 1, 1, 2), 0, 2),
+    ((2, 1, 1, 2), 30, 2),
+    ((2, 1, 1, 2), 60, 2),
+    ((1, 2, 2, 1), 0, 1),
+)
+# WIP: dW-bound small images (few pixels, big C x K): one block per channel
+# tile walks every segment and stores its tile (one_split): no atomics.
+# (wave_k16, wave_c16, waves_k, waves_c, prefetch, unfold_n, q_groups): the
+# points that won a row by > 1% (greedy 1% cover of a wider sweep).
+WGRAD_TILED_OS = (
+    (2, 1, 2, 2, 2, 1, 1),
+    (1, 1, 2, 2, 2, 2, 1),
+    (2, 1, 2, 2, 2, 2, 1),
+    (2, 2, 2, 2, 2, 2, 1),
+    (1, 1, 2, 2, 2, 4, 1),
+    (2, 1, 2, 2, 2, 4, 1),
+    (1, 1, 2, 2, 2, 1, 2),
+    (2, 1, 2, 2, 2, 1, 2),
+    (2, 1, 2, 2, 2, 2, 2),
+)
+# WIP: grouped layers with 16 channels per group: one group per wave
+# (gpack), four groups per block; (prefetch, unfold_n).
+WGRAD_TILED_GP = ((2, 1), (2, 2), (3, 2))
+# WIP: 5x5 on 16x16 wave tiles, 2x2 waves, unfold_n 4: (prefetch, one_split).
+WGRAD_TILED_5X5 = ((2, False), (3, True))
 # Depthwise LDS-ring wgrad (DwWgradLdsSpec): lanes along columns, prefetch,
 # output rows per segment, workgroups.
 WGRAD_DW_LANES_W = (8, 16, 32)
 WGRAD_DW_PREFETCH = (1, 2)
-WGRAD_DW_RPS = (16, 32, 64)
-WGRAD_DW_BLOCKS = (1024, 2048)
+WGRAD_DW_RPS = (8, 16, 32, 64, 128)
+WGRAD_DW_BLOCKS = (512, 1024, 2048, 4096)
 # Small-C depthwise (DwWgradColsSpec): channel counts it bakes, strip widths,
 # threads, workgroups.
 WGRAD_DW_COLS_CHANNELS = (1, 2, 3, 4, 8)
@@ -1081,15 +1451,26 @@ WGRAD_GATHER_WAVES = ((2, 1), (1, 3), (2, 3), (1, 6), (2, 2))
 WGRAD_GATHER_PREFETCH = (1, 2)
 WGRAD_GATHER_RPS = (8, 16)
 WGRAD_GATHER_BLOCKS = (256, 1024, 2048)
+# WIP grouped mode (WgradGatherSpec.grouped, cpg == kpg in 4/8/16, any stride):
+# measured on gfx950 g32 3x3 s2 wgrads (retinanet / ResNeXt-style layers).
+WGRAD_GATHER_GRP_WAVES = ((1, 4), (2, 2))
+WGRAD_GATHER_GRP_PREFETCH = (2, 3)
+WGRAD_GATHER_GRP_RPS = (16, 32)
+WGRAD_GATHER_GRP_BLOCKS = (256, 512, 1024)
 # Depthwise wgrad on the batched 4x4x4 MFMA (DwWgradMfmaSpec): (4-column
 # tiles per block, images packed per tile), input rows per unit, staging
 # buffers, workgroups. Measured on gfx950 bf16 7x7 layers (ConvNeXt):
 # 16-wide tiles lead below 32 columns, 32-wide on 56x56; 7x7 images pack 2 to
 # a 20-wide or 3 to a 32-wide tile.
 WGRAD_DW_MFMA_TILES = ((4, 1), (8, 1), (5, 2), (8, 3))
-WGRAD_DW_MFMA_RPC = (7, 14, 28)
+WGRAD_DW_MFMA_RPC = (7, 8, 14, 16, 28, 32, 56)
 WGRAD_DW_MFMA_PREFETCH = (1, 2)
-WGRAD_DW_MFMA_BLOCKS = (1024, 2048)
+WGRAD_DW_MFMA_BLOCKS = (512, 1024, 2048, 4096)
+# Stride 2: filters, (q_tiles, unfold_n), rows per unit, workgroups per phase.
+WGRAD_DW_MFMA_S2_FILTERS = (3, 5)
+WGRAD_DW_MFMA_S2_TILES = ((4, 1), (8, 1))
+WGRAD_DW_MFMA_S2_RPC = (8, 16, 32)
+WGRAD_DW_MFMA_S2_BLOCKS = (256, 512, 1024)
 # Grouped wgrad, 4 or 8 channels per group, on the batched 4x4x4 MFMA
 # (GroupedWgradMfmaSpec): (waves_q, wave_q4), rows per unit, staging
 # buffers, workgroups.
@@ -1145,6 +1526,18 @@ FWD_SMALLK_LAYERS = (
 # (tile K, split_c) knobs.
 FWD_FLEX_LAYERS = (
     (3, 3, 1, 1, 2, 1, 1),
+    # WIP: the dense stride-1 3x3 "same" / "valid" and
+    # 3x1 "valid" layers and the "valid" stride-2 3x3.
+    (3, 3, 1, 1, 1, 1, 1),
+    (3, 3, 0, 0, 1, 1, 1),
+    (3, 1, 0, 0, 1, 1, 1),
+    (3, 1, 1, 0, 1, 1, 1),
+    (1, 3, 0, 0, 1, 1, 1),
+    (3, 3, 0, 0, 2, 1, 1),
+    # ... and the forwards stride-1 "valid" dgrads run as (dgrad via forward)
+    (3, 3, 2, 2, 1, 1, 1),
+    (1, 3, 0, 2, 1, 1, 1),
+    (3, 1, 2, 0, 1, 1, 1),
     (1, 1, 0, 0, 2, 1, 1),
     (2, 2, 0, 0, 2, 1, 1),
     (3, 3, 24, 24, 1, 24, 24),
@@ -1161,8 +1554,115 @@ FWD_FLEX_LAYERS = (
     (1, 11, 0, 15, 1, 1, 3),
     (1, 11, 0, 25, 1, 1, 5),
     (7, 1, 3, 0, 1, 1, 1),
+    # ... the dilation-4 3x3 and the 5x5 forwards of "same" / "valid" 5x5
+    # dgrads
+    (3, 3, 4, 4, 1, 4, 4),
+    (5, 5, 0, 0, 1, 1, 1),
+    (5, 5, 2, 2, 1, 1, 1),
+    (5, 5, 4, 4, 1, 1, 1),
+    # WIP: the 1-D 1 x 16 stride-8 forward (H = 1: the row stride is moot)
+    (1, 16, 0, 4, 8, 1, 1),
 )
-FWD_FLEX_KNOBS = tuple((bk, sc) for bk in (256, 128) for sc in (1, 2, 4))
+# WIP: the strided dense dgrads of direct_dgrad_flex_mfma, (KH, KW, PAD,
+# pad_w, stride) (h1, the 1 x S one-row form, is not cached: no A/B win), and
+# its (bk, split_c, bx, wt) knobs, the A/B winners (wt: the dgrad's own
+# filter, else the transposed one)
+DGRAD_FLEX_LAYERS = (
+    (3, 3, 1, 1, 2),
+    (3, 3, 0, 0, 2),
+    (2, 2, 0, 0, 2),
+    # WIP: the 1-D 1 x 16 stride-8 dgrad (h1) and the 1 x 1 stride-2 one (zf:
+    # dX's odd rows / columns are zeros the epilogue stores)
+    (1, 16, 0, 4, 8),
+    (1, 1, 0, 0, 2),
+)
+# WIP: (bk, bx, c_tail) of the zf tiles (on the dgrad's own filter, split_c
+# 1; the A/B winners)
+DGRAD_FLEX_ZF_KNOBS = ((256, 128, False), (256, 128, True), (192, 256, False))
+# WIP: (bk, bx) of the h1 tiles (on the dgrad's own filter, split_c 1; the
+# A/B winners)
+DGRAD_FLEX_H1_KNOBS = ((256, 256), (128, 256), (128, 128))
+# WIP: the knobs of the 1 x 16 stride-8 forward cell (the A/B winners)
+FWD_FLEX_1D_S8_KNOBS = (
+    dict(bk=256, split_c=1),
+    dict(bk=128, split_c=1, xcd=True),
+    dict(bk=128, split_c=1, bx=128, cs=4, xcd=True),
+    dict(bk=128, split_c=2, bx=128, cs=4, xcd=True),
+)
+DGRAD_FLEX_KNOBS = (
+    (256, 1, 256, False),
+    (256, 1, 256, True),
+    (128, 1, 128, True),
+    (128, 4, 128, True),
+    (128, 1, 256, True),
+    (256, 1, 128, True),
+    (256, 1, 128, False),
+    (128, 1, 256, False),
+)
+# WIP: split_c of the 4-way in-block split tiles (cs=4, X128 x K128)
+FWD_FLEX_CS4_SPLITS = (1, 2, 3, 4)
+# WIP: split_c of the 2-way in-block split tiles (cs=2, X128 x K256; tap
+# counts that are a multiple of 3)
+FWD_FLEX_CS2_SPLITS = (1, 2, 3, 4)
+# WIP: (bk, split_c) of the flattened-reduction (flat) tiles, C % 64 != 0
+# (the A/B winners of a 23-point grid)
+FWD_FLEX_FLAT_KNOBS = ((256, 1), (192, 1), (128, 4))
+# WIP: (bk, split_c) of the K % 8 != 0 tiles (k_tail), 3x3 pad 1 stride 1 only
+FWD_FLEX_KTAIL_KNOBS = ((64, 1), (64, 2), (64, 4))
+# WIP: grouped forwards (and stride-1 grouped dgrads via forward) on the
+# dense 3x3 "same" layer, fp16: (bk, bx, c_tail, wt) of the cpg / kpg the
+# grouped layers have (56 = channel tail, 64, 128, 256, 512)
+FWD_FLEX_GRP = True
+FWD_FLEX_GRP_KNOBS = (
+    (64, 256, False, False),
+    (64, 256, True, False),
+    (128, 256, False, False),
+    (128, 256, True, False),
+    (128, 128, False, False),
+    (256, 256, False, False),
+    (256, 128, False, False),
+    (128, 256, False, True),
+    (128, 256, True, True),
+    (128, 128, False, True),
+    (256, 128, False, True),
+)  # (bk 256 bx 256 wt: VGPR spills, scratch)
+FWD_FLEX_KNOBS = tuple(
+    (bk, sc) for bk in (256, 128, 64) for sc in (1, 2, 3, 4, 6, 8, 12, 16)
+)  # WIP: split-K pieces sized to fill the CUs
+# 1-D tap-reuse forward (direct_fwd_tap1d_mfma, gfx950): 1 x S filters, stride
+# 1, any width dilation and padding; (KW, pad_w, dil_w) rows.  The kernel bakes
+# filter width, padding, dilation, bk, nwv, seg, ck and the single-chunk flag;
+# N, H, W, C and K are kernargs.  "Same"-padded rows (pad_w = dil_w * (S-1)/2)
+# and "valid" rows (pad_w = 0) for the HiFi-GAN resblock and generator layers.
+FWD_TAP1D_LAYERS = (
+    # 1 x 3: "same"-padded at dilation 1, 3, 5; "valid" at dilation 1.
+    (3, 1, 1),
+    (3, 3, 3),
+    (3, 5, 5),
+    (3, 0, 1),
+    # 1 x 7: "same"-padded at dilation 1, 3, 5; "valid" at dilation 1.
+    (7, 3, 1),
+    (7, 9, 3),
+    (7, 15, 5),
+    (7, 0, 1),
+    # 1 x 11: "same"-padded at dilation 1, 3, 5.
+    (11, 5, 1),
+    (11, 15, 3),
+    (11, 25, 5),
+)
+# (bk, nwv, ck, one) knobs; seg is fixed at 9 (the spec default). ck and one
+# depend on C (ck 32 for C % 64 != 0; one when C == ck), so they are knobs.
+FWD_TAP1D_KNOBS = tuple(
+    (bk, nwv, ck, one) for bk in (128, 64, 32) for nwv in (8, 4) for ck in (64, 32) for one in (False, True)
+)
+# Row-streaming forward (direct_fwd_rowstream_mfma, gfx950): dense 3x3, pad 1,
+# stride 1. The weights live in VGPRs, so C and K are baked and travel as
+# knobs (c, k) next to the strip width pw and the strip height hs.
+FWD_ROWSTREAM_CK = tuple((c, k) for c in (32, 64, 96, 128, 160, 192) for k in (32, 64))
+FWD_ROWSTREAM_PW_HS = tuple((32, hs) for hs in (2, 4, 8, 16, 32, 64)) + tuple((64, hs) for hs in (16, 32, 64))
+FWD_ROWSTREAM_KNOBS = tuple(
+    (c, k, pw, hs) for c, k in FWD_ROWSTREAM_CK for pw, hs in FWD_ROWSTREAM_PW_HS
+)
 # Tap-outer WMMA forward (direct_fwd_tapouter_wmma): the "same"-padded dilated
 # 3x3 rows of atrous / ASPP layers it serves, (PAD, dil); stride 1.
 FWD_TAPOUTER_DILATIONS = (
@@ -1589,6 +2089,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for k in DW_WIN_FWD_G8_FILTERS
             for c in DW_WIN_FWD_GROUP_CH
             for s in _STRIDES
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_FWD_SUB_GROUP_CH
         ),
     ),
     # Depthwise dgrad, windowed kernel: stride 1, the same filters, every
@@ -1599,6 +2104,19 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
             for k in _DEPTHWISE_FILTERS
             for pad in _all_pads(k)
+        )
+        # WIP: the MFMA form's stride-2 grouped dgrad
+        # over the zero-upsampled dY ("same" 3x3).
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=c, kpg=c)
+            for k in DW_WIN_FWD_G8_FILTERS
+            for c in DW_WIN_FWD_GROUP_CH
+            for s in (2, 1)  # WIP: stride 1 too (native filter, no transpose)
+        )
+        # WIP: depthwise stride-2 dgrad on the MFMA form (zero-upsampled dY).
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=2, cpg=1, kpg=1)
+            for k in (3, 5, 7)
         ),
     ),
     # Large-filter stride-1 depthwise dgrad as a rotated-filter forward pass
@@ -1737,8 +2255,13 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         "wgrad",
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=1, cpg=0, kpg=0)
-            for k in (3,)
+            for k in (3, 5)  # WIP: 5x5 on the one-split grid only
             for pad in _col_pads(k)
+        )
+        # WIP: the 1x3 / 3x1 layers, "valid" and "same" (per-axis padding).
+        + tuple(
+            DirectCaps(KH=kh, kw=kw, PAD=ph, pad_w=-1 if pw == ph else pw, stride=1, cpg=0, kpg=0)
+            for kh, kw, ph, pw in ((1, 3, 0, 0), (1, 3, 0, 1), (3, 1, 0, 0), (3, 1, 1, 0))
         ),
     ),
     # Depthwise wgrad through LDS rings: 3x3 (8 channels x 9 taps of fp32
@@ -1746,9 +2269,10 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     "direct_wgrad_dw": (
         "wgrad",
         tuple(
-            DirectCaps(KH=3, PAD=pad, stride=s, cpg=1, kpg=1)
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
+            for k in (3, 5, 7)  # WIP: 5x5 and 7x7 (lane_ch knob)
             for s in _STRIDES
-            for pad in _col_pads(3)
+            for pad in _col_pads(k)
         ),
     ),
     # Small-C depthwise wgrad (stem layers): every depthwise filter; the
@@ -1769,6 +2293,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
             for k in _DEPTHWISE_FILTERS
             for pad in _col_pads(k)
+        )
+        # Stride 2 (four stride-1 phase sub-problems): "same" padding.
+        + tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=2, cpg=1, kpg=1)
+            for k in WGRAD_DW_MFMA_S2_FILTERS
         ),
     ),
     # Grouped wgrad with 4 or 8 channels per group (cpg = kpg baked, groups
@@ -1927,9 +2456,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
     _FWD_PP_MFMA: (
         "fwd",
         tuple(
-            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=0, kpg=0)
             for k in FWD_PP_MFMA_FILTERS
+            for pad in (_same_pad(k), 0)  # "same" and valid padding
         ),
+    ),
+    # Row-streaming forward on wave64 MFMA (gfx950): dense 3x3, pad 1, stride
+    # 1; C and K baked through the knobs.
+    _FWD_ROWSTREAM_MFMA: (
+        "fwd",
+        (DirectCaps(KH=3, PAD=1, stride=1, cpg=0, kpg=0),),
     ),
     # Flattened-pixel implicit-GEMM forward on wave64 MFMA (gfx950): C, K
     # runtime; split_c > 1 pulls in the split-C fold (_split_reduce_job).
@@ -1948,6 +2484,55 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
                 dil_w=dw,
             )
             for kh, kw, pad, pw, st, dh, dw in FWD_FLEX_LAYERS
+        ),
+    ),
+    _DGRAD_FLEX_MFMA: (
+        "dgrad",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=0,
+            )
+            for kh, kw, pad, pw, st in DGRAD_FLEX_LAYERS
+        ),
+    ),
+    # Rows-in-registers forward on wave64 MFMA (gfx950): dense 3x3, pad 1,
+    # stride 1; C and K runtime (multiples of 128). Pulls in its weight-format
+    # helper (_rr_wfmt_job).
+    _FWD_RR_MFMA: (
+        "fwd",
+        # WIP: pad 0 and 2 as well (pad 2 = the forward over dY of a pad-0
+        # 3x3 dgrad)
+        tuple(DirectCaps(KH=3, PAD=pd, stride=1, cpg=0, kpg=0) for pd in (1, 0, 2))
+        # WIP: 3x1 (column padding 0), incl. the unfolded width-1 tiles that
+        # run folded 1x3 layers
+        + tuple(
+            DirectCaps(KH=3, kw=1, PAD=pd, pad_w=-1 if pd == 0 else 0, stride=1, cpg=0, kpg=0)
+            for pd in (0, 1, 2)
+        ),
+    ),
+    # 1-D tap-reuse forward on wave64 MFMA (gfx950): KH=1, stride 1, C and K
+    # runtime; workspace is always 0 (no split-C helper needed).
+    _FWD_TAP1D_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=1,
+                kw=kw,
+                PAD=0,
+                pad_w=pw,
+                stride=1,
+                cpg=0,
+                kpg=0,
+                dil_h=1,
+                dil_w=dw,
+            )
+            for kw, pw, dw in FWD_TAP1D_LAYERS
         ),
     ),
     _FWD_SMALLK: (
@@ -2127,7 +2712,1274 @@ def _dw_fwd_cpl_arch(arch: str) -> bool:
     return ArchTarget.from_gfx(arch).wave_size == 32
 
 
+# WIP (gfx950): single cells of existing families that the corpus picks (dw_win
+# xcd_tiles / lds_swz, block_h cells, dw_mfma wgrad row chunks, narrow-filter slab
+# wgrad), each added only for its own dtype and caps: (variant, dtype, KH, KW, PAD,
+# PAD_W, stride, cpg, kpg, knobs[, (dil_h, dil_w)]); a cell with a dilation tuple serves only that dilation.
+GFX950_EXTRA_CELLS = (
+    (
+        "direct_depthwise_dgrad_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        8,
+        8,
+        dict(block_h=10, block_waves=16, mfma=True, prefetch_rows=2, w_fold=1),
+    ),
+    (
+        "direct_depthwise_win",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=16, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=28, block_waves=4, lds_swz=True, prefetch_rows=2, w_fold=2, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(block_h=14, block_waves=16, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(block_h=28, block_waves=16, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "bf16",
+        5,
+        5,
+        2,
+        2,
+        1,
+        1,
+        1,
+        dict(block_h=28, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "bf16",
+        5,
+        5,
+        2,
+        2,
+        1,
+        1,
+        1,
+        dict(block_h=28, block_waves=16, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "bf16",
+        5,
+        5,
+        2,
+        2,
+        2,
+        1,
+        1,
+        dict(block_h=14, block_waves=8, lds_swz=True, prefetch_rows=3, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=12, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=14, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=14, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=2, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=16, block_waves=4, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=16, block_waves=4, lds_swz=True, prefetch_rows=2, w_fold=2, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=16, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=16, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=2, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=24, block_waves=16, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(block_h=56, block_waves=4, lds_swz=True, prefetch_rows=2, w_fold=2, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        8,
+        8,
+        dict(block_h=6, block_waves=16, prefetch_rows=2, w_fold=1),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        8,
+        8,
+        dict(block_h=8, block_waves=8, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        16,
+        16,
+        dict(block_h=12, block_waves=8, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(block_h=8, block_waves=8, lds_swz=True, prefetch_rows=3, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(block_h=14, block_waves=16, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(block_h=16, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(block_h=28, block_waves=16, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        8,
+        8,
+        dict(block_h=8, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        16,
+        16,
+        dict(block_h=16, block_waves=8, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        5,
+        5,
+        2,
+        2,
+        1,
+        1,
+        1,
+        dict(block_h=14, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=2, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        5,
+        5,
+        2,
+        2,
+        1,
+        1,
+        1,
+        dict(block_h=28, block_waves=8, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_depthwise_win",
+        "fp16",
+        5,
+        5,
+        2,
+        2,
+        1,
+        1,
+        1,
+        dict(block_h=28, block_waves=16, lds_swz=True, prefetch_rows=2, w_fold=1, xcd_tiles=True),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=4, target_blocks=1024, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=4, target_blocks=2048, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=4, target_blocks=4096, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=6, target_blocks=2048, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=6, target_blocks=1024, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        dict(pingpong=True, prefetch=2, row_unroll=0, rows_per_seg=48, slab=True, target_blocks=512, unfold_n=32, wave_c16=4, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        dict(pingpong=True, prefetch=2, row_unroll=0, rows_per_seg=96, slab=True, target_blocks=256, unfold_n=32, wave_c16=4, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(dw16=True, one_split=True, pingpong=True, pp_tight=True, prefetch=2, q_groups=4, row_tail=True, row_unroll=0, rows_per_seg=0, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=2, waves_k=1),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(dw16=True, one_split=True, pingpong=True, pp_tight=True, prefetch=2, q_groups=4, row_tail=True, row_unroll=0, rows_per_seg=0, target_blocks=256, unfold_n=2, wave_c16=2, wave_k16=2, waves_c=2, waves_k=1),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(prefetch=3, row_unroll=0, rows_per_seg=48, slab=True, target_blocks=1024, unfold_n=2, wave_c16=1, wave_k16=1, waves_c=2, waves_k=2),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=192, split_c=1, sw=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=192, split_c=4, sw=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=192, split_c=1, sw=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=192, split_c=4, sw=True),
+    ),
+    # fwd flex kmaj, dw wgrad xcd_pair / swz, tiled wgrad l64 / unfold cells
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=3, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=128, kmaj=True, split_c=6, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=256, bx=128, cs=2, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        1,
+        1,
+        0,
+        0,
+        2,
+        0,
+        0,
+        dict(bk=256, c_tail=True, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        1,
+        7,
+        0,
+        3,
+        1,
+        0,
+        0,
+        dict(bk=128, kmaj=True, split_c=1, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        1,
+        7,
+        0,
+        9,
+        1,
+        0,
+        0,
+        dict(bk=128, kmaj=True, split_c=1, wt=True, xcd=True),
+        (1, 3),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        1,
+        7,
+        0,
+        15,
+        1,
+        0,
+        0,
+        dict(bk=128, kmaj=True, split_c=1, wt=True, xcd=True),
+        (1, 5),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        0,
+        0,
+        2,
+        0,
+        0,
+        dict(bk=256, bx=128, cs=2, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=1, wt=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=3, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=256, bx=128, cs=2, kmaj=True, split_c=1, wt=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        0,
+        0,
+        dict(bk=128, kmaj=True, split_c=1, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        0,
+        0,
+        dict(bk=256, bx=128, cs=2, kmaj=True, split_c=1, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, sw=True, xcd=True),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        2,
+        2,
+        1,
+        0,
+        0,
+        dict(bk=128, bx=128, cs=4, kmaj=True, split_c=1, xcd=True),
+        (2, 2),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        2,
+        2,
+        1,
+        0,
+        0,
+        dict(bk=256, bx=128, cs=2, kmaj=True, split_c=1, xcd=True),
+        (2, 2),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        2,
+        2,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, sw=True, xcd=True),
+        (2, 2),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        4,
+        4,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, wt=True, xcd=True),
+        (4, 4),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        12,
+        12,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, xcd=True),
+        (12, 12),
+    ),
+    (
+        "direct_fwd_flex_mfma",
+        "fp16",
+        3,
+        3,
+        24,
+        24,
+        1,
+        0,
+        0,
+        dict(bk=256, kmaj=True, split_c=1, xcd=True),
+        (24, 24),
+    ),
+    (
+        "direct_wgrad_dw",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(lane_ch=4, lanes_c=16, lanes_w=8, prefetch=2, rows_per_seg=32, target_blocks=512, xcd_pair=True),
+    ),
+    (
+        "direct_wgrad_dw",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        2,
+        1,
+        1,
+        dict(lane_ch=4, lanes_c=16, lanes_w=16, prefetch=1, rows_per_seg=64, target_blocks=512, xcd_pair=True),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=1, q_tiles=4, rows_per_chunk=28, swz=True, target_blocks=2048, unfold_n=1, xcd_pair=True),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=1, q_tiles=8, rows_per_chunk=32, swz=True, target_blocks=2048, unfold_n=1, xcd_pair=True),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=7, swz=True, target_blocks=1024, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=7, swz=True, target_blocks=4096, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=28, swz=True, target_blocks=1024, unfold_n=1, xcd_pair=True),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        1,
+        1,
+        dict(prefetch=2, q_tiles=4, rows_per_chunk=28, swz=True, target_blocks=2048, unfold_n=1, xcd_pair=True),
+    ),
+    (
+        "direct_wgrad_dw_mfma",
+        "fp16",
+        5,
+        5,
+        2,
+        2,
+        2,
+        1,
+        1,
+        dict(prefetch=1, q_tiles=4, rows_per_chunk=8, swz=True, target_blocks=1024, unfold_n=1),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=3, row_tail=True, row_unroll=0, rows_per_seg=0, target_blocks=256, unfold_n=32, wave_c16=2, wave_k16=4, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=3, row_unroll=0, rows_per_seg=0, target_blocks=256, unfold_n=32, wave_c16=2, wave_k16=4, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_tail=True, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_tail=True, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_tail=True, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=4, wave_c16=2, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_unroll=4, rows_per_seg=164, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "bf16",
+        3,
+        3,
+        1,
+        1,
+        1,
+        0,
+        0,
+        dict(pingpong=True, pp_tight=True, prefetch=2, q_groups=4, row_unroll=0, rows_per_seg=39, slab=True, target_blocks=256, unfold_n=2, wave_c16=2, wave_k16=2, waves_c=1, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, pk16=True, prefetch=3, row_tail=True, row_unroll=0, rows_per_seg=0, target_blocks=256, unfold_n=32, wave_c16=2, wave_k16=4, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=3, row_tail=True, row_unroll=0, rows_per_seg=0, target_blocks=256, unfold_n=32, wave_c16=2, wave_k16=4, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=3, row_unroll=0, rows_per_seg=0, target_blocks=256, unfold_n=32, wave_c16=2, wave_k16=4, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_tail=True, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_tail=True, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=4, waves_k=2),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_tail=True, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=2, wave_c16=2, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_unroll=4, rows_per_seg=0, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=2, waves_k=4),
+    ),
+    (
+        "direct_wgrad_tiled",
+        "fp16",
+        3,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        dict(l64=True, pingpong=True, prefetch=2, row_unroll=4, rows_per_seg=48, target_blocks=256, unfold_n=1, wave_c16=2, wave_k16=2, waves_c=4, waves_k=2),
+    ),
+)
+
+
 def _knob_grid(
+    variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
+) -> Iterator[dict]:
+    for knobs in _knob_grid_base(variant, arch, dtype, caps):
+        yield knobs
+        if (
+            variant == "direct_wgrad_tiled"
+            and dtype == "fp16"
+            and not knobs.get("one_split")
+        ):
+            # WIP: the same tile adding packed fp16 pairs into the fp16 dW
+            # (no fp32 dW, no cast launch); bf16 pairs lose too much (verify
+            # rel_err 5e-2..8e-2 at 256-way splits)
+            yield dict(knobs, pk16=True)
+        if (
+            variant == "direct_wgrad_tiled"
+            and not knobs.get("one_split")
+        ):
+            # WIP: the same tile storing fp32 slabs, folded into the 16-bit
+            # dW by a second launch (no zero-fill, no atomics, no cast)
+            yield dict(knobs, slab=True)
+    if variant == "direct_wgrad_tiled":
+        for dt, kh, kw, ph, pw, knobs in WGRAD_TILED_BAL:
+            if dt == dtype and (
+                caps is None
+                or (caps.KH, caps.KW, caps.PAD, caps.PAD_W) == (kh, kw, ph, pw)
+            ):
+                yield dict(knobs)
+        if dtype == "fp16" and (
+            caps is None or (caps.KH, caps.KW, caps.PAD, caps.PAD_W) == (3, 3, 1, 1)
+        ):
+            for wk16, wc16, wk, wc, qg, un in WGRAD_TILED_OS_NARROW:
+                knobs = dict(
+                    wave_k16=wk16,
+                    wave_c16=wc16,
+                    waves_k=wk,
+                    waves_c=wc,
+                    prefetch=2,
+                    row_unroll=0,
+                    rows_per_seg=0,
+                    target_blocks=256,
+                    unfold_n=un,
+                    row_tail=True,
+                    one_split=True,
+                    dw16=True,
+                    q_groups=qg,
+                    pingpong=True,
+                )
+                if qg == 4:
+                    knobs["pp_tight"] = True
+                yield knobs
+        if caps is None or (caps.KH, caps.KW, caps.PAD, caps.PAD_W) == (3, 3, 1, 1):
+            for dt, rps, wk, wc in WGRAD_TILED_Q4_SLAB + WGRAD_TILED_Q4_SLAB_ROUND:
+                if dt == dtype:
+                    yield dict(
+                        pingpong=True,
+                        pp_tight=True,
+                        prefetch=2,
+                        q_groups=4,
+                        row_unroll=0,
+                        rows_per_seg=rps,
+                        slab=True,
+                        target_blocks=256,
+                        unfold_n=1,
+                        wave_c16=2,
+                        wave_k16=2,
+                        waves_c=wc,
+                        waves_k=wk,
+                    )
+    for cell in GFX950_EXTRA_CELLS:
+        v, dt, kh, kw, ph, pw, st, cpg, kpg, knobs = cell[:10]
+        dil = cell[10] if len(cell) > 10 else None
+        if (
+            arch == "gfx950"
+            and (dil is None or caps is None or (caps.dil_h, caps.dil_w) == dil)
+            and v == variant
+            and dt == dtype
+            and (
+                caps is None
+                or (
+                    caps.KH,
+                    caps.KW,
+                    caps.PAD,
+                    caps.PAD_W,
+                    caps.stride,
+                    caps.cpg,
+                    caps.kpg,
+                )
+                == (kh, kw, ph, pw, st, cpg, kpg)
+            )
+        ):
+            yield dict(knobs)
+
+
+# WIP: bk 256 wt grid rows with the xt8 wave tile
+FWD_FLEX_WT_XT8 = True
+
+
+def _knob_grid_base(
     variant: str, arch: str, dtype: str, caps: Optional[DirectCaps] = None
 ) -> Iterator[dict]:
     if variant == "direct_nongrouped":
@@ -2170,6 +4022,8 @@ def _knob_grid(
     elif variant == "direct_depthwise_spatial":
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
+        for bh, waves in itertools.product(DW_SPATIAL_BLOCK_H, DW_BLOCK_WAVES[:2]):
+            yield dict(block_waves=waves, block_h=bh)
     elif variant == "direct_depthwise_tiled":
         for bw, bh, waves, unroll in itertools.product(
             DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
@@ -2203,8 +4057,22 @@ def _knob_grid(
         block_hs = DW_WIN_MFMA_BLOCK_H
         if arch in DW_DGRAD_WMMA_ARCHES:
             block_hs += DW_WIN_WMMA_BLOCK_H
+        waves_grid = DW_WIN_MFMA_WAVES
+        if caps is not None and caps.cpg > 1:
+            # The grouped stride-2 dgrad (WIP): whole groups per block, even
+            # row tiles.
+            per_group = caps.cpg // 8
+            waves_grid = tuple(
+                w
+                for w in sorted({per_group, 2 * per_group, *DW_WIN_MFMA_WAVES})
+                if w <= 8 and w % per_group == 0
+            )
+            if caps.stride == 2:
+                block_hs = tuple(h for h in block_hs if h % 2 == 0) + (24, 32)
+            else:
+                block_hs = block_hs + DW_WIN_GRP_EXTRA_BLOCK_H
         for fold, waves, bh in itertools.product(
-            DW_WIN_MFMA_FOLDS, DW_WIN_MFMA_WAVES, block_hs
+            DW_WIN_MFMA_FOLDS, waves_grid, block_hs
         ):
             yield dict(
                 mfma=True,
@@ -2213,19 +4081,55 @@ def _knob_grid(
                 block_h=bh,
                 prefetch_rows=DW_WIN_MFMA_PREFETCH,
             )
+        if not (caps is not None and caps.stride == 2):
+            for fold, (waves, pf), bh in itertools.product(
+                DW_WIN_MFMA_FOLDS, _dw_win_mfma_extra(caps), block_hs
+            ):
+                yield dict(
+                    mfma=True,
+                    w_fold=fold,
+                    block_waves=waves,
+                    block_h=bh,
+                    prefetch_rows=pf,
+                )
+            for fold, (waves, bh) in itertools.product(
+                DW_WIN_MFMA_FOLDS, _dw_win_mfma_tall(caps)
+            ):
+                yield dict(
+                    mfma=True,
+                    w_fold=fold,
+                    block_waves=waves,
+                    block_h=bh,
+                    prefetch_rows=DW_WIN_MFMA_PREFETCH,
+                )
+        if caps is not None and caps.cpg in DW_WIN_DENSE_CPG:
+            for fold, waves, bh in itertools.product(
+                DW_WIN_MFMA_FOLDS, DW_WIN_DENSE_WAVES, block_hs
+            ):
+                yield dict(
+                    mfma=True,
+                    w_fold=fold,
+                    block_waves=waves,
+                    block_h=bh,
+                    prefetch_rows=DW_WIN_MFMA_PREFETCH,
+                    dense=True,
+                )
     elif variant == _DW_WIN_FWD:
         # A grouped block holds whole groups: one or two per block, plus the
         # depthwise wave counts that are whole multiples of the group.
         waves_grid = DW_WIN_MFMA_WAVES
         if caps is not None and caps.cpg > 1:
-            per_group = caps.cpg // 8
+            per_group = max(1, caps.cpg // 8)
             waves_grid = tuple(
                 w
                 for w in sorted({per_group, 2 * per_group, *DW_WIN_MFMA_WAVES})
                 if w <= 8 and w % per_group == 0
             )
+        block_hs = DW_WIN_MFMA_BLOCK_H
+        if caps is not None and caps.cpg > 1:
+            block_hs = block_hs + DW_WIN_GRP_EXTRA_BLOCK_H
         for fold, waves, bh in itertools.product(
-            DW_WIN_MFMA_FOLDS, waves_grid, DW_WIN_MFMA_BLOCK_H
+            DW_WIN_MFMA_FOLDS, waves_grid, block_hs
         ):
             yield dict(
                 w_fold=fold,
@@ -2233,6 +4137,30 @@ def _knob_grid(
                 block_h=bh,
                 prefetch_rows=DW_WIN_MFMA_PREFETCH,
             )
+        for fold, (waves, pf), bh in itertools.product(
+            DW_WIN_MFMA_FOLDS, _dw_win_mfma_extra(caps), block_hs
+        ):
+            yield dict(w_fold=fold, block_waves=waves, block_h=bh, prefetch_rows=pf)
+        for fold, (waves, bh) in itertools.product(
+            DW_WIN_MFMA_FOLDS, _dw_win_mfma_tall(caps)
+        ):
+            yield dict(
+                w_fold=fold,
+                block_waves=waves,
+                block_h=bh,
+                prefetch_rows=DW_WIN_MFMA_PREFETCH,
+            )
+        if caps is not None and caps.cpg in DW_WIN_DENSE_CPG:
+            for fold, waves, bh in itertools.product(
+                DW_WIN_MFMA_FOLDS, DW_WIN_DENSE_WAVES, block_hs
+            ):
+                yield dict(
+                    w_fold=fold,
+                    block_waves=waves,
+                    block_h=bh,
+                    prefetch_rows=DW_WIN_MFMA_PREFETCH,
+                    dense=True,
+                )
     elif variant == _DW_TILED_DGRAD:
         for bw, bh, waves in itertools.product(
             DW_TILED_DGRAD_BLOCK_W, DW_TILED_DGRAD_BLOCK_H, DW_TILED_DGRAD_BLOCK_WAVES
@@ -2432,13 +4360,153 @@ def _knob_grid(
                 target_blocks=WGRAD_TILED_AUTO_BLOCKS,
                 unfold_n=un,
             )
+        if caps.KH == 3 and caps.kw in (0, 3):
+            for (wk16, wc16, wk, wc), (pf, ru), rps, un in itertools.product(
+                WGRAD_TILED_PPX_WAVES,
+                WGRAD_TILED_PPX_PIPE,
+                WGRAD_TILED_PPX_RPS,
+                WGRAD_TILED_PPX_UNFOLD,
+            ):
+                knobs = dict(
+                    wave_k16=wk16,
+                    wave_c16=wc16,
+                    waves_k=wk,
+                    waves_c=wc,
+                    prefetch=pf,
+                    row_unroll=ru,
+                    rows_per_seg=rps,
+                    target_blocks=256,
+                    unfold_n=un,
+                    pingpong=True,
+                )
+                yield knobs
+                if rps == 0:
+                    yield dict(knobs, row_tail=True)
+        if caps.KH == 3 and caps.kw in (0, 3):
+            for (wk16, wc16, wk, wc), (pf, ru), tb, un, qg in itertools.product(
+                WGRAD_TILED_SMALL_WAVES,
+                WGRAD_TILED_SMALL_PIPE,
+                WGRAD_TILED_SMALL_BLOCKS,
+                WGRAD_TILED_SMALL_UNFOLD,
+                (1, 2),
+            ):
+                knobs = dict(
+                    wave_k16=wk16,
+                    wave_c16=wc16,
+                    waves_k=wk,
+                    waves_c=wc,
+                    prefetch=pf,
+                    row_unroll=ru,
+                    rows_per_seg=0,
+                    target_blocks=tb,
+                    unfold_n=un,
+                    row_tail=True,
+                )
+                if qg == 2:
+                    knobs.update(q_groups=2, pingpong=True)
+                yield knobs
+            for (wk16, wc16, wk, wc), rps, un in WGRAD_TILED_Q4:
+                knobs = dict(
+                    wave_k16=wk16,
+                    wave_c16=wc16,
+                    waves_k=wk,
+                    waves_c=wc,
+                    prefetch=2,
+                    row_unroll=0,
+                    rows_per_seg=rps,
+                    target_blocks=256,
+                    unfold_n=un,
+                    q_groups=4,
+                    pingpong=True,
+                    pp_tight=True,
+                )
+                if rps == 0:
+                    knobs["row_tail"] = True
+                yield knobs
+            for wk16, wc16, wk, wc, pf, un, qg in WGRAD_TILED_OS:
+                knobs = dict(
+                    wave_k16=wk16,
+                    wave_c16=wc16,
+                    waves_k=wk,
+                    waves_c=wc,
+                    prefetch=pf,
+                    row_unroll=0,
+                    rows_per_seg=0,
+                    target_blocks=256,
+                    unfold_n=un,
+                    row_tail=True,
+                    one_split=True,
+                )
+                if qg == 2:
+                    knobs.update(q_groups=2, pingpong=True)
+                yield knobs
+                # WIP: the same tile storing the 16-bit dW (one launch per call)
+                yield dict(knobs, dw16=True)
+            for pf, un in WGRAD_TILED_GP:
+                yield dict(
+                    wave_k16=1,
+                    wave_c16=1,
+                    waves_k=4,
+                    waves_c=1,
+                    prefetch=pf,
+                    row_unroll=0,
+                    rows_per_seg=0,
+                    target_blocks=256,
+                    unfold_n=un,
+                    row_tail=True,
+                    gpack=True,
+                )
+        if caps.KH == 5 and caps.kw in (0, 5):
+            for pf, os_ in WGRAD_TILED_5X5:
+                knobs = dict(
+                    wave_k16=1,
+                    wave_c16=1,
+                    waves_k=2,
+                    waves_c=2,
+                    prefetch=pf,
+                    row_unroll=0,
+                    rows_per_seg=0,
+                    target_blocks=256,
+                    unfold_n=4,
+                    row_tail=True,
+                )
+                if os_:
+                    knobs["one_split"] = True
+                    yield dict(knobs, dw16=True)
+                yield knobs
+        if caps.kw == 1 and caps.KH > 1:
+            for (wk16, wc16, wk, wc), un, (pf, ru), (tb, pp) in itertools.product(
+                WGRAD_TILED_COL_WAVES,
+                WGRAD_TILED_COL_UNFOLD,
+                WGRAD_TILED_COL_PIPE,
+                WGRAD_TILED_COL_LAUNCH,
+            ):
+                knobs = dict(
+                    wave_k16=wk16,
+                    wave_c16=wc16,
+                    waves_k=wk,
+                    waves_c=wc,
+                    prefetch=pf,
+                    row_unroll=ru,
+                    rows_per_seg=0,
+                    target_blocks=tb,
+                    unfold_n=un,
+                )
+                if pp:
+                    knobs["pingpong"] = True
+                yield knobs
+                yield dict(knobs, row_tail=True)
     elif variant == "direct_wgrad_dw":
-        for lw, pf, rps, tb in itertools.product(
-            WGRAD_DW_LANES_W, WGRAD_DW_PREFETCH, WGRAD_DW_RPS, WGRAD_DW_BLOCKS
+        # WIP: (channels per lane, lanes along channels): 5x5 / 7x7 hold 4 / 2
+        # channels per lane; narrower channel tiles for small C
+        taps = caps.KH * caps.KW
+        lanes = ((8, 8), (4, 8), (4, 16), (2, 8), (2, 16)) if taps <= 16 else (
+            ((4, 16), (4, 8), (2, 32), (2, 16), (2, 8)) if taps <= 32 else ((2, 32), (2, 16), (2, 8)))
+        for (lch, lc), lw, pf, rps, tb in itertools.product(
+            lanes, WGRAD_DW_LANES_W, WGRAD_DW_PREFETCH, WGRAD_DW_RPS, WGRAD_DW_BLOCKS
         ):
-            yield dict(
-                lanes_c=8, lanes_w=lw, prefetch=pf, rows_per_seg=rps, target_blocks=tb
-            )
+            k = dict(lanes_c=lc, lanes_w=lw, prefetch=pf, rows_per_seg=rps, target_blocks=tb)
+            yield k if lch == 8 else dict(k, lane_ch=lch)
     elif variant == "direct_wgrad_dw_cols":
         for c, st, th, tb in itertools.product(
             WGRAD_DW_COLS_CHANNELS,
@@ -2448,11 +4516,12 @@ def _knob_grid(
         ):
             yield dict(channels=c, strip=st, threads=th, target_blocks=tb)
     elif variant == "direct_wgrad_dw_mfma":
+        s2 = caps.stride == 2
         for (qt, un), rpc, pf, tb in itertools.product(
-            WGRAD_DW_MFMA_TILES,
-            WGRAD_DW_MFMA_RPC,
+            WGRAD_DW_MFMA_S2_TILES if s2 else WGRAD_DW_MFMA_TILES,
+            WGRAD_DW_MFMA_S2_RPC if s2 else WGRAD_DW_MFMA_RPC,
             WGRAD_DW_MFMA_PREFETCH,
-            WGRAD_DW_MFMA_BLOCKS,
+            WGRAD_DW_MFMA_S2_BLOCKS if s2 else WGRAD_DW_MFMA_BLOCKS,
         ):
             yield dict(
                 q_tiles=qt,
@@ -2488,6 +4557,20 @@ def _knob_grid(
                 prefetch=pf,
                 rows_per_seg=rps,
                 target_blocks=tb,
+            )
+        for (wk16, wk), pf, rps, tb in itertools.product(
+            WGRAD_GATHER_GRP_WAVES,
+            WGRAD_GATHER_GRP_PREFETCH,
+            WGRAD_GATHER_GRP_RPS,
+            WGRAD_GATHER_GRP_BLOCKS,
+        ):
+            yield dict(
+                wave_k16=wk16,
+                waves_k=wk,
+                prefetch=pf,
+                rows_per_seg=rps,
+                target_blocks=tb,
+                grouped=True,
             )
     elif variant in (_DGRAD_PATCH, _DGRAD_SMALLC):
         from rocke.core.arch import ArchTarget
@@ -2607,8 +4690,127 @@ def _knob_grid(
     elif variant == _FWD_FLEX_MFMA:
         if arch != "gfx950":
             return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
+        if caps is not None and caps.KH == 1 and caps.stride == 8:
+            yield from (dict(k) for k in FWD_FLEX_1D_S8_KNOBS)
+            return
         for bk, sc in FWD_FLEX_KNOBS:
             yield dict(bk=bk, split_c=sc)
+            yield dict(bk=bk, split_c=sc, xcd=True)
+            yield dict(bk=bk, split_c=sc, c_tail=True)
+            # WIP: positions-inner sweep (taps unrolled per chunk)
+            yield dict(bk=bk, split_c=sc, sw=True)
+            yield dict(bk=bk, split_c=sc, xcd=True, sw=True)
+            if sc == 1:
+                yield dict(bk=bk, split_c=sc, c_tail=True, sw=True)
+            if bk != 64:
+                yield dict(bk=bk, split_c=sc, bx=128)
+                yield dict(bk=bk, split_c=sc, bx=128, c_tail=True)
+                yield dict(bk=bk, split_c=sc, bx=128, sw=True)
+                yield dict(bk=bk, split_c=sc, bx=128, c_tail=True, sw=True)
+            if bk == 256 and sc in FWD_FLEX_CS2_SPLITS:
+                yield dict(bk=bk, split_c=sc, bx=128, cs=2)
+                yield dict(bk=bk, split_c=sc, bx=128, cs=2, xcd=True)
+                if caps is not None and caps.stride == 1:
+                    # WIP: the 2-way split on the dgrad's own filter
+                    yield dict(bk=bk, split_c=sc, bx=128, cs=2, wt=True)
+                    yield dict(bk=bk, split_c=sc, bx=128, cs=2, xcd=True, wt=True)
+            if bk == 128 and sc in FWD_FLEX_CS4_SPLITS:
+                yield dict(bk=bk, split_c=sc, bx=128, cs=4)
+                yield dict(bk=bk, split_c=sc, bx=128, cs=4, xcd=True)
+                # WIP: K192 tiles (X256 x K192), plain and channel tail
+                yield dict(bk=192, split_c=sc)
+                yield dict(bk=192, split_c=sc, c_tail=True)
+            if caps is not None and caps.stride == 1 and bk != 64:
+                # WIP: dgrad via forward on the dgrad's own filter: the
+                # plain tiles' set (to be trimmed to the A/B winners)
+                yield dict(bk=bk, split_c=sc, wt=True)
+                yield dict(bk=bk, split_c=sc, xcd=True, wt=True)
+                yield dict(bk=bk, split_c=sc, c_tail=True, wt=True)
+                # WIP: positions-inner sweep
+                yield dict(bk=bk, split_c=sc, wt=True, sw=True)
+                yield dict(bk=bk, split_c=sc, xcd=True, wt=True, sw=True)
+                yield dict(bk=bk, split_c=sc, c_tail=True, wt=True, sw=True)
+                if bk == 256 and FWD_FLEX_WT_XT8:
+                    # WIP: the wave tile 128 pixels x bk / 4 (half the
+                    # transposing weight reads per step)
+                    yield dict(bk=bk, split_c=sc, wt=True, xt8=True)
+                    yield dict(bk=bk, split_c=sc, xcd=True, wt=True, xt8=True)
+                    # WIP: positions-inner sweep
+                    yield dict(bk=bk, split_c=sc, wt=True, xt8=True, sw=True)
+                    yield dict(bk=bk, split_c=sc, xcd=True, wt=True, xt8=True, sw=True)
+                    if caps is None or (
+                        max(caps.dil_h, caps.dil_w) == 1 and (caps.KH, caps.KW) != (1, 7)
+                    ):
+                        # (channel tail on dilated / 1x7 cells: scratch)
+                        yield dict(bk=bk, split_c=sc, c_tail=True, wt=True, xt8=True)
+                        # WIP: positions-inner sweep
+                        yield dict(bk=bk, split_c=sc, c_tail=True, wt=True, xt8=True, sw=True)
+                yield dict(bk=bk, split_c=sc, bx=128, wt=True)
+                yield dict(bk=bk, split_c=sc, bx=128, c_tail=True, wt=True)
+                yield dict(bk=bk, split_c=sc, bx=128, wt=True, sw=True)
+                yield dict(bk=bk, split_c=sc, bx=128, c_tail=True, wt=True, sw=True)
+                if bk == 128 and sc in FWD_FLEX_CS4_SPLITS:
+                    # WIP: 4-way split and K192 tiles on the dgrad's own filter
+                    yield dict(bk=bk, split_c=sc, bx=128, cs=4, wt=True)
+                    yield dict(bk=bk, split_c=sc, bx=128, cs=4, xcd=True, wt=True)
+                    yield dict(bk=192, split_c=sc, wt=True)
+                    yield dict(bk=192, split_c=sc, c_tail=True, wt=True)
+        for bk, sc in FWD_FLEX_FLAT_KNOBS:
+            yield dict(bk=bk, split_c=sc, flat=True)
+        if (
+            caps is not None
+            and (caps.KH, caps.KW, caps.PAD, caps.stride, caps.dil_h, caps.dil_w)
+            == (3, 3, 1, 1, 1, 1)
+        ):
+            for bk, sc in FWD_FLEX_KTAIL_KNOBS:
+                yield dict(bk=bk, split_c=sc, k_tail=True)
+            if dtype == "fp16" and FWD_FLEX_GRP:
+                for bk, bx, ct, wt in FWD_FLEX_GRP_KNOBS:
+                    kn = dict(bk=bk, split_c=1, grp=True)
+                    if bx != 256:
+                        kn["bx"] = bx
+                    if ct:
+                        kn["c_tail"] = True
+                    if wt:
+                        kn["wt"] = True
+                    yield kn
+                    yield dict(kn, sw=True)  # WIP: positions-inner sweep
+    elif variant == _DGRAD_FLEX_MFMA:
+        if arch != "gfx950":
+            return
+        if caps is not None and caps.KH == caps.KW == 1:
+            for bk, bx, ct in DGRAD_FLEX_ZF_KNOBS:
+                kn = dict(bk=bk, split_c=1, wt=True, zf=True)
+                if bx != 256:
+                    kn["bx"] = bx
+                if ct:
+                    kn["c_tail"] = True
+                yield kn
+            return
+        if caps is not None and caps.KH == 1:
+            for bk, bx in DGRAD_FLEX_H1_KNOBS:
+                kn = dict(bk=bk, split_c=1, wt=True, h1=True)
+                if bx != 256:
+                    kn["bx"] = bx
+                yield kn
+            return
+        for bk, sc, bx, wt in DGRAD_FLEX_KNOBS:
+            kn = dict(bk=bk, split_c=sc)
+            if bx != 256:
+                kn["bx"] = bx
+            if wt:
+                kn["wt"] = True
+            yield kn
+    elif variant == _FWD_TAP1D_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
+        for bk, nwv, ck, one in FWD_TAP1D_KNOBS:
+            yield dict(bk=bk, nwv=nwv, ck=ck, one=one)
+    elif variant == _FWD_ROWSTREAM_MFMA:
+        if arch != "gfx950" or dtype != "fp16":
+            return  # 16-byte LDS DMA: gfx950 only; fp16 screened only
+        for c, k, pw, hs in FWD_ROWSTREAM_KNOBS:
+            yield dict(c=c, k=k, pw=pw, hs=hs)
     elif variant == _FWD_SMALLK_MFMA:
         from rocke.core.arch import ArchTarget
 
@@ -2622,7 +4824,63 @@ def _knob_grid(
         from kernels.common.conv_direct_fwd_pp_mfma import BLOCK_K
 
         for bk in BLOCK_K:
+            if caps is not None and caps.PAD == 0 and bk != 64:
+                continue  # valid padding: only the K48 rows win, on block_k 64
             yield dict(block_k=bk)
+    elif variant == _FWD_RR_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
+        if caps is not None:
+            # XCD-local tile walk (rr.xcd): only the rows where it beat the
+            # plain walk
+            for xdt, kw, pad, xkn in _RR_XCD_CELLS:
+                if dtype == xdt and caps.KW == kw and caps.PAD == pad:
+                    yield dict(xkn, xcd=True)
+        if caps is not None and caps.KW == 1:
+            # WIP: 3x1 tiles, plain and unfolded (32 images per tile)
+            for unf in (False, True):
+                for kw16 in (4, 3, 2):
+                    for odd in (False, True):
+                        kn = {} if kw16 == 4 else {"kw16": kw16}
+                        if odd:
+                            kn["odd_c"] = True
+                        if unf:
+                            kn["unfold"] = True
+                        yield kn
+                        if kw16 == 4:
+                            yield dict(kn, k4w=True)  # K256
+            if caps.PAD == 1:
+                # WIP: C64 K64 (one chunk per tile): the folded 1x3 rows
+                yield dict(kw16=2, unfold=True, one_c=True)
+            return
+        # WIP: the K256 block (4 waves along K, 8-row tile)
+        yield dict(k4w=True)
+        yield dict(k4w=True, odd_c=True)
+        # WIP: C not a multiple of 64 (K128 / K256 blocks)
+        # (K128 + odd_c + c_tail spills: not offered)
+        yield dict(c_tail=True)
+        yield dict(k4w=True, c_tail=True)
+        yield dict(k4w=True, c_tail=True, odd_c=True)
+        yield {}
+        yield dict(kw16=3)  # K96 blocks (K % 128 != 0, e.g. 192)
+        yield dict(kw16=2)  # K64 blocks
+        for kw16 in (4, 3, 2):  # an odd number of 64-channel chunks
+            yield dict(kw16=kw16, odd_c=True) if kw16 != 4 else dict(odd_c=True)
+        # WIP: one step per filter column (both channel halves) for the K64
+        # block (K96 / K128 would not fit the register file)
+        yield dict(kw16=2, c64=True)
+        yield dict(kw16=2, c64=True, odd_c=True)
+        if caps is None or caps.PAD in (0, 1):
+            # WIP: C64 (one chunk per tile), K64 / K128 / K256 blocks
+            yield dict(kw16=2, one_c=True)
+            yield dict(kw16=2, c64=True, one_c=True)
+            yield dict(one_c=True)
+            yield dict(k4w=True, one_c=True)
+        if caps is None or caps.PAD == 1:
+            # WIP: grouped rows (cpg 64 / 128 / 256), one group per K block
+            yield dict(grp=True)
+            yield dict(kw16=2, grp=True)
+            yield dict(kw16=2, one_c=True, grp=True)
     elif variant == _FWD_SMALLC_MFMA:
         from rocke.core.arch import ArchTarget
 
@@ -2752,8 +5010,12 @@ def _dw_win_policy_reason(caps: DirectCaps, knobs: dict, arch: str) -> Optional[
     from kernels.common.conv_direct_grouped import DW_DGRAD_WIN_DOT2_ARCHES
 
     if knobs.get("mfma"):
-        if caps.KH not in DW_WIN_MFMA_FILTERS or caps.PAD != _same_pad(caps.KH):
-            return "the MFMA form is cached for 'same'-padded 5x5..9x9 only"
+        if caps.cpg > 1 or caps.stride == 2:
+            return None
+        if (caps.KH, caps.PAD) in DW_WIN_MFMA_VALID_CAPS:
+            return None
+        if caps.KH not in DW_WIN_MFMA_FILTERS + (3,) or caps.PAD != _same_pad(caps.KH):
+            return "the MFMA form is cached for 'same'-padded 3x3..9x9 only"
         return None
     want_dot2 = caps.KW >= 5 and arch in DW_DGRAD_WIN_DOT2_ARCHES
     if knobs["dot2"] != want_dot2:
@@ -2983,6 +5245,15 @@ def _identity(
     )
 
 
+def dgrad_transpose_rtc_caps(caps) -> DirectCaps:
+    """The caps the runtime-channel dgrad weight transpose of a ``caps.KH x
+    caps.KW`` filter is cached under: it bakes the filter alone (no padding,
+    stride, channel count or dilation)."""
+    return DirectCaps(
+        KH=caps.KH, kw=0 if caps.KW == caps.KH else caps.KW, PAD=0, stride=0, cpg=0, kpg=0
+    )
+
+
 def _helper_identity(
     arch: str,
     wave_size: int,
@@ -2998,6 +5269,8 @@ def _helper_identity(
     # The two-stage reduce depends on its replica count alone.
     if variant == DIRECT_WGRAD_REDUCE:
         return wgrad_reduce_identity(arch, wave_size, knobs["ws_replicas"], dtype)
+    if variant == DIRECT_WGRAD_WS_REDUCE:
+        return wgrad_ws_reduce_identity(arch, wave_size, knobs["ws_replicas"], dtype)
     if variant == _WGRAD_FOLD:
         return _identity(
             arch,
@@ -3052,6 +5325,41 @@ def wgrad_reduce_identity(
     )
 
 
+def wgrad_ws_reduce_identity(
+    arch: str, wave_size: int, ws_replicas: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    """The Stage 2 a two-stage implicit-GEMM wgrad binary with ``ws_replicas``
+    scratch slabs launches after itself: folds them into its 16-bit dW."""
+    return _identity(
+        arch,
+        wave_size,
+        DIRECT_WGRAD_WS_REDUCE,
+        "direct_wgrad_helper",
+        _NO_CAPS,
+        {"ws_replicas": ws_replicas},
+        dtype,
+    )
+
+
+# WIP: slice counts of the slab fold (few slabs: 2; many: 8)
+WGRAD_SLAB_FOLD_SLICES = (2, 8)
+
+
+def wgrad_slab_fold_identity(
+    arch: str, wave_size: int, out: str, slices: int, dtype: str = DIRECT_DTYPE
+) -> KernelIdentity:
+    """The cached fold of the tiled wgrad's slab scratch (shape-generic)."""
+    return _identity(
+        arch,
+        wave_size,
+        _WGRAD_SLAB_FOLD,
+        "direct_wgrad_helper",
+        _WGRAD_REDUCE_CAPS,
+        {"out": out, "slices": slices},
+        dtype,
+    )
+
+
 def _split_reduce_job(
     arch: str, wave_size: int, split_c: int, dtype: str = DIRECT_DTYPE
 ) -> BuildJob:
@@ -3059,6 +5367,71 @@ def _split_reduce_job(
         _split_reduce_identity(arch, wave_size, split_c, dtype),
         _NO_CAPS,
         {"split_c": split_c},
+    )
+
+
+# (dtype, filter width, pad, knobs) of the rows-in-registers forward cells that
+# also get the XCD-local tile walk (xcd=True), per dtype where it won
+_RR_XCD_CELLS = (
+    ("bf16", 3, 1, {"kw16": 3}),
+    ("bf16", 3, 1, {}),
+    ("bf16", 3, 2, {"c64": True, "kw16": 2}),
+    ("fp16", 3, 1, {"kw16": 3}),
+    ("fp16", 3, 1, {}),
+    ("fp16", 3, 1, {"k4w": True}),
+    ("fp16", 3, 1, {"c64": True, "kw16": 2}),
+    ("fp16", 3, 1, {"grp": True, "kw16": 2}),
+    ("fp16", 3, 1, {"k4w": True, "one_c": True}),
+    ("fp16", 3, 2, {"c64": True, "kw16": 2}),
+    ("fp16", 3, 0, {"one_c": True}),
+    ("fp16", 1, 1, {"unfold": True}),
+    ("fp16", 1, 1, {"k4w": True, "unfold": True}),
+    ("fp16", 1, 1, {"kw16": 2, "one_c": True, "unfold": True}),
+    ("fp16", 1, 2, {"k4w": True, "unfold": True}),
+)
+
+
+def _rr_wfmt_knobs(kw16: int, fw: int = 3, nwk: int = 2, dg: bool = False) -> dict:
+    kn = {} if kw16 == 4 else {"kw16": kw16}
+    if fw != 3:
+        kn["fw"] = fw
+    if nwk != 2:
+        kn["nwk"] = nwk
+    if dg:
+        kn["dg"] = True
+    return kn
+
+
+def rr_wfmt_identity(
+    arch: str,
+    wave_size: int,
+    dtype: str = DIRECT_DTYPE,
+    kw16: int = 4,
+    fw: int = 3,
+    nwk: int = 2,
+    dg: bool = False,
+) -> KernelIdentity:
+    """The cached weight-format pass of ``direct_fwd_rr_mfma`` (one per dtype,
+    K block, filter width and K wave count; WIP ``dg``: the dgrad-via-forward
+    form that reads the dgrad's own filter)."""
+    return _identity(
+        arch, wave_size, _RR_WFMT, _FWD_HELPER, _NO_CAPS, _rr_wfmt_knobs(kw16, fw, nwk, dg), dtype
+    )
+
+
+def _rr_wfmt_job(
+    arch: str,
+    wave_size: int,
+    dtype: str = DIRECT_DTYPE,
+    kw16: int = 4,
+    fw: int = 3,
+    nwk: int = 2,
+    dg: bool = False,
+) -> BuildJob:
+    return _job(
+        rr_wfmt_identity(arch, wave_size, dtype, kw16, fw, nwk, dg),
+        _NO_CAPS,
+        _rr_wfmt_knobs(kw16, fw, nwk, dg),
     )
 
 
@@ -3132,6 +5505,34 @@ def probe_problem(
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
+    if variant == _DGRAD_FLEX_MFMA:
+        base = probe_problem(caps, dtype, None, None)
+        if (knobs or {}).get("c_tail"):
+            # WIP: the reduction runs over dY's channels; a tail needs K % 64
+            base = replace(base, kpg=base.kpg + 8)
+        return replace(base, H=1) if (knobs or {}).get("h1") else base
+    if variant == _FWD_FLEX_MFMA and (knobs or {}).get("cs", 1) == 4:
+        # WIP: the in-block split needs an even chunk count per split-C piece
+        cpg = max(128 * knobs.get("split_c", 1), 256)
+        return replace(probe_problem(caps, dtype, None, None), cpg=cpg)
+    if variant == _FWD_FLEX_MFMA and (knobs or {}).get("k_tail"):
+        # WIP: an output channel count that is not a multiple of 8
+        base = probe_problem(caps, dtype, None, None)
+        return replace(base, cpg=max(64 * knobs.get("split_c", 1), 256), kpg=36)
+    if variant == _FWD_FLEX_MFMA and (knobs or {}).get("grp"):
+        # WIP: a grouped problem (two groups; 56 channels for a tail)
+        base = probe_problem(caps, dtype, None, None)
+        return replace(base, groups=2, cpg=56 if knobs.get("c_tail") else 64, kpg=64)
+    if variant == _FWD_FLEX_MFMA and (
+        (knobs or {}).get("split_c", 1) * 64 > 256
+        or (knobs or {}).get("c_tail")
+        or (knobs or {}).get("flat")
+    ):
+        # WIP: a split-C beyond 4 needs a chunk per piece; a channel tail a C
+        # that is not a multiple of 64.
+        sc = knobs.get("split_c", 1)
+        cpg = max(64 * sc, 256) + (8 if knobs.get("c_tail") or knobs.get("flat") else 0)
+        return replace(probe_problem(caps, dtype, None, None), cpg=cpg)
     if variant in (_FWD_SMALLC, _FWD_SMALLK, _FWD_SMALLC_MFMA, _FWD_SMALLK_MFMA):
         # Ungrouped, the small channel count baked; 128 of the runtime one
         # (a multiple of every channel block and chunk) on a 64x64 image.
@@ -3166,6 +5567,10 @@ def probe_problem(
             stride=caps.stride,
             dtype=dtype,
         )
+    if variant == "direct_wgrad_tiled" and (knobs or {}).get("gpack"):
+        # WIP: one group per wave, the group as wide as the wave tile.
+        w = 16 * knobs["wave_k16"]
+        return replace(probe_problem(caps, dtype, None, None), groups=32, cpg=w, kpg=w)
     if variant == "direct_wgrad_dw_cols":
         # The binary bakes C (knob ``channels``): one group per channel.
         return DirectConvProblem(
@@ -3190,6 +5595,21 @@ def probe_problem(
             groups=256,
             cpg=1,
             kpg=1,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+        )
+    if variant == "direct_wgrad_gather" and (knobs or {}).get("grouped"):
+        # Grouped, cpg == kpg baked, groups runtime: 32 groups.
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=32,
+            cpg=caps.cpg,
+            kpg=caps.cpg,
             KH=caps.KH,
             KW=caps.KW,
             PAD=caps.PAD,
@@ -3258,6 +5678,66 @@ def probe_problem(
             PAD=caps.PAD,
             stride=caps.stride,
             dtype=dtype,
+        )
+    if caps.cpg == 0 and variant == _FWD_RR_MFMA:
+        # 384 output channels are a whole number of every K block (128, 96,
+        # 64); 448 input channels are the odd_c rows' odd chunk count.
+        channels = 448 if (knobs or {}).get("odd_c") else 384
+        if (knobs or {}).get("one_c"):
+            channels = 64
+        if (knobs or {}).get("c_tail"):  # 7 / 8 chunks, the last one partial
+            channels -= 56
+        unf = (knobs or {}).get("unfold", False)
+        return DirectConvProblem(
+            N=64 if unf else 1,
+            H=64,
+            W=1 if unf else 64,
+            groups=2 if (knobs or {}).get("grp") else 1,
+            cpg=channels,
+            kpg=768 if (knobs or {}).get("k4w") else 384,
+            KH=caps.KH,
+            KW=caps.KW,
+            PAD=caps.PAD,
+            stride=caps.stride,
+            dtype=dtype,
+            pad_w=caps.pad_w,
+        )
+    if caps.cpg == 0 and variant == _FWD_ROWSTREAM_MFMA:
+        # Row-streaming: C and K are the knobs' baked channel counts.
+        kn = knobs or {}
+        return DirectConvProblem(
+            N=1,
+            H=64,
+            W=64,
+            groups=1,
+            cpg=kn.get("c", 64),
+            kpg=kn.get("k", 64),
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype=dtype,
+        )
+    if caps.cpg == 0 and variant == _FWD_TAP1D_MFMA:
+        # 1-D tap-reuse: C follows the knobs' chunking (C == ck for the
+        # single-chunk build, two chunks otherwise) and K one bk tile.
+        kn = knobs or {}
+        ck = kn.get("ck", 64)
+        return DirectConvProblem(
+            N=1,
+            H=1,
+            W=64,
+            groups=1,
+            cpg=ck if kn.get("one", False) else 2 * ck,
+            kpg=kn.get("bk", 128),
+            KH=1,
+            KW=caps.KW,
+            PAD=0,
+            stride=1,
+            dtype=dtype,
+            dil_h=1,
+            dil_w=caps.dil_w,
+            pad_w=caps.pad_w,
         )
     if caps.cpg == 0:
         # The non-grouped kernel's split-C rows need a whole chunk per split:
@@ -3418,10 +5898,18 @@ def _caps_jobs(
     rtc_dgrad = variant == "direct_dgrad_mfma_rtc"
     # The runtime-channel dgrad probe follows each knob's tile counts, the
     # small-C depthwise wgrad's its baked channel count, the depthwise MFMA
-    # wgrad's its packed images (a narrow enough image).
+    # wgrad's its packed images (a narrow enough image), the rows-in-registers
+    # forward's its chunk parity.
     knob_probe = rtc_dgrad or variant in (
         "direct_wgrad_dw_cols",
         "direct_wgrad_dw_mfma",
+        _FWD_RR_MFMA,
+        _FWD_TAP1D_MFMA,
+        _FWD_ROWSTREAM_MFMA,
+        _FWD_FLEX_MFMA,
+        _DGRAD_FLEX_MFMA,
+        "direct_wgrad_tiled",
+        "direct_wgrad_gather",
     )
     probe = None if knob_probe else probe_problem(caps, dtype, variant)
     for knobs in _knob_grid(variant, arch, dtype, caps):
@@ -3488,11 +5976,63 @@ def _caps_jobs(
                     fold_knobs,
                 )
             )
+            if dtype in ("fp16", "bf16"):
+                # WIP: the fold that writes the 16-bit dW itself
+                fold16 = dict(fold_knobs, out=dtype)
+                cell.append(
+                    _job(
+                        _helper_identity(
+                            arch, wave_size, _WGRAD_FOLD, caps, fold16, dtype
+                        ),
+                        replace(caps, PAD=0, stride=0, cpg=0, kpg=0),
+                        fold16,
+                    )
+                )
+        if variant == _FWD_RR_MFMA:
+            # WIP: the dg form serves the same conv as a dgrad via forward
+            for dg in (False, True):
+                cell.append(
+                    _rr_wfmt_job(
+                        arch,
+                        wave_size,
+                        dtype,
+                        knobs.get("kw16", 4),
+                        caps.KW,
+                        4 if knobs.get("k4w") else 2,
+                        dg,
+                    )
+                )
         if (
-            variant in ("direct_nongrouped", _FWD_FLEX_MFMA)
+            variant in ("direct_nongrouped", _FWD_FLEX_MFMA, _DGRAD_FLEX_MFMA)
             and knobs.get("split_c", 1) > 1
         ):
             cell.append(_split_reduce_job(arch, wave_size, knobs["split_c"], dtype))
+        if variant == _DGRAD_FLEX_MFMA and not knobs.get("wt"):
+            # WIP: its filter transpose (the tiled form of dgrad via forward's)
+            tkn = {"tiled": True}
+            cell.append(
+                _job(
+                    _helper_identity(
+                        arch, wave_size, _TRANSPOSE_RTC, dgrad_transpose_rtc_caps(caps), tkn, dtype
+                    ),
+                    dgrad_transpose_rtc_caps(caps),
+                    tkn,
+                )
+            )
+        if variant == _FWD_FLEX_MFMA and caps.stride == 1:
+            # WIP: the runtime-channel filter transpose of dgrad via forward
+            # (direct_kernel_sweep.dgrad_via_fwd_plans) for this filter, per
+            # element and tiled
+            for tkn in ({}, {"tiled": True}):
+                cell.append(
+                    _job(
+                        _helper_identity(
+                            arch, wave_size, _TRANSPOSE_RTC, dgrad_transpose_rtc_caps(caps), tkn, dtype
+                        ),
+                        dgrad_transpose_rtc_caps(caps),
+                        tkn,
+                    )
+                )
         if variant in _MFMA_DGRAD:
             for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(
                 knobs, variant
@@ -3506,6 +6046,10 @@ def _caps_jobs(
                         helper_knobs,
                     )
                 )
+        if variant == "direct_wgrad_tiled" and knobs.get("slab"):
+            for sl in WGRAD_SLAB_FOLD_SLICES:
+                fid = wgrad_slab_fold_identity(arch, wave_size, dtype, sl, dtype)
+                cell.append(_job(fid, _WGRAD_REDUCE_CAPS, json.loads(fid.knobs)))
         if variant in _WGRAD_TWO_STAGE and direct_wgrad_replicas(spec) > 1:
             reduce_id = wgrad_reduce_identity(
                 arch, wave_size, direct_wgrad_replicas(spec), dtype
@@ -3570,7 +6114,7 @@ def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     caps = DirectCaps(**job.caps)
     variant = job.identity.algorithm
-    if variant == _SPLIT_REDUCE:
+    if variant in (_SPLIT_REDUCE, _RR_WFMT, DIRECT_WGRAD_WS_REDUCE):
         spec = make_spec(variant, _DtypeOnly(dtype), job.spec_kwargs)
         return _build_kernel(variant, spec, arch), {}
     probe = probe_problem(caps, dtype, variant, job.spec_kwargs)
@@ -3605,6 +6149,17 @@ def direct_job_for_identity(identity: KernelIdentity) -> BuildJob:
         )
     caps = _caps_of(identity)
     knobs = json.loads(identity.knobs) if identity.knobs else {}
+    if identity.direction == _FWD_HELPER and identity.algorithm == _RR_WFMT:
+        kw16 = knobs.get("kw16", 4)
+        fw, nwk = knobs.get("fw", 3), knobs.get("nwk", 2)
+        rebuilt = rr_wfmt_identity(
+            identity.arch, identity.wave_size, identity.dtype_a, kw16, fw, nwk
+        )
+        if replace(rebuilt, llvm_flavor=identity.llvm_flavor) != identity:
+            raise LookupError(
+                f"the direct grid cannot build this identity: {identity.label()}"
+            )
+        return _job(identity, _NO_CAPS, _rr_wfmt_knobs(kw16, fw, nwk))
     if identity.direction == _FWD_HELPER:
         split_c = knobs.get("split_c")
         rebuilt = (

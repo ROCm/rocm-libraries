@@ -21,6 +21,8 @@
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
+#include <stdio.h> /* snprintf */
+
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
  * drivers write the ctx slot the epilogue reads. */
@@ -279,6 +281,137 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
 
     /* final_accs = for_op.results */
     rocke_conv_set_final_accs(ctx, for_op.op->results, for_op.op->num_results);
+}
+
+/* ===================================================================== *
+ * rocke_conv_emit_kloop_prefetch_global_regs
+ *
+ * Mirrors Python emit_prefetch_global_regs_kloop, which the forward
+ * (``elif spec.prefetch_global_regs:``) and wgrad K-loop branches both call.
+ * The prologue issues tile k_lo's global reads into VGPRs. Each iteration
+ * writes the tile it carries to LDS, publishes it, and only then issues tile
+ * k+1's reads, which stay in flight under tile k's MFMAs and arrive as the next
+ * iteration's carried values. Both barriers are LDS-only: a full barrier would
+ * wait for those reads too. The reads issued in the last iteration are never
+ * stored.
+ *
+ * Descriptors: wgrad installs its dY / X descriptors in ctx->a_descriptor_fn /
+ * b_descriptor_fn; the forward conv leaves A NULL (rocke_conv_a_descriptor, as
+ * its sync load phase uses) and sets B only under group_merge. The range is
+ * [kloop_k_lo, kloop_k_hi), which defaults to [0, K_gemm) for an unsplit
+ * forward and is the slice for split-K (wgrad sets kloop_k_hi to K_gemm).
+ * ===================================================================== */
+#define ROCKE_CONV_PGR_MAX_ITER_ARGS (ROCKE_CONV_MAX_ACCS + 2 * ROCKE_CTL_MAX_VECS_PER_THREAD)
+
+void rocke_conv_emit_kloop_prefetch_global_regs(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int num_accs = ctx->num_accs;
+
+    rocke_loads_descriptor_fn a_fn
+        = (ctx->a_descriptor_fn != NULL) ? ctx->a_descriptor_fn : rocke_conv_a_descriptor;
+    rocke_loads_descriptor_fn b_fn
+        = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* k_hi = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
+
+    /* _load_regs(k_lo) */
+    rocke_ctl_staged_t a0;
+    rocke_ctl_staged_t b0;
+    ctx->k_off_capture = k_lo;
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a0);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b0);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    const int n_a = a0.count;
+    const int n_v = a0.count + b0.count;
+    if(num_accs + n_v > ROCKE_CONV_PGR_MAX_ITER_ARGS)
+    {
+        rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "prefetch_global_regs: %d accumulators + %d staged vectors exceed %d iter args",
+            num_accs,
+            n_v,
+            ROCKE_CONV_PGR_MAX_ITER_ARGS);
+        return;
+    }
+
+    rocke_iter_arg_t iter_args[ROCKE_CONV_PGR_MAX_ITER_ARGS];
+    char reg_names[ROCKE_CONV_PGR_MAX_ITER_ARGS][24];
+    for(int i = 0; i < num_accs; ++i)
+    {
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    for(int i = 0; i < n_a; ++i)
+    {
+        snprintf(reg_names[i], sizeof(reg_names[i]), "pgra%d", i);
+        iter_args[num_accs + i].name = reg_names[i];
+        iter_args[num_accs + i].init = a0.vecs[i].v;
+    }
+    for(int i = 0; i < b0.count; ++i)
+    {
+        snprintf(reg_names[n_a + i], sizeof(reg_names[n_a + i]), "pgrb%d", i);
+        iter_args[num_accs + n_a + i].name = reg_names[n_a + i];
+        iter_args[num_accs + n_a + i].init = b0.vecs[i].v;
+    }
+
+    rocke_for_t for_op = rocke_b_scf_for_iter(b,
+                                              k_lo,
+                                              k_hi,
+                                              ctx->c_block_k,
+                                              iter_args,
+                                              num_accs + n_v,
+                                              "k0",
+                                              /*unroll=*/false,
+                                              /*elide_trailing_barrier=*/true);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        /* The (row, col) of each chunk depends only on tid, so the prologue's
+         * slots address the carried values of every tile. */
+        rocke_ctl_staged_t a_cur = a0;
+        rocke_ctl_staged_t b_cur = b0;
+        for(int i = 0; i < n_a; ++i)
+            a_cur.vecs[i].v = for_op.iter_vars[num_accs + i];
+        for(int i = 0; i < b0.count; ++i)
+            b_cur.vecs[i].v = for_op.iter_vars[num_accs + n_a + i];
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_cur);
+        rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_cur);
+        rocke_b_sync_lds_only(b);
+
+        /* _load_regs(k0 + block_k) */
+        rocke_ctl_staged_t a_next;
+        rocke_ctl_staged_t b_next;
+        ctx->k_off_capture = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rocke_coalesced_tile_loader_load_global(
+            b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a_next);
+        rocke_coalesced_tile_loader_load_global(
+            b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b_next);
+
+        ctx->k_off_capture = for_op.iv;
+        rocke_value_t* yields[ROCKE_CONV_PGR_MAX_ITER_ARGS];
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, for_op.iter_vars, num_accs, yields);
+        rocke_b_sync_lds_only(b);
+        for(int i = 0; i < a_next.count; ++i)
+            yields[num_accs + i] = a_next.vecs[i].v;
+        for(int i = 0; i < b_next.count; ++i)
+            yields[num_accs + n_a + i] = b_next.vecs[i].v;
+        rocke_b_scf_yield(b, yields, num_accs + n_v);
+    }
+    rocke_b_region_leave(b);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    /* final_accs = for_op.results[:n_acc] */
+    rocke_conv_set_final_accs(ctx, for_op.op->results, num_accs);
 }
 
 /* ===================================================================== *

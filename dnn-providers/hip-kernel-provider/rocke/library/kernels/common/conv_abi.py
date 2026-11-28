@@ -514,15 +514,15 @@ def conv_args_signature(
 
 
 def conv_direct_args_signature(
-    dtype: str = "fp16", *, direction: str = "fwd"
+    dtype: str = "fp16", *, direction: str = "fwd", dw16: bool = False
 ) -> List[Dict[str, Any]]:
     """Direct grouped-conv AOT launch signature.
 
     ``dtype`` is the activation/filter element type (``fp16`` or ``bf16``).
     The wgrad kernel accumulates dW through fp32 atomics, so its ``D`` is
-    always ``fp32``.
+    always ``fp32`` (WIP: ``dw16``, a kernel that stores the 16-bit dW whole).
     """
-    dtype_d = "fp32" if direction == "wgrad" else dtype
+    dtype_d = "fp32" if direction == "wgrad" and not dw16 else dtype
     return _conv_signature(
         conv_direct_arg_names(direction=direction), dtype, dtype, dtype_d
     )

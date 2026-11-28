@@ -1945,6 +1945,7 @@ static int make_cfg(int idx,
         *ssp = rocke_direct_depthwise_spatial_spec_default();
         ssp->problem = p;
         ssp->block_waves = 1;
+        ssp->block_h = 4;
         *kind = KIND_SPATIAL;
         *arch = "gfx950";
         return 0;

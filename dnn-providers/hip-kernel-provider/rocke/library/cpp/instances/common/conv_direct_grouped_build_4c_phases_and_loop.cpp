@@ -530,7 +530,7 @@ rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx)
                                   num_accs,
                                   "y_row",
                                   /*unroll=*/false,
-                                  /*elide_trailing_barrier=*/false);
+                                  /*elide_trailing_barrier=*/true);
     y_base = for_op.iv;
     {
         int i;

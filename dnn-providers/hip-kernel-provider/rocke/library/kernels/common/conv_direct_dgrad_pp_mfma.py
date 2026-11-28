@@ -158,7 +158,7 @@ class _DgradWeights(PpWeights):
                 ctx.w_rsrc, ctx.lds_at(ctx.w_addr[buf], lds_off), voff, ctx.c0, 4
             )
 
-    def a_geometry(self, ctx: PpCtx) -> None:
+    def a_geometry(self, ctx: PpCtx) -> Value:
         # A (weights), transposing reads: lane (tb, ti, tj) = (l // 16, (l // 4) %
         # 4, l % 4) reads outputs m0 + 4 tj .. +3 of reduction row 8 tb + ti (+ 4
         # for the second read); the hardware hands lane l the reduction values
@@ -183,7 +183,7 @@ class _DgradWeights(PpWeights):
                         b.mul(row, ci(BK)),
                         b.add(b.mul(slot, ci(GRAN)), b.mod(col, ci(GRAN))),
                     )
-        ctx.shared["lane_hi"] = tb
+        return tb
 
     def read_a(self, ctx: PpCtx, buf: int, kf: int, part: int) -> Value:
         b = ctx.b

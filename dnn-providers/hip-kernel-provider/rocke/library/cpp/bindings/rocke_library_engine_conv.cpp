@@ -171,6 +171,10 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.async_dma = dict_bool(d, "async_dma", s.async_dma);
     s.unroll_k = dict_bool(d, "unroll_k", s.unroll_k);
+    /* The register-prefetch K loop; dropped, the engine would build the plain
+     * loop under the spec's name. */
+    s.prefetch_global_regs = dict_bool(d, "prefetch_global_regs", s.prefetch_global_regs);
+    s.patch = dict_bool(d, "patch", s.patch);
     if(d.contains("lds_k_pad") && !d["lds_k_pad"].is_none())
     {
         s.has_lds_k_pad = true;
@@ -818,36 +822,8 @@ py::tuple conv_direct_fwd_smallk_mfma_describe(const py::dict& d, const std::str
  * FwdPpMfmaSpec with the problem nested. */
 rocke_fwd_pp_mfma_spec_t fpp_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
-    auto keep = [&](const std::string& s) -> const char* {
-        store.push_back(s);
-        return store.back().c_str();
-    };
     rocke_fwd_pp_mfma_spec_t s = rocke_fwd_pp_mfma_spec_default();
-    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
-        throw py::value_error("FwdPpMfmaSpec requires a problem dictionary");
-    {
-        py::dict pd = d["problem"].cast<py::dict>();
-        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
-        for(const char* key : required)
-        {
-            if(!pd.contains(key))
-                throw py::value_error(std::string("FwdPpMfmaSpec.problem requires ") + key);
-        }
-        std::string v;
-        fill_direct_conv_problem(&s.problem, pd);
-        /* dict_str reads None as absent. An explicit None dtype is rejected
-         * (Python's validator refuses it) rather than read as the fp16
-         * default; only an omitted dtype takes the default. */
-        if(pd.contains("dtype") && pd["dtype"].is_none())
-            throw py::value_error("FwdPpMfmaSpec.problem.dtype must be a string, not None");
-        if(dict_str(pd, "dtype", v))
-            s.problem.dtype = keep(v);
-    }
-    {
-        std::string v;
-        if(dict_str(d, "name", v))
-            s.name = keep(v);
-    }
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "FwdPpMfmaSpec");
     s.block_k = dict_int(d, "block_k", s.block_k);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     return s;
@@ -912,10 +888,6 @@ py::tuple conv_direct_fwd_pp_mfma_describe(const py::dict& d, const std::string&
  * mirrors FwdFlexMfmaSpec with the problem nested. */
 rocke_fwd_flex_mfma_spec_t ffx_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
-    auto keep = [&](const std::string& s) -> const char* {
-        store.push_back(s);
-        return store.back().c_str();
-    };
     rocke_fwd_flex_mfma_spec_t s = rocke_fwd_flex_mfma_spec_default();
     if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
         throw py::value_error("FwdFlexMfmaSpec requires a problem dictionary");
@@ -1543,36 +1515,8 @@ py::tuple conv_direct_dgrad_wmma_describe(const py::dict& d, const std::string& 
  * DgradPpMfmaSpec with the (transposed, forward-pass) problem nested. */
 rocke_dgrad_pp_mfma_spec_t ddpp_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
-    auto keep = [&](const std::string& s) -> const char* {
-        store.push_back(s);
-        return store.back().c_str();
-    };
     rocke_dgrad_pp_mfma_spec_t s = rocke_dgrad_pp_mfma_spec_default();
-    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
-        throw py::value_error("DgradPpMfmaSpec requires a problem dictionary");
-    {
-        py::dict pd = d["problem"].cast<py::dict>();
-        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
-        for(const char* key : required)
-        {
-            if(!pd.contains(key))
-                throw py::value_error(std::string("DgradPpMfmaSpec.problem requires ") + key);
-        }
-        std::string v;
-        fill_direct_conv_problem(&s.problem, pd);
-        /* dict_str reads None as absent. An explicit None dtype is rejected
-         * (Python's validator refuses it) rather than read as the fp16
-         * default; only an omitted dtype takes the default. */
-        if(pd.contains("dtype") && pd["dtype"].is_none())
-            throw py::value_error("DgradPpMfmaSpec.problem.dtype must be a string, not None");
-        if(dict_str(pd, "dtype", v))
-            s.problem.dtype = keep(v);
-    }
-    {
-        std::string v;
-        if(dict_str(d, "name", v))
-            s.name = keep(v);
-    }
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "DgradPpMfmaSpec");
     s.block_k = dict_int(d, "block_k", s.block_k);
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     return s;

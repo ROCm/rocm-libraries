@@ -279,6 +279,10 @@ class EarlyStop:
             return median(
                 time_launches_staged(fn, warmup=warmup, iters=iters, stream=stream)
             )
+        if self.timing == "hcbatch":
+            from benchmarks.common.batched_timing import time_launches_hcbatch
+
+            return time_launches_hcbatch(fn, warmup=warmup, iters=iters, stream=stream)
         from rocke.runtime import time_launches
 
         return time_launches(fn, warmup=warmup, iters=iters, stream=stream)

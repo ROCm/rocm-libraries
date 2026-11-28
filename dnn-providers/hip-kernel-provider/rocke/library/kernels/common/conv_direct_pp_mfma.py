@@ -48,14 +48,15 @@ block); the filter, padding, dtype and tile are baked. The C++ mirror is
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
 from rocke.core.ir import F32, I64, IRBuilder, KernelDef, Value, VectorType
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    direct_lds_dma_mfma_caps_reason,
     I32_MAX,
     DirectConvProblem,
     _buf_store_vN,
@@ -179,28 +180,29 @@ def pp_mfma_reason(
     block_ks: Sequence[int],
     block_k_reason: str,
     needs_ds_read_tr: bool = False,
+    valid_ok: bool = False,
 ) -> "str | None":
     """Why ``spec`` cannot build on ``arch`` (None when it can).
 
     ``family`` names the kernel in the reasons; ``block_ks`` are the block_k
     values its weight staging takes (``block_k_reason`` refuses the rest);
-    ``needs_ds_read_tr`` gates on the transposing LDS read.
+    ``needs_ds_read_tr`` gates on the transposing LDS read; ``valid_ok`` also
+    takes valid padding (PAD 0: the kernel bounds its tiles by Ho x Wo).
     """
     p = spec.problem
     target = ArchTarget.from_gfx(arch)
-    if target.wave_size != 64 or spec.wave_size != 64:
-        return f"{family} is a wave64 MFMA kernel"
-    if needs_ds_read_tr and not target.memory.has_ds_read_tr:
-        return f"{family} needs ds_read_b64_tr_b16 (absent on {arch})"
-    if target.async_lds_max_dwords < 4:
-        return f"{family} needs the 16-byte LDS DMA (absent on {arch})"
     if p.dtype not in ("fp16", "bf16"):
         return "fp16/bf16 only"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
+    why = direct_lds_dma_mfma_caps_reason(
+        target,
+        arch,
+        family=family,
+        bf16=p.dtype == "bf16",
+        wave_size=spec.wave_size,
+        needs_ds_read_tr=needs_ds_read_tr,
+    )
+    if why is not None:
+        return why
     why = problem_dims_reason(p)
     if why is not None:
         return why
@@ -212,7 +214,7 @@ def pp_mfma_reason(
         return "dilation must be 1"
     if p.KH != p.KW or p.KH < 3 or p.KH % 2 == 0:
         return "square odd filters >= 3 only"
-    if p.PAD != (p.KH - 1) // 2:
+    if p.PAD != (p.KH - 1) // 2 and not (valid_ok and p.PAD == 0):
         return f"'same' padding only: PAD must be {(p.KH - 1) // 2} (got {p.PAD})"
     why = one_padding_reason(p)
     if why is not None:
@@ -291,9 +293,13 @@ class PpCtx:
     w_bufs: List[Value]
     w_addr: List[Value]
     lds_at: Callable[[Value, Value], Value]
-    # Lane values a PpWeights computed and the pipeline reuses (see
-    # PpWeights.dma_geometry and PpWeights.a_geometry).
-    shared: Dict[str, Value] = field(default_factory=dict)
+    # Lane values a PpWeights computed and the pipeline reuses instead of
+    # emitting its own (None: not computed). dma_geometry may set l_row /
+    # l_gran / lane_c; a_geometry may set l16.
+    l_row: Optional[Value] = None  # lane // 8
+    l_gran: Optional[Value] = None  # (lane % 8) ^ l_row
+    lane_c: Optional[Value] = None  # l_gran * 8
+    l16: Optional[Value] = None  # lane % 16
 
     def ci(self, v: int) -> Value:
         return self.b.const_i32(v)
@@ -307,10 +313,10 @@ class PpWeights:
     """
 
     def dma_geometry(self, ctx: PpCtx) -> None:
-        """Emit the rank-0 weight DMA geometry. May set ``ctx.shared`` keys
-        ``l_row`` (lane // 8), ``l_gran`` ((lane % 8) ^ l_row) and ``lane_c``
-        (l_gran * 8), which the input DMA geometry then reuses instead of
-        emitting its own."""
+        """Emit the rank-0 weight DMA geometry. May set ``ctx.l_row`` (lane //
+        8), ``ctx.l_gran`` ((lane % 8) ^ l_row) and ``ctx.lane_c`` (l_gran *
+        8), which the input DMA geometry then reuses instead of emitting its
+        own; ``l_row`` and ``l_gran`` go together."""
         raise NotImplementedError
 
     def issue(self, ctx: PpCtx, buf: int, tap: int, c_base: Value) -> None:
@@ -318,10 +324,10 @@ class PpWeights:
         buffer ``buf``."""
         raise NotImplementedError
 
-    def a_geometry(self, ctx: PpCtx) -> None:
-        """Emit the A fragment read geometry. Must set ``ctx.shared['lane_hi']``
-        (lane // 16, the 4-channel group of the output a lane holds); may set
-        ``l16`` (lane % 16), which the B geometry then reuses."""
+    def a_geometry(self, ctx: PpCtx) -> Value:
+        """Emit the A fragment read geometry and return ``lane_hi`` (lane //
+        16, the 4-channel group of the output a lane holds). May set
+        ``ctx.l16`` (lane % 16), which the B geometry then reuses."""
         raise NotImplementedError
 
     def read_a(self, ctx: PpCtx, buf: int, kf: int, part: int) -> Value:
@@ -451,12 +457,12 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
     # A 4-byte piece covers 2 columns: lane l -> column c0 + l / 32, element
     # (l % 32) * 2 of the column, slot (l % 32) / 4, logical granule
     # slot ^ ((c0 + l / 32) % 8).
-    if "l_row" in ctx.shared:
-        l_row, l_gran = ctx.shared["l_row"], ctx.shared["l_gran"]
+    if ctx.l_row is not None and ctx.l_gran is not None:
+        l_row, l_gran = ctx.l_row, ctx.l_gran
     else:
         l_row = b.div(lane, ci(8))
         l_gran = b.xor(b.mod(lane, ci(8)), l_row)
-    lane_c: Optional[Value] = ctx.shared.get("lane_c")
+    lane_c = ctx.lane_c
     ih0 = b.sub(oh0, ci(PAD))
     iw0 = b.sub(ow0, ci(PAD))
     lane_geo = {}
@@ -489,11 +495,10 @@ def emit_pp_mfma(spec: PpMfmaSpec, weights: PpWeights) -> KernelDef:
         b.async_buffer_load_lds(a_rsrc, lds_at(in_addr[buf], lds_off), voff, c0, dw)
 
     # ---- fragment reads -----------------------------------------------------
-    weights.a_geometry(ctx)
-    lane_hi = ctx.shared["lane_hi"]
+    lane_hi = weights.a_geometry(ctx)
     # B (input): pixel row h = wave_j * 8 + jb, column w = lane % 16; tap (r, s)
     # reads staged row h + r, column w + s, slot granule ^ ((w + s) % 8).
-    l16 = ctx.shared["l16"] if "l16" in ctx.shared else b.mod(lane, ci(16))
+    l16 = ctx.l16 if ctx.l16 is not None else b.mod(lane, ci(16))
     b_lane = {}
     for s in range(KW):
         col = b.add(l16, ci(s))

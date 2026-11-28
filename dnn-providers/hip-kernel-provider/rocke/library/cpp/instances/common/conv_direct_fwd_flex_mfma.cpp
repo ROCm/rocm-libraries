@@ -33,7 +33,7 @@ namespace
 constexpr int kCK = 64; /* channels per chunk */
 constexpr int kBX = 256; /* pixels per block tile */
 constexpr int kXT = 4; /* 16-pixel MFMA tiles per wave */
-constexpr int kPersist = 256; /* blocks of the persistent grid */
+constexpr int kPersist = ROCKE_DIRECT_PERSISTENT_BLOCKS; /* blocks of the persistent grid */
 constexpr int kRot = 97; /* per-round rotation of the item walk */
 constexpr int kWaves = 8;
 constexpr int64_t kOob = ((int64_t)1 << 31) - 1;
@@ -119,8 +119,10 @@ extern "C" long long rocke_fwd_flex_mfma_items(const rocke_fwd_flex_mfma_spec_t*
     }
     const long long nx
         = (long long)p->N * rocke_direct_conv_problem_Ho(p) * rocke_direct_conv_problem_Wo(p);
+    /* the K tiles of every group follow each other (the grouped WIP of the
+     * Python builder; one group: ceil(K / bk)) */
     const long long tiles
-        = rocke_ceil_div(nx, kBX) * rocke_ceil_div(rocke_direct_conv_problem_total_k(p), s->bk);
+        = rocke_ceil_div(nx, kBX) * (long long)p->groups * rocke_ceil_div(p->kpg, s->bk);
     return tiles * s->split_c;
 }
 
@@ -189,32 +191,26 @@ extern "C" bool rocke_fwd_flex_mfma_is_valid_spec(const rocke_fwd_flex_mfma_spec
     const long long stage = ((long long)kBX + s->bk) * kCK * 2;
     const long long tc = rocke_direct_conv_problem_total_c(p);
     const long long tk = rocke_direct_conv_problem_total_k(p);
-    const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
     const char* why = NULL;
-    if(target->wave_size != 64 || s->wave_size != 64)
+    if(!problem_dtype_ok(p))
     {
-        why = "fwd_flex_mfma is a wave64 MFMA kernel";
+        why = "fp16/bf16 only";
     }
-    else if(rocke_archtarget_async_lds_max_dwords(target) < 4)
+    else if(rocke_direct_lds_dma_mfma_caps_reason(target,
+                                                  arch,
+                                                  "fwd_flex_mfma",
+                                                  s->wave_size,
+                                                  false,
+                                                  problem_is_bf16(p),
+                                                  msg,
+                                                  sizeof msg))
     {
-        ROCKE_ERR_SNPRINTF(
-            msg, sizeof msg, "fwd_flex_mfma needs the 16-byte LDS DMA (absent on %s)", arch);
         why = msg;
     }
     else if(!rocke_arch_fits_lds(target, (long)(2 * stage)))
     {
         ROCKE_ERR_SNPRINTF(
             msg, sizeof msg, "LDS %lld B > %d", 2 * stage, (int)target->lds_capacity_bytes);
-        why = msg;
-    }
-    else if(!problem_dtype_ok(p))
-    {
-        why = "fp16/bf16 only";
-    }
-    else if(!rocke_mma_catalog_has_shape(
-                rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
-    {
-        ROCKE_ERR_SNPRINTF(msg, sizeof msg, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
         why = msg;
     }
     else if(rocke_direct_problem_dims_reason(p, msg, sizeof msg))
