@@ -238,7 +238,7 @@ namespace rocwmma
 
 // GPU exclusion for unsupported targets, but assume host is valid
 // for testing purposes.
-#if !__gfx908__ // + Host
+#if !defined(__gfx908__) // + Host
 
             template <uint32_t ElementIdx>
             struct RowBCast
