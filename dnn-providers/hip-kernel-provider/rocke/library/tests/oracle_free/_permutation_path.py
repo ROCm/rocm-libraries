@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 import struct
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 
 REDERIVE = "re-derive the bound"
@@ -78,6 +79,18 @@ def _parse(ir: str) -> dict[str, _Instruction]:
             name, opcode, text, tuple(_VALUE.findall(arguments))
         )
     return instructions
+
+
+def _replace_once(old: str, new: str) -> Callable[[str], str]:
+    """An edit of lowered IR that replaces the first ``old`` by ``new`` and
+    fails when ``old`` is absent, so a contract cannot pass on an edit that did
+    not apply."""
+
+    def edit(ir: str) -> str:
+        assert old in ir, f"edit target {old!r} not in the lowered IR"
+        return ir.replace(old, new, 1)
+
+    return edit
 
 
 def classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Counter]:

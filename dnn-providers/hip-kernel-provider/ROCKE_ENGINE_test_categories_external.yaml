@@ -279,6 +279,12 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
+      # The oracle-free structured-logit check (rocke/library/tests/oracle_free/
+      # README_structured.md): its predictions are exact rational arithmetic
+      # over every output coordinate, which is too slow for the quick tier,
+      # for the CPU contracts and for the gfx942 launches alike.
+      - "rocke_oracle_free_structured_logit_pytest"
+      - "rocke_oracle_free_structured_logit_cpu_pytest"
     labels:
       - "standard"
       - "comprehensive"
