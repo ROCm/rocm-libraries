@@ -10,9 +10,13 @@ data-type families, exercising the arch-specific paths in
 Goldens are compact digests; see ``target.md``.
 """
 
-import pytest
+from pathlib import Path
 
-from matrix import digests_for_dir
+import pytest
+import yaml
+
+from codegen_harness import emit_kernels_from_logic
+from matrix import data_dir, digests_for_dir
 
 pytestmark = pytest.mark.unit
 
@@ -24,3 +28,14 @@ def test_gfx1100_emit_digests(snapshot):
     assert digests
     assert all(k["err"] == 0 for f in digests for k in f["kernels"])
     assert digests == snapshot
+
+
+def test_valu_tail_with_inner_unroll(tmp_path):
+    logic = yaml.safe_load((Path(data_dir(_ARCH)) / "SB.yaml").read_text())
+    for solution in logic[5]:
+        solution["InnerUnroll"] = 2
+    path = tmp_path / "valu-tail.yaml"
+    path.write_text(yaml.safe_dump(logic))
+    results = emit_kernels_from_logic(path)
+    assert results
+    assert all(err == 0 for _, _, err in results)
