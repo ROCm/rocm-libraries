@@ -200,14 +200,23 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
         )
 
     if family == "wmma":
-        if q.warp_tile != (16, 16, 16):
-            return False, f"WMMA path supports only 16x16x16, got {q.warp_tile}"
+        # The WMMA atoms and the cshuffle epilogue come from the arch table
+        # (``ArchTarget.gemm``), the same source as the universal GEMM's
+        # ``is_valid_spec``, so dispatch never admits less than the kernel does
+        # for want of its own copy of the rule.
+        atoms = target.gemm.wmma_atoms
+        if tuple(q.warp_tile) not in atoms:
+            supported = ", ".join(f"{m}x{n}x{k}" for (m, n, k) in sorted(atoms))
+            return (
+                False,
+                f"WMMA path supports only {supported or 'no atom'}, got {q.warp_tile}",
+            )
         if q.pipeline != "mem":
             return (
                 False,
                 f"WMMA path supports only the 'mem' pipeline, got {q.pipeline!r}",
             )
-        if q.epilogue != "default":
+        if q.epilogue != "default" and not target.gemm.wmma_cshuffle:
             return (
                 False,
                 f"WMMA path supports only the 'default' epilogue, got {q.epilogue!r}",
