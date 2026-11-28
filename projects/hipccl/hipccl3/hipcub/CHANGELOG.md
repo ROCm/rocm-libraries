@@ -17,6 +17,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 * Fixed `BUILD_TEST`, `BUILD_BENCHMARK`, and `BUILD_EXAMPLE` being set to `OFF` in the CMake cache when hipCUB fetches rocPRIM in the same configure. Projects configured afterwards, such as rocThrust in the hipCCL superbuild, no longer lose their tests.
 * Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
+* Fixed `CachingDeviceAllocator` handing a block that was still in use to a different host thread when both threads used `hipStreamPerThread`, or stream `0` with per-thread default streams. These handles name a different stream on each thread, so cached blocks are now matched by stream ID rather than stream handle. A block freed from a different thread than the one it was allocated on is now released instead of cached, because its ready event can't be recorded on the stream that used it.
 
 ### Added
 
