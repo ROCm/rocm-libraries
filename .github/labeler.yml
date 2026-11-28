@@ -5,6 +5,7 @@
 "project: hipblas":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblas/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/hipblas/**/*'
 
 "project: hipblas-common":
 - changed-files:
@@ -63,18 +64,22 @@
 "project: hipfft":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipfft/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/hipfft/**/*'
 
 "project: hiprand":
 - changed-files:
   - any-glob-to-any-file: 'projects/hiprand/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/hiprand/**/*'
 
 "project: hipsolver":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsolver/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/hipsolver/**/*'
 
 "project: hipsparse":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparse/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/hipsparse/**/*'
 
 "project: hipsparselt":
 - changed-files:
@@ -96,7 +101,7 @@
 
 "project: none":
 - changed-files:
-  - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
+  - all-globs-to-all-files: ['!bindings/**/*', '!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
 
 "project: rocalution":
 - changed-files:
@@ -106,10 +111,12 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocblas/**/*'
   - any-glob-to-any-file: 'shared/tensile/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/rocblas/**/*'
 
 "project: rocfft":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocfft/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/rocfft/**/*'
 
 "project: rocprim-deprecated":
 - changed-files:
@@ -122,14 +129,17 @@
 "project: rocrand":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocrand/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/rocrand/**/*'
 
 "project: rocsolver":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocsolver/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/rocsolver/**/*'
 
 "project: rocsparse":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocsparse/**/*'
+  - any-glob-to-any-file: 'bindings/fortran/rocsparse/**/*'
 
 "project: rocthrust-deprecated":
 - changed-files:
@@ -192,6 +202,11 @@ documentation:
 - changed-files:
   - any-glob-to-all-files:
     - '{**/*.md,**/*.rst,**/docs/**/*,**/.readthedocs.yaml}'
+
+fortran:
+- changed-files:
+  - any-glob-to-any-file: 'bindings/fortran/**/*'
+  - any-glob-to-any-file: '.github/workflows/fortran-bindings*.yml'
 
 github actions:
 - changed-files:
