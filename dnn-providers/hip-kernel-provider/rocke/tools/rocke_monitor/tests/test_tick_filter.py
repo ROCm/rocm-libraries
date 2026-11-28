@@ -56,6 +56,10 @@ SAMPLES = {  # one line of each kind the tick prints, and its class
         "at that head already, run `rk review-close 5`"
     ): ACT,
     "!! CRITICAL TOOL failure: gh api graphql: HTTP 502": ACT,
+    (
+        "!! CRITICAL VERIFY_STALLED #5 #6: 2 reviews have waited on verification for over 4 hours (the oldest, #5, "
+        "for 9.2 h)"
+    ): ACT,
     "(priority requests not read: Broken pipe)": ROUTINE,
     "(followup scan #5 failed, try 1 of 3: x)": ROUTINE,
     "TICK idle: no change since 18:20Z (85 PRs, develop abcdef0123)": ROUTINE,

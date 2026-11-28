@@ -44,6 +44,12 @@ KINDS = (
         "the GitHub read/write split does not hold: tell the user; it stands until the logins are fixed",
     ),
     (
+        r"!! CRITICAL VERIFY_STALLED ",
+        ACT,
+        "verify_stale.stalled_lines",
+        "reviews have waited on verification for hours: tell the user, and handle each as the tick procedure says",
+    ),
+    (
         r"!! ",
         ACT,
         "any step",

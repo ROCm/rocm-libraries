@@ -86,10 +86,10 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        finds it: the orchestrator, tools/tick_loop.py or the container's tick loop, and the last tick,
                        the admin dashboard's service, the orchestrator, the gate, develop sanity); the parallel reviews
                        and the parallel builds, each current setting against its range with why the monitor set it so
-                       and its last changes; the review queue and the work in flight; the RAM disk's use; then the
-                       summary from stored state, and the GitHub logins' last check. --queue: the summary's queue
-                       computed again (git work), and the dashboard written with it. Whether it is configured right
-                       and reaches everything: doctor
+                       and its last changes; the review queue, the work in flight and the reviews stalled on
+                       verification; the RAM disk's use; then the summary from stored state, and the GitHub logins'
+                       last check. --queue: the summary's queue computed again (git work), and the dashboard written
+                       with it. Whether it is configured right and reaches everything: doctor
   gh-logins [--side read|write|session] [--json]   which GitHub login each side uses and whether the split is right,
                        probed now (a comment with no body and a branch on a commit that does not exist, each refused
                        either way: 422 may, 403 may not; rkmon_lib/ghlogins.py): exit 1 when the read or the session
@@ -1141,14 +1141,20 @@ def request_step(cfg: dict, st: dict, store: Store) -> list[str]:
 
 
 def review_step(cfg: dict, st: dict, store: Store, plan: list[dict]) -> list[str]:
-    """The reviews: the pipeline's advance (review.advance), then the stuck-verification alarm on the reviews it leaves
-    waiting for their post (rkmon_lib/verify_stale.py). The alarm's failure is a line, never raised.
+    """The reviews: the pipeline's advance (review.advance), then the stuck-verification alarms on the reviews it
+    leaves waiting for their post (rkmon_lib/verify_stale.py): each review's VERIFY_STALE line, then the stall's
+    critical line. An alarm's failure is a line, never raised.
     """
     lines = review.advance(cfg, st, store, plan)
-    try:
-        return lines + verify_stale.lines(cfg, st)
-    except Exception as exc:  # noqa: BLE001 - never fail a tick on it
-        return lines + [f"(stuck verifications not checked: {str(exc)[:200]})"]
+    for alarm, what in (
+        (verify_stale.lines, "stuck verifications"),
+        (verify_stale.stalled_lines, "stalled verifications"),
+    ):
+        try:
+            lines = lines + alarm(cfg, st)
+        except Exception as exc:  # noqa: BLE001 - never fail a tick on it
+            lines = lines + [f"({what} not checked: {str(exc)[:200]})"]
+    return lines
 
 
 def write_weekly(

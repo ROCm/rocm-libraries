@@ -292,6 +292,8 @@ What it never does:
   (`rkmon_lib/outward.py`'s table): it never files or declines a proposed ticket, sends a raw team chat message,
   pushes the team dashboard, reads the web host's requests, sends the test card, sets a secret or the read login,
   records a host's own keys, installs the web host's request service, or ends standby.
+- The file tools of the orchestrator and its agents never write outside the folders the monitor works in, each
+  allowed by one rule on its absolute path.
 
 What needs you:
 
@@ -740,7 +742,7 @@ would post, send or file is kept ([Prototype, live and standby](#prototype-live-
 | Admin dashboard | features.dashboards.admin.enabled is true | Your page, served by the monitor (where it listens and who can reach it: README.md, "The admin dashboard"). It is the one place to approve or decline priority requests, the tickets waiting for you and the in-depth reviews of large PRs. | the access token (a secret), which every request carries |
 | Team dashboard | features.dashboards.team.enabled is true | The dashboard for other teams, with its request box and no admin controls: published on a team web host, or served by this monitor on a port of its own (features.dashboards.team.delivery). | publish: its public_url and its publish block (web_host, username, site_folder) and, in live, the web host's SSH key (a secret); serve: its serve block (address and port) |
 | Develop break alerts | features.alerts.develop_breaks.enabled is true | When develop's CI is red and no fix is planned, the team chat channel gets a short message. | in live, the channel's webhook URL (a secret) |
-| Needs-you alerts | features.alerts.needs_you.enabled is true | The decisions on the dashboard's Needs-you list (a merge to propose, a stale hold, a priority request, a PR ready for your approval, an in-depth review to approve, and the like) go once each to the team chat channel. | in live, the channel's webhook URL (a secret) |
+| Needs-you alerts | features.alerts.needs_you.enabled is true | The decisions on the dashboard's Needs-you list (a merge to propose, a stale hold, a priority request, a PR ready for your approval, an in-depth review to approve, reviews that have waited on verification for hours, and the like) go once each to the team chat channel. | in live, the channel's webhook URL (a secret) |
 | Follow-up tickets | features.ticket_creation.follow_up_tickets.enabled is true | When a PR merges with our significant review items still open, each gets a follow-up ticket for the PR's author. | features.ticket_creation.project_key and the atlassian CLI (integrations.atlassian_cli.jira_url; in live, logged in) |
 | Out-of-scope issue tickets | features.ticket_creation.found_issue_tickets.enabled is true | An issue found outside any PR's review gets a proposed ticket, which waits on the admin dashboard's Tickets card: your Approve files it, your Decline drops it. | features.ticket_creation.project_key and the atlassian CLI (integrations.atlassian_cli.jira_url; in live, logged in) |
 | Weekly report | features.weekly_report.enabled is true | Each week the monitor writes a statistics report and the raw material for a lessons-learned review. | nothing |
@@ -1591,10 +1593,10 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        finds it: the orchestrator, tools/tick_loop.py or the container's tick loop, and the last tick,
                        the admin dashboard's service, the orchestrator, the gate, develop sanity); the parallel reviews
                        and the parallel builds, each current setting against its range with why the monitor set it so
-                       and its last changes; the review queue and the work in flight; the RAM disk's use; then the
-                       summary from stored state, and the GitHub logins' last check. --queue: the summary's queue
-                       computed again (git work), and the dashboard written with it. Whether it is configured right
-                       and reaches everything: doctor
+                       and its last changes; the review queue, the work in flight and the reviews stalled on
+                       verification; the RAM disk's use; then the summary from stored state, and the GitHub logins'
+                       last check. --queue: the summary's queue computed again (git work), and the dashboard written
+                       with it. Whether it is configured right and reaches everything: doctor
   gh-logins [--side read|write|session] [--json]   which GitHub login each side uses and whether the split is right,
                        probed now (a comment with no body and a branch on a commit that does not exist, each refused
                        either way: 422 may, 403 may not; rkmon_lib/ghlogins.py): exit 1 when the read or the session
@@ -2395,7 +2397,7 @@ Every key of the deploy settings file but the model bindings, in the file's orde
 | `features.alerts.message_cooldown_minutes` | The shortest time between two messages of the same alert, in minutes; anything new in between goes into the next one. 0: don't wait. Default: 30. |
 | **`features.alerts.develop_breaks`** | Develop breaks: a message when develop's CI is red and no fix is planned. It needs the develop guard. |
 | `features.alerts.develop_breaks.enabled` | true: send this alert. false: breaks only show on the dashboards. Required. |
-| **`features.alerts.needs_you`** | Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its public_url is set. |
+| **`features.alerts.needs_you`** | Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to approve, reviews that have waited on verification for hours). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its public_url is set. |
 | `features.alerts.needs_you.enabled` | true: send this alert. false: decisions only show on the dashboards. Required. |
 | **`features.ticket_creation`** | Ticket creation: JIRA tickets, filed with the atlassian tool on the site in integrations.atlassian_cli.jira_url. Install its login with: rkmon login atlassian (the login needs permission to create tickets). Each type of ticket has its own on/off switch. |
 | `features.ticket_creation.mode` | "prototype": tickets are written and listed on the admin dashboard, but not filed. "live": tickets are filed. Required when a type of ticket is on. |

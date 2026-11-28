@@ -8,8 +8,9 @@ Every entry goes to `state/daylog.jsonl` ({ts, kind, pr, text, ...}). Each appen
 
 Kinds: review (posted) · unposted (a review kept unposted: review posting off) · rebase (verdict kept) · skipped
 (review failed or dropped) · gate · proposed · hold · release · merged (into develop) · stacked (merged into another
-PR's branch) · develop (sanity) · incident · notice · arm · disarm · ticket · cleanup · wait (gh calls that waited
-for the GitHub request cap: rkmon.gh_cap_log) · save.
+PR's branch) · develop (sanity) · incident · notice · arm · disarm · ticket · refused (a tool refused to the session or
+its agents, which the session records) · cleanup · wait (gh calls that waited for the GitHub request cap:
+rkmon.gh_cap_log) · save.
 
 A `save` is an issue the system kept out of develop, by type (a review kept unposted makes the saves its post would
 make, so a prototype's log reads as a live monitor's):

@@ -1,17 +1,25 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The stuck-verification alarm (rkmon_lib/verify_stale.py): a review handed to verification that nothing posts gets
+"""The stuck-verification alarms (rkmon_lib/verify_stale.py): a review handed to verification that nothing posts gets
 its VERIFY_STALE line past its limit, at most once an hour per PR and head; the line names the review's head and
 `rk review-close N`, for a head our account posted a review at already that stands for ours, which a mirror's line
 leaves out; a split review's limit grows with its waves; the idle tick's timer falls due with the next line; the tick's
-review step adds the alarm after the advance; a review kept unposted, skipped, posted or dropped waits for nothing. The
-states and times are made up.
+review step adds the alarm after the advance; a review kept unposted, skipped, posted or dropped waits for nothing.
+The stall: a review still waiting on verification an hour past its own limit (4 hours for a review that is not split)
+gets the tick's critical line, once for each review that stalls, which the session gets whatever triages it; one line
+on the Needs-you list, whose Teams copy is one message when reviews start to stall, then quiet while any review is
+still stalled, kept unsent in standby; and a line of `rk status`. Nothing below 4 hours, nor while the monitor is
+paused or stopped or its review automation is off; the idle tick's timer falls due with a stall until its line told
+it. The skill's card for the line, and the command it records a refused tool with: the session's guard lets it
+through, and it writes the day's log. The states and times are made up.
 """
 
+import copy
 import json
 import os
 import pathlib
 import re
+import shlex
 import sys
 import tempfile
 import unittest
@@ -21,7 +29,22 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import rkmon  # noqa: E402
-from rkmon_lib import idle, post, split, triage, verify_stale  # noqa: E402
+from rkmon_lib import (  # noqa: E402
+    config,
+    control,
+    daylog,
+    idle,
+    needs_teams,
+    orchestrator,
+    paths,
+    post,
+    report,
+    split,
+    state_store,
+    tickfilter,
+    triage,
+    verify_stale,
+)
 from rkmon_lib.store import Store, empty_state, now, parse_ts  # noqa: E402
 
 HEAD, NEW_HEAD = "a" * 40, "b" * 40
@@ -43,6 +66,19 @@ def stale(pr: int, age: str, head: str = HEAD) -> str:
         f"!! VERIFY_STALE #{pr}: handed to verification {age} ago, nothing posted (head {head[:10]}); if our account "
         f"posted at that head already, run `rk review-close {pr}`"
     )
+
+
+def stalled(prs: str, words: str) -> str:
+    """The stall's critical line for the reviews PRS, the stall in WORDS."""
+    return f"!! CRITICAL VERIFY_STALLED {prs}: {words}"
+
+
+ONE = "1 review has waited on verification for over 4 hours (#12, for {age})"
+
+
+def ago(minutes: float) -> str:
+    """`minutes` before now."""
+    return idle.plus(now(), -minutes)
 
 
 class Base(unittest.TestCase):
@@ -174,6 +210,19 @@ class TestSplit(Base):
         self.assertEqual(self.lines(539), [])
         self.assertEqual(self.lines(540), [stale(12, "9.0 h")])
 
+    def test_a_split_review_stalls_an_hour_past_its_own_limit(self):
+        """Its VERIFY_STALE line comes at its limit, an hour before the stall's line."""
+        self.cfg["features"] = {"review_automation": {"enabled": True}}
+        self.st["enabled"] = True
+        self.plan("fr", 3, [[1, 2], [3]], 10)
+        self.assertEqual(self.lines(540), [stale(12, "9.0 h")])
+        self.assertEqual(verify_stale.stalled_lines(self.cfg, self.st, at(540)), [])
+        self.assertEqual(verify_stale.stalled_lines(self.cfg, self.st, at(599)), [])
+        self.assertEqual(
+            verify_stale.stalled_lines(self.cfg, self.st, at(600)),
+            [stalled("#12", ONE.format(age="10.0 h"))],
+        )
+
     def test_one_part_or_a_plan_from_before_the_hand_off_is_no_split(self):
         self.plan("fr", 1, [[1]], 10)  # one part: verified as usual
         self.plan("fu1", 4, [[1], [2], [3], [4]], -60)  # an earlier round's
@@ -240,6 +289,262 @@ class TestTick(Base):
             )
 
 
+class TestStall(Base):
+    """The stall's critical line, while the monitor is on and its review pipeline verifies."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg["features"] = {"review_automation": {"enabled": True}}
+        self.st["enabled"] = True
+
+    def stall(self, minutes: float) -> list[str]:
+        return verify_stale.stalled_lines(self.cfg, self.st, at(minutes))
+
+    def due(self, when: str, cfg: dict | None = None, st: dict | None = None) -> dict:
+        timers = {"verify stalled": idle.TIMERS["verify stalled"]}
+        return idle.deadlines(
+            cfg or self.cfg, self.st if st is None else st, None, timers, at=when
+        )
+
+    def test_a_review_waiting_over_4_hours_gets_the_critical_line_once(self):
+        self.assertEqual(verify_stale.STALL_MIN, 4 * 60)
+        self.assertEqual(self.stall(239), [])
+        self.assertEqual(
+            self.stall(240),
+            [
+                "!! CRITICAL VERIFY_STALLED #12: 1 review has waited on verification for over 4 hours (#12, for "
+                "4.0 h)"
+            ],
+        )
+        for m in (250, 300, 600, 24 * 60):  # a repeat: the same stall
+            self.assertEqual(self.stall(m), [], m)
+        self.assertEqual(self.st[verify_stale.STALLED_KEY], [12])
+
+    def test_another_review_that_stalls_brings_the_line_again_naming_each_stalled_one(
+        self,
+    ):
+        self.st["review_ready"].append(ready(13, "c" * 40, at(60)))
+        self.assertEqual(self.stall(240), [stalled("#12", ONE.format(age="4.0 h"))])
+        self.assertEqual(self.stall(299), [])
+        self.assertEqual(
+            self.stall(300),
+            [
+                stalled(
+                    "#12 #13",
+                    "2 reviews have waited on verification for over 4 hours (the oldest, #12, for 5.0 h)",
+                )
+            ],
+        )
+        self.assertEqual(self.stall(310), [])
+
+    def test_a_review_stalling_again_at_a_new_head_is_told_again_and_a_posted_one_goes(
+        self,
+    ):
+        self.assertEqual(len(self.stall(240)), 1)
+        # The head moved: the review was dropped, picked again and handed to verification at 250, as an entry of its
+        # own. The next full tick finds it not stalled: its PR leaves the record, and the idle tick's timer falls due
+        # with its own stall.
+        self.st["review_ready"] = [ready(head=NEW_HEAD, when=at(250))]
+        self.assertEqual(self.stall(260), [])
+        self.assertNotIn(verify_stale.STALLED_KEY, self.st)
+        self.assertEqual(self.due(at(260)), {"verify stalled #12": at(490)})
+        self.assertEqual(self.stall(489), [])
+        self.assertEqual(self.stall(490), [stalled("#12", ONE.format(age="4.0 h"))])
+        self.st["review_ready"] = []  # posted
+        self.assertEqual(self.stall(500), [])
+        self.assertNotIn(verify_stale.STALLED_KEY, self.st)
+
+    def test_nothing_while_paused_or_stopped_or_with_review_automation_off(self):
+        """A pause or a stop says why nothing is verified; with review automation off, nothing verifies."""
+        for case in ("paused", "stopped", "review automation off"):
+            with self.subTest(case):
+                cfg, st = copy.deepcopy(self.cfg), copy.deepcopy(self.st)
+                if case == "paused":
+                    st["enabled"] = False  # rk pause
+                elif case == "stopped":
+                    st["stopped"] = {"at": T0, "how": "stop"}  # rk stop
+                else:
+                    cfg["features"]["review_automation"]["enabled"] = False
+                self.assertEqual(verify_stale.stalled_lines(cfg, st, at(600)), [])
+                self.assertEqual(verify_stale.stalled_text(cfg, st, at(600)), "")
+                self.assertEqual(self.due(T0, cfg, st), {})
+        # On again: the stall is told.
+        self.assertEqual(len(self.stall(600)), 1)
+
+    def test_the_idle_tick_s_timer_falls_due_with_a_stall_until_its_line_told_it(self):
+        self.assertEqual(self.due(T0), {"verify stalled #12": at(240)})
+        self.assertEqual(self.stall(239), [])
+        # Due after the review step: kept, so that the next tick is full and tells it.
+        self.assertEqual(self.due(at(241)), {"verify stalled #12": at(240)})
+        self.stall(240)
+        self.assertEqual(self.due(at(240)), {})
+
+    def test_the_tick_s_review_step_adds_the_stall_after_the_stale_lines(self):
+        self.st["review_ready"] = [ready(12, when=ago(250))]
+        with mock.patch.object(rkmon.review, "advance", return_value=[]):
+            out = rkmon.review_step(self.cfg, self.st, None, [])
+        self.assertEqual(len(out), 2, out)
+        self.assertTrue(out[0].startswith("!! VERIFY_STALE #12: "), out)
+        self.assertRegex(
+            out[1],
+            r"^!! CRITICAL VERIFY_STALLED #12: 1 review has waited on verification for over 4 hours \(#12, for "
+            r"4\.\d h\)$",
+        )
+        self.st.pop(verify_stale.STALLED_KEY)
+        with mock.patch.object(
+            rkmon.review, "advance", return_value=["REVIEW_START #14"]
+        ), mock.patch.object(
+            verify_stale, "stalled_lines", side_effect=ValueError("bad")
+        ):
+            self.assertEqual(
+                rkmon.review_step(self.cfg, self.st, None, []),
+                ["REVIEW_START #14", "(stalled verifications not checked: bad)"],
+            )
+
+    def test_the_session_gets_the_line_whatever_triages_it(self):
+        line = self.stall(240)[0]
+        # The triage's copy of how the line starts (it stays light: features imports it).
+        self.assertIn(verify_stale.STALLED_LINE, triage.CRITICAL_CLAUDE)
+        for acting in (False, True):  # incidents filed or not
+            self.assertEqual(triage.classify(line, acting), triage.CLAUDE)
+        # The tick filter's row for it: the session acts on it each time it comes, as the skill's card says; the row
+        # points at the card.
+        cls, what = tickfilter.classify(line)
+        self.assertEqual(cls, tickfilter.ACT)
+        self.assertIn("handle each as the tick procedure says", what)
+
+
+class TestStallTold(unittest.TestCase):
+    """The stall on the Needs-you list, its Teams copy and `rk status`, in the monitor's default configuration (review
+    automation on)."""
+
+    LINE = "2 reviews have waited on verification for over 4 hours (the oldest, #12, for 9.2 h)"
+
+    def setUp(self):
+        self._d = tempfile.TemporaryDirectory()
+        self.d = pathlib.Path(self._d.name)
+        c = config.load_defaults()
+        c.pop("_doc", None)
+        c.update(repo="acme/widgets", operator={"github_login": "op-login"})
+        c["paths"] = dict(c["paths"], working_dir=str(self.d / "work"))
+        self.cfg = config.normalize(c)
+        self.store = Store(self.d / "state")
+        self.st = empty_state()
+        self.st["enabled"] = True
+        self.st["develop"]["sha"] = "d" * 40
+        self.st["review_ready"] = [
+            ready(12, when=ago(9 * 60 + 12)),
+            ready(13, "c" * 40, ago(5 * 60)),
+            ready(14, "e" * 40, ago(60)),
+        ]
+        home = mock.patch.dict(os.environ, {"RKMON_HOME": str(self.d / "home")})
+        home.start()
+        self.addCleanup(home.stop)
+
+    def tearDown(self):
+        self._d.cleanup()
+
+    def board(self) -> dict:
+        return report.board(self.cfg, self.st, self.store, [], [])
+
+    def told(self, b: dict) -> list:
+        return [t for t in b["needs"] if "waited on verification" in t] + [
+            a for a in b["asks"] if a["kind"] == verify_stale.STALLED
+        ]
+
+    def alerts(self) -> list[dict]:
+        """Needs-you alerts on, live, with a webhook; the posts they make."""
+        self.cfg["features"]["alerts"] = dict(
+            self.cfg["features"]["alerts"], enabled=True, mode="live", needs_you=True
+        )
+        hook = self.d / "hook"
+        hook.write_text("https://hooks.example.invalid/workflows/x\n", encoding="utf-8")
+        self.cfg["teams"] = dict(
+            self.cfg["teams"], channel="Chan", webhook_file=str(hook)
+        )
+        posted = []
+        patch = mock.patch.object(
+            post, "_teams_post", lambda cfg, payload: posted.append(payload) or 202
+        )
+        patch.start()
+        self.addCleanup(patch.stop)
+        return posted
+
+    def test_needs_you_has_one_line_with_the_count_and_the_oldest_wait(self):
+        b = self.board()
+        self.assertIn(self.LINE, b["needs"])
+        (a,) = [a for a in b["asks"] if a["kind"] == verify_stale.STALLED]
+        self.assertEqual(
+            (a["key"], a["text"], a["pr"]), ("VERIFY_STALLED:-:", self.LINE, None)
+        )
+
+    def test_the_board_shows_again_for_another_stalled_review_not_for_a_longer_wait(
+        self,
+    ):
+        fp = self.board()["fp"]
+        self.st["review_ready"][0]["at"] = ago(9 * 60 + 30)
+        self.assertEqual(self.board()["fp"], fp)
+        self.st["review_ready"][2]["at"] = ago(4 * 60 + 1)
+        self.assertNotEqual(self.board()["fp"], fp)
+
+    def test_none_below_4_hours_or_while_paused(self):
+        self.st["review_ready"] = [ready(12, when=ago(239))]
+        self.assertEqual(self.told(self.board()), [])
+        self.st["review_ready"] = [ready(12, when=ago(600))]
+        self.st["enabled"] = False  # rk pause
+        self.assertEqual(self.told(self.board()), [])
+
+    def test_the_teams_copy_is_one_message_when_reviews_start_to_stall(self):
+        """Then quiet while any review is still stalled; once none is, a review that stalls brings one again."""
+        posted = self.alerts()
+
+        def tick() -> list[str]:
+            return needs_teams.tick(self.cfg, self.st, self.store, self.board())
+
+        self.assertEqual(
+            tick(), ["NEEDS_YOU_TEAMS sent 1 item to the team chat (HTTP 202)"]
+        )
+        self.assertIn(
+            f"**VERIFY_STALLED** · {self.LINE}",
+            [b.get("text") for b in posted[0]["attachments"][0]["content"]["body"]],
+        )
+        post.mark_sent(self.st, post.KIND_NEEDS_YOU, ago(60))  # past the gap
+        self.st["review_ready"][2]["at"] = ago(4 * 60 + 1)  # a third stalls: quiet
+        self.assertEqual(tick(), [])
+        self.st["review_ready"] = []  # verified: none is stalled
+        self.assertEqual(tick(), [])
+        self.st["review_ready"] = [ready(15, "f" * 40, ago(300))]  # one stalls
+        self.assertEqual(
+            tick(), ["NEEDS_YOU_TEAMS sent 1 item to the team chat (HTTP 202)"]
+        )
+        self.assertEqual(len(posted), 2)
+
+    def test_in_standby_the_teams_copy_is_kept_unsent_and_the_stall_still_told(self):
+        posted = self.alerts()
+        state_store.set(self.d / "home", "standby.on", True)
+        (line,) = needs_teams.tick(self.cfg, self.st, self.store, self.board())
+        self.assertTrue(
+            line.startswith("NEEDS_YOU_TEAMS UNSENT: the Needs-you message (1 item)"),
+            line,
+        )
+        self.assertEqual(posted, [])
+        (item,) = state_store.unsent_items(self.store.dir)
+        self.assertIn(self.LINE, item["content"])
+        # Standby verifies: the list and the session still have it.
+        self.assertIn(self.LINE, self.board()["needs"])
+        self.assertEqual(len(verify_stale.stalled_lines(self.cfg, self.st)), 1)
+
+    def test_rk_status_says_it_under_the_reviews_awaiting_verification(self):
+        lines = control.status_lines(self.cfg, self.st, self.store, web_running=False)
+        i = next(
+            k for k, x in enumerate(lines) if x.startswith("  awaiting verification: ")
+        )
+        self.assertEqual(lines[i + 1], f"  STALLED: {self.LINE}")
+        self.st["enabled"] = False  # rk pause
+        lines = control.status_lines(self.cfg, self.st, self.store, web_running=False)
+        self.assertFalse([x for x in lines if "STALLED" in x], lines)
+
+
 class TestCard(unittest.TestCase):
     """The session's card for the line, in the skill's tick procedure."""
 
@@ -270,6 +575,82 @@ class TestCard(unittest.TestCase):
         self.assertIn("`rk review-close N`", card)
         self.assertIn("`rk facts N`", card)
         self.assertIn("A mirror's line names no `rk review-close`.", card)
+
+
+class TestStallCard(unittest.TestCase):
+    """The session's card for the stall's line, in the skill's tick procedure, and the command it records a refused
+    tool with."""
+
+    def card(self, line: str = "!! CRITICAL VERIFY_STALLED") -> str:
+        """The skill's card for the tick line that starts with LINE, its words on one line."""
+        skill = (ROOT / "agentic" / "skills" / "rocke-monitor" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        card = skill.split(f"`{line}", 1)[1].split("\n   - **", 1)[0]
+        return " ".join(card.split())
+
+    def test_each_stalled_review_is_handled_as_its_verify_stale_card_says(self):
+        """The stall starts no second verification: a verifier still running with its notes changing is left running,
+        as the VERIFY_STALE card leaves it."""
+        self.assertIn(
+            "Handle each now, as the card for its VERIFY_STALE line above says: post it if its verifier handed back, "
+            "start that verifier again where it is gone or stuck, and leave one that is still running with its notes "
+            "changing",
+            self.card(),
+        )
+        stale = self.card("!! VERIFY_STALE #N")
+        self.assertIn("Still running, its notes still changing", stale)
+        self.assertIn("nothing to do", stale)
+        self.assertIn("Handed back with its post: check and post it", stale)
+        self.assertIn(
+            "Gone or stuck: stop it if it runs (`TaskStop`), start that one again",
+            stale,
+        )
+
+    def test_a_refused_tool_holds_no_review_and_is_recorded(self):
+        self.assertIn(
+            "Never hold a review because a tool was refused: record the refusal with "
+            '`rk log refused N "<tool> <path>"`, which writes the day\'s log that <user_login> reads',
+            self.card(),
+        )
+
+    def test_the_session_may_run_the_record_and_rk_writes_it_in_the_day_s_log(self):
+        """The card's command, filled in as the session runs it: the session's guard lets it through, a path in a
+        shared build too, and rk takes its words as they are: an entry of kind refused for the PR, with the tool and
+        the path, in the day's log."""
+        # A shared build (workguard.shared_paths), which the agents only read.
+        build = "/work/workers/pr12/checks/build"
+        (command,) = re.findall(r"`(rk log [^`]+)`", self.card())
+        command = command.replace(" N ", " 12 ").replace(
+            "<tool> <path>", f"Write {build}/notes.md"
+        )
+        self.assertIsNone(orchestrator.guard(command, shared=[build]))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        d = pathlib.Path(tmp.name)
+        c = config.load_defaults()
+        c.pop("_doc", None)
+        c["paths"] = dict(c["paths"], working_dir=str(d / "work"))
+        cfg, store, printed = config.normalize(c), Store(d / "state"), []
+        with mock.patch.dict(
+            os.environ, {"RKMON_HOME": str(d / "home")}
+        ), mock.patch.object(rkmon, "load_config", lambda: cfg), mock.patch.object(
+            rkmon, "Store", lambda: store
+        ), mock.patch(
+            "builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a)))
+        ):
+            self.assertEqual(rkmon.main(shlex.split(command)[1:]), 0)
+        self.assertEqual(printed, ["logged refused for 12"])
+        (entry,) = daylog.entries(store)
+        self.assertEqual(
+            (entry["kind"], entry["pr"], entry["text"]),
+            ("refused", 12, f"Write {build}/notes.md"),
+        )
+        day = pathlib.Path(paths.get(cfg, "daily_dir")) / f"rocke_{entry['ts'][:10]}.md"
+        self.assertIn(
+            f"| refused | #12 | Write {build}/notes.md |",
+            day.read_text(encoding="utf-8"),
+        )
 
 
 if __name__ == "__main__":

@@ -771,8 +771,8 @@ CAPABILITIES = {
             "needs-you-alerts",
             "Needs-you alerts",
             "The decisions on the dashboard's Needs-you list (a merge to propose, a stale hold, a priority request, a "
-            "PR ready for your approval, an in-depth review to approve, and the like) go once each to the team chat "
-            "channel.",
+            "PR ready for your approval, an in-depth review to approve, reviews that have waited on verification for "
+            "hours, and the like) go once each to the team chat channel.",
             "in live, the channel's webhook URL (a secret)",
             _alert("needs_you"),
             "features.alerts.needs_you.enabled is true",

@@ -57,8 +57,8 @@ SPDX-License-Identifier: MIT
 
    Present the review in compact tables. Apply the lesson and mirror edits at once, build the proposed guards as toolkit
    code with tests, and ask <user_login> before changing a standing rule. Headless (a container): apply lesson edits to
-   the lessons file only, and write team-file, review-book, skill and guard proposals to the outputs folder's
-   `rocke_lessons/<week>_proposals.md`, which <user_login> lands as a pull request to the package; the session never
+   the lessons file only, and write team-file, review-book, skill and guard proposals to `<week>_proposals.md` in the
+   weekly reports' folder, which <user_login> lands as a pull request to the package; the session never
    pushes, and the week's corrections come from the journal and the Needs-you answers, not from memories.
 
    After editing `lessons.md`, the verifier's or the code quality reviewer's team member file, or the review passes'

@@ -285,6 +285,9 @@ ticket, assigned to the PR's author. Each type has its switch in ticket creation
   a ticket feature is on: `rk atlassian` weighs each of its writes itself), the `rk` commands only the operator or rk
   itself runs (`rkmon_lib/outward.py`'s table), and anything that would change state the review's agents and jobs
   share.
+- **The session's file tools.** The file tools of the session and its agents write only in the folders the monitor
+  works in (`paths.*`), each allowed by one rule on its absolute path (`rkmon_lib/orchestrator.py`, `write_rule`):
+  Claude Code's dontAsk mode refuses every tool call the allow list lacks.
 - **The ledger.** Every outward write is one ledger line, checked before each write, so nothing is done twice. A
   write whose answer was lost is read back from GitHub or JIRA before it is called failed.
 

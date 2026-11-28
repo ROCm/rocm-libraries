@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The stuck-verification alarm. A review handed to verification (the review driver's REVIEW_READY: state
+"""The stuck-verification alarms. A review handed to verification (the review driver's REVIEW_READY: state
 review_ready) waits there until `rk post` posts it. One still waiting past its limit gets, from the full tick, its
 VERIFY_STALE line (`lines`: how long ago it was handed to verification, and its head), at most once an hour per PR and
 head (EVERY_MIN), until it is posted or dropped. The session then checks the PR's verifier (the skill's tick
@@ -18,15 +18,31 @@ cross pass: LIMIT_MIN for each wave and one for the cross pass.
 Not waited for: a review that waits on no verifier (review.waiting_on_verifier), such as one the operator skipped, or a
 finished one (review.review_finished): posted, or kept unposted while posting is off.
 
+The stall, the operator's alarm: a review still waiting on verification an hour past its own limit has stalled: 4 hours
+for a review that is not split (STALL_MIN). The session has the review's VERIFY_STALE line an hour before. While the
+monitor watches (`watched`: it is on, and its review pipeline verifies, in standby too; a pause or a stop says why
+nothing is verified), each stall is told:
+- the tick's critical line (`stalled_lines`: STALLED_LINE, the stalled reviews and the stall in words), once for each
+  review that stalls;
+- one line on the Needs-you list (report.board: `stalled_text`, how many reviews and the oldest's wait), under one key:
+  where the monitor may send (needs_teams), its Teams copy is one message when reviews start to stall, then quiet while
+  any review is still stalled;
+- a line of `rk status` (control.status_lines).
+
 st[KEY] = {"<pr>": {"head": the review's head, "said": when its line was last printed}}; a record whose review no
 longer waits, or waits at another head, goes at the next full tick.
+st[STALLED_KEY] = [the PRs of the stalled reviews the tick's line told]; one that no longer stalls goes at the next full
+tick. A review at a new head is handed to verification again, as an entry of its own: the next full tick finds it not
+stalled (its VERIFY_STALE line brings one an hour before its stall), and its PR leaves the record.
 """
+
+from __future__ import annotations
 
 import json
 
 from . import features, idle, mirror, prep, report, review, split
 from .snapshot import same_commit
-from .store import minutes_since, now, parse_ts
+from .store import minutes_since, now, parse_ts, stopped
 
 KEY = "verify_stale"
 LINE = "!! VERIFY_STALE"
@@ -38,6 +54,12 @@ LINE = "!! VERIFY_STALE"
 # hand-off counts as stuck.
 LIMIT_MIN = 180
 EVERY_MIN = 60  # the line again for the same PR and head, at most this often
+# A review stalls an hour past its own limit (stall_at): 4 hours for a review that is not split. STALL_MIN is that wait,
+# in minutes: the monitor's own. The session has the review's VERIFY_STALE line an hour before.
+STALL_MIN = 4 * 60
+STALLED = "VERIFY_STALLED"  # the stall's kind: its tick line's, and its Needs-you line's (report.board)
+STALLED_LINE = f"!! CRITICAL {STALLED}"
+STALLED_KEY = "verify_stalled"
 
 
 def waiting(st: dict) -> dict[int, dict]:
@@ -110,6 +132,69 @@ def lines(cfg: dict, st: dict, at: str | None = None) -> list[str]:
     return out
 
 
+def watched(cfg: dict, st: dict) -> bool:
+    """Whether a stall is told: the monitor is on (not paused, nor stopped by rk stop or rk kill), and its review
+    pipeline verifies (review-drafts), in standby too."""
+    return (
+        bool(st.get("enabled"))
+        and not stopped(st)
+        and features.on(cfg, "review-drafts")
+    )
+
+
+def stall_at(cfg: dict, r: dict) -> str:
+    """When review r stalls, counted from its hand-off to verification: an hour past its own limit (limit_min),
+    STALL_MIN for a review that is not split."""
+    return idle.plus(r["at"], limit_min(cfg, r) + STALL_MIN - LIMIT_MIN)
+
+
+def stalled(cfg: dict, st: dict, at: str | None = None) -> list[dict]:
+    """The reviews stalled as of `at` (default: now), the longest waiting first; none while the monitor does not watch
+    (watched)."""
+    if not watched(cfg, st):
+        return []
+    t = at or now()
+    out = [r for r in waiting(st).values() if stall_at(cfg, r) <= t]
+    return sorted(out, key=lambda r: (parse_ts(r["at"]), r["pr"]))
+
+
+def _stall_words(rs: list[dict], t: str) -> str:
+    """The stall of the reviews rs (stalled's, as of `t`) in words: how many, and how long the oldest has waited."""
+    n, oldest = len(rs), rs[0]
+    return (
+        f"{n} review{'s have' if n > 1 else ' has'} waited on verification for over {STALL_MIN / 60:g} hours "
+        f"({'the oldest, ' if n > 1 else ''}#{oldest['pr']}, for "
+        f"{report._ago_min(minutes_since(oldest['at'], t))})"
+    )
+
+
+def stalled_text(cfg: dict, st: dict, at: str | None = None) -> str:
+    """The stall as of `at` (default: now) in one sentence: how many reviews have stalled, and how long the oldest has
+    waited; "" when none has."""
+    t = at or now()
+    rs = stalled(cfg, st, t)
+    return _stall_words(rs, t) if rs else ""
+
+
+def stalled_lines(cfg: dict, st: dict, at: str | None = None) -> list[str]:
+    """The tick's critical line as of `at` (default: now), when a review has stalled that the last one did not tell:
+    every stalled review, and the stall in words. The stalled reviews' PRs are recorded in st[STALLED_KEY]; one that no
+    longer stalls leaves the record, so that it is told again if it stalls again. The full tick runs it after the
+    VERIFY_STALE lines."""
+    t = at or now()
+    rs = stalled(cfg, st, t)
+    told = st.get(STALLED_KEY) or []
+    new = [r for r in rs if r["pr"] not in told]
+    if rs:
+        st[STALLED_KEY] = [r["pr"] for r in rs]
+    else:
+        st.pop(STALLED_KEY, None)
+    if not new:
+        return []
+    prs = " ".join(f"#{r['pr']}" for r in rs)
+    return [f"{STALLED_LINE} {prs}: {_stall_words(rs, t)}"]
+
+
 @idle.timer("verify stale", again=True)
 def _due(cfg: dict, st: dict, store):
     """When each review that waits on a verifier gets its next VERIFY_STALE line. A line that falls due after the full
@@ -120,3 +205,16 @@ def _due(cfg: dict, st: dict, store):
     said = st.get(KEY) or {}
     for n, r in waiting(st).items():
         yield f"verify stale #{n}", _next(cfg, said, r)
+
+
+@idle.timer("verify stalled", again=True)
+def _stall_due(cfg: dict, st: dict, store):
+    """When each review that waits on a verifier stalls, while the monitor watches (watched), until the tick's line has
+    told it. A stall that falls due after the full tick's review step stays due, so the next tick is full and tells
+    it."""
+    if not watched(cfg, st):
+        return
+    told = st.get(STALLED_KEY) or []
+    for n, r in waiting(st).items():
+        if n not in told:
+            yield f"verify stalled #{n}", stall_at(cfg, r)

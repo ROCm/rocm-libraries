@@ -591,8 +591,8 @@ class TestSettings(Base):
             "Bash",
             "Agent(rocke-review-verifier)",
             "Skill(rocke-monitor)",
-            f"Write({self.cfg['paths']['tmp']}/**)",
-            f"Edit({self.cfg['paths']['lessons']}/**)",
+            f"Edit(/{self.cfg['paths']['tmp']}/**)",
+            f"Edit(/{self.cfg['paths']['lessons']}/**)",
         ):
             self.assertIn(want, tools)
         (self.secrets / "jira_mcp_headers").write_text(
@@ -612,6 +612,48 @@ class TestSettings(Base):
                 for w in ("mcp-header-31", "jira_mcp_headers")
                 if w in json.dumps(vars(opts), default=str)
             ]
+        )
+
+    def test_each_folder_the_session_writes_in_gets_one_edit_rule_on_its_absolute_path(
+        self,
+    ):
+        """Claude Code reads a file rule's path after `//` as absolute; after one `/` it starts at the settings file's
+        folder, so such a rule allows nothing in the work folders. An Edit rule covers Write too, and a Write rule of
+        its own is refused all the same. Each folder the skill and its agents write files in gets one rule: Edit, on
+        its absolute path, with `//`: the work folders, the weekly reports' folder (the weekly lessons review's drafts)
+        and the site lessons' folder (the site lessons, which that review edits)."""
+        p = paths.resolve(self.cfg)
+        files = [
+            t
+            for t in orchestrator.allowed_tools(self.cfg)
+            if t.startswith(("Write(", "Edit("))
+        ]
+        self.assertEqual([t for t in files if t.startswith("Write(")], [])
+        for rule in files:
+            self.assertRegex(rule, r"^Edit\(//[^/].*/\*\*\)$")
+        folders = [
+            p[key]
+            for key in (
+                "tmp",
+                "scratch",
+                "probes",
+                "workers",
+                "lessons",
+                "posts",
+                "cache",
+                "weekly_dir",
+            )
+        ] + [os.path.dirname(p["site_lessons"])]
+        self.assertTrue(all(f.startswith("/") for f in folders), folders)
+        self.assertEqual(files, [f"Edit(/{f}/**)" for f in folders])
+
+    def test_a_work_folder_that_is_not_absolute_is_refused(self):
+        """A relative folder would make a rule that allows nothing where the monitor writes: refused, by its name."""
+        cfg = dict(self.cfg, paths=dict(self.cfg["paths"], probes="work/probes"))
+        with self.assertRaises(ValueError) as cm:
+            orchestrator.allowed_tools(cfg)
+        self.assertIn(
+            "paths.probes is 'work/probes', not an absolute path", str(cm.exception)
         )
 
     def test_standby_stops_the_sessions_jira_writes_at_their_next_call(self):

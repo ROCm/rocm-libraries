@@ -668,7 +668,8 @@ def status_lines(
     """`rk status`: how the monitor operates right now, from local files only (no remote call): its state; the pieces
     running (the review driver, the tick loop that runs here as rk tick-now finds it (tick_loops) and the last tick,
     the admin dashboard's service, the orchestrator, the gate, develop sanity); each current setting against its range
-    with the scaler's reason and its last changes; the review queue and the work in flight; the RAM disk's use.
+    with the scaler's reason and its last changes; the review queue, the work in flight and the reviews stalled on
+    verification (verify_stale.stalled_text); the RAM disk's use.
     """
     from . import doctor, features, gpu, idle, ramdisk, scaler
     from .review import FIRST, pipes
@@ -790,6 +791,11 @@ def status_lines(
         for r in review.waiting_on_verifier(st)
     ]
     out.append(f"  awaiting verification: {', '.join(ready) or 'none'}")
+    from . import verify_stale
+
+    stall = verify_stale.stalled_text(cfg, st)
+    if stall:
+        out.append(f"  STALLED: {stall}")
     busy = jobs.heavy_running(st, store)
     out.append(
         f"  builds running: {len(busy)} of {scaler.current(cfg, store, 'heavy')} parallel builds: "

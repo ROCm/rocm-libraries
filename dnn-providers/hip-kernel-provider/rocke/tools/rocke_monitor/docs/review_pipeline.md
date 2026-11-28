@@ -428,7 +428,11 @@ the starting setting.
    `` !! VERIFY_STALE #N: handed to verification <age> ago, nothing posted (head <head>); if our account posted at that head already, run `rk review-close N` ``,
    at most once an hour per PR and head, until it is posted or dropped (a mirror's line ends at the head: it closes
    none); a split review gets three hours for each wave of part verifications and three more for the cross pass
-   (`rkmon_lib/verify_stale.py`).
+   (`rkmon_lib/verify_stale.py`). A review still waiting an hour past its own limit has stalled: 4 hours for a review
+   that is not split. While the monitor is on, in standby too, the tick prints `!! CRITICAL VERIFY_STALLED #N …` once
+   for each review that stalls, and the Needs-you list and `rk status` say how many reviews wait, and the oldest's
+   wait. The list's team-channel copy is one message when reviews start to stall, then quiet while any review is still
+   stalled.
 6. **Post.** `rk spec-post N --round R` writes the post's spec from the verification notes and live reads, and posts
    only when nothing differs (no `CHECK:` line). The premises stop the post if the head, the base branch's changes to
    the PR's own files, the conflict set, CI or the threads changed since the verification, and a fix line fails its
@@ -896,14 +900,14 @@ verdict; only a post changes it.
 **`rk status` and `rk doctor`.** `rk status` says how the monitor operates right now, from local files only: on or off,
 stopped or draining, the pieces running (the review driver, the tick loop and the last tick, the admin dashboard's
 service, the orchestrator, the gate, develop sanity), the parallel reviews and the parallel builds in effect, each
-against its range with the scaler's reason and last changes, the review queue, the work in flight, the RAM disk's
-use, then the summary from stored state and the GitHub logins' last check. `rk doctor` says
-whether the monitor is set up right and reaches everything, each check PASS, FAIL or WARN with its fix: the machine's
-prerequisites, every configured value (a secret only as set or missing, with its path), and read-only checks of each
-configured service (GitHub, JIRA, the team chat, the model gateways, the GPU cluster, the Claude session's
-settings and the RAM disk; in the container also the Claude session's key, with the claude login's test call). It keeps
-the services' results a few minutes in `state/doctor_cache.json`; `rk doctor --fresh` checks again. `rk status` writes
-nothing, and `rk doctor` only that cache.
+against its range with the scaler's reason and last changes, the review queue, the work in flight, the reviews
+stalled on verification, the RAM disk's use, then the summary from stored state and the GitHub logins' last check.
+`rk doctor` says whether the monitor is set up right and reaches everything, each check PASS, FAIL or WARN with its
+fix: the machine's prerequisites, every configured value (a secret only as set or missing, with its path), and
+read-only checks of each configured service (GitHub, JIRA, the team chat, the model gateways, the GPU cluster, the
+Claude session's settings and the RAM disk; in the container also the Claude session's key, with the claude login's
+test call). It keeps the services' results a few minutes in `state/doctor_cache.json`; `rk doctor --fresh` checks
+again. `rk status` writes nothing, and `rk doctor` only that cache.
 
 ## 4. Setup and tools
 

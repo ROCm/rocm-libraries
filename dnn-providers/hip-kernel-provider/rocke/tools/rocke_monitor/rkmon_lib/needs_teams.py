@@ -9,7 +9,8 @@ main channel; the Teams message is a second copy of it.
   only alerts, or auto-merge is on again after that guard turned it off), AUTOMERGE_JUMP, PRIORITY_READY_EARLY,
   HOLD_STALE, HOLD_DISMISSED, HELD_MERGED, MERGED_OVER_RED, REVERT_OFFER, INCIDENT_AGED, BACKLOG_GROWING,
   READY_FOR_APPROVAL (one per PR), PRIORITY_REQUEST, IN_DEPTH_REVIEW, TICKET_DRAFTS (the proposed tickets waiting for
-  the user's OK) and NEEDS_PERSON (with no Claude session, each tick line that needs a person). The other lines are
+  the user's OK), NEEDS_PERSON (with no Claude session, each tick line that needs a person) and VERIFY_STALLED
+  (reviews that have waited on verification for hours: one key for the whole stall). The other lines are
   news, not decisions, and are not sent: a critical alert the orchestrator acts on at once, an auto-merge that the
   auto-merge guard turns off itself.
 - Once: each sent key stays in the state (`needs_teams.sent`) while its item is on the list. A key that leaves the list

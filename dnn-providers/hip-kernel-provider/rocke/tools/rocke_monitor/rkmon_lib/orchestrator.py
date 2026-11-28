@@ -31,8 +31,11 @@ monitor skill unattended, where a person's Claude Code session runs `/rocke-moni
 - One reader takes every message for the whole connection (the SDK needs exactly one). Background subagents and shell
   jobs report in turns the CLI starts by itself (task notifications). A notification with no turn after it within
   NUDGE_S gets a short nudge.
-- Permissions: Claude Code's dontAsk mode. The allow list (`allowed_tools`) holds the local tools, the skill and the two
-  agent types; the session has no MCP server (the atlassian CLI is the one way to JIRA). GUARD, a
+- Permissions: Claude Code's dontAsk mode, which refuses every tool call the allow list (`allowed_tools`) does not
+  allow. The list holds the local tools, the skill, the two agent types and, for each folder the skill and its agents
+  write files in (`write_folders`: the work folders, the weekly reports' folder and the site lessons' folder), one rule
+  that lets the session and its agents create and edit files anywhere in it (`write_rule`): their file tools write
+  nowhere else. The session has no MCP server (the atlassian CLI is the one way to JIRA). GUARD, a
   PreToolUse hook on every Bash call (the subagents' included), refuses outward actions that are not `rk` commands:
   GitHub writes through gh, pushes to a git remote, network writes by curl or wget, ssh, scp and Slurm commands, and
   the atlassian CLI's own writes unless follow-up tickets are on (an `rk atlassian` call is rk's to weigh, on each
@@ -85,6 +88,7 @@ import asyncio
 import json
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import signal
@@ -138,6 +142,18 @@ REPEAT_MIN = 60  # a line the session got is handed again only after this long (
 TICKS = "ticks"  # state/ticks: each tick's output with its triage, and each review driver's, for the session to read
 TICKS_KEPT = 300
 SEEN = "tick_seen.txt"  # the standing lines the rule filter already handed over (tickfilter.actionable's `seen`)
+# The folders (paths.*) in which the session and its agents create and edit files (write_folders): the monitor's work
+# folders, and the weekly reports' folder, where the weekly lessons review writes its drafts (the skill's weekly.md).
+WRITE_FOLDERS = (
+    "tmp",
+    "scratch",
+    "probes",
+    "workers",
+    "lessons",
+    "posts",
+    "cache",
+    "weekly_dir",
+)
 _PROGRESS = re.compile(r"\d\d:\d\dZ ")  # the review driver's progress lines
 
 # Outward actions that are not rk commands, refused with the reason (GUARD). Read-only GitHub calls (gh api GETs, gh pr
@@ -601,9 +617,33 @@ def check(cfg: dict, with_key: bool = True) -> list[str]:
     return out
 
 
-def allowed_tools(cfg: dict) -> list[str]:
-    """The allow list of the dontAsk session (GUARD refuses outward Bash commands within it)."""
+def write_rule(folder: str, name: str = "the folder") -> str:
+    """The allow rule that lets the session and its agents create and edit files anywhere in FOLDER, an absolute path
+    (NAME: what the configuration calls it): an Edit rule, which covers Write too, whose path starts with `//`,
+    Claude Code's mark of an absolute path (a path after one `/` starts at the settings file's folder). A folder that is
+    not absolute is refused: no rule made from it allows what the monitor writes there.
+    """
+    if not folder.startswith("/"):
+        raise ValueError(
+            f"{name} is {folder!r}, not an absolute path: the session's file tools get no rule for it"
+        )
+    return f"Edit(//{folder.lstrip('/')}/**)"
+
+
+def write_folders(cfg: dict) -> dict[str, str]:
+    """Each folder the session and its agents create and edit files in, by what the configuration calls it: the
+    folders of WRITE_FOLDERS, and the site lessons' folder (paths.site_lessons is the file the weekly lessons review
+    edits, in the monitor's state)."""
     p = paths.resolve(cfg)
+    out = {f"paths.{key}": p[key] for key in WRITE_FOLDERS if p.get(key)}
+    if p.get("site_lessons"):
+        out["paths.site_lessons' folder"] = posixpath.dirname(p["site_lessons"])
+    return out
+
+
+def allowed_tools(cfg: dict) -> list[str]:
+    """The allow list of the dontAsk session (GUARD refuses outward Bash commands within it): the tools, and one
+    write_rule for each folder the session writes files in (write_folders)."""
     out = [
         "Bash",
         "Read",
@@ -617,10 +657,9 @@ def allowed_tools(cfg: dict) -> list[str]:
         "Agent(rocke-review-verifier)",
         "Agent(rocke-code-quality-reviewer)",
     ]
-    for key in ("tmp", "scratch", "probes", "workers", "lessons", "posts", "cache"):
-        if p.get(key):
-            out += [f"Write({p[key]}/**)", f"Edit({p[key]}/**)"]
-    return out
+    return out + [
+        write_rule(folder, name) for name, folder in write_folders(cfg).items()
+    ]
 
 
 def options(cfg: dict, sdk, resume: str | None, log=None, session=None) -> object:

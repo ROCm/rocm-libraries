@@ -42,7 +42,7 @@ machine until you set a feature's `mode` to "live" ("Go live"). Spend a day or t
 
 | Command | What it shows |
 |---|---|
-| `./rkmon status` | The deployment first: its container, the features on, each prototype or live, where it stands and the command to run next. Then, while the container runs, the monitor: on or off, paused or stopped, the parallel reviews and builds in effect, the review queue, the work in flight and the RAM disk |
+| `./rkmon status` | The deployment first: its container, the features on, each prototype or live, where it stands and the command to run next. Then, while the container runs, the monitor: on or off, paused or stopped, the parallel reviews and builds in effect, the review queue, the work in flight, the reviews stalled on verification and the RAM disk |
 | `./rkmon doctor` | Where the deployment is on the deploy path, then whether each setting, login, secret and server is right, each with its fix; `--fresh` skips its few-minute cache |
 | `./rkmon next` | Where the deployment is on the deploy path, and the command to run next |
 | `./rkmon rk features` | Each feature: on or off, prototype or live, and what it still lacks |
@@ -222,7 +222,7 @@ log, and `./rkmon logs --since 1h` its last hour; `./rkmon shell` opens a shell 
 | Symptom | Fix |
 |---|---|
 | `./rkmon doctor` fails a login: not set, expired, or a read login that can write | The row's `fix:` line. Each login, and the token it needs: [README.md, "Logins and secrets"](README.md#logins-and-secrets) |
-| Nothing is reviewed | `features.review_automation.enabled` is false, or `./rkmon rk orchestrate --check` names what the Claude session lacks |
+| Nothing is reviewed, or Needs you (and `./rkmon status`) says reviews have waited on verification for over 4 hours | `features.review_automation.enabled` is false, or `./rkmon rk orchestrate --check` names what the Claude session lacks, or the day's log names a refused tool; `./rkmon doctor` checks its login |
 | Verified reviews are not posted | Each is kept as `PR_UNPOSTED_<N>.md` ("Your first day"), and its line `UNPOSTED: …` says why: review automation is in prototype ("Go live") or the monitor in standby; review posting is off, as it runs only while `features.review_automation.enabled` is true and its `mode` is "live"; or review posting is not set up, and the line names what it needs and the fix, as `./rkmon rk features` does. A kept review is never posted later |
 | `rk post` refuses a verified review (exit 4): `REFUSED: #N is in review_skip: run rk review-unskip N first`, `REFUSED: already posted on #N at head …`, or a line that ends in `: stop` | A pull request you skipped (`./rkmon rk review-skip N`): `./rkmon rk review-unskip N` takes it back. One with our review at that head already: `--again` posts another, when that is meant. A line that ends in `: stop` names what the review was verified on and has changed since, such as its head, its base, its CI, its threads or a newer comment, and what to do, as in `premise: threads changed: …: stop` |
 | A feature says `OFF` or `NOT SET UP` (exit 5) | `./rkmon rk features` names what is missing ("Turn on a feature") |

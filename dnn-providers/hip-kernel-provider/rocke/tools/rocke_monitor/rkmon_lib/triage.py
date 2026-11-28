@@ -10,7 +10,8 @@ monitor.tick_interval_minutes minutes and hands its output here (rkmon_lib/orche
   issue, a ticket, an arm; or a judgement the skill gives Claude), USER when the skill only tells the user (the
   orchestrator's log prints it, and the board lists what needs them), QUIET when it needs nothing, UNSURE when no rule
   knows it. The incident lines are Claude's while incidents are filed (the merge queue live, with its develop guard)
-  and a report before (INCIDENT); any other `!! ` line is Claude's.
+  and a report before (INCIDENT); the critical lines that are no incident's are always Claude's (CRITICAL_CLAUDE); any
+  other `!! ` line is Claude's.
 - `run`: the triage model, when `models.tick` names one (config.tick_model: "worker", the local worker's model, or a
   binding's name, which needs no Ollama; never the reviewer by itself), reads the classified lines and the board,
   does the routine work with read-only rk commands only (READ_ONLY: the board and the status, a REVIEW_READY's prep,
@@ -151,6 +152,10 @@ RULES = (
         ),
     ),
 )
+# The critical lines that are no incident's, Claude's whatever the incidents: a tool's failure (rkmon.py, the
+# orchestrator), and the stalled verifications (rkmon_lib/verify_stale.py, STALLED_LINE, which a test ties to this
+# copy: this module stays light, as features imports it).
+CRITICAL_CLAUDE = ("!! CRITICAL TOOL", "!! CRITICAL VERIFY_STALLED")
 # The incident procedure's lines: Claude's while incidents are filed (the develop guard with the merge queue live), a
 # report otherwise (develop is checked after every merge in prototype too).
 INCIDENT = (
@@ -391,7 +396,7 @@ def parse(text: str) -> tuple[list[str], str]:
 def classify(line: str, acting: bool) -> str:
     """A tick line's class (CLAUDE, USER, QUIET or UNSURE); `acting`: incidents are filed (features.on(cfg,
     "incident-issues"))."""
-    if line.startswith("!! CRITICAL TOOL"):
+    if line.startswith(CRITICAL_CLAUDE):
         return CLAUDE
     if line.startswith(INCIDENT):
         return CLAUDE if acting else USER

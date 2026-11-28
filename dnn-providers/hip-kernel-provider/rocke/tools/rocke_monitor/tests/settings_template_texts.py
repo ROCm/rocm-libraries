@@ -385,8 +385,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
-    # public_url is set.
+    # approve, reviews that have waited on verification for hours). Each is sent once, addressed to your GitHub
+    # username, with a link to the team dashboard when its public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false
@@ -694,8 +694,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
-    # public_url is set.
+    # approve, reviews that have waited on verification for hours). Each is sent once, addressed to your GitHub
+    # username, with a link to the team dashboard when its public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false
@@ -943,8 +943,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
-    # public_url is set.
+    # approve, reviews that have waited on verification for hours). Each is sent once, addressed to your GitHub
+    # username, with a link to the team dashboard when its public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false
@@ -1423,8 +1423,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
-    # public_url is set.
+    # approve, reviews that have waited on verification for hours). Each is sent once, addressed to your GitHub
+    # username, with a link to the team dashboard when its public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false

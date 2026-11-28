@@ -1937,6 +1937,13 @@ def board(cfg: dict, st: dict, store, plan: list[dict], q: list[dict]) -> dict:
             "critical"
         ]:  # the orchestrator acts on it at once (the tick's critical lines): news, not a decision
             need(f"Critical: {p['text'][:110]}")
+    # Reviews that have waited on verification for hours: one line under one key while any has stalled, so its Teams
+    # copy is one message when reviews start to stall (rkmon_lib/verify_stale.py).
+    from . import verify_stale
+
+    stall = verify_stale.stalled_text(cfg, st)
+    if stall:
+        need(stall, verify_stale.STALLED)
     if tp["delta"] is not None and tp["delta"] > 0 and tp["backlog"] > LOSING_BACKLOG:
         need(
             f"The review backlog is growing ({tp['trend']}, {tp['backlog']} waiting): decide on more capacity "

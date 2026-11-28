@@ -8,7 +8,7 @@
 
 allowed:
   - files: 'agentic/.+\.md|worker/offload_agent\.py'
-    keep: '<(?:STATUS|STATE|NAME|TAB|UTC|ID|SAVE|NN|MM-DD|Rk|light|title|reviewer|what|whom|path|line|text)>'
+    keep: '<(?:STATUS|STATE|NAME|TAB|UTC|ID|SAVE|NN|MM-DD|Rk|light|title|reviewer|what|whom|path|line|text|tool)>'
     why: example words of the agentic files and the offload prompt, the slots of a form, filled as it is written
   - files: 'agentic/skills/rocke-monitor/lessons\.md'
     keep: '<(?:n|n-1|m|f|d|files|digits|token|base|commit|mb|log|id|pid|png|html|fam|form)>'

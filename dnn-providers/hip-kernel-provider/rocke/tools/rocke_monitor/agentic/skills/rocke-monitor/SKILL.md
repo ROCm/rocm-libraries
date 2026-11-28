@@ -265,6 +265,11 @@ the like) wake the loop once; the heartbeat repeats them.
        the directory's `notes.md`. The other parts' verifiers keep running.
 
      The line comes at most once an hour per PR and head, until the review is posted or dropped.
+   - **Review automation:** `!! CRITICAL VERIFY_STALLED #N …`: these reviews have waited on verification for hours.
+     Handle each now, as the card for its VERIFY_STALE line above says: post it if its verifier handed back, start
+     that verifier again where it is gone or stuck, and leave one that is still running with its notes changing. Never
+     hold a review because a tool was refused: record the refusal with `rk log refused N "<tool> <path>"`, which writes
+     the day's log that <user_login> reads.
    - **Develop guard:** develop sanity and incidents (`incident_procedure.md`).
    - **Merge queue:** the merge queue (`merge_procedure.md`). The tick starts gate and batch-gate jobs itself,
      in prototype too. Handle

@@ -226,8 +226,8 @@ Two commands, for two questions:
 - **`rk status`: how the monitor operates right now**, from local files only (no remote call): on or off, stopped or
   draining; the pieces running (the review driver, the tick loop with the last tick and the last full tick, the admin
   dashboard's service, the orchestrator, the gate, develop sanity); the settings; the review queue, the reviews in
-  flight, the drafts awaiting verification, the builds running and the remote GPU jobs; the RAM disk's use and the PRs
-  on it; then the summary from the stored state.
+  flight, the drafts awaiting verification and the reviews stalled on it, the builds running and the remote GPU jobs;
+  the RAM disk's use and the PRs on it; then the summary from the stored state.
 - **`rk doctor`: whether the monitor is configured right and reaches everything**, read-only: this machine's
   prerequisites, every configured value (secrets only as set or missing, with their path), the secrets' permissions,
   the features, the dashboards' ports, in the container the Claude session, its settings and the tick triage; then
