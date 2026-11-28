@@ -173,7 +173,7 @@ struct BlockGemmARegBSmemCRegV2
         };
 
         // hot loop:
-#if defined(__gfx117__)
+#if defined(__gfx117__) || defined(__gfx120__)
         if constexpr(UsePartialN && !UsePartialK)
         {
             // Group K steps under one N check to allow LDS reads ahead of WMMA,

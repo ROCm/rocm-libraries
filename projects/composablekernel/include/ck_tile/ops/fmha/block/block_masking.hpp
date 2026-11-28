@@ -568,7 +568,15 @@ struct SimplifiedGenericAttentionMask
         index_t x_start = -y + i_y + 1;          // this could be negative, but it's fine
         index_t x_end   = min(i_y + x, x_total); // need min in case x is padded
         // See the local-mask IsOutOfSinkBound for the clauses and the gate.
-#if defined(__gfx1250__)
+#if defined(__gfx120__)
+        // Fold row validity into the sink bound and the clamped unsigned window.
+        const index_t sink_end =
+            (y < y_total && i_y < x_total) ? min(sink, i_y + x) : numeric<index_t>::lowest();
+        const index_t window_end = i_y < y_total ? max(x_start, x_end) : x_start;
+        const uint32_t width     = uint32_t(window_end) - uint32_t(x_start);
+        const bool out           = (i_x >= sink_end) & (uint32_t(i_x) - uint32_t(x_start) >= width);
+        return out;
+#elif defined(__gfx1250__)
         const bool in_sink = (i_x < sink) & (i_x < i_y + x) & (y < y_total) & (i_y < x_total);
         const bool out     = (!in_sink) & ((i_x < x_start) | (i_x >= x_end) | (i_y >= y_total));
         return out;
