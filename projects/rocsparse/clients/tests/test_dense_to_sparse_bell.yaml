@@ -75,6 +75,31 @@ Tests:
   baseA: [rocsparse_index_base_one]
   order: [rocsparse_order_row]
 
+# Block dimensions around the 256 threads of the analysis kernel.
+- name: dense_to_sparse_bell
+  category: quick
+  function: dense_to_sparse_bell
+  indextype: *i32_i64
+  precision: *single_only_precisions
+  M: [1, 600]
+  N: [1, 700]
+  denseld: [700]
+  block_dim: [1, 2, 3, 128, 255, 256]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  order: [rocsparse_order_row, rocsparse_order_column]
+
+- name: dense_to_sparse_bell
+  category: quick
+  function: dense_to_sparse_bell
+  indextype: *i32_i64
+  precision: *single_only_precisions
+  M: [1, 600]
+  N: [1, 700]
+  denseld: [700]
+  block_dim: [257, 300, 512]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  order: [rocsparse_order_row, rocsparse_order_column]
+
 # Pre-checkin
 - name: dense_to_sparse_bell_bad_arg
   category: pre_checkin

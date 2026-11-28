@@ -29,7 +29,52 @@
 
 #include "dense2bell.h"
 
+#include <limits>
 #include <vector>
+
+namespace
+{
+    constexpr uint32_t DENSE2BELL_REDUCE_BLOCKSIZE = 256;
+
+    // Reduce nnzb_per_row (device, size mb) down to a single maximum using two
+    // kernels so that no reduction is performed on the host. workspace holds
+    // DENSE2BELL_REDUCE_BLOCKSIZE entries.
+    rocsparse_status dense2bell_max_nnzb_per_row(rocsparse_handle handle,
+                                                 int64_t          mb,
+                                                 const int64_t*   nnzb_per_row,
+                                                 int64_t*         workspace,
+                                                 int64_t*         max_nnzb_per_row)
+    {
+        hipStream_t stream = handle->stream;
+
+        // Stage 1: each of the DENSE2BELL_REDUCE_BLOCKSIZE blocks reduces a grid-strided slice
+        // of nnzb_per_row into workspace[blockIdx].
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::dense2bell_max_nnzb_part1_kernel<DENSE2BELL_REDUCE_BLOCKSIZE>),
+            dim3(DENSE2BELL_REDUCE_BLOCKSIZE),
+            dim3(DENSE2BELL_REDUCE_BLOCKSIZE),
+            0,
+            stream,
+            mb,
+            nnzb_per_row,
+            workspace);
+
+        // Stage 2: a single block reduces the workspace array into workspace[0].
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::dense2bell_max_nnzb_part2_kernel<DENSE2BELL_REDUCE_BLOCKSIZE>),
+            dim3(1),
+            dim3(DENSE2BELL_REDUCE_BLOCKSIZE),
+            0,
+            stream,
+            workspace);
+
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            max_nnzb_per_row, workspace, sizeof(int64_t), hipMemcpyDeviceToHost, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+        return rocsparse_status_success;
+    }
+}
 
 template <typename T>
 rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          handle, //0
@@ -61,7 +106,20 @@ rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          ha
     // Stream
     hipStream_t stream = handle->stream;
 
-    const int64_t mb = (m + ell_block_size - 1) / ell_block_size;
+    // The column loop of the nnz kernel and ell_cols = ceil(n / ell_block_size) * ell_block_size
+    // both reach n + ell_block_size - 1, which has to fit in int64_t.
+    if(n > 0 && ell_block_size > std::numeric_limits<int64_t>::max() - (n - 1))
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_size);
+    }
+
+    const int64_t mb = rocsparse::ceil_div(m, ell_block_size);
+
+    if(mb == 0 || n == 0)
+    {
+        *ell_cols = 0;
+        return rocsparse_status_success;
+    }
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_nnz_kernel<256>),
                                        dim3(rocsparse::get_grid_size_x(handle, mb, 256)),
@@ -77,41 +135,30 @@ rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          ha
                                        ell_block_size,
                                        nnzb_per_row);
 
-    // Reduce nnzb_per_row (device, size mb) down to a single maximum using two
-    // kernels so that no reduction is performed on the host.
-    constexpr uint32_t REDUCE_BLOCKSIZE = 256;
+    // The partial maxima live in the handle buffer when it is large enough. Otherwise they get
+    // their own allocation, which is released whatever the reduction returns.
+    const size_t workspace_size  = sizeof(int64_t) * DENSE2BELL_REDUCE_BLOCKSIZE;
+    const bool   workspace_alloc = (handle->buffer_size < workspace_size);
 
     int64_t* workspace = nullptr;
-    RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync(&workspace, sizeof(int64_t) * REDUCE_BLOCKSIZE, stream));
+    if(workspace_alloc)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&workspace, workspace_size, stream));
+    }
+    else
+    {
+        workspace = reinterpret_cast<int64_t*>(handle->buffer);
+    }
 
-    // Stage 1: each of the REDUCE_BLOCKSIZE blocks reduces a grid-strided slice of
-    // nnzb_per_row into workspace[blockIdx].
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        (rocsparse::dense2bell_max_nnzb_part1_kernel<REDUCE_BLOCKSIZE>),
-        dim3(REDUCE_BLOCKSIZE),
-        dim3(REDUCE_BLOCKSIZE),
-        0,
-        stream,
-        mb,
-        nnzb_per_row,
-        workspace);
+    int64_t                max_nnzb_per_row = 0;
+    const rocsparse_status status
+        = dense2bell_max_nnzb_per_row(handle, mb, nnzb_per_row, workspace, &max_nnzb_per_row);
 
-    // Stage 2: a single block reduces the workspace array into workspace[0].
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        (rocsparse::dense2bell_max_nnzb_part2_kernel<REDUCE_BLOCKSIZE>),
-        dim3(1),
-        dim3(REDUCE_BLOCKSIZE),
-        0,
-        stream,
-        workspace);
-
-    int64_t max_nnzb_per_row = 0;
-    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
-        &max_nnzb_per_row, workspace, sizeof(int64_t), hipMemcpyDeviceToHost, stream));
-    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
-
-    RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace, stream));
+    if(workspace_alloc)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace, stream));
+    }
+    RETURN_IF_ROCSPARSE_ERROR(status);
 
     // ell_cols is expressed in columns, i.e. the block width scaled by the block size.
     *ell_cols = max_nnzb_per_row * ell_block_size;
@@ -151,7 +198,7 @@ rocsparse_status rocsparse::dense2bell_template(rocsparse_handle          handle
     // Stream
     hipStream_t stream = handle->stream;
 
-    const int64_t mb              = (m + ell_block_size - 1) / ell_block_size;
+    const int64_t mb              = rocsparse::ceil_div(m, ell_block_size);
     const int64_t ell_block_width = ell_cols / ell_block_size;
 
     if(mb == 0 || ell_block_width == 0)

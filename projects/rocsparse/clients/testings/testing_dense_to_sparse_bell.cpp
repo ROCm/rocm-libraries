@@ -251,6 +251,7 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                            h_bell_val_cpu,
                            h_bell_col_ind_cpu);
 
+        unit_check_scalar<int64_t>(ell_cols_tmp, ell_cols_cpu);
         h_bell_col_ind_cpu.unit_check(h_bell_col_ind_gpu);
         h_bell_val_cpu.unit_check(h_bell_val_gpu);
     }
