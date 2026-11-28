@@ -19,6 +19,15 @@
 #include <string>
 #include <type_traits>
 
+#ifndef _WIN32
+#include <dirent.h>
+#include <fstream>
+#include <memory>
+#include <sstream>
+#include <string_view>
+#include <system_error>
+#endif
+
 #ifdef _WIN32
 // clang-format off
 #include <windows.h>
@@ -28,6 +37,7 @@
 #endif
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_CK_LIB_PATH)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_EARLY_LOAD)
 
 namespace miopen {
 namespace solver {
@@ -102,6 +112,12 @@ miopen::fs::path GetOwningModuleDirectory()
     return {};
 }
 
+#ifndef _WIN32
+// Keep symbols local to avoid accidental global symbol collisions and
+// preserve RTLD_NODELETE to match the existing unload behavior.
+constexpr int ck_dlopen_flags = RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE;
+#endif
+
 void* OpenDynamicLibrary(const miopen::fs::path& library_path)
 {
     MIOPEN_LOG_I("Loading Composable Kernel dynamic library: " << library_path.string());
@@ -109,11 +125,8 @@ void* OpenDynamicLibrary(const miopen::fs::path& library_path)
     const auto native_path = library_path.wstring();
     return static_cast<void*>(LoadLibraryW(native_path.c_str()));
 #else
-    // Keep symbols local to avoid accidental global symbol collisions and
-    // preserve RTLD_NODELETE to match the existing unload behavior.
-    constexpr int flags    = RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE;
     const auto native_path = library_path.string();
-    return dlopen(native_path.c_str(), flags);
+    return dlopen(native_path.c_str(), ck_dlopen_flags);
 #endif
 }
 
@@ -207,6 +220,128 @@ const CkImplLibLoader& CkImplLibLoader::Get(const std::string& device_name)
     }
     return *it->second;
 }
+
+#ifndef _WIN32
+namespace {
+
+/// Calls fn(entry_name) for each entry of the directory, skipping "." and "..". A directory
+/// that cannot be opened has no entries.
+///
+/// This uses opendir and readdir, not std::filesystem::directory_iterator. The library
+/// constructor below can run before the constructors of libraries preloaded into the process,
+/// and libstdc++ opens the directory with openat. A preloaded library that intercepts openat
+/// can crash when it is called before its own constructor has run, while it handles opendir
+/// during that window.
+template <class Fn>
+void ForEachDirectoryEntry(const char* dir, Fn&& fn)
+{
+    const std::unique_ptr<DIR, int (*)(DIR*)> handle{opendir(dir), closedir};
+    if(!handle)
+        return;
+    // readdir is thread safe when no other thread reads the same stream, and this one is local.
+    while(const dirent* entry = readdir(handle.get())) // NOLINT(concurrency-mt-unsafe)
+    {
+        const std::string_view name{entry->d_name};
+        if(name != "." && name != "..")
+            fn(name);
+    }
+}
+
+} // namespace
+
+std::string GfxNameFromTargetVersion(unsigned long long target_version)
+{
+    if(target_version == 0)
+        return {};
+    std::ostringstream name;
+    name << "gfx" << target_version / 10000 << std::hex << (target_version / 100) % 100
+         << target_version % 100;
+    return name.str();
+}
+
+std::vector<std::string> GetKfdDeviceNames()
+{
+    std::vector<std::string> names;
+    constexpr std::string_view nodes_dir = "/sys/class/kfd/kfd/topology/nodes";
+    ForEachDirectoryEntry(nodes_dir.data(), [&](std::string_view node) {
+        std::ifstream properties{std::string{nodes_dir} + '/' + std::string{node} + "/properties"};
+        std::string key;
+        unsigned long long value = 0;
+        while(properties >> key >> value)
+        {
+            if(key != "gfx_target_version")
+                continue;
+            auto name = GfxNameFromTargetVersion(value);
+            if(!name.empty() && std::find(names.begin(), names.end(), name) == names.end())
+                names.push_back(std::move(name));
+            break;
+        }
+    });
+    return names;
+}
+
+namespace {
+
+/// True when this process already has the GPU kernel driver open, that is, when a GPU runtime
+/// has started.
+bool IsKfdOpen()
+{
+    bool found = false;
+    ForEachDirectoryEntry("/proc/self/fd", [&](std::string_view fd) {
+        std::error_code ec;
+        const miopen::fs::path link{"/proc/self/fd/" + std::string{fd}};
+        if(miopen::fs::read_symlink(link, ec) == "/dev/kfd")
+            found = true;
+    });
+    return found;
+}
+
+/// Loads the CK library of each GPU in the system while MIOpen itself is being loaded, which in
+/// most applications is before the HIP runtime starts. The HIP runtime extracts the code
+/// objects of a fat binary registered before it starts when a kernel of that fat binary is
+/// first used, and those of one registered after it starts at once and for every device. For
+/// the CK library the second case extracts every code object of the library.
+///
+/// This only maps the library, from the directories CkImplLibLoader searches first, and keeps it
+/// mapped (RTLD_NODELETE). CkImplLibLoader::Get at handle creation then opens the same file, which
+/// is already mapped. It does not log and reads MIOPEN_CK_LIB_PATH without caching,
+/// so environment variables an application sets after loading MIOpen still apply. When it does
+/// not load the library (Windows, a GPU runtime already started, MIOPEN_DEBUG_CK_EARLY_LOAD=0,
+/// another library path at handle creation), handle creation loads it as before.
+__attribute__((constructor)) void LoadComposableKernelEarly()
+{
+    try
+    {
+        if(env::disabled(MIOPEN_DEBUG_CK_EARLY_LOAD) || IsKfdOpen())
+            return;
+        const auto env_path = env::getEnvironmentVariable(MIOPEN_CK_LIB_PATH.GetName());
+        const auto lib_dir  = GetOwningModuleDirectory();
+        for(const auto& name : GetKfdDeviceNames())
+        {
+            const miopen::fs::path filename{MakeLibraryFilename(name)};
+            for(const auto& dir :
+                {env_path ? miopen::fs::path{*env_path} : miopen::fs::path{}, lib_dir})
+            {
+                std::error_code ec;
+                if(dir.empty() || !miopen::fs::exists(dir / filename, ec))
+                    continue;
+                void* handle = dlopen((dir / filename).string().c_str(), ck_dlopen_flags);
+                if(handle != nullptr)
+                {
+                    dlclose(handle);
+                    break;
+                }
+            }
+        }
+    }
+    catch(...) // NOLINT(bugprone-empty-catch)
+    {
+        // An exception must not leave a library constructor. Handle creation loads the library.
+    }
+}
+
+} // namespace
+#endif
 
 // -- Construction / Destruction -----------------------------------------------
 

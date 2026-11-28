@@ -12,10 +12,17 @@
 #include <miopen/execution_context.hpp>
 #include <miopen/tensor.hpp>
 
+#include <cstdlib>
+#include <fstream>
+#include <string>
 #include <thread>
 
 #if MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime.h>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+#include <miopen/miopen.h>
 #endif
 
 using miopen::solver::CKSolverType;
@@ -176,6 +183,105 @@ TEST_P(GPU_CkImplLoader_FP16, LoaderStripsDeviceSuffix)
         << "Suffixed and bare device names should resolve to the same cached loader";
 }
 
+#ifndef _WIN32
+namespace {
+
+// HSA_OVERRIDE_GFX_VERSION changes the architecture the HIP runtime reports for a device but not
+// the KFD topology that MIOpen reads before the runtime starts, so the two names can differ.
+bool GfxVersionOverridden() { return std::getenv("HSA_OVERRIDE_GFX_VERSION") != nullptr; }
+
+} // namespace
+
+// MIOpen loads the CK library of each GPU in the KFD topology when MIOpen itself is loaded. The
+// name derived there must be the one the HIP runtime reports, or that early load picks the wrong
+// library and handle creation then loads the right one.
+TEST_P(GPU_CkImplLoader_FP16, KfdDeviceNamesContainCurrentDevice)
+{
+    if(GfxVersionOverridden())
+        GTEST_SKIP() << "HSA_OVERRIDE_GFX_VERSION makes the HIP runtime report another name than "
+                        "the KFD topology";
+
+    auto device_name = GetCurrentDeviceName();
+    ASSERT_FALSE(device_name.empty());
+    device_name = device_name.substr(0, device_name.find(':'));
+
+    const auto names = miopen::solver::GetKfdDeviceNames();
+    EXPECT_NE(std::find(names.begin(), names.end(), device_name), names.end())
+        << "KFD topology does not list " << device_name;
+}
+
+namespace {
+
+bool CkLibraryMapped()
+{
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    while(std::getline(maps, line))
+    {
+        if(line.find("MIOpenCKGroupedConv_") != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
+// Whether the CK library was mapped when this binary started. libMIOpen runs its initializers
+// before the ones of the binary that links it, and priority 101 runs this one before the other
+// static initializers of the binary and before main. In a binary that holds many test files, test
+// registration or a global environment may create a MIOpen handle later, which loads the CK
+// library through handle creation.
+bool ck_mapped_at_start = false;
+
+__attribute__((constructor(101))) void RecordCkMappedAtStart()
+{
+    ck_mapped_at_start = CkLibraryMapped();
+}
+
+} // namespace
+
+// Loading MIOpen maps the CK library of the current device before any code of the test runs, and
+// MIOPEN_DEBUG_CK_EARLY_LOAD=0 turns that off. A threadsafe death test starts a new process of
+// this binary for each check, and the child checks what was mapped when it started.
+// The child runs this test body again from the top, so the skip below must not fire for the
+// MIOPEN_DEBUG_CK_EARLY_LOAD=0 that the test itself sets for the second child.
+TEST_P(GPU_CkImplLoader_FP16, EarlyLoadMapsLibraryBeforeRuntime)
+{
+    const bool set_by_test = std::getenv("MIOPEN_TEST_CK_EARLY_LOAD_CHILD") != nullptr;
+    if((std::getenv("MIOPEN_DEBUG_CK_EARLY_LOAD") != nullptr && !set_by_test) ||
+       std::getenv("MIOPEN_CK_LIB_PATH") != nullptr)
+        GTEST_SKIP() << "early load configured from the environment";
+
+    const char* deferred = std::getenv("HIP_ENABLE_DEFERRED_LOADING");
+    if(deferred != nullptr && std::string{deferred} == "0")
+        GTEST_SKIP() << "HIP_ENABLE_DEFERRED_LOADING=0 starts the HIP runtime before MIOpen loads";
+
+    // The early load follows the KFD names and the library below follows the HIP name.
+    if(GfxVersionOverridden())
+        GTEST_SKIP() << "HSA_OVERRIDE_GFX_VERSION makes the HIP runtime report another name than "
+                        "the KFD topology";
+
+    auto device_name = GetCurrentDeviceName();
+    ASSERT_FALSE(device_name.empty());
+    device_name = device_name.substr(0, device_name.find(':'));
+    Dl_info info{};
+    ASSERT_NE(dladdr(reinterpret_cast<void*>(miopenCreate), &info), 0);
+    const auto lib = miopen::fs::path{info.dli_fname}.parent_path() /
+                     ("libMIOpenCKGroupedConv_" + device_name + ".so");
+    if(!miopen::fs::exists(lib))
+        GTEST_SKIP() << "CK grouped conv library not installed next to MIOpen: " << lib;
+
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    EXPECT_EXIT(std::_Exit(ck_mapped_at_start ? 0 : 1), ::testing::ExitedWithCode(0), "")
+        << "loading MIOpen did not map " << lib;
+
+    setenv("MIOPEN_DEBUG_CK_EARLY_LOAD", "0", 1);      // NOLINT(concurrency-mt-unsafe)
+    setenv("MIOPEN_TEST_CK_EARLY_LOAD_CHILD", "1", 1); // NOLINT(concurrency-mt-unsafe)
+    EXPECT_EXIT(std::_Exit(ck_mapped_at_start ? 1 : 0), ::testing::ExitedWithCode(0), "")
+        << "MIOPEN_DEBUG_CK_EARLY_LOAD=0 did not stop the early load";
+    unsetenv("MIOPEN_TEST_CK_EARLY_LOAD_CHILD"); // NOLINT(concurrency-mt-unsafe)
+    unsetenv("MIOPEN_DEBUG_CK_EARLY_LOAD");      // NOLINT(concurrency-mt-unsafe)
+}
+#endif
+
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_CkImplLoader_FP16, ::testing::Values(0));
 
 #endif // MIOPEN_BACKEND_HIP
@@ -183,6 +289,25 @@ INSTANTIATE_TEST_SUITE_P(Standard, GPU_CkImplLoader_FP16, ::testing::Values(0));
 // -- CPU tests (no GPU required) ----------------------------------------------
 
 using CPU_CkImplLoader_NONE = testing::TestWithParam<int>;
+
+#ifndef _WIN32
+// The KFD topology spells the target as major * 10000 + minor * 100 + stepping, and the GPU name
+// spells minor and stepping as hex digits. On gfx942, gfx950 and the gfx11 and gfx12 targets the
+// hex and decimal spellings agree, so only gfx90a and gfx90c tell a wrong conversion apart there.
+TEST_P(CPU_CkImplLoader_NONE, GfxNameFromTargetVersion)
+{
+    using miopen::solver::GfxNameFromTargetVersion;
+    EXPECT_EQ(GfxNameFromTargetVersion(90008), "gfx908");
+    EXPECT_EQ(GfxNameFromTargetVersion(90010), "gfx90a");
+    EXPECT_EQ(GfxNameFromTargetVersion(90012), "gfx90c");
+    EXPECT_EQ(GfxNameFromTargetVersion(90402), "gfx942");
+    EXPECT_EQ(GfxNameFromTargetVersion(90500), "gfx950");
+    EXPECT_EQ(GfxNameFromTargetVersion(110000), "gfx1100");
+    EXPECT_EQ(GfxNameFromTargetVersion(110501), "gfx1151");
+    EXPECT_EQ(GfxNameFromTargetVersion(120001), "gfx1201");
+    EXPECT_EQ(GfxNameFromTargetVersion(0), "") << "CPU nodes report 0 and have no name";
+}
+#endif
 
 TEST_P(CPU_CkImplLoader_NONE, LoaderFailsGracefullyForUnknownDevice)
 {
