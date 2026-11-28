@@ -213,15 +213,16 @@ namespace Tensile
                 {
                     // Idempotent: producer may already have suffixed the
                     // filePrefix with "_<arch>" (per-arch fallback routing).
-                    // Don't double-append.
-                    const std::string archSuffix = std::string("_") + arch;
-                    if(coFileDependency.size() < archSuffix.size()
-                       || coFileDependency.compare(coFileDependency.size() - archSuffix.size(),
-                                                   archSuffix.size(),
-                                                   archSuffix)
-                              != 0)
+                    // That arch may also be a generic target (e.g. gfx9-generic)
+                    // that differs from the hardware arch (e.g. gfx90c) when the
+                    // generic library is used as fallback. Don't double-append.
+                    const auto lastUnderscore = coFileDependency.rfind('_');
+                    const bool hasArchSuffix
+                        = lastUnderscore != std::string::npos
+                          && coFileDependency.compare(lastUnderscore + 1, 3, "gfx") == 0;
+                    if(!hasArchSuffix)
                     {
-                        coFileDependency += archSuffix;
+                        coFileDependency += std::string("_") + arch;
                     }
                     coFileDependency += std::string(".hsaco");
                 }
