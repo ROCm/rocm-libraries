@@ -49,6 +49,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
+* Fixed an issue for ROCm 7.2.0 where `device_merge_inplace`` could return an unsorted array due to out-of-order stream commands.
 
 ### Fixed
 
