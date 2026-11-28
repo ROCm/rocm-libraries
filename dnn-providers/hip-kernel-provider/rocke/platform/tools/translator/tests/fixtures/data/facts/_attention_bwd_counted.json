@@ -1,0 +1,344 @@
+{
+ "attrs": {
+  "CountedWaits": {
+   "_issued": [
+    "int"
+   ],
+   "_since_load": [
+    "int"
+   ],
+   "n_atomics": [
+    "int"
+   ],
+   "waits": [
+    "list[]",
+    "list[int]"
+   ]
+  },
+  "StagedStep": {
+   "qdo": [
+    "tuple[Value,...]",
+    "tuple[Value,Value,Value,Value]",
+    "tuple[Value,Value]"
+   ],
+   "stats": [
+    "tuple[Value,...]"
+   ]
+  },
+  "_LdsView": {
+   "lds": [
+    "Value"
+   ]
+  }
+ },
+ "built": 85,
+ "configs": 93,
+ "driver": {
+  "_LdsView.store@108": {
+   "args": [
+    "self",
+    "b",
+    "row",
+    "col",
+    "val",
+    "vec"
+   ],
+   "calls": 308,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "col": [
+     "Value"
+    ],
+    "row": [
+     "Value"
+    ],
+    "self": [
+     "_LdsView"
+    ],
+    "val": [
+     "Value"
+    ],
+    "vec": [
+     "int"
+    ]
+   },
+   "return": [
+    "None"
+   ]
+  },
+  "build_attention_bwd_counted_kernel.<locals>.loader.<locals>.load@164": {
+   "args": [
+    "row",
+    "col"
+   ],
+   "calls": 312,
+   "params": {
+    "col": [
+     "Value"
+    ],
+    "row": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ]
+  }
+ },
+ "emit": "attention_bwd_counted_emit",
+ "funcs": {
+  "CountedWaits.__init__": {
+   "args": [
+    "self",
+    "n_atomics"
+   ],
+   "calls": 89,
+   "params": {
+    "n_atomics": [
+     "int"
+    ],
+    "self": [
+     "CountedWaits"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "27f6c1c24462"
+  },
+  "CountedWaits.atomics": {
+   "args": [
+    "self",
+    "n"
+   ],
+   "calls": 107,
+   "params": {
+    "n": [
+     "int"
+    ],
+    "self": [
+     "CountedWaits"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "6a11945fa61f"
+  },
+  "CountedWaits.barrier": {
+   "args": [
+    "self",
+    "b"
+   ],
+   "calls": 317,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "self": [
+     "CountedWaits"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "d7b8a55ab257"
+  },
+  "CountedWaits.end_step": {
+   "args": [
+    "self"
+   ],
+   "calls": 107,
+   "params": {
+    "self": [
+     "CountedWaits"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "fb7e8cc5ec8b"
+  },
+  "CountedWaits.loads": {
+   "args": [
+    "self"
+   ],
+   "calls": 105,
+   "params": {
+    "self": [
+     "CountedWaits"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "002d39758283"
+  },
+  "CountedWaits.step_entry": {
+   "args": [
+    "self"
+   ],
+   "calls": 107,
+   "params": {
+    "self": [
+     "CountedWaits"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "3ce6b9ae42fd"
+  },
+  "StagedStep.flat": {
+   "args": [
+    "self"
+   ],
+   "calls": 89,
+   "params": {
+    "self": [
+     "StagedStep"
+    ]
+   },
+   "return": [
+    "list[Value]"
+   ],
+   "src": "8ce39f493de5"
+  },
+  "StagedStep.from_flat": {
+   "args": [
+    "cls",
+    "values",
+    "n_stats"
+   ],
+   "calls": 89,
+   "params": {
+    "cls": [
+     "type"
+    ],
+    "n_stats": [
+     "int"
+    ],
+    "values": [
+     "list[Value]"
+    ]
+   },
+   "return": [
+    "StagedStep"
+   ],
+   "src": "acb124465413"
+  },
+  "issue_tile_loads": {
+   "args": [
+    "b",
+    "loads",
+    "chunks"
+   ],
+   "calls": 93,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "chunks": [
+     "list[TileChunk]"
+    ],
+    "loads": [
+     "list[callable]"
+    ]
+   },
+   "return": [
+    "list[Value]"
+   ],
+   "src": "d00cf9b2138d"
+  },
+  "store_tile": {
+   "args": [
+    "b",
+    "views",
+    "chunks",
+    "values",
+    "vec"
+   ],
+   "calls": 93,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "chunks": [
+     "list[TileChunk]"
+    ],
+    "values": [
+     "list[Value]"
+    ],
+    "vec": [
+     "int"
+    ],
+    "views": [
+     "list[_LdsView]"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "61213f14f8ec"
+  },
+  "tile_chunks": {
+   "args": [
+    "b",
+    "rows",
+    "cols",
+    "tid",
+    "threads",
+    "vec"
+   ],
+   "calls": 93,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "cols": [
+     "int"
+    ],
+    "rows": [
+     "int"
+    ],
+    "threads": [
+     "int"
+    ],
+    "tid": [
+     "Value"
+    ],
+    "vec": [
+     "int"
+    ]
+   },
+   "return": [
+    "list[TileChunk]"
+   ],
+   "src": "04a48222d1b9"
+  },
+  "zero_like": {
+   "args": [
+    "b",
+    "types"
+   ],
+   "calls": 90,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "types": [
+     "list[Type|VectorType]"
+    ]
+   },
+   "return": [
+    "None",
+    "list[Value]"
+   ],
+   "src": "e908cde8d604"
+  }
+ },
+ "rejected": 8,
+ "seconds": 0.09
+}
