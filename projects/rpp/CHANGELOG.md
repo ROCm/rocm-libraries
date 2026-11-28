@@ -38,6 +38,7 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 - Fixed HOST backend I8 Resize Mirror Normalize scalar path to use proper rounding and avoid intermediate type conversions, ensuring consistency with SIMD path and reference implementation.
 - Corrected `rppt_log` to return `RPP_ERROR_INVALID_SRC_DATATYPE` instead of the misleading `RPP_ERROR_INVALID_DST_DATATYPE` for unsupported source datatypes.
 - Fixed error propagation through the HIP kernel dispatcher: kernel launch failures now return `RPP_ERROR_HIP_LAUNCH` instead of `RPP_SUCCESS`, which previously masked launch errors as pixel mismatches on GPUs with no matching kernel binary.
+- Bounded the HIP kernel writes into the shared scratch buffer. `rain` copied a full-frame layer sized from the input dimensions without checking it against the buffer, and `tensor_sum`, `tensor_max`, `tensor_mean`, `tensor_min`, `tensor_stddev` and `normalize` sized their partial buffers from the grid and the batch the same way. `rain` now falls back to its own allocation and the reductions return `RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE`.
 
 ## RPP 3.2.0 ROCm 10.1.0
 

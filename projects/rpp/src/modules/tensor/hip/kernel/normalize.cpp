@@ -1252,6 +1252,11 @@ RppStatus set_kernel_launch_config_2d(RpptGenericDescPtr srcGenericDescPtr, int&
 
             Rpp32u partialSumArrLength =
                 srcGenericDescPtr->dims[0] * srcGenericDescPtr->dims[1] * globalThreads_x;
+            // Same buffer, same rule: this form grows with the batch, the channels
+            // and the width.
+            constexpr Rpp32u kScratchBufferFloats = 8294400;
+            if (static_cast<Rpp64u>(partialSumArrLength) > kScratchBufferFloats)
+                return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 partialSumArr, 0, partialSumArrLength * sizeof(Rpp32f), handle.GetStream()));
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
@@ -1269,6 +1274,12 @@ RppStatus set_kernel_launch_config_2d(RpptGenericDescPtr srcGenericDescPtr, int&
             globalThreads_z = srcGenericDescPtr->dims[0];
 
             Rpp32u partialSumArrLength = globalThreads_x * globalThreads_y * globalThreads_z;
+            // Block count against the fixed scratch; it grows with the frame area
+            // and the batch, so it is reachable: 8K allows 512 images, 4K allows
+            // 2048, 1080p allows 8132.
+            constexpr Rpp32u kScratchBufferFloats = 8294400;
+            if (static_cast<Rpp64u>(partialSumArrLength) > kScratchBufferFloats)
+                return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 partialSumArr, 0, partialSumArrLength * sizeof(Rpp32f), handle.GetStream()));
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
@@ -1321,6 +1332,12 @@ RppStatus set_kernel_launch_config_3d(RpptGenericDescPtr srcGenericDescPtr, int&
             globalThreads_z = srcGenericDescPtr->dims[0];
 
             Rpp32u partialSumArrLength = globalThreads_x * globalThreads_y * globalThreads_z;
+            // Block count against the fixed scratch; it grows with the frame area
+            // and the batch, so it is reachable: 8K allows 512 images, 4K allows
+            // 2048, 1080p allows 8132.
+            constexpr Rpp32u kScratchBufferFloats = 8294400;
+            if (static_cast<Rpp64u>(partialSumArrLength) > kScratchBufferFloats)
+                return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 partialSumArr, 0, partialSumArrLength * sizeof(Rpp32f), handle.GetStream()));
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
@@ -1359,6 +1376,12 @@ RppStatus set_kernel_launch_config_3d(RpptGenericDescPtr srcGenericDescPtr, int&
             globalThreads_z = srcGenericDescPtr->dims[0];
 
             Rpp32u partialSumArrLength = globalThreads_x * globalThreads_y * globalThreads_z;
+            // Block count against the fixed scratch; it grows with the frame area
+            // and the batch, so it is reachable: 8K allows 512 images, 4K allows
+            // 2048, 1080p allows 8132.
+            constexpr Rpp32u kScratchBufferFloats = 8294400;
+            if (static_cast<Rpp64u>(partialSumArrLength) > kScratchBufferFloats)
+                return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 partialSumArr, 0, partialSumArrLength * sizeof(Rpp32f), handle.GetStream()));
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
@@ -1376,6 +1399,12 @@ RppStatus set_kernel_launch_config_3d(RpptGenericDescPtr srcGenericDescPtr, int&
             globalThreads_z = srcGenericDescPtr->dims[0];
 
             Rpp32u partialSumArrLength = globalThreads_x * globalThreads_y * globalThreads_z;
+            // Block count against the fixed scratch; it grows with the frame area
+            // and the batch, so it is reachable: 8K allows 512 images, 4K allows
+            // 2048, 1080p allows 8132.
+            constexpr Rpp32u kScratchBufferFloats = 8294400;
+            if (static_cast<Rpp64u>(partialSumArrLength) > kScratchBufferFloats)
+                return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
             RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
                 partialSumArr, 0, partialSumArrLength * sizeof(Rpp32f), handle.GetStream()));
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));

@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <memory>
 #include <random>
 
 #include "hip_tensor_executors.hpp"
@@ -243,10 +244,33 @@ RppStatus hip_exec_rain_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr, Rpp
         }
     }
 
-    T* rainLayerHip =
-        reinterpret_cast<T*>(handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
-    RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(rainLayerHip, rainLayer,
-                                           srcDescPtr->w * srcDescPtr->h * sizeof(T),
+    // The rain layer is a full-frame scratch, so its size follows the caller's
+    // dimensions and element type rather than a filter size. The shared HIP
+    // scratch holds one 4K Rpp32f frame (sizeof(Rpp32f) * 8294400); a larger frame,
+    // or the same frame at a wider element, does not fit. Compare before copying
+    // and fall back to a dedicated allocation, the way histogram_equalize already
+    // does for its histogram buffer.
+    constexpr size_t kScratchBufferSize = sizeof(Rpp32f) * 8294400;
+    const size_t rainLayerSize = static_cast<size_t>(srcDescPtr->w) * srcDescPtr->h * sizeof(T);
+
+    auto hip_async_deleter = [stream = handle.GetStream()](void* ptr) {
+        if (ptr) {
+            (void)hipFreeAsync(ptr, stream);
+        }
+    };
+    std::unique_ptr<T, decltype(hip_async_deleter)> rainLayerOverflowGuard(nullptr,
+                                                                           hip_async_deleter);
+    T* rainLayerHip = nullptr;
+    if (rainLayerSize <= kScratchBufferSize) {
+        rainLayerHip =
+            reinterpret_cast<T*>(handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
+    } else {
+        Rpp8u* overflowBuffer = nullptr;
+        RPP_HIP_RETURN_IF_ERROR(hipMalloc(&overflowBuffer, rainLayerSize));
+        rainLayerHip = reinterpret_cast<T*>(overflowBuffer);
+        rainLayerOverflowGuard.reset(rainLayerHip);
+    }
+    RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(rainLayerHip, rainLayer, rainLayerSize,
                                            hipMemcpyHostToDevice, handle.GetStream()));
 
     int globalThreads_x = (dstDescPtr->w + 7) >> 3;
