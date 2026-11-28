@@ -128,6 +128,18 @@ def test_solution_name_full(make_state, snapshot):
     assert N.getSolutionNameFull(make_state(), splitGSU=False) == snapshot
 
 
+def test_legacy_local_dot_layout_preserves_full_name_and_key(make_state):
+    baseline = make_state()
+    legacy = make_state(LocalDotLayout=1)
+    dot4 = make_state(LocalDotLayout=4)
+    assert N.getSolutionNameFull(legacy, splitGSU=False) == N.getSolutionNameFull(
+        baseline, splitGSU=False)
+    assert N.getKeyNoInternalArgs(legacy, splitGSU=False) == N.getKeyNoInternalArgs(
+        baseline, splitGSU=False)
+    assert N.getSolutionNameFull(dot4, splitGSU=False) != N.getSolutionNameFull(
+        baseline, splitGSU=False)
+
+
 def test_kernel_name_min(make_state, snapshot):
     assert N.getKernelNameMin(make_state(), splitGSU=False) == snapshot
 
