@@ -363,6 +363,18 @@ def test_the_pass_preserves_the_single_loop_pgr_edge_barrier():
     assert len(barriers) > 1, "the preserved edge barrier disabled normal planning"
 
 
+def test_the_pass_preserves_the_sdma_handshake_barrier():
+    handshake = SBarrier(comment="fused-A2A SDMA handshake sync: all waves done before counter election")
+    authored = SBarrier(comment="ordinary writer barrier")
+    root = _seq(_fill(), authored, _read(), handshake)
+
+    _runPass(_waveParityKernel(), root)
+
+    barriers = _barriers(root)
+    assert handshake in barriers, "the planner removed the SDMA handshake barrier"
+    assert authored not in barriers, "an ordinary authored barrier was not rebuilt"
+
+
 def test_the_pass_preserves_pgr1_tdm_synchronization():
     """PGR1's authored tensor drain and extra barrier are one synchronization unit."""
     firstBarrier = SBarrier(comment="PGR, and wait until LW done to sync")

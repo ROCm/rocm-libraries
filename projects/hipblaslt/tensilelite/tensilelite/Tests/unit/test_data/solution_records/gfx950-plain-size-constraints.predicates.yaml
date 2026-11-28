@@ -158,7 +158,10 @@ problem:
   - type: SwizzleTensorB
     value: true
   - type: GemmA2AShape
-    value: 32
+    value:
+    - 32
+    - 19
+    - 14
   - type: SizeEqual
     index: 0
     value: 64

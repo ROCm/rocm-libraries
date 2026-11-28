@@ -48,6 +48,9 @@ namespace TensileLite
         // internalParameters["GlobalSplitUPGR"] in Tensile/Common/GlobalParameters.py.
         constexpr size_t GlobalSplitUPGR = 16;
 
+        // CLUSTER_AID_MAPPING_XCC_COUNT in Tensile/Common/Constants.py.
+        constexpr int clusterAIDMappingXccCount = 8;
+
         std::string_view view(msgpack::object const& object)
         {
             return {object.via.str.ptr, object.via.str.size};
@@ -1455,8 +1458,14 @@ namespace TensileLite
             if(problemType.record.mxBlockA || problemType.record.mxBlockB)
                 rv.push_back(withValue<MXScaleFormatEquals>(mxScaleFormatId(state)));
 
+            // SDMA_COPY_FIELD_BITS_* in Tensile/Common/Constants.py.
             if(problemType.record.fusedA2A == FusedA2A::GemmA2A)
-                rv.push_back(withValue<GemmA2AShape>(state.integer("MacroTile0")));
+            {
+                auto const isa     = state["ISA"].list();
+                bool const gfx1250 = isa[0].integer() == 12 && isa[1].integer() == 5;
+                rv.push_back(withValue<GemmA2AShape>(std::array<int64_t, 3>{
+                    state.integer("MacroTile0"), gfx1250 ? 16 : 19, gfx1250 ? 16 : 14}));
+            }
 
             // Exact-size custom kernels record the M/N/K window they won.
             if(auto const* bounds = state.find("CustomKernelSizePredicate"))
@@ -1568,8 +1577,10 @@ namespace TensileLite
         }
 
         // Hardware.HardwarePredicate.FromHardware.
-        std::shared_ptr<HardwarePredicate>
-            hardwarePredicate(Value const& isaValue, Value const* cuCount, Value const* deviceNames)
+        std::shared_ptr<HardwarePredicate> hardwarePredicate(Value const& isaValue,
+                                                             Value const* cuCount,
+                                                             Value const* deviceNames,
+                                                             int          xccCount)
         {
             auto isa = isaValue.list();
             if(isa.size() < 3)
@@ -1592,6 +1603,8 @@ namespace TensileLite
             if(cuCount && !cuCount->isNone())
                 props.push_back(
                     std::make_shared<Predicates::GPU::CUCountEqual>(int(cuCount->integer())));
+            if(xccCount != 0)
+                props.push_back(std::make_shared<Predicates::GPU::XCCCountEqual>(xccCount));
             if(ChipIdRegistry::supportsChipIdPredicate(processor))
                 if(auto pciChipId = pciChipIdPredicate(deviceNames))
                     props.push_back(pciChipId);
@@ -1870,8 +1883,11 @@ namespace TensileLite
                 rv->linearModel.max = value->number();
         }
 
-        rv->hardwarePredicate
-            = hardwarePredicate(d["ISA"], d.find("CUCount"), d.find("DeviceNames"));
+        rv->hardwarePredicate = hardwarePredicate(
+            d["ISA"],
+            d.find("CUCount"),
+            d.find("DeviceNames"),
+            d.integer("ClusterAIDMapping", -1) != -1 ? clusterAIDMappingXccCount : 0);
 
         return rv;
     }

@@ -10683,7 +10683,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # n_shard = FusedAM / FusedW, divided once in the prologue (W is not a
       # power of two, so this is a real u32 divide, not a shift).
       self.defineSgpr("FusedNShard", 1)
-      # ceil(N / MT1), needed by both the counter3 address and the handshake's
+      # ceil(N / (MT1 * tiles per band)), needed by both the counter3 address and the handshake's
       # counter index; latched so the two do not each recompute it.
       self.defineSgpr("FusedTokenTiles", 1)
       # Offset of this WG's peer group within the kernarg segment. Every pointer
@@ -12236,14 +12236,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           keptItems.append(item)
         elif isinstance(item, SBarrier) \
              and "-3" not in str(item).split("//", 1)[0] \
-             and "PGR bypass sync" not in item.comment:
+             and "PGR bypass sync" not in item.comment \
+             and "SDMA handshake sync" not in item.comment:
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
           # prologue arrive, are placed deliberately by other components and
           # carry no LDS token, so preserve them rather than dropping a half of
-          # a cluster handshake. The PGR bypass syncs are matched on the comment
-          # attribute: str() drops comments under --disable-asm-comments.
+          # a cluster handshake. The PGR bypass and SDMA handshake syncs are matched
+          # on the comment attribute: str() drops comments under --disable-asm-comments.
           removedCount += 1
           continue
         else:

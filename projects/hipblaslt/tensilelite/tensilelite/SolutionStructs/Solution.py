@@ -2759,10 +2759,13 @@ class Solution(collections.abc.Mapping):
 
     fusedA2A = state["ProblemType"]["FusedA2A"]
     if fusedA2A != "Disabled":
-      if isa[:2] not in ((9, 4), (9, 5)):
+      if fusedA2A == "GemmA2A" and isa[:2] not in ((9, 4), (9, 5), (12, 5)):
         reject(state, printRejectionReason,
-               "FusedA2A=%s requires a gfx94x/gfx95x ISA (the SdmaPacketEmitter "
-               "packet layout is gfx9 only)" % fusedA2A)
+               "FusedA2A=GemmA2A requires a gfx94x/gfx95x/gfx1250 ISA")
+        return
+      if fusedA2A != "GemmA2A" and isa[:2] not in ((9, 4), (9, 5)):
+        reject(state, printRejectionReason,
+               "FusedA2A=%s requires a gfx94x/gfx95x ISA" % fusedA2A)
         return
       if isPersistent(state):
         reject(state, printRejectionReason,

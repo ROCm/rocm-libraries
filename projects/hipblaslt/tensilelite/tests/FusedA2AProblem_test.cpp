@@ -60,7 +60,7 @@ namespace
 
 TEST(FusedA2AProblem, ShapePredicate)
 {
-    Predicates::Contraction::GemmA2AShape mt256(256);
+    Predicates::Contraction::GemmA2AShape mt256({256, 19, 14});
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 4, 2048)));
     EXPECT_TRUE(mt256(fusedProblem(3072, 512, 3072, 8, 2048)));
     // D is not 2 bytes
@@ -85,6 +85,18 @@ TEST(FusedA2AProblem, ShapePredicate)
     auto plain
         = ContractionProblemGemm::GEMM(false, true, 3000, 500, 100, 3000, 500, 3000, 0.0, false, 1);
     EXPECT_TRUE(mt256(plain));
+}
+
+TEST(FusedA2AProblem, ShapePredicateGfx12FieldWidths)
+{
+    Predicates::Contraction::GemmA2AShape gfx9({256, 19, 14});
+    Predicates::Contraction::GemmA2AShape gfx12({256, 16, 16});
+    // (ldd >> 3) == 2^16 - 1 and 2^16
+    EXPECT_TRUE(gfx12(fusedProblem(3072, 512, 524280, 2, 2048)));
+    EXPECT_FALSE(gfx12(fusedProblem(3072, 512, size_t(1) << 19, 2, 2048)));
+    EXPECT_TRUE(gfx9(fusedProblem(3072, 512, size_t(1) << 19, 2, 2048)));
+    // (nShard >> 3) == 16384
+    EXPECT_TRUE(gfx12(fusedProblem(262144, 16, 262144, 2, 262144)));
 }
 
 TEST(FusedA2AProblem, SegmentNeedsCuCount)

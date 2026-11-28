@@ -21,6 +21,7 @@
 ################################################################################
 
 
+from ..Common.Constants import CLUSTER_AID_MAPPING_XCC_COUNT
 from ..ExecutionPolicy import isPersistent
 from rocisa.code import Module, Label, ValueSet
 from rocisa.instruction import SSendMsgRtnB32
@@ -432,9 +433,11 @@ def ClusterAIDRemap(writer, kernel, sgprWGM):
     module = Module("ClusterAIDRemap")
     start = kernel["ClusterAIDMapping"]
     cs, ck = kernel["ClusterDim"]
-    if start == -1 or isPersistent(kernel) or cs & (cs - 1) or ck & (ck - 1):
+    if start == -1 or isPersistent(kernel) or cs & (cs - 1) or ck & (ck - 1) \
+            or kernel["ProblemType"]["FusedA2A"] == "GemmA2A":
         return module
-    numXCC, xccPerAID = 8, 4
+    numXCC = CLUSTER_AID_MAPPING_XCC_COUNT
+    xccPerAID = numXCC // 2
     log2cs, log2ck = int(log2(cs)), int(log2(ck))
 
     module.addComment1("remap clusters onto AIDs: one contiguous half of the cluster grid per GL2")
@@ -1364,8 +1367,25 @@ def FusedA2AWgRemap(writer, kernel):
     stray SCC write in between selects from a dead condition, which is still a
     bijection, so the numerics stay correct and only the dispatch order -- the
     entire point -- is wrong.
+
+    Under a workgroup cluster the map runs on cluster coordinates (N0/Cs, N1/Ck,
+    A/Cs) and each work-group keeps its position in the cluster.  It is skipped
+    at runtime unless N0 and A are multiples of Cs and N1 of Ck, and not emitted
+    when Cs or Ck is not a power of two.
+
+    With ClusterAIDMapping it replaces ClusterAIDRemap: AID a takes the M half
+    [a*A/2, (a+1)*A/2) of the PUSH segment and [A + a*L/2, A + (a+1)*L/2) of the
+    local segment, and runs the map above on its own dispatch index
+    (c // 8)*4 + xcc % 4.  Needs Cx*Cy % 8 == 0 and A, Cx even in clusters;
+    otherwise the clusters are ordered as without ClusterAIDMapping.
     """
     module = Module("FusedA2AWgRemap")
+
+    cs, ck = kernel["ClusterDim"]
+    cluster = clusterEnabled(kernel["ClusterDim"])
+    if cluster and (cs & (cs - 1) or ck & (ck - 1)):
+        return module
+    aidMap = cluster and kernel["ClusterAIDMapping"] != -1
 
     from .Signature import fusedA2AKernArgLayout
     layout = fusedA2AKernArgLayout()
@@ -1379,23 +1399,79 @@ def FusedA2AWgRemap(writer, kernel):
     sS = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_S", preventOverflow=False)
     sL = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_L", preventOverflow=False)
     sU = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_u", preventOverflow=False)
+    # sW = PUSH width of one dispatch stream, sX = aid
+    sW = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_w", preventOverflow=False) if aidMap else sA
+    sX = writer.sgprPool.checkOut(1, tag="fusedA2AWgRemap_aid", preventOverflow=False) if aidMap else None
 
     # A = FusedAM >> log2(MT0) -- the same expression as the epilogue's PUSH gate
     # (emitFusedA2AGate). Deriving it differently would split the grid at one
     # boundary and classify PUSH/local at another.
     module.add(writer.argLoader.loadKernArg(sA, "KernArgAddress",
         sgprOffset=hex(fusedBase + layout["FusedAM"]), dword=1))
-    module.add(SMulI32(dst=sgpr(sT), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1"),
-                       comment="t = wg1*N0 ..."))
-    module.add(SAddU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr("WorkGroup0"),
-                       comment="... + wg0 (linear dispatch index)"))
-    module.add(SWaitCnt(kmcnt=0, comment="wait FusedAM for the WG remap"))
-    module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2mt0, src=sgpr(sA),
-                               comment="A = AM_tiles = FusedAM >> log2(MT0=%u)" % kernel["MacroTile0"]))
-    module.add(SMulI32(dst=sgpr(sS), src0=sgpr(sA), src1=sgpr("NumWorkGroups1"),
-                       comment="S = A*N1 (size of the PUSH segment)"))
-    module.add(SSubU32(dst=sgpr(sL), src0=sgpr("NumWorkGroups0"), src1=sgpr(sA),
-                       comment="L = N0-A (M-tiles in the local segment)"))
+    if cluster:
+        log2cs, log2ck = int(log2(cs)), int(log2(ck))
+        labelEnd = Label(writer.labels.getNameInc("FusedA2AWgRemapEnd"), "")
+        module.add(SWaitCnt(kmcnt=0, comment="wait FusedAM for the WG remap"))
+        module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2mt0, src=sgpr(sA),
+                                   comment="A = AM_tiles = FusedAM >> log2(MT0=%u)" % kernel["MacroTile0"]))
+        module.add(SOrB32(dst=sgpr(sT), src0=sgpr("NumWorkGroups0"), src1=sgpr(sA)))
+        module.add(SAndB32(dst=sgpr(sT), src0=sgpr(sT), src1=hex(cs - 1), comment="(N0 | A) % Cs"))
+        module.add(SAndB32(dst=sgpr(sU), src0=sgpr("NumWorkGroups1"), src1=hex(ck - 1), comment="N1 % Ck"))
+        module.add(SOrB32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sU)))
+        module.add(SCmpEQU32(src0=sgpr(sT), src1=0, comment="grid and PUSH segment are whole clusters?"))
+        module.add(SCBranchSCC0(labelName=labelEnd.getLabelName()))
+        module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2cs, src=sgpr(sA), comment="A in clusters"))
+        module.add(SLShiftRightB32(dst=sgpr(sL), shiftHex=log2cs, src=sgpr("NumWorkGroups0"), comment="Cx"))
+        module.add(SLShiftRightB32(dst=sgpr(sS), shiftHex=log2ck, src=sgpr("NumWorkGroups1"), comment="Cy"))
+        module.add(SLShiftRightB32(dst=sgpr(sT), shiftHex=log2ck, src=sgpr("WorkGroup1"), comment="cy"))
+        module.add(SMulI32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sL), comment="t = cy*Cx ..."))
+        module.add(SLShiftRightB32(dst=sgpr(sU), shiftHex=log2cs, src=sgpr("WorkGroup0"), comment="cx"))
+        module.add(SAddU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sU),
+                           comment="... + cx (cluster dispatch index)"))
+        module.add(SAndB32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=hex(cs - 1), comment="peer x"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=sgpr("WorkGroup1"), src1=hex(ck - 1), comment="peer y"))
+        if aidMap:
+            labelOrder = Label(writer.labels.getNameInc("FusedA2AWgRemapOrder"), "")
+            numXCC = CLUSTER_AID_MAPPING_XCC_COUNT
+            xccPerAID = numXCC // 2
+            module.add(SMulI32(dst=sgpr(sW), src0=sgpr(sL), src1=sgpr(sS), comment="Nc = Cx*Cy"))
+            module.add(SAndB32(dst=sgpr(sW), src0=sgpr(sW), src1=hex(numXCC - 1), comment="Nc % 8"))
+            module.add(SOrB32(dst=sgpr(sX), src0=sgpr(sA), src1=sgpr(sL)))
+            module.add(SAndB32(dst=sgpr(sX), src0=sgpr(sX), src1=hex(1), comment="(A | Cx) % 2"))
+            module.add(SOrB32(dst=sgpr(sW), src0=sgpr(sW), src1=sgpr(sX)))
+            module.add(SCmpEQU32(src0=sgpr(sW), src1=0, comment="each AID can take half of both segments?"))
+            module.add(SMovB32(dst=sgpr(sW), src=sgpr(sA), comment="PUSH width = A"))
+            module.add(SMovB32(dst=sgpr(sX), src=0, comment="aid = 0"))
+            module.add(SCBranchSCC0(labelName=labelOrder.getLabelName()))
+            module.add(SSendMsgRtnB32(dst=sgpr(sX), src=135, comment="MSG_RTN_GET_SE_AID_ID, [31:16] = XCC"))
+            module.add(SWaitCnt(kmcnt=0, comment="wait SE_AID_ID"))
+            module.add(SLShiftRightB32(dst=sgpr(sX), shiftHex=16, src=sgpr(sX)))
+            module.add(SAndB32(dst=sgpr(sX), src0=sgpr(sX), src1=hex(numXCC - 1), comment="xcc from hardware"))
+            module.add(SLShiftRightB32(dst=sgpr(sT), shiftHex=int(log2(numXCC)), src=sgpr(sT), comment="c // 8"))
+            module.add(SLShiftLeftB32(dst=sgpr(sT), shiftHex=int(log2(xccPerAID)), src=sgpr(sT), comment="(c // 8) * 4"))
+            module.add(SAndB32(dst=sgpr(sU), src0=sgpr(sX), src1=hex(xccPerAID - 1), comment="xcc % 4"))
+            module.add(SAddU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sU),
+                               comment="t = (c // 8)*4 + xcc % 4 (dispatch index inside the AID)"))
+            module.add(SLShiftRightB32(dst=sgpr(sX), shiftHex=int(log2(xccPerAID)), src=sgpr(sX), comment="aid"))
+            module.add(SLShiftRightB32(dst=sgpr(sW), shiftHex=1, src=sgpr(sW), comment="PUSH width = A/2"))
+            module.add(SLShiftRightB32(dst=sgpr(sL), shiftHex=1, src=sgpr(sL), comment="Cx/2"))
+            module.add(labelOrder)
+        module.add(SMulI32(dst=sgpr(sS), src0=sgpr(sW), src1=sgpr(sS),
+                           comment="S = A*Cy (size of the PUSH segment)"))
+        module.add(SSubU32(dst=sgpr(sL), src0=sgpr(sL), src1=sgpr(sW),
+                           comment="L = Cx-A (clusters along M in the local segment)"))
+    else:
+        module.add(SMulI32(dst=sgpr(sT), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1"),
+                           comment="t = wg1*N0 ..."))
+        module.add(SAddU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr("WorkGroup0"),
+                           comment="... + wg0 (linear dispatch index)"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait FusedAM for the WG remap"))
+        module.add(SLShiftRightB32(dst=sgpr(sA), shiftHex=log2mt0, src=sgpr(sA),
+                                   comment="A = AM_tiles = FusedAM >> log2(MT0=%u)" % kernel["MacroTile0"]))
+        module.add(SMulI32(dst=sgpr(sS), src0=sgpr(sA), src1=sgpr("NumWorkGroups1"),
+                           comment="S = A*N1 (size of the PUSH segment)"))
+        module.add(SSubU32(dst=sgpr(sL), src0=sgpr("NumWorkGroups0"), src1=sgpr(sA),
+                           comment="L = N0-A (M-tiles in the local segment)"))
     module.add(SSubU32(dst=sgpr(sU), src0=sgpr(sT), src1=sgpr(sS),
                        comment="u = t-S (wraps when t<S; that value is discarded)"))
 
@@ -1403,22 +1479,39 @@ def FusedA2AWgRemap(writer, kernel):
     module.add(SCmpLtU32(src0=sgpr(sT), src1=sgpr(sS), comment="t < S? (PUSH segment)"))
     module.add(SCSelectB32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sU),
                            comment="dividend = t if PUSH else u"))
-    module.add(SCSelectB32(dst=sgpr(sL), src0=sgpr(sA), src1=sgpr(sL),
+    module.add(SCSelectB32(dst=sgpr(sL), src0=sgpr(sW), src1=sgpr(sL),
                            comment="divisor = A if PUSH else L"))
     module.add(SCSelectB32(dst=sgpr(sS), src0=0, src1=sgpr(sA),
                            comment="base = 0 if PUSH else A"))
+    if aidMap:
+        module.add(SMulI32(dst=sgpr(sX), src0=sgpr(sX), src1=sgpr(sL), comment="aid * divisor"))
+        module.add(SAddU32(dst=sgpr(sS), src0=sgpr(sS), src1=sgpr(sX), comment="base += this AID's half"))
 
     # j = dividend / divisor, m = dividend % divisor. One instance, shared.
     tmpVgpr = writer.vgprPool.checkOutAligned(4, 2, "fusedA2AWgRemap_div")
     module.add(scalarUInt24DivideAndRemainder(
-        qReg="WorkGroup1", dReg=sT, divReg=sL, rReg="WorkGroup0",
+        qReg=sU if cluster else "WorkGroup1", dReg=sT, divReg=sL, rReg=sA if cluster else "WorkGroup0",
         tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
         wavewidth=kernel["WavefrontSize"], doRemainder=True))
     writer.vgprPool.checkIn(tmpVgpr)
 
-    module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(sS),
-                       comment="m += base (local segment starts at A)"))
+    if cluster:
+        module.add(SAddU32(dst=sgpr(sA), src0=sgpr(sA), src1=sgpr(sS),
+                           comment="m += base (local segment starts at A)"))
+        module.add(SLShiftLeftB32(dst=sgpr(sA), shiftHex=log2cs, src=sgpr(sA), comment="m * Cs"))
+        module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(sA),
+                           comment="WorkGroup0 = m * Cs + peer x"))
+        module.add(SLShiftLeftB32(dst=sgpr(sU), shiftHex=log2ck, src=sgpr(sU), comment="j * Ck"))
+        module.add(SAddU32(dst=sgpr("WorkGroup1"), src0=sgpr("WorkGroup1"), src1=sgpr(sU),
+                           comment="WorkGroup1 = j * Ck + peer y"))
+        module.add(labelEnd)
+    else:
+        module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(sS),
+                           comment="m += base (local segment starts at A)"))
 
+    if aidMap:
+        writer.sgprPool.checkIn(sX)
+        writer.sgprPool.checkIn(sW)
     writer.sgprPool.checkIn(sU)
     writer.sgprPool.checkIn(sL)
     writer.sgprPool.checkIn(sS)

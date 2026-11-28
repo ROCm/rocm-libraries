@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_fused_a2a_gfx1250_cluster_wg_remap[cluster_dim0]
+  list([
+    'Cijk_Alik_Bljk_BBS_BH_GemmA2A_UserArgs_MT256x2567AOAlN8kZLhZvzUKHRvEsnideGKkXaU0rtiPwtSeUoc=',
+    'Cijk_Alik_Bljk_BBS_BH_GemmA2A_UserArgs_MT256x256HQjnFEY17aGZJnlaztT-32qnxOq5Q87PodkjOiQhhdw=',
+  ])
+# ---
+# name: test_fused_a2a_gfx1250_cluster_wg_remap[cluster_dim1]
+  list([
+    'Cijk_Alik_Bljk_BBS_BH_GemmA2A_UserArgs_MT256x2560-zwp7_aTMV8UPqI2cEt62or2DXBWPcbQjn_oTiuuIo=',
+    'Cijk_Alik_Bljk_BBS_BH_GemmA2A_UserArgs_MT256x256n1Q5ZbgM1kFBUz3_Vx1cxvKRojcy5BSy4rcsQMSFKwo=',
+  ])
+# ---

@@ -35,6 +35,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AKernArg_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2AProblem_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Float8ConversionArguments_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2ATopology_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HipUtilsCopyTensor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HybridAssignmentPolicy_test.cpp"

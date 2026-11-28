@@ -20,6 +20,13 @@ LIBRARY_CLIENT_DIR: str = "4_LibraryClient"
 # If a file name is longer than this value, and `--short-filenames` is set, shorten it with a hash.
 MAX_FILENAME_LENGTH: int = 64
 
+# XCC count ClusterAIDMapping != -1 is written for (2 AIDs x 4 XCCs).
+CLUSTER_AID_MAPPING_XCC_COUNT: int = 8
+
+# SDMA COPY_SUBWIN (pitch, rect_x) field widths in bits.
+SDMA_COPY_FIELD_BITS_GFX9: tuple = (19, 14)
+SDMA_COPY_FIELD_BITS_GFX1250: tuple = (16, 16)
+
 # Characters to use for GEMM naming, e.g., C[ij]=Sum[k] A[ik]*B[jk]
 INDEX_CHARS: str = "IJKLMNOPQRSTUVWXYZ"
 

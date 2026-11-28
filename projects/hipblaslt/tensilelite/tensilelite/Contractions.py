@@ -30,6 +30,8 @@ from .Activation import ActivationType
 from . import Hardware
 from . import Properties
 from .Common import state, state_key_ordering, IsaInfo
+from .Common.Constants import CLUSTER_AID_MAPPING_XCC_COUNT
+from .Common.Constants import SDMA_COPY_FIELD_BITS_GFX9, SDMA_COPY_FIELD_BITS_GFX1250
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
@@ -804,7 +806,9 @@ class ProblemPredicate(Properties.Predicate):
         fusedA2A = state['ProblemType'].get('FusedA2A')
         fusedGemm = state['ProblemType'].get('FusedGemmA2A')
         if fusedA2A == 'GemmA2A' or fusedGemm is True:
-            rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
+            fieldBits = SDMA_COPY_FIELD_BITS_GFX1250 if tuple(state['ISA'][:2]) == (12, 5) \
+                else SDMA_COPY_FIELD_BITS_GFX9
+            rv += [cls('GemmA2AShape', value=[state['MacroTile0'], *fieldBits])]
 
         # A rocRoller custom kernel is a pre-assembled object captured at one tile.
         # It carries no generated edge handling in M and no partial-k-tile drain, so
@@ -1304,8 +1308,10 @@ class Solution:
         if 'CUCount' not in d:
             d['CUCount'] = None
 
+        xccCount = CLUSTER_AID_MAPPING_XCC_COUNT if d.get('ClusterAIDMapping', -1) != -1 else None
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
-            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName,
+            xccCount=xccCount
         )
         return rv
 
