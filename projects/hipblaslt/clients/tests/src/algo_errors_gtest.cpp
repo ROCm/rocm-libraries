@@ -545,8 +545,14 @@ namespace
         if(count == 0
            || hipblaslt_ext::getKernelNameFromAlgo(rocroller, result.algo).find("_sk")
                   == std::string::npos)
+        {
+            // gfx950 is expected to select Stream-K here.
+            if(std::string(props.gcnArchName).find("gfx950") != std::string::npos)
+                FAIL() << "rocRoller chose no Stream-K kernel for this problem on "
+                       << props.gcnArchName;
             GTEST_SKIP() << "rocRoller chose no Stream-K kernel for this problem on "
                          << props.gcnArchName;
+        }
         size_t workspaceSize = 0;
         ASSERT_EQ(isSupported(result.algo, workspaceSize), HIPBLAS_STATUS_SUCCESS);
 
@@ -652,8 +658,14 @@ namespace
         int count = 0;
         ASSERT_NO_FATAL_FAILURE(heuristicWithUniformOrder(0, count));
         if(count == 0 || nameOf(results[0].algo).find("_sk") == std::string::npos)
+        {
+            // gfx950 is expected to select Stream-K here.
+            if(std::string(props.gcnArchName).find("gfx950") != std::string::npos)
+                FAIL() << "rocRoller chose no Stream-K kernel for this problem on "
+                       << props.gcnArchName;
             GTEST_SKIP() << "rocRoller chose no Stream-K kernel for this problem on "
                          << props.gcnArchName;
+        }
 
         ASSERT_NO_FATAL_FAILURE(heuristicWithUniformOrder(1, count));
         ASSERT_GT(count, 0);

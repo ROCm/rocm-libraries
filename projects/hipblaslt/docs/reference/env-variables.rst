@@ -58,6 +58,13 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
       - | 0 or unset: Disable marker trace
         | 1: Enable marker trace
 
+    * - | ``HIPBLASLT_USO_BYPASS_REFUSALS``
+        | For debugging only. With uniform summation order on, kernels that it would refuse are still selected and launched, so the uniform order is no longer guaranteed.
+        | Warns once per kernel and clause, naming the first refusal found.
+        | Has no effect with uniform summation order off.
+      - | Unset or other values: Off (default)
+        | ``1``, ``on`` or ``true`` (case-insensitive): Bypass the refusals
+
 
 Offline tuning
 ===============

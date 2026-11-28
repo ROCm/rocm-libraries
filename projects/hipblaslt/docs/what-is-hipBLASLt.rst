@@ -331,8 +331,10 @@ restricts hipBLASLt to kernels that add up their partial results in a consistent
 ``M`` and ``N`` dimensions. Identical rows of op(A) then yield bitwise identical rows of D, and
 identical columns of op(B) yield bitwise identical columns of D, provided C, any bias or scale
 vectors, any block scales of op(A) (for rows) or op(B) (for columns), and the auxiliary buffer a
-gradient epilogue reads are uniform along the same dimension. Fewer kernels
-qualify, which can cost performance, and the call returns an error rather than quietly giving you a
+gradient epilogue reads are uniform along the same dimension. Quantized inputs are identical only
+after dequantization: the stored values, the block scales and, for asymmetric integer types, the
+zero-points must all match. Fewer kernels qualify, which can cost performance, and the call
+returns an error rather than quietly giving you a
 non-uniform result. ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` steers selection and grid sizing
 toward a compute-unit budget, which is useful when a GEMM has to share the device with other work.
 
