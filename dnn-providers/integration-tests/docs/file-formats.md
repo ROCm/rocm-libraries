@@ -944,7 +944,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 version = 1
 
 [[tolerance_overrides]]
-filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0"]
+filters = ["*_ConvolutionWrw_Default.b1_3d_i16x16x16_n8c16k1_f1x1x1_bf16_cl"]
 atol = 1.19
 rtol = 0.2
 

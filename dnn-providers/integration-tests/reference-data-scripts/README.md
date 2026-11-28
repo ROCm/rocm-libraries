@@ -426,3 +426,43 @@ python dnn-providers/integration-tests/reference-data-scripts/generate_conv_fwd_
   the distinct geometries, the largest case of each level, and the cases the
   generator dropped or trimmed.
 - `--dry-run` writes nothing and prints the same report.
+
+## `generate_conv_wrw_bundles.py`
+
+Writes the convolution backward-weights sweeps from the convolution backward-weights
+test plan (`docs/test-plans/convolution-wrw.md`). Nobody edits those bundles by hand.
+
+| File | Holds |
+|---|---|
+| `conv_wrw_plan.py` | axes, legality, behaviour classes, shape catalog (S, L, LA, M, H, A, X), level ceilings, value domains, purpose rule, trimmed products (`TRIMS`) |
+| `generate_conv_wrw_bundles.py` | level rules, graph template, sweep writer, report |
+| `conv_wrw_corpus.json` | the R set: the corpus pick, its selection rule and its provenance |
+
+From the `rocm-libraries/` repo root:
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/generate_conv_wrw_bundles.py \
+  --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+  --report
+```
+
+- It writes `{quick,standard,comprehensive,full}/ConvolutionWrw/Default`, each with
+  `graph.template.json`, `sweep.json` and `support.json`.
+- Before it writes, it removes the `ConvolutionWrw` directories of all four levels and
+  writes them again. Nothing else under the bundle directory changes.
+- It never creates a claim. A `support.json` keeps the claims of the case ids the
+  generator writes and drops every other claim; a sweep with no claims gets an
+  empty sidecar. Claims are harvested with `--write-support-claims`.
+- The fill recipes of `metadata.inputs` are keyed by tensor uid and follow the operand
+  they are written for: dy is uid 1 and x is uid 2 in the wrw graph. The
+  backward-data graph numbers its operands differently, so a recipe table is never
+  copied from one to the other.
+- `--report` prints the counts by level, by purpose and size class, the distinct
+  geometries and behaviour signatures, the largest case of each level, and the cases the
+  generator dropped or trimmed.
+- `--dry-run` writes nothing and prints the same report.
+
+`tests/test_generate_conv_wrw_bundles.py` (CTest
+`hipdnn_conv_wrw_bundle_generator_python_tests`, pytest) fails when the checked-in
+sweeps differ from the generator output, when a case is illegal, when a fill recipe is
+keyed to the wrong operand, or when a value class could overflow its data type.

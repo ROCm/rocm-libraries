@@ -32,34 +32,6 @@ filters = ["*_BatchnormBackward_Default.1_16_8_112_112_*_ncdhw"]
 atol = 0.002
 rtol = 0.012
 
-# ROCm/rocm-libraries#8029 — Due to split-k, conv WRW can cause reduced accuracy
-# ROCm/rocm-libraries#8030 — conv-wgrad switched from dynamic per-shape
-# tolerances to a fixed 0.2 → flaky CI failures
-# Both failing cases share the same shape (1x1x1 filter, batched, ref=0.691406
-# at DW[0,0,0,0,0]) and produce a nondeterministic ~2x-wrong value at that
-# element only. Across 100-pass sweep: case 14 fails ~45% with peak abs diff
-# 1.105; case 5 fails ~3% with peak abs diff 0.438. atol bumped to 1.19
-# (rtol unchanged at 0.2) gives a threshold of ~1.328 at the failing element
-# — ~20% margin over worst observed — while only marginally loosening the
-# per-element check on the (correct) larger-magnitude channels.
-# Case 5 recurred in CI exceeding the 1.328 threshold above. A ~1300-run sweep
-# on gfx942 showed the excursion is multi-element (worst channels DW[0,0,0,0,0]
-# ref=1.39 maxdiff=1.52, DW[0,14,...] ref=-2.56 maxdiff=1.58, DW[0,8,...]
-# ref=-4.94 maxdiff=2.00) and that atol=1.6 still failed ~0.2%. Cover the tail
-# via rtol instead: atol reverted to 1.19, rtol raised to 0.3 (threshold
-# 1.19 + 0.3*|ref|) so the loosening scales with each channel's magnitude.
-# Bundle cases for the two 3D bf16 conv WRW shapes described above: the NDHWC
-# case (formerly C++ Correctness/14) and the NCDHW case (formerly /5)
-[[tolerance_overrides]]
-filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0"]
-atol = 1.19
-rtol = 0.2
-
-[[tolerance_overrides]]
-filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0"]
-atol = 1.19
-rtol = 0.3
-
 # Conv forward fp32 numerical floor, calibrated on gfx942 from the conv-fwd test plan
 # run (docs/test-plans/convolution-fwd.md). MIOpen and the GPU reference accumulate in
 # different orders, so the absolute error of a long fp32 reduction grows with the
@@ -197,3 +169,51 @@ filters = [
     "*_ConvolutionFwd_Default.s9_f16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",
 ]
 reason  = "3-D channels-last conv with a padded channel or plane stride returns wrong results (66-85% of elements) when its packed same-shape sibling ran earlier in the same process: MIOpen's invoker cache key leaves out strides; tracked in ALMIOPEN-3356 (also reported as ALMIOPEN-3241)"
+
+# conv-wrw test plan (docs/test-plans/convolution-wrw.md), gfx90a: wrong convolution backward-weights results that
+# MIOpen returns for graphs the plugin accepts. Each list is the cases that failed on a run of the plan's
+# bundles on gfx90a (several input seeds) together with the cases ALMIOPEN-3564 names; the failing
+# cases of one run are not always those of the next, because the kernels sum in an order that varies from run to run.
+# bf16, channels-first 2D 3x3 (ALMIOPEN-3564). Temporary: remove when the MIOpen defect is fixed.
+[[test_skips]]
+archs = ["gfx90a"]
+filters = [
+    "*_ConvolutionWrw_Default.h1_2d_i16x16_n2c15k32_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.h3_2d_i16x16_n2c31k31_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.h4_2d_i16x16_n2c33k65_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.h5_2d_i16x16_n2c63k64_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.h6_2d_i16x16_n2c65k63_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.h13_2d_i31x31_n2c16k32_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.h19_2d_i9x9_n5c16k32_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.m9_2d_i256x256_n1c128k3_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.s2_*2d_i16x16_n2c16k32_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.s3_*2d_i16x16_n2c16k32_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.s7_2d_i16x8_n2c16k32_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.s38_2d_i15x15_n2c13k17_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.s39_2d_i16x16_n2c24k24_f3x3_bf16_cf",
+    "*_ConvolutionWrw_Default.s65_2d_i8x8_n2c32k32_f3x3_bf16_cf",
+]
+reason = "gfx90a: MIOpen's assembly implicit-GEMM backward-weights kernel returns wrong bf16 values (errors of 0.7 to 27 on outputs of 2 to 53) for NCHW 3x3 2D problems on some runs; tracked in ALMIOPEN-3564"
+
+# fp32, 2D 3x3 and 5x5 (ALMIOPEN-3564). Temporary: remove when the MIOpen defect is fixed.
+[[test_skips]]
+archs = ["gfx90a"]
+filters = [
+    "*_ConvolutionWrw_Default.l36_2d_i56x56_n4c128k3_f3x3_fp32_cf",
+    "*_ConvolutionWrw_Default.l38_2d_i55x55_n4c61k67_f3x3_fp32_cf",
+    "*_ConvolutionWrw_Default.l79_2d_i56x56_n4c128k4_f3x3_fp32_cf",
+    "*_ConvolutionWrw_Default.m9_2d_i256x256_n1c128k3_f3x3_fp32_cf",
+    "*_ConvolutionWrw_Default.r065_2d_i20x20_n2c256k256_f3x3_fp32_cf",
+    "*_ConvolutionWrw_Default.l4_2d_i56x56_n4c64k128_f5x5_fp32_cf",
+    "*_ConvolutionWrw_Default.l2_2d_i56x56_n4c64k128_f3x3_fp32_cf",
+    "*_ConvolutionWrw_Default.l67_2d_i48x48_n4c64k64_f5x5_fp32_cf",
+    "*_ConvolutionWrw_Default.l69_2d_i55x57_n4c64k128_f3x3_fp32_cf",
+]
+reason = "gfx90a: MIOpen's multipass Winograd and assembly implicit-GEMM backward-weights solvers return fp32 outputs 3e-5 to 2e-4 relative off, about 1,000 float roundings, far outside the accuracy of the compute type; tracked in ALMIOPEN-3564"
+
+# 2^31 elements (X3, ALMIOPEN-3571): MIOpen's naive wrw kernel is the only applicable solver for the
+# fp16 channels-first problem and returns 0. The case takes about 7 minutes (the reference sums
+# 2.1e9 products in one thread). Temporary: remove when ALMIOPEN-3571 is fixed.
+[[test_skips]]
+filters = ["*_ConvolutionWrw_Default.x3_2d_i46341x46341_n1c1k1_f1x1_fp16_cf"]
+reason  = "MIOpen's ConvDirectNaiveConvWrw is the only solver offered for backward weights with more than 2^31 elements (fp16 NCHW) and returns 0 instead of the sum (gfx90a and gfx942); tracked in ALMIOPEN-3571"

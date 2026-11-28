@@ -262,6 +262,18 @@ if(Python3_FOUND)
         PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
     )
     set(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST hipdnn_sdpa_bwd_bundle_generator_python_tests)
+    # The ConvolutionWrw bundles are generated from the test plan; this pytest suite
+    # fails when they drift from the generator.
+    add_test(
+        NAME hipdnn_conv_wrw_bundle_generator_python_tests
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+                ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_generate_conv_wrw_bundles.py
+    )
+    set_tests_properties(
+        hipdnn_conv_wrw_bundle_generator_python_tests
+        PROPERTIES ENVIRONMENT "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1"
+    )
+    set(HIPDNN_IT_CONV_WRW_GENERATOR_TEST hipdnn_conv_wrw_bundle_generator_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -432,6 +444,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     endif()
     if(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SDPA_BWD_GENERATOR_TEST})
+    endif()
+    if(HIPDNN_IT_CONV_WRW_GENERATOR_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_CONV_WRW_GENERATOR_TEST})
     endif()
     _apply_provider_ctest_category_labels(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST})
 else()
