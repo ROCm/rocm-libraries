@@ -176,8 +176,8 @@ namespace TensileLite
                             throw std::runtime_error("StreamKForceDPOnly requires StreamK=3");
                         auto expectedStrategy = legacyDP ? TileProcessingStrategy::DataParallel
                             : legacyMode ? TileProcessingStrategy::StreamK : TileProcessingStrategy::None;
-                        auto expectedAssignment = legacyMode == 4 ? WorkAssignment::DynamicWorkQueue
-                            : legacyMode == 5 ? WorkAssignment::Hybrid : WorkAssignment::StaticGrid;
+                        auto expectedAssignment = legacyMode == 4 ? StreamK::WorkAssignment::DynamicWorkQueue
+                            : legacyMode == 5 ? StreamK::WorkAssignment::Hybrid : StreamK::WorkAssignment::StaticGrid;
                         if((hasStrategy && parsedStrategy != expectedStrategy)
                            || (hasAssignment && expectedStrategy != TileProcessingStrategy::None
                                && parsedAssignment != expectedAssignment))
@@ -191,7 +191,7 @@ namespace TensileLite
                     }
                     s.tileProcessingStrategy = parsedStrategy;
                     s.workAssignment = parsedStrategy == TileProcessingStrategy::None
-                        ? WorkAssignment::StaticGrid : parsedAssignment;
+                        ? StreamK::WorkAssignment::StaticGrid : parsedAssignment;
                     s.validateExecutionPolicy();
                 }
                 iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);

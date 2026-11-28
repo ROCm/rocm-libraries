@@ -6,6 +6,7 @@
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/MagicDivision.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
@@ -19,6 +20,23 @@
 
 namespace TensileLite
 {
+    StreamK::Static::Split StreamK::Static::computeParallelReductionSplit(size_t tiles,
+                                                                          size_t itersPerTile,
+                                                                          size_t grid,
+                                                                          size_t kGranularity)
+    {
+        assert(tiles > 0);
+        Split split;
+        kGranularity = std::max(kGranularity, size_t{1});
+        const size_t paddedIters
+            = StreamK::paddedItersPerTile(std::max(itersPerTile, size_t{1}), kGranularity);
+        const size_t skSplit = grid / tiles;
+        split.args.skTiles   = static_cast<uint32_t>(skSplit);
+        split.args.itersPerWG = static_cast<uint32_t>(
+            kGranularity * (paddedIters / kGranularity / std::max(skSplit, size_t{1})));
+        return split;
+    }
+
     StreamK::Static::Split StreamK::Static::computeSplit(size_t tiles,
                                                          size_t itersPerTile,
                                                          size_t skGrid,
@@ -27,6 +45,7 @@ namespace TensileLite
                                                          size_t kGranularity)
     {
         Split split;
+
         if(skGrid == 0)
             return split;
 
@@ -53,10 +72,11 @@ namespace TensileLite
         // stride and the remainder have to be multiples of the unit. The flat
         // space counts padded tiles (StreamK::paddedItersPerTile), which is what puts
         // the tile starts the cuts fall between on unit boundaries as well.
-        const size_t g           = std::max(kGranularity, size_t{1});
-        const size_t paddedIters = StreamK::paddedItersPerTile(itersPerTile, g);
+        kGranularity             = std::max(kGranularity, size_t{1});
+        const size_t paddedIters = StreamK::paddedItersPerTile(itersPerTile, kGranularity);
         const size_t skIters     = static_cast<size_t>(skTiles) * paddedIters;
-        split.args.itersPerWG    = static_cast<uint32_t>(g * (skIters / g / skGrid));
+        split.args.itersPerWG
+            = static_cast<uint32_t>(kGranularity * (skIters / kGranularity / skGrid));
         // Global leftover under the historical first-E mapping. The device may
         // redistribute these extras within each tile when
         // InternalArgsSupport::perTileExtraIters is set and skGrid % skTiles == 0;
@@ -64,6 +84,59 @@ namespace TensileLite
         split.extraIters = static_cast<uint32_t>(
             skIters - static_cast<size_t>(split.args.itersPerWG) * skGrid);
         return split;
+    }
+
+    void StreamK::Static::calculateMagicDivision(KernelArguments& args,
+                                                 size_t           itersPerTile,
+                                                 size_t           kGranularity,
+                                                 bool             uniformSummationOrderActive)
+    {
+        const size_t paddedIters = StreamK::paddedItersPerTile(
+            std::max(itersPerTile, size_t{1}), std::max(kGranularity, size_t{1}));
+
+        // MagicShiftItersPerTile wire format:
+        //   31    = magicNumberAlg2's "add" indicator (abit)
+        //   30    = Hybrid mode bit (set by the Hybrid dynamic packer only)
+        //   29    = distribute extra K iterations within each tile
+        //   28..6 = zero
+        //   5..0  = shift amount
+        // magicNumberAlg2 returns p - 32 with p <= 64, so the shift never exceeds 32
+        // and bits 6..30 are clear here.
+        args.magicNumber = magicNumberAlg2(static_cast<uint32_t>(paddedIters), &args.magicShift);
+        assert((args.magicShift & Slot2Bits::ShiftReservedMask) == 0u);
+        if(uniformSummationOrderActive)
+            args.magicShift |= Slot2Bits::UniformSummationOrderBit;
+    }
+
+    StreamK::Static::KernelArguments
+        StreamK::Static::calculateKernelArgs(size_t               numTiles,
+                                             size_t               itersPerTile,
+                                             size_t               grid,
+                                             origami::reduction_t reduction,
+                                             int                  skFullTiles,
+                                             bool                 uniformSummationOrderActive,
+                                             size_t               kGranularity)
+    {
+        // Clamp minimum iters per tile to 1 so the stream-k index calculation works
+        // when K == 0; no iteration runs, but workgroups still map for beta*C.
+        itersPerTile = std::max(itersPerTile, size_t{1});
+        kGranularity = std::max(kGranularity, size_t{1});
+        // The flat iteration space is measured in padded tiles.
+        const size_t paddedIters = StreamK::paddedItersPerTile(itersPerTile, kGranularity);
+
+        KernelArguments args;
+        calculateMagicDivision(args, itersPerTile, kGranularity, uniformSummationOrderActive);
+        args.grid       = static_cast<uint32_t>(grid);
+        args.totalIters = static_cast<uint32_t>(numTiles * paddedIters);
+
+        const Split split
+            = (reduction == origami::reduction_t::parallel && numTiles > 0)
+                  ? computeParallelReductionSplit(numTiles, itersPerTile, grid, kGranularity)
+                  : computeSplit(
+                      numTiles, itersPerTile, grid, skFullTiles, false, kGranularity);
+        args.skTiles    = split.args.skTiles;
+        args.itersPerWG = split.args.itersPerWG;
+        return args;
     }
 
     bool StreamK::Static::isRowUniform(Split const& split,
@@ -344,6 +417,19 @@ namespace TensileLite
         items.totalItems = static_cast<uint32_t>((tiles - items.tiles)
                                                  + size_t{items.tiles} * items.split);
         return items;
+    }
+
+    StreamK::Dynamic::KernelArguments
+        StreamK::Dynamic::calculateKernelArgs(Hardware const& hardware,
+                                              size_t          tiles,
+                                              size_t          itersPerTile,
+                                              size_t          grid,
+                                              size_t          kGranularity)
+    {
+        KernelArguments args = items(hardware, tiles, itersPerTile, kGranularity);
+        args.grid            = static_cast<uint32_t>(grid);
+        assertGridCoversQueues(hardware, grid, args.totalItems);
+        return args;
     }
 
     bool StreamK::usePerTileSplit(ContractionSolution const&      solution,

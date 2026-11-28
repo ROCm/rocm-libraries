@@ -933,6 +933,14 @@ def test_metadata_arg_magic_size_without_a_supported_algorithm_raises(name):
         _metadataArgToCustomArg(_meta_arg(name))
 
 
+def test_metadata_arg_streamk_dynamic_semantics():
+    assert _metadataArgToCustomArg(_meta_arg("TotalItems"))["semantic"] == "TotalItems"
+    assert _metadataArgToCustomArg(_meta_arg("SKTiles"))["semantic"] == "SKTiles"
+    assert _metadataArgToCustomArg(_meta_arg("SKSplit"))["semantic"] == "SKSplit"
+    assert _metadataArgToCustomArg(_meta_arg("SKItersPerWI"))["semantic"] == "SKItersPerWI"
+    assert _metadataArgToCustomArg(_meta_arg("SKGrid"))["semantic"] == "SKGrid"
+
+
 def test_metadata_arg_missing_field_raises():
     with pytest.raises(RuntimeError, match="missing required field"):
         _metadataArgToCustomArg({".name": "D"})
@@ -1231,6 +1239,29 @@ def test_validate_metadata_custom_kernel_not_mapping(tmp_path):
     assert not valid
     assert "CustomKernel (mapping)" in msg
 
+
+def test_validate_external_allows_individual_dynamic_semantics(tmp_path):
+    write_kernel(tmp_path / "external.s", """\
+          Source:
+            Origin: test
+          Version: 1.0.0
+          Features: {}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args:
+              - {type: uint32, semantic: SKSplit}
+              - {type: uint32, semantic: SKItersPerWI}
+            macrotile: [16, 16, 16]
+            threads: [64, 1, 1]
+            grid: [TilesX, TilesY, One]
+        """)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert valid, msg
 
 # --------------------------------------------------------------------------- #
 # Remaining CustomKernels branch coverage
@@ -1916,3 +1947,85 @@ def test_emitted_predicate_tags_are_registered_in_cpp(key, value):
     definition = re.search(rf'struct {tag}\b.*?return "([^"]*)";', predicates.read_text(), re.S)
     assert definition is not None, f"{tag} is not defined in ContractionProblemPredicates.hpp"
     assert definition.group(1) == tag
+
+
+def _metadata_streamk_args():
+    return [
+        {".name": "numWG", ".size": 4, ".value_kind": "by_value"},
+        {".name": "MagicNumberItersPerTile", ".size": 4, ".value_kind": "by_value"},
+        {".name": "MagicShiftItersPerTile", ".size": 4, ".value_kind": "by_value"},
+        {".name": "SKItersPerWG", ".size": 4, ".value_kind": "by_value"},
+        {".name": "skGrid", ".size": 4, ".value_kind": "by_value"},
+        {".name": "skTiles", ".size": 4, ".value_kind": "by_value"},
+    ]
+
+
+def _metadata_semantics():
+    ck = _buildCustomKernelFromMetadata(
+        "k", _kernel_yaml(_metadata_streamk_args()),
+        {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "StreamK"})
+    return [a["semantic"] for a in ck["args"] if a["semantic"] != "NumWorkGroups"]
+
+
+def test_metadata_inference_maps_the_static_streamk_names():
+    assert _metadata_semantics() == [
+        "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG", "SKGrid",
+        "SKTilesAndSplit"]
+
+
+def _streamk_family_config(work_assignment, semantics):
+    return {
+        "TileProcessingStrategy": "StreamK",
+        "WorkAssignment": work_assignment,
+        "CustomKernel": {
+            "name": "k",
+            "args": [{"semantic": s, "type": "uint32"} for s in semantics],
+        },
+    }
+
+
+_STATIC_FAMILY = ["MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG",
+                  "SKGrid", "SKTilesAndSplit"]
+_DYNAMIC_FAMILY = ["TotalItems", "SKTiles", "SKSplit", "SKItersPerWI", "SKGrid"]
+_HYBRID_FAMILY = ["HybridMagicNumberItersPerTileOrTotalItems",
+                  "HybridMagicShiftItersPerTileOrSKTiles", "HybridSKItersPerWGOrSKSplit",
+                  "HybridSKGridOrSKItersPerWI", "HybridSKTilesAndSplitOrSKGrid"]
+
+
+@pytest.mark.parametrize("work_assignment, semantics", [
+    ("StaticGrid", _STATIC_FAMILY),
+    ("DynamicWorkQueue", _DYNAMIC_FAMILY),
+    ("Hybrid", _HYBRID_FAMILY),
+])
+def test_streamk_family_matching_the_work_assignment_is_accepted(work_assignment, semantics):
+    ck_mod.validateCustomPersistentArgs(_streamk_family_config(work_assignment, semantics))
+
+
+@pytest.mark.parametrize("work_assignment, semantics, offender", [
+    ("Hybrid", _STATIC_FAMILY, "MagicNumberItersPerTile"),
+    ("Hybrid", _DYNAMIC_FAMILY, "TotalItems"),
+    ("DynamicWorkQueue", _STATIC_FAMILY, "MagicNumberItersPerTile"),
+    ("DynamicWorkQueue", _HYBRID_FAMILY, "HybridMagicNumberItersPerTileOrTotalItems"),
+    ("StaticGrid", _DYNAMIC_FAMILY, "TotalItems"),
+    ("StaticGrid", _HYBRID_FAMILY, "HybridMagicNumberItersPerTileOrTotalItems"),
+])
+def test_streamk_family_of_another_work_assignment_is_rejected(work_assignment, semantics, offender):
+    with pytest.raises(ValueError, match=f"'{offender}'.*WorkAssignment {work_assignment}"):
+        ck_mod.validateCustomPersistentArgs(_streamk_family_config(work_assignment, semantics))
+
+
+def test_streamk_family_check_waits_for_a_declared_work_assignment():
+    # A minimal custom.config inherits its selectors from the logic file, so with no
+    # WorkAssignment there is nothing to compare the semantics with yet.
+    config = _streamk_family_config("Hybrid", _STATIC_FAMILY)
+    del config["WorkAssignment"]
+    ck_mod.validateCustomPersistentArgs(config)
+
+
+def test_hybrid_kernel_inferred_from_metadata_with_static_names_is_rejected():
+    config = {"MatrixInstruction": [16, 16, 16, 1], "TileProcessingStrategy": "StreamK",
+              "WorkAssignment": "Hybrid"}
+    config["CustomKernel"] = _buildCustomKernelFromMetadata(
+        "k", _kernel_yaml(_metadata_streamk_args()), config)
+    with pytest.raises(ValueError, match="StreamK argument.*WorkAssignment Hybrid"):
+        ck_mod.validateCustomPersistentArgs(config)

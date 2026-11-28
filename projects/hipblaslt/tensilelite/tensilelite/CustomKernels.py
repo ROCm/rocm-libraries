@@ -43,64 +43,74 @@ except ImportError:
 # Mapping from amdgpu_metadata arg .name -> CustomArgSemantic string
 # ---------------------------------------------------------------------------
 _METADATA_NAME_TO_SEMANTIC = {
-    "Gemm info":              "GemmInfo",
-    "kernel info":            "InternalArgs",
-    "kernel info0":           "InternalArgs",
-    "kernel info1":           "InternalArgs1",
-    "internalArgs":           "InternalArgs",
-    "numWG":                  "NumWorkGroups",
-    "D":                      "AddressD",
-    "C":                      "AddressC",
-    "A":                      "AddressA",
-    "B":                      "AddressB",
-    "MetaData":               "AddressMetadata",
-    "AddressDbg":             "DebugBuffer",
-    "AddressWS":              "AddressWorkspace",
-    "AddressFlags":           "AddressFlags",
-    "alpha":                  "Alpha",
-    "beta":                   "Beta",
-    "betapad":                "Beta",
-    "cuCount":                "ComputeUnits",
-    "ComputeUnits":           "ComputeUnits",
-    "AddressScaleA":          "AddressScaleA",
-    "AddressScaleB":          "AddressScaleB",
-    "AddressScaleZeroA":      "AddressScaleZeroA",
-    "groupSize":              "ScaleBlockSizeA",
-    "AddressScaleC":          "AddressScaleC",
-    "AddressScaleD":          "AddressScaleD",
-    "AddressMXScaleA":        "AddressMXScaleA",
-    "AddressMXScaleB":        "AddressMXScaleB",
-    "MXSA":                   "AddressMXScaleA",
-    "MXSB":                   "AddressMXScaleB",
-    "AddressScaleAlphaVec":   "AddressScaleAlphaVec",
-    "bias":                   "AddressBias",
-    "biasType":               "BiasType",
-    "StrideBias":             "StrideBias",
-    "gate":                   "AddressGateResidual",
-    "gateType":               "GateResidualType",
-    "factorDim":              "FactorDim",
-    "E":                      "AddressE",
-    "activationType":         "ActivationTypeArg",
-    "AddrAmaxOut":            "AddressAmaxOut",
-    "AmaxWS":                 "AmaxWS",
-    "AmaxSync":               "AmaxSync",
-    "dstD":                   "AddressTD",
-    "Synchronizer":           "Synchronizer",
-    "GSUSync":                "GSUSync",
-    "ItersPerTile":           "ItersPerTile",
-    "PersistentGrid":         "PersistentGrid",
-    "MagicNumberItersPerTile": "MagicNumberItersPerTile",
-    "MagicShiftItersPerTile": "MagicShiftItersPerTile",
-    "TotalIters":             "TotalIters",
-    "SKItersPerWG":           "SKItersPerWG",
-    "skGrid":                 "SKGrid",
-    "skTiles":                "SKTilesAndSplit",
-    "ESMRuntimeSupported":    "ESMRuntimeSupported",
-    "batchOffsetD":           "BatchOffsetD",
-    "batchOffsetC":           "BatchOffsetC",
-    "batchOffsetA":           "BatchOffsetA",
-    "batchOffsetB":           "BatchOffsetB",
-    "RNDSeed":                "RNDSeed",
+    "Gemm info":                                 "GemmInfo",
+    "kernel info":                               "InternalArgs",
+    "kernel info0":                              "InternalArgs",
+    "kernel info1":                              "InternalArgs1",
+    "internalArgs":                              "InternalArgs",
+    "numWG":                                     "NumWorkGroups",
+    "D":                                         "AddressD",
+    "C":                                         "AddressC",
+    "A":                                         "AddressA",
+    "B":                                         "AddressB",
+    "MetaData":                                  "AddressMetadata",
+    "AddressDbg":                                "DebugBuffer",
+    "AddressWS":                                 "AddressWorkspace",
+    "AddressFlags":                              "AddressFlags",
+    "alpha":                                     "Alpha",
+    "beta":                                      "Beta",
+    "betapad":                                   "Beta",
+    "cuCount":                                   "ComputeUnits",
+    "ComputeUnits":                              "ComputeUnits",
+    "AddressScaleA":                             "AddressScaleA",
+    "AddressScaleB":                             "AddressScaleB",
+    "AddressScaleZeroA":                         "AddressScaleZeroA",
+    "groupSize":                                 "ScaleBlockSizeA",
+    "AddressScaleC":                             "AddressScaleC",
+    "AddressScaleD":                             "AddressScaleD",
+    "AddressMXScaleA":                           "AddressMXScaleA",
+    "AddressMXScaleB":                           "AddressMXScaleB",
+    "MXSA":                                      "AddressMXScaleA",
+    "MXSB":                                      "AddressMXScaleB",
+    "AddressScaleAlphaVec":                      "AddressScaleAlphaVec",
+    "bias":                                      "AddressBias",
+    "biasType":                                  "BiasType",
+    "StrideBias":                                "StrideBias",
+    "gate":                                      "AddressGateResidual",
+    "gateType":                                  "GateResidualType",
+    "factorDim":                                 "FactorDim",
+    "E":                                         "AddressE",
+    "activationType":                            "ActivationTypeArg",
+    "AddrAmaxOut":                               "AddressAmaxOut",
+    "AmaxWS":                                    "AmaxWS",
+    "AmaxSync":                                  "AmaxSync",
+    "dstD":                                      "AddressTD",
+    "Synchronizer":                              "Synchronizer",
+    "GSUSync":                                   "GSUSync",
+    "ItersPerTile":                              "ItersPerTile",
+    "PersistentGrid":                            "PersistentGrid",
+    "MagicNumberItersPerTile":                   "MagicNumberItersPerTile",
+    "MagicShiftItersPerTile":                    "MagicShiftItersPerTile",
+    "TotalIters":                                "TotalIters",
+    "SKItersPerWG":                              "SKItersPerWG",
+    "skGrid":                                    "SKGrid",
+    "SKGrid":                                    "SKGrid",
+    "skTiles":                                   "SKTilesAndSplit",
+    "ESMRuntimeSupported":                       "ESMRuntimeSupported",
+    "TotalItems":                                "TotalItems",
+    "SKTiles":                                   "SKTiles",
+    "SKSplit":                                   "SKSplit",
+    "SKItersPerWI":                              "SKItersPerWI",
+    "HybridMagicNumberItersPerTileOrTotalItems": "HybridMagicNumberItersPerTileOrTotalItems",
+    "HybridMagicShiftItersPerTileOrSKTiles":     "HybridMagicShiftItersPerTileOrSKTiles",
+    "HybridSKItersPerWGOrSKSplit":               "HybridSKItersPerWGOrSKSplit",
+    "HybridSKGridOrSKItersPerWI":                "HybridSKGridOrSKItersPerWI",
+    "HybridSKTilesAndSplitOrSKGrid":             "HybridSKTilesAndSplitOrSKGrid",
+    "batchOffsetD":                              "BatchOffsetD",
+    "batchOffsetC":                              "BatchOffsetC",
+    "batchOffsetA":                              "BatchOffsetA",
+    "batchOffsetB":                              "BatchOffsetB",
+    "RNDSeed":                                   "RNDSeed",
 }
 
 _ACTIVATION_ARG_INDEX = {
@@ -392,6 +402,34 @@ _HEADER_SEMANTIC_ORDER = {
     "GemmInfo": 0, "InternalArgs": 1, "InternalArgs1": 2, "NumWorkGroups": 3,
 }
 
+# The StreamK words each WorkAssignment family packs. SKGrid is the launch grid in
+# every family, so it belongs to none of them.
+_STREAMK_FAMILY_SEMANTICS = {
+    "StaticGrid": {"TotalIters", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                   "SKItersPerWG", "SKTilesAndSplit"},
+    "DynamicWorkQueue": {"TotalItems", "SKTiles", "SKSplit", "SKItersPerWI"},
+    "Hybrid": {"HybridMagicNumberItersPerTileOrTotalItems",
+               "HybridMagicShiftItersPerTileOrSKTiles", "HybridSKItersPerWGOrSKSplit",
+               "HybridSKGridOrSKItersPerWI", "HybridSKTilesAndSplitOrSKGrid"},
+}
+
+
+def _validateStreamKFamily(kernelConfig, args):
+    """Reject a descriptor whose StreamK words belong to another WorkAssignment family.
+    """
+    workAssignment = kernelConfig.get("WorkAssignment")
+    if workAssignment not in _STREAMK_FAMILY_SEMANTICS:
+        return
+    expected = _STREAMK_FAMILY_SEMANTICS[workAssignment]
+    streamKWords = set().union(*_STREAMK_FAMILY_SEMANTICS.values())
+    for arg in args:
+        semantic = arg.get("semantic")
+        if semantic in streamKWords and semantic not in expected:
+            raise ValueError(
+                f"Custom kernel StreamK argument '{semantic}' is not a "
+                f"WorkAssignment {workAssignment} argument")
+
+
 def validateCustomPersistentArgs(kernelConfig):
     """Validate the scheduling payload of a versioned persistent descriptor."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
@@ -408,6 +446,7 @@ def validateCustomPersistentArgs(kernelConfig):
             raise ValueError(f"Persistent argument layout version {version} requires a custom-kernel argument descriptor")
         return
     args = descriptor.get("args", [])
+    _validateStreamKFamily(kernelConfig, args)
     persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
     if version == 0:
         if persistentGridArgIndices:
@@ -416,7 +455,9 @@ def validateCustomPersistentArgs(kernelConfig):
     if version == 2:
         expected = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
                     "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]
-        forbidden = {"PersistentGrid", "TotalIters", "AddressSynchronizer", "Synchronizer", "GSUSync"}
+        forbidden = ({"PersistentGrid", "TotalIters", "AddressSynchronizer", "Synchronizer", "GSUSync"}
+                     | _STREAMK_FAMILY_SEMANTICS["DynamicWorkQueue"]
+                     | _STREAMK_FAMILY_SEMANTICS["Hybrid"])
         scheduling = [(i, arg) for i, arg in enumerate(args)
                       if arg.get("semantic") in set(expected) | forbidden]
         if ([arg.get("semantic") for _, arg in scheduling] != expected
@@ -435,9 +476,11 @@ def validateCustomPersistentArgs(kernelConfig):
         if descriptor.get("workspaceType", "None") not in ("None", "StreamKWithReduction"):
             raise ValueError("StreamK version-2 requires tree partial workspace")
         return
-    legacy = {"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
-              "SKItersPerWG", "SKGrid", "SKTilesAndSplit", "AddressWorkspace", "AddressFlags",
-              "AddressSynchronizer", "Synchronizer", "GSUSync"}
+    legacy = ({"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
+               "SKItersPerWG", "SKGrid", "SKTilesAndSplit", "AddressWorkspace", "AddressFlags",
+               "AddressSynchronizer", "Synchronizer", "GSUSync"}
+              | _STREAMK_FAMILY_SEMANTICS["DynamicWorkQueue"]
+              | _STREAMK_FAMILY_SEMANTICS["Hybrid"])
     scheduling = [(i, arg) for i, arg in enumerate(args)
                   if arg.get("semantic") in legacy | {"ItersPerTile", "PersistentGrid"}]
     if (len(scheduling) != 2
